@@ -2580,7 +2580,12 @@
         "addCountry": "देश जोड़ें",
         "removeCountry": "{{country}} हटाएँ",
         "remove": "शिपिंग विकल्प हटाएँ",
-        "defaultName": "स्टैंडर्ड शिपिंग"
+        "defaultName": "स्टैंडर्ड शिपिंग",
+        "untitled": "बिना नाम का शिपिंग विकल्प",
+        "countryCount": {
+          "one": "{{count}} देश",
+          "other": "{{count}} देश"
+        }
       },
       "editor": {
         "newTitle": "सामान बेचें",

@@ -2580,7 +2580,12 @@
         "addCountry": "देश जोडा",
         "removeCountry": "{{country}} काढा",
         "remove": "शिपिंग पर्याय काढा",
-        "defaultName": "सामान्य शिपिंग"
+        "defaultName": "सामान्य शिपिंग",
+        "untitled": "नाव नसलेला शिपिंग पर्याय",
+        "countryCount": {
+          "one": "{{count}} देश",
+          "other": "{{count}} देश"
+        }
       },
       "editor": {
         "newTitle": "वस्तू विका",
