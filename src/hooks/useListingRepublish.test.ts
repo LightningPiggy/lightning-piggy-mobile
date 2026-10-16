@@ -24,12 +24,15 @@ jest.mock('../services/listingRepublish', () => ({
     copies: [],
     relays: new Map([['wss://example.com', []]]),
   })),
-  newestSignedListing: () => null,
+  newestSignedListing: jest.fn(() => null),
   republishListing: jest.fn(),
 }));
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest
+    .mocked(jest.requireMock('../services/listingRepublish').newestSignedListing)
+    .mockReturnValue(null);
   mockFocused = true;
 });
 
@@ -102,3 +105,83 @@ it.each([true, false])(
     else expect(Toast.show).not.toHaveBeenCalled();
   },
 );
+
+it('opens the progress sheet before relays answer, then fills in results', async () => {
+  const services = jest.requireMock('../services/listingRepublish');
+  const listing: Event = {
+    id: 'signed',
+    sig: 'sig',
+    pubkey: 'seller',
+    kind: 30402,
+    created_at: 100,
+    content: '',
+    tags: [
+      ['d', 'item'],
+      ['title', 'Piggy mug'],
+    ],
+  };
+  jest.mocked(services.newestSignedListing).mockReturnValue(listing);
+  let finish!: () => void;
+  jest.mocked(services.republishListing).mockImplementation(
+    (
+      _pubkey: string,
+      _d: string,
+      _snapshot: unknown,
+      _signal: AbortSignal,
+      _timeout: number | undefined,
+      onResult: (result: { url: string; status: string }) => void,
+    ) =>
+      new Promise((resolve) => {
+        onResult({ url: 'wss://example.com', status: 'accepted' });
+        finish = () => resolve([{ url: 'wss://example.com', status: 'accepted' }]);
+      }),
+  );
+  const { result } = renderHook(() => useListingRepublish([listing], jest.fn()));
+  await act(async () => {});
+  act(() => result.current.republishAll());
+  expect(result.current.progress.open).toBe(true);
+  expect(result.current.progress.finished).toBe(false);
+  expect(result.current.progress.items).toEqual([
+    expect.objectContaining({ key: 'item', title: 'Piggy mug', done: false }),
+  ]);
+  await act(async () => {
+    finish();
+  });
+  expect(result.current.progress.finished).toBe(true);
+  expect(result.current.progress.items[0]).toMatchObject({
+    done: true,
+    results: [{ url: 'wss://example.com', status: 'accepted' }],
+  });
+});
+
+it('closes the sheet when the screen loses focus mid-run', async () => {
+  const services = jest.requireMock('../services/listingRepublish');
+  const listing = {
+    id: 'signed',
+    sig: 'sig',
+    pubkey: 'seller',
+    kind: 30402,
+    created_at: 1,
+    content: '',
+    tags: [['d', 'item']],
+  } as Event;
+  jest.mocked(services.newestSignedListing).mockReturnValue(listing);
+  jest
+    .mocked(services.republishListing)
+    .mockImplementation(
+      (_p: string, _d: string, _s: unknown, signal: AbortSignal) =>
+        new Promise((resolve) =>
+          signal.addEventListener('abort', () => resolve([]), { once: true }),
+        ),
+    );
+  const { result, rerender } = renderHook(() => useListingRepublish([listing], jest.fn()));
+  await act(async () => {});
+  act(() => result.current.republishAll());
+  expect(result.current.progress.open).toBe(true);
+  mockFocused = false;
+  await act(async () => {
+    rerender({});
+  });
+  expect(result.current.progress.open).toBe(false);
+  expect(result.current.busy).toBe(false);
+});

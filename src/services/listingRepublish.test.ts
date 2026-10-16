@@ -234,3 +234,33 @@ test('different valid signatures for the same event id both count as held copies
   expect(snapshot.relays.get('wss://a')).toHaveLength(1);
   expect(snapshot.relays.get('wss://b')).toHaveLength(1);
 });
+test('reports each relay as it answers, before the whole publish settles', async () => {
+  let answerSlow!: (reason: string) => void;
+  publish.mockImplementation(([url]: string[]) => [
+    url === 'wss://slow'
+      ? new Promise<string>((resolve) => {
+          answerSlow = resolve;
+        })
+      : Promise.resolve(''),
+  ]);
+  const seen: string[] = [];
+  const done = republishListing(
+    me,
+    'item',
+    {
+      copies: [sign(10)],
+      relays: new Map([
+        ['wss://fast', []],
+        ['wss://slow', []],
+      ]),
+    },
+    signal(),
+    8000,
+    (result) => seen.push(`${result.url}:${result.status}`),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(seen).toEqual(['wss://fast:accepted']);
+  answerSlow('');
+  await done;
+  expect(seen).toEqual(['wss://fast:accepted', 'wss://slow:accepted']);
+});

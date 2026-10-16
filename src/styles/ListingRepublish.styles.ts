@@ -2,16 +2,15 @@ import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 export const createListingRepublishStyles = (colors: Palette) =>
   StyleSheet.create({
-    backdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      justifyContent: 'center',
-      padding: 24,
-    },
-    card: { backgroundColor: colors.surface, borderRadius: 20, padding: 20, maxHeight: '80%' },
-    title: { color: colors.textBody, fontSize: 18, fontWeight: '700', marginBottom: 8 },
+    sheetBackground: { backgroundColor: colors.surface },
+    sheet: { padding: 24, paddingBottom: 40, gap: 16 },
+    title: { color: colors.textBody, fontSize: 18, fontWeight: '700' },
+    itemTitle: { color: colors.textBody, fontSize: 16, fontWeight: '700' },
     text: { color: colors.textBody, fontSize: 14 },
-    item: { marginBottom: 12 },
+    muted: { color: colors.textSupplementary, fontSize: 13 },
+    item: { gap: 8 },
+    resultRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    resultText: { flex: 1 },
     button: {
       backgroundColor: colors.brandPink,
       padding: 14,
