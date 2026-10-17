@@ -8,6 +8,7 @@ import {
   deleteDmMessagesByIds,
   selectKnownEventIds,
   upsertDmMessages,
+  upsertDmMessagesIf,
   importDmMessages,
   updateDmDeliveryStatuses,
   getConversationMessages,
@@ -23,6 +24,7 @@ import {
   type DmMessageRow,
   getConversationForEvent,
 } from './dmDb';
+import { dmOwnerEpoch, isDmOwnerRetired, reviveDmOwner } from './dmOwnerGuard';
 
 const mockExecute = jest.fn();
 const mockTransaction = jest.fn(
@@ -86,6 +88,12 @@ describe('dmDb', () => {
     it('no-ops on empty input', async () => {
       await upsertDmMessages([]);
       expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing when persistIf fails inside the transaction', async () => {
+      expect(await upsertDmMessagesIf([row({ eventId: 'e1' })], () => false)).toBe(false);
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockExecute).not.toHaveBeenCalled();
     });
 
     it('upserts received rows in one transaction, keeping any existing tick (COALESCE)', async () => {
@@ -476,11 +484,29 @@ describe('dmDb', () => {
   });
 
   describe('deleteDmMessagesForOwner', () => {
-    it("deletes only the owner's rows", async () => {
+    it("deletes only the owner's rows, in a transaction (ordered against upserts)", async () => {
       await deleteDmMessagesForOwner(OWNER);
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('DELETE FROM dm_messages WHERE owner = ?');
       expect(params).toEqual([OWNER]);
+    });
+
+    it('changes the owner epoch at once, so an in-flight write can tell', async () => {
+      const before = dmOwnerEpoch(OWNER);
+      const wipe = deleteDmMessagesForOwner(OWNER);
+      expect(dmOwnerEpoch(OWNER)).toBe(before + 1); // before the DELETE resolves
+      await wipe;
+      expect(dmOwnerEpoch(OWNER.toUpperCase())).toBe(before + 1);
+    });
+
+    it('retires the owner until it signs in again', async () => {
+      reviveDmOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER)).toBe(false);
+      await deleteDmMessagesForOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER.toUpperCase())).toBe(true);
+      reviveDmOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER)).toBe(false);
     });
   });
 });

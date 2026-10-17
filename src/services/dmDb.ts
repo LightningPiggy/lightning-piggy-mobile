@@ -1,6 +1,7 @@
 import { type ParsedOrderEvent, parseStoredOrder } from '../utils/orderEvents';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { getLocalDb } from './localDb';
+import { retireDmOwner } from './dmOwnerGuard';
 import type { MarmotEdit } from './marmotEdits';
 import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 
@@ -294,12 +295,37 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
  * existing delivery tick / rumorId to NULL.
  */
 export async function upsertDmMessages(rows: readonly DmMessageRow[]): Promise<void> {
-  if (rows.length === 0) return;
+  await writeDmMessages(rows);
+}
+
+/**
+ * `upsertDmMessages` for a write that may outlive its account (a background
+ * save): `persistIf` is checked inside the write transaction, and false writes
+ * nothing. Wipes are transactions too, so a wipe either lands first (and this
+ * sees its epoch) or runs after this write and removes it. Returns whether it
+ * wrote.
+ */
+export function upsertDmMessagesIf(
+  rows: readonly DmMessageRow[],
+  persistIf: () => boolean,
+): Promise<boolean> {
+  return writeDmMessages(rows, persistIf);
+}
+
+async function writeDmMessages(
+  rows: readonly DmMessageRow[],
+  persistIf?: () => boolean,
+): Promise<boolean> {
+  if (rows.length === 0) return false;
   const db = await getLocalDb();
+  let written = false;
   await db.transaction(async (tx) => {
+    if (persistIf?.() === false) return;
     for (const m of rows) await upsertOne(tx as Executor, m);
+    written = true;
   });
-  notifyDmStorage(rows);
+  if (written) notifyDmStorage(rows);
+  return written;
 }
 
 /** Import a legacy misfiled group row only if neither its wrap nor its rumor
@@ -841,8 +867,12 @@ export async function deleteMarmotMessages(
  * calls `wipeLocalDmStore` (localDb) to delete the DB file + keystore key.
  */
 export async function deleteDmMessagesForOwner(owner: string): Promise<void> {
+  retireDmOwner(owner); // before the DELETE: in-flight writes must see it
   const db = await getLocalDb();
-  await db.execute(`DELETE FROM dm_messages WHERE owner = ?;`, [owner]);
+  // A transaction, so it's ordered against upserts (see upsertDmMessages).
+  await db.transaction(async (tx) => {
+    await tx.execute(`DELETE FROM dm_messages WHERE owner = ?;`, [owner]);
+  });
 }
 
 /** Relay-delivered rows of one inner kind (event id = wrap id for NIP-17). */

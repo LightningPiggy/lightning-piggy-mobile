@@ -54,6 +54,8 @@ export interface InboxWrapIngestParams<W extends IngestableWrap> {
    * (#788) inside the pacing scheduler. */
   isColdStart?: boolean;
   signal?: AbortSignal;
+  /** Checked right before rows are saved (see dmIngest `persistIf`). */
+  persistIf?: () => boolean;
   /** Amber inbox refresh: a PERMISSION_NOT_GRANTED from the silent decrypt
    * path stops further decrypt attempts (one flag, no per-wrap dialog flood)
    * instead of being treated as an ordinary skip. */
@@ -317,7 +319,7 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
         };
       },
       // Pacing is the scheduler above; disable ingestWraps' count-based yield.
-      { yieldEvery: 0, signal },
+      { yieldEvery: 0, signal, persistIf: params.persistIf },
     );
 
     // Completion releases these claims itself; do not release a later retry claim.

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { filterMessagesByProtocol, type DmProtocol } from '../utils/dmProtocol';
 import { subscribeDmMessages } from '../contexts/nostrEventBus';
+import { subscribeDmStorage } from '../services/dmDb';
 import { keepPendingLocalRows, reconcileDeliveryStatus } from '../contexts/nostrDmCache';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { ConversationMessageInput } from '../utils/conversationItems';
@@ -208,14 +209,50 @@ export function useConversationLoader({
           void load(false);
         }, 150);
       });
+      // The live sub announces a message before its store write commits
+      // (#934), so the read above can miss it on a busy cold start, and
+      // nothing announces it again (#1325). Re-read the store, without a
+      // relay fetch, once a write has committed.
+      // Only the newest read may apply, and only while this focus lasts: an
+      // older read resolving late would drop the newer message again.
+      let storeTimer: ReturnType<typeof setTimeout> | undefined;
+      let storeRead = 0;
+      let focused = true;
+      const viewer = notification?.owner?.toLowerCase();
+      const peer = pubkey.toLowerCase();
+      const unsubscribeStore = subscribeDmStorage((owner, rows) => {
+        // Only this account's writes to this thread (rows are empty when a
+        // write isn't row-specific: re-read then too).
+        if (storeTimer || (viewer && owner.toLowerCase() !== viewer)) return;
+        if (rows.length && !rows.some((r) => r.conversation.toLowerCase() === peer)) return;
+        storeTimer = setTimeout(() => {
+          storeTimer = undefined;
+          const read = ++storeRead;
+          void loadInitialConversation(pubkey, protocol)
+            .then((rows) => {
+              if (!isMountedRef.current || !focused || read !== storeRead) return;
+              const stored = filterMessagesByProtocol(rows, protocol);
+              // Keep the delivery ticks `load` reconciled: the store rows may
+              // not carry them yet.
+              setMessages((prev) => {
+                const previous = filterMessagesByProtocol(prev, protocol);
+                return keepPendingLocalRows(previous, reconcileDeliveryStatus(previous, stored));
+              });
+            })
+            .catch(() => undefined);
+        }, 150);
+      });
       return () => {
+        focused = false;
         clearTimeout(refreshTimer);
+        clearTimeout(storeTimer);
         unsubscribe();
+        unsubscribeStore();
         // A blurred thread (e.g. kept underneath another protocol's thread)
         // must not keep decrypting or prompting a signer; refocus reloads.
         fetchAbortRef.current?.abort();
       };
-    }, [pubkey, load]),
+    }, [pubkey, protocol, load, loadInitialConversation, notification?.owner]),
   );
 
   // Generation guard so overlapping pull-to-refreshes don't drop the spinner
