@@ -112,6 +112,8 @@ test.each(variants)(
     const ui = render(<MessageBubble {...props} content={content} />);
     const gradient = ui.UNSAFE_getByType(LinearGradient);
     expect(gradient.props.colors).toEqual(['#EC008C', '#8B5CF6']);
+    // Mostly pink: purple only towards the bottom-right corner.
+    expect(gradient.props.locations).toEqual([0.55, 1]);
     expect(gradient.props.start).toEqual({ x: 0, y: 0 });
     expect(gradient.props.end).toEqual({ x: 1, y: 1 });
     await act(async () => {});
