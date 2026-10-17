@@ -1,3 +1,11 @@
+import {
+  beginSkipSetRecheck,
+  completeSkipSetRecheck,
+  hasRepliedTo,
+  loadRepliedPartners,
+  pendingSkipSetRecheck,
+  skipSetRecheckDone,
+} from '../services/dmRepliedPartners';
 import { reviveSellerAccount } from '../services/sellerEventStore';
 import { useLiveFollowGate } from './useLiveFollowGate';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -445,6 +453,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           lastRefreshAt,
           bypassesFreshnessTtl(opts) ||
             widensView ||
+            // A reply's skip-set recheck (#1623) shouldn't wait out the TTL.
+            pendingSkipSetRecheck(pubkey) !== null ||
             (retryAt !== undefined && retryAt <= Date.now()),
           performance.now(),
         )
@@ -479,7 +489,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // of the parental-control filter from a single switch.
       const refreshForSigner = signerType;
       const refreshFollows = followPubkeys;
-      const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
+      // Someone we've replied to passes too (#1623), so their later messages
+      // are stored like a follow's (the Messages list keeps its trust tiers).
+      const passesFollowGate = (pk: string): boolean =>
+        includeNonFollows || refreshFollows.has(pk) || hasRepliedTo(refreshForPubkey, pk);
 
       if (!isStillActive()) return;
       const accountSignal = accountSignalFor(refreshForPubkey);
@@ -497,6 +510,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // single-flighted per account; after the first call it costs one
           // Map lookup, so firing it on every refresh is safe.
           await ensureDmStoreMigrated(refreshForPubkey);
+          // `passesFollowGate` reads it: people we've replied to pass (#1623).
+          await loadRepliedPartners(refreshForPubkey);
+          // Replying to someone new re-reads wraps the skip-set rejected before:
+          // one forced pass per session, cleared once a refresh completes it.
+          const skipSetRecheck = beginSkipSetRecheck(refreshForPubkey);
 
           // Cold REBUILD detection (F1, #849). A post-login / post-wipe inbox
           // has an empty store: this sweep is the ONLY thing that will populate
@@ -684,13 +702,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   wraps: kind1059,
                   passesFollowGate,
                   isFollowed: (pk) => refreshFollows.has(pk),
-                  bypassSkipSet,
+                  bypassSkipSet: bypassSkipSet || skipSetRecheck !== null,
                   isColdStart,
                   signal: effectiveSignal,
                   onSkip,
                   amberNip44DecryptSilent,
                 })
               : null;
+          const skipSetRechecked = skipSetRecheckDone(nip17 !== null, effectiveSignal.aborted);
           if (nip17) {
             // No early return on abort: entries is [] when aborted, but
             // nip17Stored counts rows persisted before the abort (F1, #849)
@@ -775,6 +794,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // Completion drives TTL and full wrap backfill independently of the
           // history floor. A productive abort still needs another pass.
           refreshCompleted = !effectiveSignal.aborted && kind4Complete;
+          if (refreshCompleted && skipSetRechecked && skipSetRecheck !== null) {
+            completeSkipSetRecheck(refreshForPubkey, skipSetRecheck);
+          }
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {

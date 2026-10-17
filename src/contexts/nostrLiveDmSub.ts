@@ -1,4 +1,5 @@
 import { gateLiveDm, startFollowGateFallback } from './liveDmFollowGateDecision';
+import { loadRepliedPartners, hasRepliedTo } from '../services/dmRepliedPartners';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmRowPreview } from '../utils/dmRowPreview';
@@ -469,6 +470,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           buffer: followGateBuffer,
           fresh: isFreshArrival(ev.created_at),
           bypassOwn: true,
+          replied: hasRepliedTo(viewerPubkey, k4InboxEntry.partnerPubkey),
           onEvict: () => seen.delete(ev.id),
         }) !== 'pass'
       )
@@ -699,6 +701,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // just-migrated install seeds the full id set.
     try {
       await ensureDmStoreMigrated(viewerPubkey);
+      // Before arming: the follow gate passes people we've replied to (#1623).
+      await loadRepliedPartners(viewerPubkey);
       const storedWrapIds = await selectDmWrapIds(viewerPubkey);
       for (const id of storedWrapIds) knownWrapIds.add(id);
       // Also seed from persisted group messages — group-routed wraps

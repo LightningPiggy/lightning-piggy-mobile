@@ -1,5 +1,6 @@
 import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { gateLiveDm } from './liveDmFollowGateDecision';
+import { hasRepliedTo } from '../services/dmRepliedPartners';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import type React from 'react';
@@ -266,6 +267,7 @@ export function createLiveRumorSurfacer(
           cacheReady: isFollowCacheReady(),
           buffer: followGateBuffer,
           fresh: isFreshArrival(rumor.created_at),
+          replied: hasRepliedTo(viewerPubkey, partnership.partnerPubkey),
         });
     if (decision !== 'pass') {
       if (decision === 'drop') nothingToSee();

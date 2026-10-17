@@ -17,6 +17,7 @@ export function gateLiveDm({
   fresh,
   cacheReady = false,
   bypassOwn = false,
+  replied = false,
   groupRumor,
   rumor,
   onEvict,
@@ -32,9 +33,13 @@ export function gateLiveDm({
   fresh: boolean;
   bypassOwn?: boolean;
   cacheReady?: boolean;
+  /** The viewer has sent this partner a message (#1623): their side of the
+   * conversation passes like a follow's, hydrated or not. */
+  replied?: boolean;
 }): 'pass' | 'defer' | 'drop' {
   const label = kind === 4 ? 'kind-4' : 'wrap';
   if (bypassOwn && entry.fromMe) return 'pass';
+  if (replied) return 'pass';
   if ((hydrated || cacheReady) && isFollowed(follows, entry.partnerPubkey)) return 'pass';
   if (!hydrated) {
     const text = dmRowPreview(entry.text, entry.wireKind, getAppFormatLocale());

@@ -50,8 +50,10 @@ export interface DmMessageRow {
 }
 
 /** Post-commit updates: consumers must not resolve wraps before their rows exist. */
-const dmStorageListeners = new Set<(owner: string) => void>();
-export function subscribeDmStorage(listener: (owner: string) => void): () => void {
+type DmStorageListener = (owner: string, rows: readonly DmMessageRow[]) => void;
+const dmStorageListeners = new Set<DmStorageListener>();
+/** `rows` are the committed rows for `owner` (empty when not row-specific). */
+export function subscribeDmStorage(listener: DmStorageListener): () => void {
   dmStorageListeners.add(listener);
   return () => {
     dmStorageListeners.delete(listener);
@@ -60,9 +62,10 @@ export function subscribeDmStorage(listener: (owner: string) => void): () => voi
 
 function notifyDmStorage(rows: readonly DmMessageRow[]): void {
   for (const owner of new Set(rows.map((row) => row.owner))) {
+    const ownerRows = rows.filter((row) => row.owner === owner);
     for (const listener of dmStorageListeners) {
       try {
-        listener(owner);
+        listener(owner, ownerRows);
       } catch {
         // A consumer failure must not turn a committed write into a failed one.
       }
@@ -649,6 +652,22 @@ export async function hasConversationWith(owner: string, conversation: string): 
     [owner, conversation],
   );
   return (res.rows ?? []).length > 0;
+}
+
+/** Kinds of a sent row that count as replying in a 1:1 thread (#1623): text
+ * and files. Orders, invites and other structured rows don't. */
+export const REPLY_WIRE_KINDS: readonly number[] = [4, 14, 15];
+
+/** Everyone this owner has sent a 1:1 message to (#1623), any protocol. */
+export async function selectRepliedConversations(owner: string): Promise<string[]> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT DISTINCT conversation FROM dm_messages
+      WHERE owner = ? AND from_me = 1 AND wire_kind IN (${REPLY_WIRE_KINDS.join(', ')})
+        AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%';`,
+    [owner],
+  );
+  return (res.rows ?? []).map((r) => String(r.conversation));
 }
 
 /**

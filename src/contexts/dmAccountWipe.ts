@@ -2,6 +2,7 @@ import { forgetNip17GroupHistoryRepair } from './nip17GroupHistoryRepairRunner';
 import { File, Paths } from 'expo-file-system';
 import { deleteInstallationSignatureKey } from '../services/marmotSignatureKey';
 import { deleteDmMessagesForOwner } from '../services/dmDb';
+import { forgetRepliedPartners } from '../services/dmRepliedPartners';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
   AMBER_NIP17_CACHE_KEY_BASE,
@@ -61,6 +62,7 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   // upsert resurrect rows and re-set the migration flag after removal (N4).
   await pendingDmStoreMigration(pubkey)?.catch(() => {});
   await forgetNip17GroupHistoryRepair(pubkey).catch(() => {});
+  forgetRepliedPartners(pubkey);
   try {
     await deleteDmMessagesForOwner(pubkey);
   } catch (e) {
