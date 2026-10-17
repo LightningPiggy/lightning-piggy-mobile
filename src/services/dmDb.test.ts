@@ -200,7 +200,10 @@ describe('dmDb', () => {
       mockExecute.mockResolvedValueOnce(rowsResult([{ present: 1 }]));
       expect(await hasConversationWith(OWNER, 'convA')).toBe(true);
       const [sql, params] = mockExecute.mock.calls[0];
-      expect(sql).toContain('WHERE owner = ? AND conversation = ? LIMIT 1');
+      // Reaction rows (#1321) alone don't make a conversation.
+      expect(sql).toContain(
+        'WHERE owner = ? AND conversation = ? AND wire_kind NOT IN (7, 5) LIMIT 1',
+      );
       expect(params).toEqual([OWNER, 'convA']);
     });
 
@@ -406,8 +409,9 @@ describe('dmDb', () => {
       );
       expect(sql).toContain('WHERE m.owner = ?');
       // Marmot invite gift wraps never become a thread's latest (#1269).
-      expect(sql).toContain('WHERE owner = ? AND wire_kind NOT IN (444)');
-      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind NOT IN (444)');
+      // …and neither do wrapped reactions / retractions (#1321).
+      expect(sql).toContain('WHERE owner = ? AND wire_kind NOT IN (444, 7, 5)');
+      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind NOT IN (444, 7, 5)');
       expect(params).toEqual([OWNER, OWNER]);
     });
   });
@@ -519,7 +523,11 @@ it('signals each owner once after a committed upsert and unsubscribes', async ()
     return rowsResult([]);
   });
   await upsertDmMessages([row(), row({ eventId: 'e2' }), row({ owner: 'owner2' })]);
-  expect(listener.mock.calls).toEqual([[OWNER], ['owner2']]);
+  // Each owner gets its own committed rows (#1623 tracks our sends from them).
+  expect(listener.mock.calls).toEqual([
+    [OWNER, [row(), row({ eventId: 'e2' })]],
+    ['owner2', [row({ owner: 'owner2' })]],
+  ]);
   unsubscribe();
   await upsertDmMessages([row()]);
   expect(listener).toHaveBeenCalledTimes(2);
@@ -543,7 +551,7 @@ it('signals imported rows after commit so placeholders can resolve', async () =>
   const unsubscribe = subscribeDmStorage(listener);
   try {
     await importDmMessages([row()]);
-    expect(listener).toHaveBeenCalledWith(OWNER);
+    expect(listener).toHaveBeenCalledWith(OWNER, [row()]);
   } finally {
     unsubscribe();
   }

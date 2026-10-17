@@ -72,7 +72,7 @@ import type { ConversationMessageInput, Item } from '../utils/conversationItems'
 import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
 import { useStartLiveLocationShare } from '../hooks/useStartLiveLocationShare';
 import { useConversationReactions } from '../hooks/useConversationReactions';
-import { useReactionBackend } from '../hooks/useReactionBackend';
+import { useThreadReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
@@ -110,10 +110,6 @@ const ConversationScreen: React.FC = () => {
     pubkey: myPubkey,
     relays,
     profile,
-    publishReaction,
-    deleteReaction,
-    fetchReactionsForMessages,
-    fetchReactionDeletionsForReactions,
   } = useNostr();
   const { armLiveDmSub } = useNostrDmInbox();
   // Trust gate (#1338): the peer's media auto-loads only if I follow them.
@@ -466,21 +462,7 @@ const ConversationScreen: React.FC = () => {
       marmot: protocol === 'marmot',
     });
 
-  const relayReactionBackend = useMemo(
-    () => ({
-      fetchReactionsForMessages,
-      publishReaction,
-      deleteReaction,
-      fetchReactionDeletions: fetchReactionDeletionsForReactions,
-    }),
-    [
-      fetchReactionsForMessages,
-      publishReaction,
-      deleteReaction,
-      fetchReactionDeletionsForReactions,
-    ],
-  );
-  const reactionBackend = useReactionBackend(protocol, myPubkey, pubkey, relayReactionBackend);
+  const reactionBackend = useThreadReactionBackend(protocol, myPubkey, pubkey);
 
   // Per-message reactions + long-press action state (#205) — kind-7 fetch /
   // reduce, optimistic publish/retract toggle, and the actioned-message

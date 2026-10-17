@@ -1,6 +1,7 @@
 import type { Event } from 'nostr-tools/core';
 import type { Filter } from 'nostr-tools/filter';
 import { subscribeRelayWithBudget } from './relayReqSubscription';
+import { querySyncAbortable } from './relayQuery';
 import { pool, trackRelays } from './nostrService';
 
 // Relay-layer fetch helpers for NIP-25 reactions + NIP-09 retractions (#205).
@@ -113,6 +114,45 @@ export async function fetchReactionDeletions(
   return events.map((e) => ({
     id: e.id,
     pubkey: e.pubkey,
+    created_at: e.created_at,
+    tags: e.tags,
+  }));
+}
+
+/**
+ * The viewer's own public NIP-25 reactions to DM messages (`k` 14 / 15), as
+ * earlier builds published them for NIP-17 chats (#1319). Filtered by author
+ * and kind only, so no private rumor id goes to a relay; callers match the
+ * targets locally. Bounded; merges every relay that answers.
+ */
+export async function fetchOwnDmReactions(
+  author: string,
+  relays: string[],
+  limit = 500,
+): Promise<
+  {
+    id: string;
+    pubkey: string;
+    kind: number;
+    content: string;
+    created_at: number;
+    tags: string[][];
+  }[]
+> {
+  const allRelays = [...new Set(relays)];
+  trackRelays(allRelays);
+  const filter: Filter = { kinds: [7], authors: [author], '#k': ['14', '15'], limit };
+  // Best effort across relays: one failing relay mustn't hide the others'
+  // results. Rejects only when no relay completes.
+  const events = await querySyncAbortable(pool, allRelays, filter, {
+    maxWait: 10000,
+    completedRelays: new Set<string>(),
+  });
+  return events.map((e) => ({
+    id: e.id,
+    pubkey: e.pubkey,
+    kind: e.kind,
+    content: e.content,
     created_at: e.created_at,
     tags: e.tags,
   }));

@@ -4,6 +4,7 @@ import type { TransactionDetailData } from '../components/TransactionDetailSheet
 import type { WalletState } from '../types/wallet';
 import { classifyStoredMessage } from './messageContent';
 import { POLL_KIND, VOTE_KIND, parseStoredPoll, type DisplayPoll } from './nip88Poll';
+import { isChatReactionKind } from './nip17Reactions';
 import { sanitizeDisplayText } from './sanitizeDisplayText';
 import type { DeliveryStatus } from './dmDeliveryStatus';
 import {
@@ -469,6 +470,9 @@ export function buildConversationItems(
     // Structured NIP-88 vote (kind 1018) — never a bubble; it's aggregated into
     // the referenced poll's tally by the screen's poll hook. Drop from the list.
     if (m.wireKind === VOTE_KIND) return [];
+    // A wrapped reaction / retraction (#1321) renders as a pill on its target
+    // (useConversationReactions), never as its own bubble.
+    if (isChatReactionKind(m.wireKind)) return [];
     // Generic, future-proof fallback: a stored message whose wireKind we don't
     // render (an inner Nostr event of an unhandled kind) becomes a muted
     // placeholder rather than a blank text bubble. Only fires for a defined

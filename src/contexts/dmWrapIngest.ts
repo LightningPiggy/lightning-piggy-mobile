@@ -1,3 +1,5 @@
+import { isChatReactionKind } from '../utils/nip17Reactions';
+import { placeOwnChatReaction } from './chatReactionPartner';
 import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -209,7 +211,11 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
           }
           return null;
         }
-        const partnership = partnerFromRumor(rumor, owner);
+        const partnership = await placeOwnChatReaction(
+          rumor,
+          owner,
+          partnerFromRumor(rumor, owner),
+        );
         if (!partnership) return null;
         // B1 — free-text non-follows stay gated. Valid bounded orders
         // persist independently for Orders, but Messages keeps the gate. A
@@ -269,7 +275,9 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
         } catch {
           rumorId = undefined;
         }
-        if (showInMessages)
+        // A reaction / retraction is stored for its target's thread but is
+        // never an inbox entry or a bubble (#1321).
+        if (showInMessages && !isChatReactionKind(rumor.kind))
           entries.push({
             id: wrap.id,
             partnerPubkey: partnership.partnerPubkey,
@@ -296,6 +304,9 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
           content: text,
           fromMe: partnership.fromMe,
           wireKind: rumor.kind,
+          // Both directions (#1320): a received message needs it to be reacted
+          // to, and a stored reaction needs it so a kind 5 can retract it.
+          ...(rumorId ? { rumorId } : {}),
         };
       },
       // Pacing is the scheduler above; disable ingestWraps' count-based yield.
