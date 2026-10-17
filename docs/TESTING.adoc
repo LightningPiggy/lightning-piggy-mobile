@@ -250,7 +250,7 @@ and Middle, Maestro on `PATH`, ImageMagick (`convert`, for flow 130) and
 | `flow-126-marmot-group` | Creates a named Marmot group with Little; the row carries the Marmot pill.
 | `flow-127-marmot-dm-message-types` | Contact, location, GIF, poll (kind 1068), photo (MIP-04 v2) and invoice over Marmot; the runner asserts each inner kind in the bot log.
 | `flow-128-marmot-three-pigs-group` | Big, Little and Middle (two bots) in one group; rename, then remove Middle, who must stop receiving.
-| `flow-129-marmot-receive-invite` | The bot (as Middle) invites Big; Big auto-joins from the Welcome and replies over MLS.
+| `flow-129-marmot-receive-invite` | The bot (as Middle) invites Big; Big accepts the pending invitation and replies over MLS.
 | `flow-130-marmot-photos` | Photos both ways: the bot's White Noise-format photo renders; ours is decrypted by the bot.
 |===
 

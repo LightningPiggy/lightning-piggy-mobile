@@ -9,6 +9,8 @@ import { createGroupFileRumor } from '../services/nostrFileMessage';
 import { directMessageRumorEventId } from '../services/dmRumorId';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { RelayConfig, SignerType } from '../types/nostr';
+import { isNip171GroupId } from '../utils/nip171';
+import { nip171Outgoing } from '../services/nip171Groups';
 import { isMarmotGroupId } from '../services/marmotSession';
 import { sendMarmotGroupRumor } from '../services/marmotSend';
 import { mentionedPubkeys } from '../utils/chatMentions';
@@ -133,28 +135,41 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
       const targetRelays = Array.from(
         new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
       );
+      // NIP-171: one wrap to the group's current epoch key, tagged per the
+      // draft, instead of a per-member fan-out (and no self-copy).
+      const nip171 = isNip171GroupId(input.groupId)
+        ? input.file
+          ? { error: 'Files are not supported in NIP-171 groups yet' }
+          : nip171Outgoing(pubkey, input.groupId, text, targetRelays)
+        : null;
+      if (nip171 && 'error' in nip171) return { success: false, error: nip171.error };
+      const recipients = nip171 ? nip171.recipientPubkeys : input.memberPubkeys;
+      const sendRelays = nip171 ? nip171.relays : targetRelays;
+      const includeSelf = !nip171;
       try {
         // kind-15 encrypted file (voice note, #235) when a `file` is given;
         // otherwise the standard kind-14 group chat rumor.
-        const rumor = input.file
-          ? createGroupFileRumor({
-              senderPubkey: pubkey,
-              subject: input.subject,
-              memberPubkeys: input.memberPubkeys,
-              url: input.file.url,
-              mime: input.file.mime,
-              keyHex: input.file.keyHex,
-              nonceHex: input.file.nonceHex,
-              sha256Hex: input.file.sha256Hex,
-              size: input.file.size,
-              filename: input.file.filename,
-            })
-          : nostrService.createGroupChatRumor({
-              senderPubkey: pubkey,
-              subject: input.subject,
-              memberPubkeys: input.memberPubkeys,
-              content: text,
-            });
+        const rumor = nip171
+          ? nip171.rumor
+          : input.file
+            ? createGroupFileRumor({
+                senderPubkey: pubkey,
+                subject: input.subject,
+                memberPubkeys: input.memberPubkeys,
+                url: input.file.url,
+                mime: input.file.mime,
+                keyHex: input.file.keyHex,
+                nonceHex: input.file.nonceHex,
+                sha256Hex: input.file.sha256Hex,
+                size: input.file.size,
+                filename: input.file.filename,
+              })
+            : nostrService.createGroupChatRumor({
+                senderPubkey: pubkey,
+                subject: input.subject,
+                memberPubkeys: input.memberPubkeys,
+                content: text,
+              });
 
         if (isMarmotGroupId(input.groupId) && !input.file) {
           rumor.tags.push(...marmotReplyTags(input.replyTo));
@@ -179,8 +194,9 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           const result = await nostrService.sendNip17ToManyWithNsec({
             senderSecretKey: secretKey,
             rumor,
-            recipientPubkeys: input.memberPubkeys,
-            relays: targetRelays,
+            recipientPubkeys: recipients,
+            includeSelf,
+            relays: sendRelays,
           });
           if (result.wrapsPublished === 0) {
             return { success: false, error: result.errors[0] ?? 'No wraps published' };
@@ -206,8 +222,9 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           const result = await nostrService.sendNip17ToManyWithSigner({
             senderPubkey: currentUser,
             rumor,
-            recipientPubkeys: input.memberPubkeys,
-            relays: targetRelays,
+            recipientPubkeys: recipients,
+            includeSelf,
+            relays: sendRelays,
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               amberService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
             signerSignSeal: async (unsignedSeal) => {
@@ -253,8 +270,9 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           const result = await nostrService.sendNip17ToManyWithSigner({
             senderPubkey: currentUser,
             rumor,
-            recipientPubkeys: input.memberPubkeys,
-            relays: targetRelays,
+            recipientPubkeys: recipients,
+            includeSelf,
+            relays: sendRelays,
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               nostrConnectService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
             signerSignSeal: async (unsignedSeal) => {

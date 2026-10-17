@@ -26,4 +26,16 @@ export const createRelayDetailsScreenStyles = (colors: Palette) =>
     remove: { backgroundColor: colors.white, padding: 14, borderRadius: 12, alignItems: 'center' },
     disabled: { opacity: 0.45 },
     removeText: { color: colors.brandPink, fontWeight: '700', fontSize: 15 },
+    // Same white-on-brand button as `remove`, with a ⚡ icon beside the label.
+    tip: {
+      backgroundColor: colors.white,
+      padding: 14,
+      borderRadius: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      marginTop: 8,
+    },
+    tipText: { color: colors.brandPink, fontWeight: '700', fontSize: 15 },
   });

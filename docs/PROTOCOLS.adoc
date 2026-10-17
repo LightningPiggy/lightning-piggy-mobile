@@ -6,7 +6,7 @@ This page documents which Nostr Improvement Proposals (NIPs) Lightning Piggy Mob
 
 ==== Summary
 
-Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as the **default** outbound 1:1 messaging path. Legacy **NIP-04** (kind 4) events are **read** for backward-compatibility with peers on older clients; one is only sent when the user explicitly picks NIP-04 in a thread's protocol picker. Group chats also use NIP-17 (a multi-`p`-tag kind-14 rumor). **Marmot** (MLS over Nostr, Alpha) is a third, opt-in transport for 1:1 and group chats — see <<marmot-protocol>>.
+Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as the **default** outbound 1:1 messaging path. Legacy **NIP-04** (kind 4) events are **read** for backward-compatibility with peers on older clients; one is only sent when the user explicitly picks NIP-04 in a thread's protocol picker. Group chats also use NIP-17 (a multi-`p`-tag kind-14 rumor). **Marmot** (MLS over Nostr, Alpha) is a third, opt-in transport for 1:1 and group chats — see <<marmot-protocol>>. Lightning Piggy can also join **NIP-171** groups created in Anagram — see <<nip171-groups>>.
 
 [cols="1,1,1,3", options="header"]
 |===
@@ -153,6 +153,33 @@ Members publish encrypted native push tokens inside the group (447/448, removals
 * Key packages are read from the peer's NIP-65 write relays plus the lookup relays. Selection keeps the newest event per `d` slot, skips retired slots and validates signature, tags, lifetime and credential. Fresh packages must advertise `0x800b`: the window is 35 days for White Noise-tagged packages, 14 otherwise. If none is fresh, the single newest compatible package is selected, or the newest valid package if none is compatible. A new 1:1 with a selected White Noise package uses only the newest such package; other invites use the selection in one commit, skipping packages that fail group eligibility or invite checks and capping accepted devices at 10 per person. An existing 1:1 later adds devices the contact installed since it began (fresh key packages whose leaf signature key isn't in the group yet, one commit; White Noise contacts get only their newest White Noise install), #1559. Linking your own installs (historical MIP-06 device linking) isn't implemented; see `SOLUTION_DESIGN.adoc` → "Key packages" for the exact checks.
 * Every commit Lightning Piggy sends, including the founding invite, carries a GroupContextExtensions proposal that puts `app_data_dictionary` last, as MDK expects, so a rename or admin change doesn't fork White Noise off the group (#1309).
 * Typing indicators (ephemeral, content-free) are not carried over MLS. Live location is (#1300): in a Marmot chat the markers and coordinate updates are MLS application messages — see the next section.
+
+[[nip171-groups]]
+=== NIP-171 epoch-ticketed groups — member side
+
+Draft NIP: https://github.com/nostr-protocol/nips/pull/2428[nostr-protocol/nips#2428]. https://anagram.chat[Anagram] is the reference client and the one Lightning Piggy is tested against. Lightning Piggy can be a *member* of a NIP-171 group: be invited, read and send. Creating a group and managing its members (the owner side: recovery words, ticket issuing, epoch rotation) isn't implemented yet.
+
+[cols="1,4"]
+|===
+| Kind | Use
+
+| 1059 → 13 → 1014
+| *Epoch ticket*, gift-wrapped by the owner to each member: signed by the group identity key, tags exactly `["p", <member>]`, `["epoch", <n>]`, `content` = the epoch private key (32-byte hex). As Anagram sends it, the ticket rumor is unsigned and its signature travels as the seal's `invitation_proof` tag; a `sig` on the rumor is accepted too. A ticket is rejected unless the signature verifies against a recomputed id and the epoch key differs from the group and member keys.
+| 1059 → 13 → 14
+| *Group message*, gift-wrapped once to the current epoch *public* key and published to the group identity's kind-10050 relays (plus ours). Tags: `p` (epoch pubkey), `h` (group pubkey), `epoch`, `invited_at` (our ticket's `created_at`) and `invitation_proof` (our ticket's signature). Receivers rebuild the sender's ticket from those and the epoch key and verify it, so only members can post. No self-copy: we read our own messages back from the epoch key.
+| 1059 → 13 → 14 (from the group key)
+| *Membership announcement*: `+` / `-` with `member` tags. Used for the member list we show (the roster isn't published).
+| 1059 → 13 → 14 to the group identity
+| *Leave request*: a plain NIP-17 `-` to the group identity, sent when we leave; the group's keys are then forgotten here.
+|===
+
+* *Invitations need consent.* A ticket's seal is signed by the group key, not by a person we could check against the follow list, so any key can send one. A valid ticket for a group the user hasn't accepted shows as an invitation in Messages (Accept / Decline). Until it's accepted, nothing about the group is fetched or subscribed to (a lookup would tell relays the user was invited). Declining or leaving is recorded per account with the newest ticket's `created_at`; the same tickets read again are ignored, and only a newer ticket (a re-invite) is a new invitation. At most 20 unanswered invitations are kept and 100 groups joined (Anagram's limit).
+* Group relays from the group identity's kind 10050 are used only if they are `wss://`, and are asked only for that group's epoch key (our own read relays get every group's), so one group's relays can't learn the user's other groups — unless several joined groups advertise the same relay, which is then asked for each of their keys and can link them. The group's profile (kind 0) and relay list are signature-checked; its name is capped at 64 characters and its picture must be `https://`.
+* Limits against flooding: tickets dated more than 10 minutes ahead are refused; a group keeps at most 8 tickets (a higher epoch, i.e. a key rotation, is always taken); the session remembers up to 4,000 handled wraps (seeded from the group logs, so stored messages aren't decrypted again on start) and queues at most 1,000; message times are clamped to 10 minutes ahead.
+* The highest-epoch ticket wins; two tickets with different keys for that epoch make the group read-only until the owner rotates.
+* Tickets (they hold epoch private keys) live only in the encrypted local DB (`nip171_tickets`). Tickets an older version filed as 1:1 DM rows ("Unsupported message type") are re-read about 20 s after launch and those rows removed, for local-key accounts; a row whose wrap no relay returns is retried on the next launch.
+* Not yet: files (kind 15) and reactions in NIP-171 groups, renaming, adding or removing members (owner only).
+* Code: `src/utils/nip171.ts` (rules), `src/services/nip171Groups.ts` (state, send shape), `src/services/nip171Session.ts` (epoch-key subscription), `src/contexts/nip171InboxRouting.ts`.
 
 === Live location: tagged markers + coordinate updates (#206, #1300)
 

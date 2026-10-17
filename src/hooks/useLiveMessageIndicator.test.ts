@@ -146,3 +146,84 @@ it('cancels a pending scroll when the conversation changes during loading', () =
   act(() => jest.advanceTimersByTime(50));
   expect(jump).not.toHaveBeenCalled();
 });
+
+describe('a jump that lands (first unread / a mention)', () => {
+  const setup = () => {
+    const jump = jest.fn();
+    const hook = renderHook(
+      ({ entries }: { entries: LiveMessageEntry[] }) =>
+        useLiveMessageIndicator({ scope: 'a', entries, scrollToLatest: jump }),
+      { initialProps: { entries: [entry('old', 10)] } },
+    );
+    return { jump, ...hook };
+  };
+
+  it('lands at the live edge: no arrow once the hold ends, even without another scroll', () => {
+    const { result } = setup();
+    act(() => result.current.leaveEdge(500));
+    expect(result.current.atEdge).toBe(false);
+    act(() => result.current.onScroll(scroll(0))); // the jump landed at the edge
+    expect(result.current.atEdge).toBe(false); // still holding
+    act(() => jest.advanceTimersByTime(500));
+    expect(result.current.atEdge).toBe(true);
+  });
+
+  it("opens at the edge and the jump doesn't move the list: no arrow once the hold ends", () => {
+    const { result } = setup();
+    act(() => result.current.leaveEdge(500)); // no scroll event at all
+    act(() => jest.advanceTimersByTime(500));
+    expect(result.current.atEdge).toBe(true);
+  });
+
+  it('a list whose edge is its end, with no scroll event yet, keeps the arrow', () => {
+    const { result } = renderHook(() =>
+      useLiveMessageIndicator({
+        scope: 'a',
+        entries: [entry('old', 10)],
+        edge: 'end',
+        scrollToLatest: jest.fn(),
+      }),
+    );
+    act(() => result.current.leaveEdge(500));
+    act(() => jest.advanceTimersByTime(500));
+    expect(result.current.atEdge).toBe(false);
+  });
+
+  it('a message that arrives during the hold is scrolled into view when it lands at the edge', () => {
+    const { result, rerender, jump } = setup();
+    act(() => result.current.leaveEdge(500));
+    act(() => result.current.onScroll(scroll(0)));
+    rerender({ entries: [entry('new', 20), entry('old', 10)] });
+    expect(result.current.hasNewMessages).toBe(true);
+    act(() => jest.advanceTimersByTime(500));
+    expect(result.current.hasNewMessages).toBe(false);
+    expect(jump).toHaveBeenCalledWith(true);
+  });
+
+  it('landing at the edge with nothing new does not scroll', () => {
+    const { result, jump } = setup();
+    act(() => result.current.leaveEdge(500));
+    act(() => result.current.onScroll(scroll(0)));
+    act(() => jest.advanceTimersByTime(500));
+    expect(jump).not.toHaveBeenCalled();
+  });
+
+  it('lands in history: the arrow stays', () => {
+    const { result } = setup();
+    act(() => result.current.leaveEdge(500));
+    act(() => result.current.onScroll(scroll(500)));
+    act(() => jest.advanceTimersByTime(500));
+    expect(result.current.atEdge).toBe(false);
+  });
+
+  it('after landing at the edge, a new message is followed rather than flagged', () => {
+    const { result, rerender, jump } = setup();
+    act(() => result.current.leaveEdge(500));
+    act(() => result.current.onScroll(scroll(0)));
+    act(() => jest.advanceTimersByTime(500));
+    rerender({ entries: [entry('new', 20), entry('old', 10)] });
+    act(() => jest.advanceTimersByTime(100));
+    expect(result.current.hasNewMessages).toBe(false);
+    expect(jump).toHaveBeenCalledWith(true);
+  });
+});

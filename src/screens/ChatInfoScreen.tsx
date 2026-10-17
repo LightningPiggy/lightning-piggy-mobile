@@ -139,17 +139,21 @@ export default function ChatInfoScreen() {
           <Text style={styles.text}>
             {params.protocol === 'marmot'
               ? 'Marmot MLS'
-              : params.protocol === 'nip17'
-                ? 'NIP-17'
-                : 'NIP-04'}
+              : params.protocol === 'nip171'
+                ? 'NIP-171'
+                : params.protocol === 'nip17'
+                  ? 'NIP-17'
+                  : 'NIP-04'}
           </Text>
           <Text style={styles.muted}>
             {t(
               params.protocol === 'marmot'
                 ? 'chatMenu.mlsSecurity'
-                : params.protocol === 'nip17'
-                  ? 'chatMenu.nip17Security'
-                  : 'chatMenu.nip04Security',
+                : params.protocol === 'nip171'
+                  ? 'chatMenu.nip171Security'
+                  : params.protocol === 'nip17'
+                    ? 'chatMenu.nip17Security'
+                    : 'chatMenu.nip04Security',
             )}
           </Text>
           {params.chatId ? (
