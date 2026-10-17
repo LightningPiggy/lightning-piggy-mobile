@@ -1,6 +1,7 @@
 import { type ParsedOrderEvent, parseStoredOrder } from '../utils/orderEvents';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { getLocalDb } from './localDb';
+import { retireDmOwner } from './dmOwnerGuard';
 import type { MarmotEdit } from './marmotEdits';
 import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 
@@ -50,8 +51,10 @@ export interface DmMessageRow {
 }
 
 /** Post-commit updates: consumers must not resolve wraps before their rows exist. */
-const dmStorageListeners = new Set<(owner: string) => void>();
-export function subscribeDmStorage(listener: (owner: string) => void): () => void {
+type DmStorageListener = (owner: string, rows: readonly DmMessageRow[]) => void;
+const dmStorageListeners = new Set<DmStorageListener>();
+/** `rows` are the committed rows for `owner` (empty when not row-specific). */
+export function subscribeDmStorage(listener: DmStorageListener): () => void {
   dmStorageListeners.add(listener);
   return () => {
     dmStorageListeners.delete(listener);
@@ -60,9 +63,10 @@ export function subscribeDmStorage(listener: (owner: string) => void): () => voi
 
 function notifyDmStorage(rows: readonly DmMessageRow[]): void {
   for (const owner of new Set(rows.map((row) => row.owner))) {
+    const ownerRows = rows.filter((row) => row.owner === owner);
     for (const listener of dmStorageListeners) {
       try {
-        listener(owner);
+        listener(owner, ownerRows);
       } catch {
         // A consumer failure must not turn a committed write into a failed one.
       }
@@ -270,12 +274,37 @@ async function upsertOne(tx: Executor, m: DmMessageRow): Promise<void> {
  * existing delivery tick / rumorId to NULL.
  */
 export async function upsertDmMessages(rows: readonly DmMessageRow[]): Promise<void> {
-  if (rows.length === 0) return;
+  await writeDmMessages(rows);
+}
+
+/**
+ * `upsertDmMessages` for a write that may outlive its account (a background
+ * save): `persistIf` is checked inside the write transaction, and false writes
+ * nothing. Wipes are transactions too, so a wipe either lands first (and this
+ * sees its epoch) or runs after this write and removes it. Returns whether it
+ * wrote.
+ */
+export function upsertDmMessagesIf(
+  rows: readonly DmMessageRow[],
+  persistIf: () => boolean,
+): Promise<boolean> {
+  return writeDmMessages(rows, persistIf);
+}
+
+async function writeDmMessages(
+  rows: readonly DmMessageRow[],
+  persistIf?: () => boolean,
+): Promise<boolean> {
+  if (rows.length === 0) return false;
   const db = await getLocalDb();
+  let written = false;
   await db.transaction(async (tx) => {
+    if (persistIf?.() === false) return;
     for (const m of rows) await upsertOne(tx as Executor, m);
+    written = true;
   });
-  notifyDmStorage(rows);
+  if (written) notifyDmStorage(rows);
+  return written;
 }
 
 /** Import a legacy misfiled group row only if neither its wrap nor its rumor
@@ -801,6 +830,10 @@ export async function deleteMarmotMessages(
  * calls `wipeLocalDmStore` (localDb) to delete the DB file + keystore key.
  */
 export async function deleteDmMessagesForOwner(owner: string): Promise<void> {
+  retireDmOwner(owner); // before the DELETE: in-flight writes must see it
   const db = await getLocalDb();
-  await db.execute(`DELETE FROM dm_messages WHERE owner = ?;`, [owner]);
+  // A transaction, so it's ordered against upserts (see upsertDmMessages).
+  await db.transaction(async (tx) => {
+    await tx.execute(`DELETE FROM dm_messages WHERE owner = ?;`, [owner]);
+  });
 }

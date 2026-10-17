@@ -1,4 +1,4 @@
-import { reviveSellerAccount } from '../services/sellerEventStore';
+import { reviveAccountWrites } from '../services/accountWriteGuards';
 import { useLiveFollowGate } from './useLiveFollowGate';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Kind4RetryStore } from './kind4RetryStore';
@@ -124,7 +124,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   } = options;
 
   useEffect(() => {
-    if (isLoggedIn && pubkey) reviveSellerAccount(pubkey);
+    if (isLoggedIn && pubkey) reviveAccountWrites(pubkey);
   }, [isLoggedIn, pubkey]);
 
   // The inbox is tagged with the account that owns it (see dmInboxScope):

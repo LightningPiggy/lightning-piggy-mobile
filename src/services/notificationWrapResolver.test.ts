@@ -19,6 +19,30 @@ it('resolves a wrap once the app has stored its decrypted message (#1154)', asyn
   expect(lookup).toHaveBeenCalledWith(PK, 'wrap');
 });
 
+it('fetches the wrap itself after the first miss instead of waiting on a refresh (#1325)', async () => {
+  let stored = false;
+  const lookup = jest.fn(async () => (stored ? { conversation: PARTNER, wireKind: 14 } : null));
+  const fetchNow = jest.fn(async () => {
+    stored = true;
+  });
+  await expect(
+    resolveWrapConversation(PK, 'wrap', { intervalMs: 10_000, lookup, fetchNow }),
+  ).resolves.toEqual({ pubkey: PARTNER, protocol: 'nip17' });
+  // One fetch, then an immediate second look: no poll interval was waited.
+  expect(fetchNow).toHaveBeenCalledTimes(1);
+  expect(lookup).toHaveBeenCalledTimes(2);
+});
+
+it('does not wait past the deadline for a stalled direct fetch', async () => {
+  const lookup = jest.fn(async () => null);
+  const fetchNow = jest.fn(() => new Promise<void>(() => {})); // never settles
+  const started = Date.now();
+  await expect(
+    resolveWrapConversation(PK, 'wrap', { timeoutMs: 30, intervalMs: 5, lookup, fetchNow }),
+  ).resolves.toBeNull();
+  expect(Date.now() - started).toBeLessThan(1000);
+});
+
 it('gives up after the timeout, or as soon as the result is no longer wanted', async () => {
   const lookup = jest.fn(async () => null);
   await expect(

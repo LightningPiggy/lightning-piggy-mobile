@@ -61,12 +61,10 @@ import {
 } from './backgroundPaymentService';
 import { captureBackgroundPaymentScope } from './backgroundPaymentScope';
 import { Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { initialiseBackgroundRelayAccount } from './backgroundRelayAccount';
-import { loadIdentities, type StoredIdentity } from './identitiesStore';
-import { perAccountKey } from './perAccountStorage';
-import { CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
+import { loadIdentities } from './identitiesStore';
 import { resolveReadRelays } from './backgroundDmReadRelays';
+import { buildNsecDecryptor, loadFollowedPubkeys, storeDecryptedWrap } from './backgroundDmIngest';
 import {
   claimWrapNotification,
   isLiveDmSubArmed,
@@ -82,12 +80,7 @@ import {
   dismissForegroundServiceNotification,
 } from './notificationService';
 import * as zapSenderProfileStorage from './zapSenderProfileStorage';
-import {
-  unwrapWrapNsec,
-  partnerFromRumor,
-  textForRumor,
-  type DecodedRumor,
-} from '../utils/nip17Unwrap';
+import { partnerFromRumor, textForRumor, type DecodedRumor } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import {
@@ -118,32 +111,6 @@ const BACKLOG_WRAPS_LIMIT = 50;
 const CONTENTLESS_BACKLOG_WRAPS_LIMIT = 10;
 
 const HEX64 = /^[0-9a-f]{64}$/;
-
-/**
- * The viewer's followed pubkeys from the per-account contacts cache, for the
- * watch's follow gate (mirrors the live sub's gate — strangers must not be
- * able to spam OS notifications by gift-wrapping to a pubkey). `null` means
- * the cache has never been written (fresh install / pre-first-sync): we then
- * FAIL OPEN and notify, because "no cache yet" is indistinguishable from
- * "follows not hydrated" and silently eating real messages is worse. An
- * empty cached array gates strictly, matching the live sub.
- */
-async function loadFollowedPubkeys(pubkey: string): Promise<Set<string> | null> {
-  try {
-    const raw = await AsyncStorage.getItem(perAccountKey(CONTACTS_CACHE_KEY_BASE, pubkey));
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return null;
-    const set = new Set<string>();
-    for (const c of parsed) {
-      const pk = (c as { pubkey?: unknown })?.pubkey;
-      if (typeof pk === 'string' && HEX64.test(pk.toLowerCase())) set.add(pk.toLowerCase());
-    }
-    return set;
-  } catch {
-    return null;
-  }
-}
 
 interface ActiveWatch {
   viewerPubkey: string;
@@ -340,6 +307,15 @@ async function handleWrap(input: {
   ) {
     return;
   }
+  // Keep what we just decrypted (#1325): tapping the alert or opening
+  // Messages then shows it at once instead of waiting for an inbox refresh.
+  // Fresh, gated 1:1 messages only: the on-open backlog, Marmot invites and
+  // an unknown follow set are left to the refresh; and not while the app's
+  // live sub is armed, which stores it already. Not awaited: the write
+  // mustn't delay the alert.
+  if (input.followedPubkeys && !isLiveDmSubArmed()) {
+    void storeDecryptedWrap(viewerPubkey, ev, rumor, input.followedPubkeys).catch(() => undefined);
+  }
   // Claim BEFORE the async name resolution below — the claim is the
   // synchronous point that closes the race with the foreground live sub
   // processing the same wrap on the same JS thread.
@@ -367,29 +343,6 @@ async function handleWrap(input: {
     },
   });
   console.warn(`[BgDmWatch] notification result: ${notifId ?? 'suppressed/failed'}`);
-}
-
-/**
- * Build the per-wrap decryptor for the active identity, or null when the
- * secret key isn't locally available (Amber / NIP-46 remote → contentless
- * notifications). Pure-JS NIP-44 via nostr-tools for the nsec path; no
- * dependency on the React context layer so this is safe to run headless.
- */
-function buildDecryptor(
-  identity: StoredIdentity,
-): ((wrap: nostrService.RawGiftWrapEvent) => DecodedRumor | null) | null {
-  if (identity.signerType !== 'nsec' || !identity.nsec) return null;
-  let secretKey: Uint8Array;
-  try {
-    const decoded = nostrService.decodeNsec(identity.nsec);
-    if (decoded.pubkey !== identity.pubkey) return null;
-    secretKey = decoded.secretKey;
-  } catch {
-    return null;
-  }
-  // Reuse the exact same two-layer NIP-17 unwrap the foreground path uses, so
-  // the sender-binding / validation rules can't drift between paths.
-  return (wrap) => unwrapWrapNsec(wrap, secretKey);
 }
 
 /**
@@ -474,7 +427,7 @@ async function armBackgroundDmWatchOnce(isCurrent: () => boolean): Promise<boole
     return false;
   }
 
-  const decryptWrap = buildDecryptor(identity);
+  const decryptWrap = buildNsecDecryptor(identity);
   // Follow gate data — only meaningful on the content path (the contentless
   // path can't know the sender, so it can't be gated). Loaded once per arm;
   // the 15-min safety re-arm refreshes it as follows change.

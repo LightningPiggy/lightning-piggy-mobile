@@ -29,7 +29,8 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { useDmCatchUpOnOpen } from '../hooks/useDmCatchUpOnOpen';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -115,15 +116,12 @@ const ConversationScreen: React.FC = () => {
     fetchReactionsForMessages,
     fetchReactionDeletionsForReactions,
   } = useNostr();
-  const { armLiveDmSub } = useNostrDmInbox();
   // Trust gate (#1338): the peer's media auto-loads only if I follow them.
   const followed = useFollowedPubkeys();
   const peerMediaTrusted = canAutoLoadMedia(false, pubkey, followed);
-  // Cover the deep-link path (notification → straight to ConversationScreen
-  // without passing the Messages tab). Idempotent — no-op if already armed.
-  useEffect(() => {
-    armLiveDmSub();
-  }, [armLiveDmSub]);
+  // A notification or cold start can open this chat without the Messages tab:
+  // arm the live sub and catch up on messages that arrived meanwhile (#1325).
+  useDmCatchUpOnOpen(isLoggedIn);
   const { wallets, addNwcWallet } = useWallet();
   const { stopShare } = useLiveLocation();
 
