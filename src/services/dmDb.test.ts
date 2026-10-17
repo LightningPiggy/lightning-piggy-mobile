@@ -4,6 +4,8 @@
 // (localDb / #700).
 import {
   subscribeDmStorage,
+  subscribeDmDeletions,
+  deleteDmMessagesByIds,
   selectKnownEventIds,
   upsertDmMessages,
   importDmMessages,
@@ -551,4 +553,45 @@ it('signals imported rows after commit so placeholders can resolve', async () =>
   } finally {
     unsubscribe();
   }
+});
+
+describe('subscribeDmDeletions', () => {
+  it('fires once with owner + ids after the deletes land, then unsubscribes', async () => {
+    const listener = jest.fn();
+    const unsubscribe = subscribeDmDeletions(listener);
+    mockExecute.mockImplementationOnce(async () => {
+      expect(listener).not.toHaveBeenCalled();
+      return rowsResult([]);
+    });
+    await deleteDmMessagesByIds(OWNER, ['w1', 'w2']);
+    expect(listener.mock.calls).toEqual([[OWNER, ['w1', 'w2']]]);
+    unsubscribe();
+    await deleteDmMessagesByIds(OWNER, ['w3']);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire on upserts, imports or an empty delete', async () => {
+    const listener = jest.fn();
+    const unsubscribe = subscribeDmDeletions(listener);
+    try {
+      await upsertDmMessages([row()]);
+      await importDmMessages([row({ eventId: 'e2' })]);
+      await deleteDmMessagesByIds(OWNER, []);
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('does not fire when the delete fails', async () => {
+    const listener = jest.fn();
+    const unsubscribe = subscribeDmDeletions(listener);
+    try {
+      mockExecute.mockRejectedValueOnce(new Error('db'));
+      await expect(deleteDmMessagesByIds(OWNER, ['w1'])).rejects.toThrow('db');
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
 });

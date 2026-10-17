@@ -3336,6 +3336,7 @@
     "security": "Protocolo y seguridad",
     "mlsSecurity": "Cifrado de extremo a extremo con MLS. Los dispositivos comparten las claves del grupo.",
     "nip17Security": "Mensajes cifrados de extremo a extremo con la identidad del remitente oculta.",
+    "nip171Security": "Grupo con cifrado de extremo a extremo. Los miembros comparten una única clave de grupo y el propietario la cambia cuando alguien sale del grupo.",
     "nip04Security": "Cifrado antiguo. Cambia a NIP-17 para mayor privacidad.",
     "devices": "Dispositivos en este chat",
     "relays": "Relés del grupo",
@@ -3492,6 +3493,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Dirección Lightning (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "Grupo NIP-171",
+    "full": "Ya alcanzaste el límite de grupos NIP-171. Sal de uno para aceptar esta invitación."
   },
   "marmotInvitation": {
     "pending": "Invitación pendiente",

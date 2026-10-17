@@ -3390,6 +3390,7 @@
     "security": "Protokół i bezpieczeństwo",
     "mlsSecurity": "Szyfrowanie end-to-end z MLS. Urządzenia współdzielą klucze grupy.",
     "nip17Security": "Wiadomości szyfrowane end-to-end z ukrytą tożsamością nadawcy.",
+    "nip171Security": "Grupa z szyfrowaniem end-to-end. Członkowie korzystają ze wspólnego klucza grupy, a właściciel zmienia go, gdy ktoś opuszcza grupę.",
     "nip04Security": "Starsze szyfrowanie. Przejdź na NIP-17, aby zwiększyć prywatność.",
     "devices": "Urządzenia w tym czacie",
     "relays": "Przekaźniki grupy",
@@ -3546,6 +3547,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Adres Lightning (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "Grupa NIP-171",
+    "full": "Należysz już do maksymalnej liczby grup NIP-171. Opuść jedną z nich, aby przyjąć to zaproszenie."
   },
   "marmotInvitation": {
     "pending": "Zaproszenie oczekuje",

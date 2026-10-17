@@ -24,6 +24,7 @@ import {
   takeContentlessWrapAlert,
 } from '../services/dmWrapNotificationDedupe';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
+import { routeNip171Rumor } from './nip171InboxRouting';
 import type { LiveSubFollowGateBuffer } from './liveSubFollowGate';
 import {
   acceptOrderRumor,
@@ -136,6 +137,20 @@ export function createLiveRumorSurfacer(
       throw error;
     }
     if (routedWelcome) {
+      nothingToSee();
+      return;
+    }
+    // NIP-171: a group's epoch ticket, or a rumor of a NIP-171 group
+    // conversation, never becomes a 1:1 DM.
+    let nip171: boolean;
+    try {
+      nip171 = await routeNip171Rumor(rumor, viewerPubkey);
+    } catch (error) {
+      releaseWrapClaim(wrapId);
+      throw error;
+    }
+    if (shouldAbort()) return;
+    if (nip171) {
       nothingToSee();
       return;
     }

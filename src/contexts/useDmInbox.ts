@@ -55,6 +55,7 @@ import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { useMarmotDmInbound } from './useMarmotDmInbound';
+import { useDmInboxDeletions } from './useDmInboxDeletions';
 import {
   applyScopedDmInboxUpdate,
   INITIAL_SCOPED_DM_INBOX,
@@ -62,7 +63,6 @@ import {
   selectScopedDmInbox,
   type ScopedDmInbox,
 } from './dmInboxScope';
-
 import { useDmRefreshCoordinator, canJoinDmRefresh } from './dmRefreshCoordinator';
 
 type DmInboxSetter = React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
@@ -186,6 +186,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   const setDmInboxForPubkey = useMemo(() => inboxSetterFor(pubkey), [inboxSetterFor, pubkey]);
   // Marmot 1:1 chats land in the same store + list (protocol 'marmot').
   useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInboxForPubkey, followPubkeys);
+  useDmInboxDeletions(inboxSetterFor);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
   // Welcomes and DMs must arrive before first Messages focus (#1399).
   // The provider remains the sole owner; the pool reserves inbox capacity.
@@ -780,7 +781,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               `dbInbox=${dbLatest.length}, ` +
               `yields=${nip17YieldCount}`,
           );
-
           setInboxForRefresh(filteredFinal);
 
           // Advance only after all targets were processed and rows persisted.

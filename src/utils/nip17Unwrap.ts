@@ -16,6 +16,13 @@ export interface DecodedRumor {
   kind: number;
   tags: string[][];
   content: string;
+  /** Kept when the inner event is a signed event, as a NIP-171 ticket is
+   * (its signature is the members' invitation proof). Rumors are unsigned. */
+  id?: string;
+  sig?: string;
+  /** The seal's single `invitation_proof` tag: a NIP-171 ticket's signature
+   * travels there (Anagram), the ticket rumor itself stays unsigned. */
+  sealInvitationProof?: string;
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -78,6 +85,8 @@ function parseRumor(raw: string): DecodedRumor | null {
     kind: r.kind as number,
     content: r.content as string,
     tags: r.tags as string[][],
+    ...(typeof r.id === 'string' && HEX64.test(r.id) ? { id: r.id } : {}),
+    ...(typeof r.sig === 'string' && /^[0-9a-f]{128}$/.test(r.sig) ? { sig: r.sig } : {}),
   };
 }
 
@@ -136,13 +145,21 @@ function parseValidSeal(sealJson: string, skip: Skip) {
  * to a *different* pubkey (sender spoofing). Both unwrap paths call this one
  * implementation so they can't drift — the divergence that was gap #830.
  */
-function bindRumor(rumorJson: string, sealPubkey: string, skip: Skip): DecodedRumor | null {
+function bindRumor(
+  rumorJson: string,
+  seal: { pubkey: string; tags: string[][] },
+  skip: Skip,
+): DecodedRumor | null {
   const rumor = parseRumor(rumorJson);
   if (!rumor) return skip('rumor JSON malformed or wrong shape');
-  if (rumor.pubkey !== sealPubkey) {
+  if (rumor.pubkey !== seal.pubkey) {
     return skip(
-      `rumor pubkey ${rumor.pubkey.slice(0, 8)}… != seal pubkey ${sealPubkey.slice(0, 8)}…`,
+      `rumor pubkey ${rumor.pubkey.slice(0, 8)}… != seal pubkey ${seal.pubkey.slice(0, 8)}…`,
     );
+  }
+  const proofs = seal.tags.filter((t) => t[0] === 'invitation_proof');
+  if (proofs.length === 1 && /^[0-9a-f]{128}$/.test(proofs[0][1] ?? '')) {
+    rumor.sealInvitationProof = proofs[0][1];
   }
   return rumor;
 }
@@ -194,7 +211,7 @@ export async function unwrapWrapViaNip44(
     rethrowSignerDenial(error);
     return skip(`seal decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
-  return bindRumor(rumorJson, seal.pubkey, skip);
+  return bindRumor(rumorJson, seal, skip);
 }
 
 /**
@@ -242,7 +259,7 @@ export function unwrapWrapNsec(
   } catch (error) {
     return skip(`seal decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
-  return bindRumor(rumorJson, seal.pubkey, skip);
+  return bindRumor(rumorJson, seal, skip);
 }
 
 /**

@@ -3336,6 +3336,7 @@
     "security": "Protokoll und Sicherheit",
     "mlsSecurity": "Ende-zu-Ende-Verschlüsselung mit MLS. Geräte teilen die Gruppenschlüssel.",
     "nip17Security": "Ende-zu-Ende-verschlüsselte Nachrichten mit verborgener Absenderidentität.",
+    "nip171Security": "Ende-zu-Ende-verschlüsselte Gruppe. Alle Mitglieder teilen sich einen Gruppenschlüssel. Der Gruppeninhaber ändert ihn, wenn jemand die Gruppe verlässt.",
     "nip04Security": "Veraltete Verschlüsselung. Wechsle für mehr Privatsphäre zu NIP-17.",
     "devices": "Geräte in diesem Chat",
     "relays": "Gruppen-Relays",
@@ -3492,6 +3493,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning-Adresse (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "NIP-171-Gruppe",
+    "full": "Du hast die maximale Anzahl an NIP-171-Gruppen erreicht. Verlasse eine, um diese Einladung anzunehmen."
   },
   "marmotInvitation": {
     "pending": "Einladung ausstehend",

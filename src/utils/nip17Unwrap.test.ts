@@ -6,7 +6,7 @@
  */
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
-import { wrapEvent } from 'nostr-tools/nip59';
+import { createRumor, createWrap, wrapEvent } from 'nostr-tools/nip59';
 import * as nip44 from 'nostr-tools/nip44';
 import {
   subjectFromRumor,
@@ -315,6 +315,39 @@ describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
   // Cast helper — `wrapEvent` returns a fully-typed VerifiedEvent; the
   // unwrap function takes the looser RawGiftWrapEvent shape.
   type WrapArg = Parameters<typeof unwrapWrapNsec>[0];
+
+  it("exposes the seal's invitation_proof (how Anagram signs a NIP-171 ticket)", () => {
+    const senderSk = generateSecretKey();
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+    const proof = 'ab'.repeat(64);
+    const sealWith = (tags: string[][]) => {
+      const rumor = createRumor({ kind: 1014, content: 'x', tags: [] }, senderSk);
+      const key = nip44.getConversationKey(senderSk, recipientPk);
+      const seal = finalizeEvent(
+        { kind: 13, created_at: 1, tags, content: nip44.encrypt(JSON.stringify(rumor), key) },
+        senderSk,
+      );
+      return createWrap(seal, recipientPk) as unknown as WrapArg;
+    };
+    expect(
+      unwrapWrapNsec(sealWith([['invitation_proof', proof]]), recipientSk)?.sealInvitationProof,
+    ).toBe(proof);
+    // Missing, duplicated or malformed: no proof.
+    expect(unwrapWrapNsec(sealWith([]), recipientSk)?.sealInvitationProof).toBeUndefined();
+    expect(
+      unwrapWrapNsec(
+        sealWith([
+          ['invitation_proof', proof],
+          ['invitation_proof', proof],
+        ]),
+        recipientSk,
+      )?.sealInvitationProof,
+    ).toBeUndefined();
+    expect(
+      unwrapWrapNsec(sealWith([['invitation_proof', 'nothex']]), recipientSk)?.sealInvitationProof,
+    ).toBeUndefined();
+  });
 
   it('round-trips a kind-14 rumor (decrypt works without a sig verify)', () => {
     const { wrap, recipientSk, senderPk } = makeWrap('hello piggy');
