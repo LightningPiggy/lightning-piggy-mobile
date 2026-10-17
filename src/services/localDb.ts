@@ -71,6 +71,20 @@ const SCHEMA: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_marmot_deletions_target ON marmot_deletions (owner, target);`,
   `CREATE INDEX IF NOT EXISTS idx_marmot_deletions_deleter
      ON marmot_deletions (owner, scope, deleter);`,
+  // NIP-171 epoch tickets addressed to this account (nip171Store.ts). Each
+  // carries a group's shared epoch private key, so it lives only here, in the
+  // encrypted DB. Keyed by the ticket's event id; one group has one row per
+  // ticket it sent us (an epoch rotation is a new ticket).
+  `CREATE TABLE IF NOT EXISTS nip171_tickets (
+     owner        TEXT NOT NULL,
+     event_id     TEXT NOT NULL,
+     group_pubkey TEXT NOT NULL,
+     epoch        INTEGER NOT NULL,
+     created_at   INTEGER NOT NULL,
+     epoch_secret TEXT NOT NULL,
+     sig          TEXT NOT NULL,
+     PRIMARY KEY (owner, event_id)
+   );`,
 ];
 
 // Columns added after the v2 table shipped (#850). SQLite supports in-place

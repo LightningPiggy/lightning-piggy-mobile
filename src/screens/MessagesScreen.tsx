@@ -1,4 +1,5 @@
 import { MarmotInvitations } from '../components/MarmotInvitations';
+import { Nip171Invitations } from '../components/Nip171Invitations';
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { useLocale } from '../contexts/LocaleContext';
@@ -869,6 +870,7 @@ const MessagesScreen: React.FC = () => {
           </View>
         )}
         {isLoggedIn && <MarmotInvitations />}
+        {isLoggedIn && <Nip171Invitations />}
         {!isLoggedIn ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>{t('messagesScreen.connectNostr')}</Text>

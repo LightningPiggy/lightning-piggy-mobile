@@ -1,3 +1,4 @@
+import type { GroupProtocol } from '../utils/groupProtocol';
 import type { SearchableMessage } from '../utils/chatSearch';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 import type { SettingsPickerParams } from '../utils/settingsPicker';
@@ -73,7 +74,7 @@ export type RootStackParamList = {
   ChatInfo: {
     name: string;
     picture?: string | null;
-    protocol: DmProtocol;
+    protocol: GroupProtocol;
     contact?: ContactProfileBodyData;
     groupId?: string;
     members?: GroupMemberRow[];

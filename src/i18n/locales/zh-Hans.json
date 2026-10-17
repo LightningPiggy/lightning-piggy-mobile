@@ -3336,6 +3336,7 @@
     "security": "协议与安全",
     "mlsSecurity": "使用 MLS 进行端到端加密。设备共享群组密钥。",
     "nip17Security": "端到端加密消息，隐藏发送者身份。",
+    "nip171Security": "端到端加密群组。成员共用一个群组密钥，有人退出时，群主会更换密钥。",
     "nip04Security": "旧版加密。切换到 NIP-17 以获得更好的隐私保护。",
     "devices": "此聊天中的设备",
     "relays": "群组中继",
@@ -3490,6 +3491,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning地址 (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "NIP-171 群组",
+    "full": "你加入的 NIP-171 群组数量已达上限。请先退出一个群组，再接受此邀请。"
   },
   "marmotInvitation": {
     "pending": "邀请待处理",

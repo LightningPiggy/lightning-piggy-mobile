@@ -2697,33 +2697,33 @@
         "noOrders": "Brak zamówień",
         "shippingCount": {
           "one": "{{count}} opcja",
-          "other": "{{count}} opcji",
           "few": "{{count}} opcje",
-          "many": "{{count}} opcji"
+          "many": "{{count}} opcji",
+          "other": "{{count}} opcji"
         },
         "collectionsCount": {
           "one": "{{count}} kolekcja",
-          "other": "{{count}} kolekcji",
           "few": "{{count}} kolekcje",
-          "many": "{{count}} kolekcji"
+          "many": "{{count}} kolekcji",
+          "other": "{{count}} kolekcji"
         },
         "listingsCount": {
           "one": "{{count}} wystawiona",
-          "other": "{{count}} wystawionych",
           "few": "{{count}} wystawione",
-          "many": "{{count}} wystawionych"
+          "many": "{{count}} wystawionych",
+          "other": "{{count}} wystawionych"
         },
         "ordersCount": {
           "one": "{{count}} zamówienie",
-          "other": "{{count}} zamówień",
           "few": "{{count}} zamówienia",
-          "many": "{{count}} zamówień"
+          "many": "{{count}} zamówień",
+          "other": "{{count}} zamówień"
         },
         "ordersNeedInvoice": {
           "one": "{{count}} czeka na fakturę",
-          "other": "{{count}} czeka na fakturę",
           "few": "{{count}} czekają na fakturę",
-          "many": "{{count}} czeka na fakturę"
+          "many": "{{count}} czeka na fakturę",
+          "other": "{{count}} czeka na fakturę"
         }
       },
       "currencies": {
@@ -2768,9 +2768,9 @@
       "noCollections": "Brak kolekcji.",
       "collectionListings": {
         "one": "{{count}} oferta",
-        "other": "{{count}} ofert",
         "few": "{{count}} oferty",
-        "many": "{{count}} ofert"
+        "many": "{{count}} ofert",
+        "other": "{{count}} ofert"
       }
     },
     "markdown": {
@@ -3271,17 +3271,17 @@
     "secureChat": "Bezpieczny czat",
     "secureChatDevices": {
       "one": "Bezpieczny czat · {{count}} urządzenie",
-      "other": "Bezpieczny czat · {{count}} urządzenia",
       "few": "Bezpieczny czat · {{count}} urządzenia",
-      "many": "Bezpieczny czat · {{count}} urządzeń"
+      "many": "Bezpieczny czat · {{count}} urządzeń",
+      "other": "Bezpieczny czat · {{count}} urządzenia"
     },
     "bylineA11y": "Pokaż, kto jest na tym czacie i na jakich urządzeniach",
     "inThisChat": "Na tym czacie",
     "deviceCount": {
       "one": "{{count}} urządzenie",
-      "other": "{{count}} urządzenia",
       "few": "{{count}} urządzenia",
-      "many": "{{count}} urządzeń"
+      "many": "{{count}} urządzeń",
+      "other": "{{count}} urządzenia"
     },
     "showDevicesA11y": "Pokaż urządzenia: {{name}}",
     "hideDevicesA11y": "Ukryj urządzenia: {{name}}",
@@ -3293,24 +3293,24 @@
     "sentFrom": "Wysłano z",
     "oneOfDevices": {
       "one": "Jedno z {{count}} urządzeń",
-      "other": "Jedno z {{count}} urządzeń",
       "few": "Jedno z {{count}} urządzeń",
-      "many": "Jedno z {{count}} urządzeń"
+      "many": "Jedno z {{count}} urządzeń",
+      "other": "Jedno z {{count}} urządzeń"
     },
     "readableOn": "Można odczytać na",
     "readableOnPerson": "{{name}}: {{count}}",
     "you": "Ty",
     "noticeJoined": {
       "one": "{{name}} · na czacie na {{count}} urządzeniu ({{apps}})",
-      "other": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
       "few": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
-      "many": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})"
+      "many": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
+      "other": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})"
     },
     "noticeAdded": {
       "one": "{{name}} · nowe urządzenie ({{apps}})",
-      "other": "{{name}} · {{count}} nowych urządzeń ({{apps}})",
       "few": "{{name}} · {{count}} nowe urządzenia ({{apps}})",
-      "many": "{{name}} · {{count}} nowych urządzeń ({{apps}})"
+      "many": "{{name}} · {{count}} nowych urządzeń ({{apps}})",
+      "other": "{{name}} · {{count}} nowych urządzeń ({{apps}})"
     },
     "showChanges": "Pokazuj zmiany urządzeń na czatach",
     "showChangesHint": "Alfa: szara linia na czatach Marmot, gdy ktoś dołącza z urządzenia lub dodaje urządzenie. Widoczna tylko na tym telefonie; nic nie jest wysyłane."
@@ -3390,6 +3390,7 @@
     "security": "Protokół i bezpieczeństwo",
     "mlsSecurity": "Szyfrowanie end-to-end z MLS. Urządzenia współdzielą klucze grupy.",
     "nip17Security": "Wiadomości szyfrowane end-to-end z ukrytą tożsamością nadawcy.",
+    "nip171Security": "Grupa z szyfrowaniem end-to-end. Członkowie korzystają ze wspólnego klucza grupy, a właściciel zmienia go, gdy ktoś opuszcza grupę.",
     "nip04Security": "Starsze szyfrowanie. Przejdź na NIP-17, aby zwiększyć prywatność.",
     "devices": "Urządzenia w tym czacie",
     "relays": "Przekaźniki grupy",
@@ -3544,6 +3545,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Adres Lightning (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "Grupa NIP-171",
+    "full": "Należysz już do maksymalnej liczby grup NIP-171. Opuść jedną z nich, aby przyjąć to zaproszenie."
   },
   "marmotInvitation": {
     "pending": "Zaproszenie oczekuje",

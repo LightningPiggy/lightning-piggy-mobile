@@ -909,6 +909,15 @@ Upgrade path: the old device-wide `group_messages_${groupId}` blobs can't be att
 * `src/components/GroupAvatar.tsx`, `GroupRow.tsx`, `CreateGroupSheet.tsx`, `RenameGroupSheet.tsx` — UI surfaces.
 * `src/screens/GroupConversationScreen.tsx`, `GroupsScreen.tsx` — screens.
 
+=== NIP-171 groups (member side)
+
+A NIP-171 group (protocol rules in `PROTOCOLS.adoc` → "NIP-171 epoch-ticketed groups") shows up in Messages like any other group, with a NIP-171 tag. Its id is `nip171:<group identity pubkey>`.
+
+* *Joining.* Tickets reach our ordinary NIP-17 inbox. `routeNip171Rumor` takes them (and any group rumor that reached us directly) before the DM pipeline would file them as 1:1 messages; `ingestNip171Ticket` validates and stores them as an invitation (`Nip171Invitations`, above the inbox next to Marmot's); only once the user accepts does `nip171Groups` build the group's keys. Decisions (`accepted` / `declined` / `left` with the newest ticket time) live in a per-account record (`nip171Membership`), so a refresh can't bring back a declined or left group.
+* *Receiving.* `useNip171Groups` (composed into `GroupsContext`) starts `startNip171Session` 3 s after sign-in: one subscription for kind 1059 `#p` = every current epoch key, bounded by `limit` (no `since`: NIP-59 randomises `created_at`), on our read relays plus each group's kind-10050 relays. Wraps are decrypted with the epoch key, so this works whatever signer the account uses, paced through `createYieldScheduler`, validated (`classifyGroupRumor`) and appended to the shared group message log. A new ticket re-subscribes.
+* *Sending.* `useGroupMessaging` asks `nip171Outgoing` for the rumor, the one recipient (the epoch key) and the relays, then sends through the usual signer branch with no self-copy. Files aren't supported yet.
+* *Leaving.* Sends the owner a NIP-17 `-` and forgets the group's tickets and metadata.
+
 == Profiles: Posts, Media and Shop (#1332)
 
 A person's profile (`ContactProfileScreen`) is one `FlashList`: the header (`components/profile/ContactProfileHeader`), a tab bar and the rows of the selected tab.

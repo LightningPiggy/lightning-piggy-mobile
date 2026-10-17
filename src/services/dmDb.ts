@@ -804,3 +804,31 @@ export async function deleteDmMessagesForOwner(owner: string): Promise<void> {
   const db = await getLocalDb();
   await db.execute(`DELETE FROM dm_messages WHERE owner = ?;`, [owner]);
 }
+
+/** Relay-delivered rows of one inner kind (event id = wrap id for NIP-17). */
+export async function selectDmEventIdsOfKind(owner: string, wireKind: number): Promise<string[]> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT event_id FROM dm_messages
+      WHERE owner = ? AND wire_kind = ? AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%' LIMIT 200;`,
+    [owner, wireKind],
+  );
+  return (res.rows ?? []).map((r) => String(r.event_id));
+}
+
+/** Delete rows by event id (a misfiled rumor moved elsewhere). */
+export async function deleteDmMessagesByIds(
+  owner: string,
+  eventIds: readonly string[],
+): Promise<void> {
+  if (eventIds.length === 0) return;
+  const db = await getLocalDb();
+  for (let i = 0; i < eventIds.length; i += VAR_CHUNK) {
+    const slice = eventIds.slice(i, i + VAR_CHUNK);
+    await db.execute(
+      `DELETE FROM dm_messages WHERE owner = ? AND event_id IN (${slice.map(() => '?').join(',')});`,
+      [owner, ...slice],
+    );
+  }
+  notifyDmStorage(eventIds.map((eventId) => ({ owner, eventId }) as DmMessageRow));
+}
