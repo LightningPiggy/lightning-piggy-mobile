@@ -5,6 +5,7 @@ import { retireDmOwner } from './dmOwnerGuard';
 import type { MarmotEdit } from './marmotEdits';
 import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 import { CHAT_DELETION_KIND, CHAT_REACTION_KIND } from '../utils/nip17Reactions';
+import { notifyDmDeletions, notifyDmStorage } from './dmStorageEvents';
 
 // Data-access layer for the `dm_messages` table in the encrypted local DB
 // (#695). One row per decrypted DM, keyed by (owner, event_id) — `owner` is
@@ -51,50 +52,8 @@ export interface DmMessageRow {
   editId?: string;
 }
 
-/** Post-commit updates: consumers must not resolve wraps before their rows exist. */
-type DmStorageListener = (owner: string, rows: readonly DmMessageRow[]) => void;
-const dmStorageListeners = new Set<DmStorageListener>();
-/** `rows` are the committed rows for `owner` (empty when not row-specific). */
-export function subscribeDmStorage(listener: DmStorageListener): () => void {
-  dmStorageListeners.add(listener);
-  return () => {
-    dmStorageListeners.delete(listener);
-  };
-}
-
-/** Row deletions, kept apart from upserts so the inbox can drop removed
- * rows without re-rendering on every write. Fired after the deletes land. */
-type DmDeletionListener = (owner: string, eventIds: readonly string[]) => void;
-const dmDeletionListeners = new Set<DmDeletionListener>();
-export function subscribeDmDeletions(listener: DmDeletionListener): () => void {
-  dmDeletionListeners.add(listener);
-  return () => {
-    dmDeletionListeners.delete(listener);
-  };
-}
-
-function notifyDmDeletions(owner: string, eventIds: readonly string[]): void {
-  for (const listener of dmDeletionListeners) {
-    try {
-      listener(owner, eventIds);
-    } catch {
-      // A consumer failure must not turn a committed delete into a failed one.
-    }
-  }
-}
-
-function notifyDmStorage(rows: readonly DmMessageRow[]): void {
-  for (const owner of new Set(rows.map((row) => row.owner))) {
-    const ownerRows = rows.filter((row) => row.owner === owner);
-    for (const listener of dmStorageListeners) {
-      try {
-        listener(owner, ownerRows);
-      } catch {
-        // A consumer failure must not turn a committed write into a failed one.
-      }
-    }
-  }
-}
+// Change notifications live in dmStorageEvents; re-exported for callers.
+export { subscribeDmDeletions, subscribeDmStorage } from './dmStorageEvents';
 
 /** SQL for a row's effective protocol — mirrors `protocolForWireKind`. */
 const PROTOCOL_SQL = `COALESCE(protocol, CASE WHEN wire_kind = 4 THEN 'nip04' ELSE 'nip17' END)`;
