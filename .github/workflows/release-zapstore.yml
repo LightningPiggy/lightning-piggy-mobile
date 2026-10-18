@@ -40,6 +40,9 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.event == 'release' &&
        contains(fromJSON('["success","failure"]'), github.event.workflow_run.conclusion))
+    # The signing secrets live in this Environment, which only deploys from
+    # main, so a dispatch from any other branch can't read them.
+    environment: zapstore
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -52,11 +55,9 @@ jobs:
         run: |
           tag="$MANUAL_TAG"
           if [ -z "$tag" ]; then
+            # Release runs name the triggering tag. Never fall back to the newest
+            # release: a re-run for an older tag would publish the wrong one.
             tag="$RUN_BRANCH"
-            # Release runs normally name the tag; some payloads name the branch.
-            if [ -z "$tag" ] || ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName >/dev/null 2>&1; then
-              tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')
-            fi
           fi
           skip() {
             # A manual run that can't publish is an error; an automatic one is a notice.

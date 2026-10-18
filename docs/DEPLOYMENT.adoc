@@ -438,7 +438,7 @@ A failed iOS build or TestFlight submission no longer skips the Android build: t
 ==== Secrets
 
 - **`EXPO_TOKEN`** — repo secret. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add under *Settings → Secrets and variables → Actions*. Everything else (iOS ASC API key, Apple distribution cert, future Google Play service account) lives on EAS's server via `eas credentials`, so the workflow never handles a `.p8` or service account JSON.
-- **`ZAPSTORE_BUNKER_URI`** / **`ZAPSTORE_CLIENT_KEY`**: the Lightning Piggy account's NIP-46 bunker URI and the stable hex client key for Zapstore publishing. Setup is under "Zapstore (Nostr App Store)" → "One-time setup". Without them, the Zapstore workflow skips with a notice.
+- **`ZAPSTORE_BUNKER_URI`** / **`ZAPSTORE_CLIENT_KEY`**: the Lightning Piggy account's NIP-46 bunker URI and the stable hex client key for Zapstore publishing, stored as secrets of the `zapstore` Environment (deploys from `main` only), not as repo secrets. Setup is under "Zapstore (Nostr App Store)" → "One-time setup". Without them, the Zapstore workflow skips with a notice.
 
 ==== Build-time `EXPO_PUBLIC_*` environment variables
 
@@ -852,20 +852,27 @@ Every asset event records the APK's signing certificate hash. For the EAS produc
 * *nsec.app* works the same way: create a connection for the Lightning Piggy account, copy its `bunker://` URI, and allow the same four kinds without prompting.
 * Keep the signer online, with background running allowed, so release-time requests reach it.
 
-*2. Store the secrets (whoever has admin on the repository).* If Richard isn't a repo admin, he sends the URI privately (an encrypted DM, never email or chat in plain text) and Ben runs this. Neither command echoes the value:
+*2. Store the secrets (whoever has admin on the repository).* If Richard isn't a repo admin, he sends the URI privately (an encrypted DM, never email or chat in plain text) and Ben runs this. The secrets go in a `zapstore` Environment that only deploys from `main`, so a workflow dispatched from any other branch can't read them. Create the Environment first: if the workflow runs before it exists, GitHub creates it without the branch rule. Neither secret command echoes the value:
 
 [source,bash]
 ----
 set +x
 set -o pipefail
+# The Environment, restricted to deployments from main.
+gh api -X PUT repos/LightningPiggy/lightning-piggy-mobile/environments/zapstore \
+  -F 'deployment_branch_policy[protected_branches]=false' \
+  -F 'deployment_branch_policy[custom_branch_policies]=true'
+gh api -X POST repos/LightningPiggy/lightning-piggy-mobile/environments/zapstore/deployment-branch-policies \
+  -f name=main -f type=branch
+
 # A separate client key: 64 hex characters (zsp rejects nsec). Run ONCE and
 # keep it, so the bunker recognises the same client on every release.
-openssl rand -hex 32 | gh secret set ZAPSTORE_CLIENT_KEY --repo LightningPiggy/lightning-piggy-mobile
+openssl rand -hex 32 | gh secret set ZAPSTORE_CLIENT_KEY --env zapstore --repo LightningPiggy/lightning-piggy-mobile
 
 # Paste the bunker:// URI into a hidden prompt; it never reaches history or the screen.
 read -r -s -p 'Zapstore bunker URI: ' zapstore_bunker_uri
 printf '\n'
-printf '%s' "$zapstore_bunker_uri" | gh secret set ZAPSTORE_BUNKER_URI --repo LightningPiggy/lightning-piggy-mobile
+printf '%s' "$zapstore_bunker_uri" | gh secret set ZAPSTORE_BUNKER_URI --env zapstore --repo LightningPiggy/lightning-piggy-mobile
 unset zapstore_bunker_uri
 ----
 
