@@ -897,11 +897,17 @@ Richard approves the new client's connection when the pre-flight step asks. If A
 
 ==== Dry run (local, offline, never signs)
 
-`--offline` makes no network calls. With an `npub` as `SIGN_WITH` it only prints *unsigned* events, which can't be published. It needs a local APK, and relative paths resolve against the config's folder, so build a copy of the config with absolute paths:
+`--offline` makes no network calls. With an `npub` as `SIGN_WITH` it only prints *unsigned* events, which can't be published. It needs a local APK, so fetch one first. That's the only step that needs network:
 
 [source,bash]
 ----
 gh release download v1.5.1 -p '*.apk' -D /tmp/zapstore-apk
+----
+
+Then, offline from here on (relative paths resolve against the config's folder, so build a copy of the config with absolute paths):
+
+[source,bash]
+----
 zsp utils extract-apk /tmp/zapstore-apk/lightning-piggy-v1.5.1.apk   # package, version, cert_fingerprint
 repo=$(git rev-parse --show-toplevel)
 sed "s#: \./#: $repo/#; s#^  - \./#  - $repo/#" "$repo/zapstore.yaml" > /tmp/zapstore-offline.yaml
