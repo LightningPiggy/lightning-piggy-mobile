@@ -4,6 +4,7 @@ import { getLocalDb } from './localDb';
 import { retireDmOwner } from './dmOwnerGuard';
 import type { MarmotEdit } from './marmotEdits';
 import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
+import { CHAT_DELETION_KIND, CHAT_REACTION_KIND } from '../utils/nip17Reactions';
 
 // Data-access layer for the `dm_messages` table in the encrypted local DB
 // (#695). One row per decrypted DM, keyed by (owner, event_id) — `owner` is
@@ -97,6 +98,9 @@ function notifyDmStorage(rows: readonly DmMessageRow[]): void {
 
 /** SQL for a row's effective protocol — mirrors `protocolForWireKind`. */
 const PROTOCOL_SQL = `COALESCE(protocol, CASE WHEN wire_kind = 4 THEN 'nip04' ELSE 'nip17' END)`;
+/** Wrapped reactions / retractions (#1321) annotate a message; they are never
+ * one, so thread pages, the inbox and the trust check below skip them. */
+const NOT_REACTION_SQL = `wire_kind NOT IN (${CHAT_REACTION_KIND}, ${CHAT_DELETION_KIND})`;
 const isDmProtocol = (v: unknown): v is DmProtocol =>
   v === 'nip04' || v === 'nip17' || v === 'marmot';
 
@@ -423,7 +427,7 @@ export async function getConversationMessages(
   const db = await getLocalDb();
   const limit = opts.limit ?? 50;
   const params: (string | number)[] = [owner, conversation];
-  let sql = `SELECT * FROM dm_messages WHERE owner = ? AND conversation = ?`;
+  let sql = `SELECT * FROM dm_messages WHERE owner = ? AND conversation = ? AND ${NOT_REACTION_SQL}`;
   // Per-protocol thread (#1118): filter BEFORE the LIMIT so one protocol's
   // newer history can't use up the other thread's whole slice.
   if (opts.protocol) {
@@ -455,8 +459,8 @@ export async function getConversationMessageWindow(
   const at = target.rows?.[0]?.created_at;
   if (at == null) return [];
   const result = await db.execute(
-    `SELECT * FROM (SELECT * FROM dm_messages WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = ? AND created_at <= ? ORDER BY created_at DESC LIMIT 30)
-     UNION SELECT * FROM (SELECT * FROM dm_messages WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = ? AND created_at > ? ORDER BY created_at ASC LIMIT 20);`,
+    `SELECT * FROM (SELECT * FROM dm_messages WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = ? AND ${NOT_REACTION_SQL} AND created_at <= ? ORDER BY created_at DESC LIMIT 30)
+     UNION SELECT * FROM (SELECT * FROM dm_messages WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = ? AND ${NOT_REACTION_SQL} AND created_at > ? ORDER BY created_at ASC LIMIT 20);`,
     [owner, conversation, protocol, Number(at), owner, conversation, protocol, Number(at)],
   );
   // Include the exact target even if many messages share its timestamp.
@@ -633,6 +637,8 @@ export async function getOrderRows(owner: string, limit = 500): Promise<DmMessag
  * with both shows two inbox threads (see `protocolForWireKind`). Marmot
  * invite gift wraps (kind 444) never count as a thread's latest: the joined
  * chat shows on its own, and failed ones come from the Marmot session (#1269).
+ * Wrapped reactions / retractions (kinds 7 / 5, #1321) never count either:
+ * they aren't messages.
  */
 export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
@@ -640,12 +646,12 @@ export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
     `SELECT m.* FROM dm_messages m
        JOIN (
          SELECT conversation, ${PROTOCOL_SQL} AS proto, MAX(created_at) AS mx
-         FROM dm_messages WHERE owner = ? AND wire_kind NOT IN (${MARMOT_WELCOME_KIND})
+         FROM dm_messages WHERE owner = ? AND wire_kind NOT IN (${MARMOT_WELCOME_KIND}, ${CHAT_REACTION_KIND}, ${CHAT_DELETION_KIND})
          GROUP BY conversation, ${PROTOCOL_SQL}
        ) g ON m.conversation = g.conversation
           AND COALESCE(m.protocol, CASE WHEN m.wire_kind = 4 THEN 'nip04' ELSE 'nip17' END) = g.proto
           AND m.created_at = g.mx
-     WHERE m.owner = ? AND m.wire_kind NOT IN (${MARMOT_WELCOME_KIND})
+     WHERE m.owner = ? AND m.wire_kind NOT IN (${MARMOT_WELCOME_KIND}, ${CHAT_REACTION_KIND}, ${CHAT_DELETION_KIND})
      ORDER BY m.created_at DESC;`,
     [owner, owner],
   );
@@ -695,10 +701,103 @@ export async function getConversationForEvent(
 export async function hasConversationWith(owner: string, conversation: string): Promise<boolean> {
   const db = await getLocalDb();
   const res = await db.execute(
-    `SELECT 1 AS present FROM dm_messages WHERE owner = ? AND conversation = ? LIMIT 1;`,
+    `SELECT 1 AS present FROM dm_messages WHERE owner = ? AND conversation = ? AND ${NOT_REACTION_SQL} LIMIT 1;`,
     [owner, conversation],
   );
   return (res.rows ?? []).length > 0;
+}
+
+/** Most reaction / retraction rows one thread read returns (newest first). */
+export const CHAT_REACTION_ROW_CAP = 2000;
+
+/**
+ * A NIP-17 thread's wrapped reactions and retractions (#1321), newest first
+ * and bounded. The thread's reactions hook filters them by target itself
+ * (the target id lives in the stored JSON, not a column).
+ */
+export async function getConversationReactionRows(
+  owner: string,
+  conversation: string,
+): Promise<DmMessageRow[]> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT * FROM dm_messages
+      WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = 'nip17'
+        AND wire_kind IN (${CHAT_REACTION_KIND}, ${CHAT_DELETION_KIND})
+      ORDER BY created_at DESC LIMIT ${CHAT_REACTION_ROW_CAP};`,
+    [owner, conversation],
+  );
+  return (res.rows ?? []).map(toRow);
+}
+
+/**
+ * Relay-delivered NIP-17 rows in one thread that were stored before rows
+ * carried their rumor id (#1320), newest first. The thread open re-decrypts
+ * these wraps to fill the id in, so old messages can be reacted to.
+ */
+export async function selectRowsMissingRumorId(
+  owner: string,
+  conversation: string,
+  limit: number,
+): Promise<string[]> {
+  const db = await getLocalDb();
+  const res = await db.execute(
+    `SELECT event_id FROM dm_messages
+      WHERE owner = ? AND conversation = ? AND ${PROTOCOL_SQL} = 'nip17'
+        AND rumor_id IS NULL AND wire_kind IN (14, 15)
+        AND event_id NOT LIKE '${LOCAL_DM_ID_PREFIX}%'
+      ORDER BY created_at DESC LIMIT ?;`,
+    [owner, conversation, limit],
+  );
+  return (res.rows ?? []).map((r) => String(r.event_id));
+}
+
+/**
+ * The 1:1 NIP-17 conversation holding a message or reaction with one of these
+ * rumor ids, or null. Places a reaction / retraction our other client sent
+ * without the peer's `p` tag (#1321).
+ */
+export async function getConversationForRumorIds(
+  owner: string,
+  rumorIds: readonly string[],
+): Promise<string | null> {
+  if (rumorIds.length === 0) return null;
+  const db = await getLocalDb();
+  const ids = rumorIds.slice(0, VAR_CHUNK);
+  const res = await db.execute(
+    `SELECT conversation FROM dm_messages
+      WHERE owner = ? AND conversation != ? AND ${PROTOCOL_SQL} = 'nip17'
+        AND rumor_id IN (${ids.map(() => '?').join(',')}) LIMIT 1;`,
+    [owner, owner, ...ids],
+  );
+  const row = (res.rows ?? [])[0];
+  return row ? String(row.conversation) : null;
+}
+
+/** Remove one optimistic `local-` row (a send no relay accepted). Never
+ * touches a relay-delivered row. */
+export async function deleteLocalDmRow(owner: string, eventId: string): Promise<void> {
+  if (!eventId.startsWith(LOCAL_DM_ID_PREFIX)) return;
+  const db = await getLocalDb();
+  await db.execute(`DELETE FROM dm_messages WHERE owner = ? AND event_id = ?;`, [owner, eventId]);
+}
+
+/** Fill in rumor ids (#1320) by wrap id. Never overwrites an existing one. */
+export async function setDmRumorIds(
+  owner: string,
+  rumorIdByEventId: ReadonlyMap<string, string>,
+): Promise<void> {
+  if (rumorIdByEventId.size === 0) return;
+  const db = await getLocalDb();
+  await db.transaction(async (tx) => {
+    for (const [eventId, rumorId] of rumorIdByEventId) {
+      await tx.execute(
+        `UPDATE dm_messages SET rumor_id = ?
+          WHERE owner = ? AND event_id = ? AND rumor_id IS NULL;`,
+        [rumorId, owner, eventId],
+      );
+    }
+  });
 }
 
 /** Kinds of a sent row that count as replying in a 1:1 thread (#1623): text

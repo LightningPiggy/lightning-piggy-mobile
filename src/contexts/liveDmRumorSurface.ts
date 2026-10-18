@@ -1,5 +1,7 @@
 import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { gateLiveDm } from './liveDmFollowGateDecision';
+import { isChatReactionKind } from '../utils/nip17Reactions';
+import { placeOwnChatReaction } from './chatReactionPartner';
 import { hasRepliedTo } from '../services/dmRepliedPartners';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
@@ -202,7 +204,12 @@ export function createLiveRumorSurfacer(
       return;
     }
 
-    const partnership = partnerFromRumor(rumor, viewerPubkey);
+    const partnership = await placeOwnChatReaction(
+      rumor,
+      viewerPubkey,
+      partnerFromRumor(rumor, viewerPubkey),
+    );
+    if (shouldAbort()) return;
     if (!partnership) {
       nothingToSee();
       if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} no-partnership`);
@@ -262,6 +269,15 @@ export function createLiveRumorSurfacer(
       nothingToSee();
       return;
     }
+    // Inner rumor id, both directions (#1320): a received message needs it to
+    // be reacted to; our own sent rows key their delivery tick on it (#857). A
+    // malformed rumor degrades to no id rather than failing the surface.
+    let rumorId: string | undefined;
+    try {
+      rumorId = rumorEventId(rumor);
+    } catch {
+      rumorId = undefined;
+    }
     const decision = order
       ? 'pass'
       : gateLiveDm({
@@ -272,9 +288,13 @@ export function createLiveRumorSurfacer(
             createdAt: rumor.created_at,
             text: textForRumor(rumor),
             wireKind: rumor.kind,
+            ...(rumorId ? { rumorId } : {}),
           },
           kind: 1059,
-          groupRumor: order ? rumor : routeResult.deferredGroupRumor,
+          // A deferred reaction replays through this function (like a group
+          // rumor), so it is stored as a reaction, never queued as a message.
+          groupRumor:
+            order || isChatReactionKind(rumor.kind) ? rumor : routeResult.deferredGroupRumor,
           rumor,
           onEvict: () => releaseWrapClaim(wrapId),
           follows: followPubkeysRef.current,
@@ -313,7 +333,29 @@ export function createLiveRumorSurfacer(
       content: wrapText,
       fromMe: partnership.fromMe,
       wireKind: rumor.kind,
+      ...(rumorId ? { rumorId } : {}),
     };
+    // A reaction / retraction (#1321) is stored for the open thread's reaction
+    // hook to pick up (it listens for store commits), but it is never an inbox
+    // entry or a "New message" alert.
+    if (isChatReactionKind(rumor.kind)) {
+      chainWrite(async () => {
+        if (isCancelled()) {
+          releaseWrapClaim(wrapId);
+          return;
+        }
+        try {
+          await upsertDmMessages([wrapRow]);
+        } catch (error) {
+          releaseWrapClaim(wrapId);
+          throw error;
+        }
+        knownWrapIds.add(wrapId);
+      });
+      nothingToSee();
+      if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} stored as a reaction`);
+      return;
+    }
     const inboxEntry: DmInboxEntry = {
       id: wrapId,
       partnerPubkey: partnership.partnerPubkey,
@@ -324,9 +366,10 @@ export function createLiveRumorSurfacer(
       // Plain DM rumors pass through unchanged.
       text: dmRowPreview(wrapText, rumor.kind, getAppFormatLocale()),
       wireKind: rumor.kind,
-      // Inner rumor id (#857) — the delivery-store key for our own sent rows,
-      // stable across the optimistic bubble + this live echo.
-      rumorId: partnership.fromMe ? rumorEventId(rumor) : undefined,
+      // Inner rumor id (#857, #1320) — the delivery-store key for our own sent
+      // rows (stable across the optimistic bubble + this live echo) and the
+      // reaction target for received ones.
+      rumorId,
     };
 
     const surface = () => {

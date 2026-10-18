@@ -5,6 +5,7 @@ import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 import { parseOrderEvent, serializeOrder } from './orderEvents';
 import { POLL_KIND, VOTE_KIND, serializePollFromRumor, serializeVoteFromRumor } from './nip88Poll';
 import { liveMarkerTextForRumor } from '../services/liveLocationWire';
+import { isChatReactionKind, serializeChatReactionRumor } from './nip17Reactions';
 
 /**
  * Shape of a decoded NIP-17 message after two layers of NIP-44 decrypt.
@@ -278,7 +279,13 @@ export function partnerFromRumor(
 ): { partnerPubkey: string; fromMe: boolean } | null {
   const me = viewerPubkey.toLowerCase();
   if (rumor.pubkey === me) {
-    const pTag = rumor.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
+    // The first `p` that isn't us; a lone self `p` is a note to self. A
+    // reaction to our own message tags us (the target's author) before the
+    // peer (#1319), so the first `p` alone would misfile it.
+    const pTags = rumor.tags
+      .filter((t) => t[0] === 'p' && typeof t[1] === 'string')
+      .map((t) => t[1].toLowerCase());
+    const pTag = pTags.find((p) => p !== me) ?? pTags[0];
     if (!pTag || !HEX64.test(pTag)) return null;
     return { partnerPubkey: pTag, fromMe: true };
   }
@@ -435,6 +442,8 @@ export function textForRumor(rumor: DecodedRumor): string {
     const vote = serializeVoteFromRumor(rumor);
     if (vote) return vote;
   }
+  // Wrapped reaction / retraction (#1321): keep the tags that name its target.
+  if (isChatReactionKind(rumor.kind)) return serializeChatReactionRumor(rumor);
   const meta = fileMetaFromRumor(rumor);
   // All supported AES-GCM files use the shared attachment cache and renderer.
   if (meta && meta.algorithm === 'aes-gcm') {

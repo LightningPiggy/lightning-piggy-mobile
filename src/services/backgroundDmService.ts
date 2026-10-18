@@ -82,6 +82,7 @@ import {
 import * as zapSenderProfileStorage from './zapSenderProfileStorage';
 import { partnerFromRumor, textForRumor, type DecodedRumor } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
+import { isChatReactionKind } from '../utils/nip17Reactions';
 import { isNip171InboxRumor } from '../contexts/nip171InboxRouting';
 import { hasRepliedTo, loadRepliedPartners } from './dmRepliedPartners';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
@@ -299,6 +300,8 @@ async function handleWrap(input: {
   // Never notify for our own echoes (self-wraps / outgoing copies), nor for a
   // Marmot invite: it's joined as its own chat, the NIP-17 row is hidden (#1269).
   if (partnership.fromMe || rumor.kind === MARMOT_WELCOME_KIND) return;
+  // A wrapped reaction / retraction (#1321) is not a message.
+  if (isChatReactionKind(rumor.kind)) return;
   // A NIP-171 ticket or group rumor isn't a 1:1 message (the app ingests it).
   if (isNip171InboxRumor(rumor)) return;
   // Follow gate (mirrors the live sub's): a stranger must not be able to

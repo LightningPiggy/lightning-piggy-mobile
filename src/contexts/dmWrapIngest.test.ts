@@ -64,7 +64,8 @@ jest.mock('./nostrDmCache', () => ({
 jest.mock('../utils/nip17Unwrap', () => ({
   partnerFromRumor: (rumor: { partnership?: { partnerPubkey: string; fromMe: boolean } }) =>
     rumor.partnership ?? null,
-  rumorEventId: (rumor: { kind: number }) => (rumor.kind === 16 ? 'unique-order-rumor' : undefined),
+  rumorEventId: (rumor: { kind: number }) =>
+    ({ 16: 'unique-order-rumor', 7: 'reaction-rumor' })[rumor.kind],
   textForRumor: (rumor: DecodedRumor) => {
     const { parseOrderEvent, serializeOrder } = jest.requireActual('../utils/orderEvents');
     const order = parseOrderEvent(rumor);
@@ -130,6 +131,25 @@ beforeEach(async () => {
 });
 
 describe('dmWrapIngest.ingestInboxWraps', () => {
+  it('stores a wrapped reaction with its rumor id but emits no inbox entry (#1321)', async () => {
+    const unwrap = jest.fn(async () => rumorFrom(ALICE, { kind: 7, content: '{"content":"🎉"}' }));
+    const res = await ingestInboxWraps({
+      owner: OWNER,
+      wraps: [wrap('w-react')],
+      unwrap,
+      passesFollowGate: () => true,
+      skipKey: 'skip_key',
+    });
+    expect(res.entries).toEqual([]);
+    const rows: DmMessageRow[] = mockUpsert.mock.calls[0][0];
+    expect(rows[0]).toMatchObject({
+      eventId: 'w-react',
+      conversation: ALICE,
+      wireKind: 7,
+      rumorId: 'reaction-rumor',
+    });
+  });
+
   it('stores followed 1:1 rumors as rows and emits matching entries', async () => {
     const unwrap = jest.fn(async () => rumorFrom(ALICE));
     const res = await ingestInboxWraps({

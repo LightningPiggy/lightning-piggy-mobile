@@ -19,6 +19,7 @@ import { deleteMarmotStateForOwner } from '../services/marmotStore';
 import { forgetMarmotDeletionsForOwner } from '../services/marmotDeletionStore';
 import { quiesceMarmotSession } from '../services/marmotSession';
 import { retireMarmotPushForAccount } from '../services/marmotPushRegistration';
+import { forgetOwnLegacyDmReactions } from '../services/legacyDmReactions';
 
 /**
  * Per-account DM-store wipe, called from NostrContext's `wipeAccountCaches`
@@ -35,7 +36,9 @@ import { retireMarmotPushForAccount } from '../services/marmotPushRegistration';
  *    out, NostrContext additionally deletes the DB file + keystore key via
  *    `wipeLocalDmStore`;
  *  - the in-session migration memo, so a re-login re-checks the per-account
- *    flag (NostrContext removes the AsyncStorage flag itself).
+ *    flag (NostrContext removes the AsyncStorage flag itself);
+ *  - the session read of our legacy public DM reactions and its "none"
+ *    marker, so a re-login reads them again.
  */
 export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   for (const base of [
@@ -94,4 +97,5 @@ export async function wipeDmStoresForAccount(pubkey: string): Promise<void> {
   if (!retired && __DEV__)
     console.warn('[Account] push retirement incomplete (token deletion is retried at next start)');
   forgetDmStoreMigration(pubkey);
+  await forgetOwnLegacyDmReactions(pubkey);
 }

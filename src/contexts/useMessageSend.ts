@@ -326,6 +326,38 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           };
         }
 
+        if (signerType === 'nip46') {
+          // Same Encrypt → SignSeal → Publish shape as `sendDirectMessage`'s
+          // NIP-46 branch, so polls and chat reactions (#1319) work over a
+          // remote signer too.
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: normalized,
+            relays: targetRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
+            signerNip44Encrypt: (plain, recipient) =>
+              nostrConnectService.requestNip44Encrypt(plain, recipient, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('NIP-46 signer returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          return {
+            success: result.delivery.delivered,
+            delivery: result.delivery,
+            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
+          };
+        }
+
         return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send';

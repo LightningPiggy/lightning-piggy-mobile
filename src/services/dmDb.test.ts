@@ -210,7 +210,10 @@ describe('dmDb', () => {
       mockExecute.mockResolvedValueOnce(rowsResult([{ present: 1 }]));
       expect(await hasConversationWith(OWNER, 'convA')).toBe(true);
       const [sql, params] = mockExecute.mock.calls[0];
-      expect(sql).toContain('WHERE owner = ? AND conversation = ? LIMIT 1');
+      // Reaction rows (#1321) alone don't make a conversation.
+      expect(sql).toContain(
+        'WHERE owner = ? AND conversation = ? AND wire_kind NOT IN (7, 5) LIMIT 1',
+      );
       expect(params).toEqual([OWNER, 'convA']);
     });
 
@@ -416,8 +419,9 @@ describe('dmDb', () => {
       );
       expect(sql).toContain('WHERE m.owner = ?');
       // Marmot invite gift wraps never become a thread's latest (#1269).
-      expect(sql).toContain('WHERE owner = ? AND wire_kind NOT IN (444)');
-      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind NOT IN (444)');
+      // …and neither do wrapped reactions / retractions (#1321).
+      expect(sql).toContain('WHERE owner = ? AND wire_kind NOT IN (444, 7, 5)');
+      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind NOT IN (444, 7, 5)');
       expect(params).toEqual([OWNER, OWNER]);
     });
   });

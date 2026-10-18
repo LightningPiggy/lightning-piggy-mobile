@@ -70,6 +70,11 @@ changing how anything is stored.
   the *only* at-rest home for 1:1 DM content; no plaintext side blobs.
   Marmot 1:1 rows live here too, tagged `protocol = 'marmot'` (NULL on
   NIP-04/NIP-17 rows, whose protocol is inferred from `wire_kind`).
+  `rumor_id` is set on received rows as well as sent ones (#1320; older
+  rows get it on the next thread open). Wrapped NIP-17 reactions and
+  retractions are rows with `wire_kind` 7 / 5 whose `content` is
+  `{"content", "tags"}` JSON; thread pages, the inbox and the
+  existing-conversation check skip them (#1321).
   `marmot_kv` holds every Marmot (MLS) store — group ratchet state, epoch
   secrets, key-package private keys, invites, each group's decrypted
   message history, photo file keys and MIP-05 push records — keyed

@@ -253,6 +253,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
             content: item.content ?? item.entry.text,
             fromMe: item.entry.fromMe,
             wireKind: item.entry.wireKind,
+            ...(item.entry.rumorId ? { rumorId: item.entry.rumorId } : {}),
           },
         ]);
         pendingReplays.delete(item);
