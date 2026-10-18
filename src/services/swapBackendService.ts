@@ -20,26 +20,50 @@ export const isNoSwapServerError = (error: unknown): error is NoSwapServerError 
 /** i18n key for a failed fee quote — never the raw server/network text. */
 export const swapQuoteErrorKey = (error: unknown): string =>
   isNoSwapServerError(error) ? 'swapBackend.notConfigured' : 'swapBackend.quoteFailed';
+
+/** Why a swap server could not be checked or saved — drives the user-facing copy. */
+export type SwapBackendErrorReason = 'invalidUrl' | 'unreachable' | 'noSwaps' | 'incompatible';
+export class SwapBackendError extends Error {
+  constructor(
+    readonly reason: SwapBackendErrorReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'SwapBackendError';
+  }
+}
+const SAVE_ERROR_KEYS: Record<SwapBackendErrorReason, string> = {
+  invalidUrl: 'swapBackend.errorInvalidUrl',
+  unreachable: 'swapBackend.errorUnreachable',
+  noSwaps: 'swapBackend.errorNoSwaps',
+  incompatible: 'swapBackend.errorIncompatible',
+};
+/** i18n key for a failed check/save — never the raw server/network text. */
+export const swapBackendSaveErrorKey = (error: unknown): string =>
+  error instanceof SwapBackendError ? SAVE_ERROR_KEYS[error.reason] : 'swapBackend.saveError';
 const SETTING_KEY = 'swap_backend_url_v1';
 
 /** Accept an HTTPS origin or API base, including reverse-proxy path prefixes. */
 export function normalizeSwapBackend(input: string): string {
   const value = input.trim();
   if (!/^https:\/\//i.test(value) || /[\\\s?#]/.test(value)) {
-    throw new Error('Enter an HTTPS server URL without a query or fragment.');
+    throw new SwapBackendError(
+      'invalidUrl',
+      'Enter an HTTPS server URL without a query or fragment.',
+    );
   }
   let url: URL;
   try {
     url = new URL(value);
   } catch {
-    throw new Error('Enter a valid HTTPS server URL.');
+    throw new SwapBackendError('invalidUrl', 'Enter a valid HTTPS server URL.');
   }
   if (!url.hostname || url.username || url.password) {
-    throw new Error('The server URL must not contain credentials.');
+    throw new SwapBackendError('invalidUrl', 'The server URL must not contain credentials.');
   }
   const path = url.pathname.replace(/\/+$/, '');
   if (/\/(v\d+|ws)$/.test(path) && !path.endsWith('/v2')) {
-    throw new Error('Enter the server URL or its v2 API base.');
+    throw new SwapBackendError('invalidUrl', 'Enter the server URL or its v2 API base.');
   }
   return `${url.origin}${path.endsWith('/v2') ? path : `${path}/v2`}`;
 }
@@ -62,16 +86,48 @@ export async function checkSwapBackend(input: string, signal?: AbortSignal): Pro
   const backend = normalizeSwapBackend(input);
   await Promise.all(
     (['reverse', 'submarine'] as const).map(async (direction) => {
-      await fetchWithTimeout(
-        `${backend}/swap/${direction}`,
-        signal ? { signal } : undefined,
-        10000,
-        async (response) => {
-          if (!response.ok) throw new Error(`Swap server check failed (HTTP ${response.status}).`);
-          const pairs = await response.json();
-          parseBoltzPair(pairs?.BTC?.BTC, direction);
-        },
-      );
+      try {
+        await fetchWithTimeout(
+          `${backend}/swap/${direction}`,
+          signal ? { signal } : undefined,
+          10000,
+          async (response) => {
+            if (!response.ok)
+              throw new SwapBackendError(
+                'unreachable',
+                `Swap server check failed (HTTP ${response.status}).`,
+              );
+            let pairs: { BTC?: { BTC?: unknown } } | null;
+            try {
+              pairs = await response.json();
+            } catch (error) {
+              if (error instanceof Error && error.name === 'AbortError')
+                throw new SwapBackendError('unreachable', 'Swap server timed out.');
+              throw new SwapBackendError('incompatible', 'Swap server returned invalid JSON.');
+            }
+            const pair = pairs?.BTC?.BTC;
+            // A reachable server answering `{}` simply has no BTC pair on offer.
+            if (!pair || typeof pair !== 'object' || Object.keys(pair).length === 0)
+              throw new SwapBackendError('noSwaps', `Swap server offers no BTC ${direction} pair.`);
+            try {
+              parseBoltzPair(pair, direction);
+            } catch (error) {
+              throw new SwapBackendError(
+                'incompatible',
+                error instanceof Error ? error.message : 'Invalid swap quote.',
+              );
+            }
+          },
+        );
+      } catch (error) {
+        if (signal?.aborted) throw new Error('Connection check cancelled.');
+        if (error instanceof SwapBackendError) throw error;
+        // fetch rejections: offline, DNS, TLS, timeout abort.
+        throw new SwapBackendError(
+          'unreachable',
+          error instanceof Error ? error.message : 'Swap server unreachable.',
+        );
+      }
     }),
   );
   if (signal?.aborted) throw new Error('Connection check cancelled.');

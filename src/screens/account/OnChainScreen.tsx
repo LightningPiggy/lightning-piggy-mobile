@@ -7,9 +7,11 @@ import { useTranslation } from '../../contexts/LocaleContext';
 import SwapBackendSettings from '../../components/SwapBackendSettings';
 import { getElectrumServer } from '../../services/walletStorageService';
 import ServerConnectionTest from '../../components/ServerConnectionTest';
+import SaveResultBox from '../../components/SaveResultBox';
 import {
+  checkAndSaveElectrumServer,
   checkElectrumConnection,
-  saveElectrumSetting,
+  electrumSaveErrorKey,
 } from '../../services/onchainConnectionService';
 
 const DEFAULT_ELECTRUM = 'electrum.blockstream.info:50002';
@@ -28,7 +30,9 @@ const OnChainScreen: React.FC = () => {
   const [electrumLoading, setElectrumLoading] = useState(true);
   const [electrumLoaded, setElectrumLoaded] = useState(false);
   const [electrumError, setElectrumError] = useState(false);
-  const electrumWrite = useRef(0);
+  const [electrumBusy, setElectrumBusy] = useState(false);
+  const [electrumMessage, setElectrumMessage] = useState('');
+  const [electrumFailed, setElectrumFailed] = useState(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -53,25 +57,32 @@ const OnChainScreen: React.FC = () => {
     };
   }, []);
 
-  const saveElectrum = async (hostPort: string, ssl: boolean) => {
-    const request = ++electrumWrite.current;
+  const editElectrum = () => {
+    setElectrumLoaded(true);
+    setElectrumError(false);
+    setElectrumMessage('');
+  };
+  const saveElectrum = async () => {
+    setElectrumBusy(true);
+    setElectrumMessage('');
     try {
-      await saveElectrumSetting(hostPort, ssl);
-      if (mounted.current && request === electrumWrite.current) setElectrumError(false);
-    } catch {
-      if (mounted.current && request === electrumWrite.current) setElectrumError(true);
+      await checkAndSaveElectrumServer(electrumHostPort, electrumSSL);
+      if (!mounted.current) return;
+      setElectrumFailed(false);
+      setElectrumMessage(t('onChainScreen.saved'));
+    } catch (error) {
+      if (!mounted.current) return;
+      setElectrumFailed(true);
+      setElectrumMessage(t(electrumSaveErrorKey(error)));
+    } finally {
+      if (mounted.current) setElectrumBusy(false);
     }
   };
-  const handleElectrumSave = () => {
-    if (!electrumLoading && electrumLoaded) void saveElectrum(electrumHostPort, electrumSSL);
-  };
   const testElectrum = useCallback(
-    async (signal: AbortSignal) => {
-      if (mounted.current) setElectrumError(false);
-      return checkElectrumConnection(electrumHostPort, electrumSSL, signal);
-    },
+    (signal: AbortSignal) => checkElectrumConnection(electrumHostPort, electrumSSL, signal),
     [electrumHostPort, electrumSSL],
   );
+  const electrumDisabled = electrumLoading || electrumBusy || !electrumLoaded;
 
   return (
     <AccountScreenLayout title={t('onChainScreen.title')} parent="AccountAdvanced">
@@ -80,17 +91,14 @@ const OnChainScreen: React.FC = () => {
         style={sharedAccountStyles.textInput}
         value={electrumHostPort}
         onChangeText={(value) => {
-          ++electrumWrite.current;
           setElectrumHostPort(value);
-          setElectrumLoaded(true);
-          setElectrumError(false);
+          editElectrum();
         }}
-        editable={!electrumLoading}
+        editable={!electrumLoading && !electrumBusy}
         placeholder={DEFAULT_ELECTRUM}
         placeholderTextColor="rgba(0,0,0,0.3)"
         autoCapitalize="none"
         autoCorrect={false}
-        onBlur={handleElectrumSave}
         testID="electrum-server-input"
         accessibilityLabel={t('onChainScreen.electrumServerA11y')}
       />
@@ -102,17 +110,16 @@ const OnChainScreen: React.FC = () => {
             electrumSSL && sharedAccountStyles.sslToggleActive,
           ]}
           onPress={() => {
-            const next = !electrumSSL;
-            setElectrumSSL(next);
-            void saveElectrum(electrumHostPort, next);
+            setElectrumSSL(!electrumSSL);
+            editElectrum();
           }}
-          disabled={electrumLoading || !electrumLoaded}
+          disabled={electrumDisabled}
           testID="electrum-ssl-toggle"
           accessibilityLabel={t('onChainScreen.useSsl')}
           accessibilityRole="switch"
           accessibilityState={{
             checked: electrumSSL,
-            disabled: electrumLoading || !electrumLoaded,
+            disabled: electrumDisabled,
           }}
         >
           <View
@@ -127,21 +134,37 @@ const OnChainScreen: React.FC = () => {
       <ServerConnectionTest
         inputKey={`${electrumHostPort}:${electrumSSL}`}
         probe={testElectrum}
-        disabled={electrumLoading || !electrumLoaded}
+        disabled={electrumDisabled}
         label={t('serverConnection.electrumTest')}
         testID="electrum-connection"
       />
+      <TouchableOpacity
+        style={sharedAccountStyles.saveButton}
+        onPress={saveElectrum}
+        disabled={electrumDisabled}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: electrumDisabled, busy: electrumBusy }}
+        accessibilityLabel={t('onChainScreen.save')}
+        testID="electrum-save"
+      >
+        <Text style={sharedAccountStyles.saveButtonText}>
+          {t(electrumBusy ? 'swapBackend.checking' : 'onChainScreen.save')}
+        </Text>
+      </TouchableOpacity>
+      {!!electrumMessage && (
+        <SaveResultBox
+          message={electrumMessage}
+          failed={electrumFailed}
+          testID="electrum-save-message"
+        />
+      )}
       {electrumError && (
         <Text
           style={sharedAccountStyles.fieldHint}
           testID="electrum-settings-error"
           accessibilityLiveRegion="polite"
         >
-          {t(
-            electrumLoaded
-              ? 'serverConnection.electrumSaveError'
-              : 'serverConnection.electrumLoadError',
-          )}
+          {t('serverConnection.electrumLoadError')}
         </Text>
       )}
 

@@ -5,11 +5,13 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import ServerConnectionTest from './ServerConnectionTest';
 import { createSwapBackendSettingsStyles } from '../styles/SwapBackendSettings.styles';
+import SaveResultBox from './SaveResultBox';
 import {
   DEFAULT_SWAP_BACKEND,
   getSwapBackend,
   checkAndSaveSwapBackend,
   checkSwapBackend,
+  swapBackendSaveErrorKey,
 } from '../services/swapBackendService';
 
 export default function SwapBackendSettings() {
@@ -21,6 +23,7 @@ export default function SwapBackendSettings() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [failed, setFailed] = useState(false);
   const mounted = useRef(true);
   const translation = useRef(t);
   translation.current = t;
@@ -33,7 +36,9 @@ export default function SwapBackendSettings() {
         if (active) setUrl(value);
       })
       .catch(() => {
-        if (active) setMessage(translation.current('swapBackend.loadError'));
+        if (!active) return;
+        setFailed(true);
+        setMessage(translation.current('swapBackend.loadError'));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -53,10 +58,12 @@ export default function SwapBackendSettings() {
       const saved = await checkAndSaveSwapBackend(url);
       if (!mounted.current) return;
       setUrl(saved);
+      setFailed(false);
       setMessage(t(saved ? 'swapBackend.saved' : 'swapBackend.cleared'));
     } catch (error) {
       if (!mounted.current) return;
-      setMessage(`${t('swapBackend.saveError')} ${error instanceof Error ? error.message : ''}`);
+      setFailed(true);
+      setMessage(t(swapBackendSaveErrorKey(error)));
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -102,6 +109,9 @@ export default function SwapBackendSettings() {
           {t(busy ? 'swapBackend.checking' : 'swapBackend.save')}
         </Text>
       </TouchableOpacity>
+      {!!message && (
+        <SaveResultBox message={message} failed={failed} testID="swap-backend-message" />
+      )}
       <TouchableOpacity
         style={styles.reset}
         onPress={() => {
@@ -116,15 +126,6 @@ export default function SwapBackendSettings() {
       >
         <Text style={shared.fieldHint}>{t('swapBackend.default')}</Text>
       </TouchableOpacity>
-      {!!message && (
-        <Text
-          style={shared.fieldHint}
-          accessibilityLiveRegion="polite"
-          testID="swap-backend-message"
-        >
-          {message}
-        </Text>
-      )}
     </View>
   );
 }
