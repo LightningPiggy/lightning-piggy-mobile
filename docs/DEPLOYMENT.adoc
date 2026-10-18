@@ -967,7 +967,7 @@ Users can install the APK by:
 1. **Direct download**: Download the `.apk` file from the GitHub Releases page on the device, then tap to install
 2. **ADB install**: Connect via USB and run `adb install lightning-piggy.apk`
 3. **Obtainium**: Users can add the GitHub repository to https://github.com/ImranR98/Obtainium[Obtainium], which automatically tracks releases and notifies users of updates
-4. **Zapstore**: install and update from https://zapstore.dev/apps/com.lightningpiggy.app (every stable release is published there; see "Zapstore (Nostr App Store)")
+4. **Zapstore**: install and update from https://zapstore.dev/apps/com.lightningpiggy.app (stable releases are published there automatically, unless the workflow skips one, e.g. missing secrets or APK; see "Zapstore (Nostr App Store)")
 
 On GrapheneOS, sideloading works the same as stock Android — enable "Install unknown apps" for the browser or file manager, then open the APK.
 
