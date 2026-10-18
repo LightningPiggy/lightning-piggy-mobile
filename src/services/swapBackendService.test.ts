@@ -12,6 +12,7 @@ import {
   getSwapBackendForId,
   swapWebSocketUrl,
   swapQuoteErrorKey,
+  swapBackendSaveErrorKey,
   NoSwapServerError,
 } from './swapBackendService';
 
@@ -247,4 +248,62 @@ it('clears the selected server without altering pinned or legacy swaps', async (
 it('maps quote failures to translatable keys, not raw server text', () => {
   expect(swapQuoteErrorKey(new NoSwapServerError())).toBe('swapBackend.notConfigured');
   expect(swapQuoteErrorKey(new Error('Boltz API error: 503'))).toBe('swapBackend.quoteFailed');
+});
+
+describe('save failure classification', () => {
+  const failure = async (input = 'https://new.example') => {
+    try {
+      await checkAndSaveSwapBackend(input);
+    } catch (error) {
+      return swapBackendSaveErrorKey(error);
+    }
+    throw new Error('expected the save to fail');
+  };
+  it('reports a reachable server answering {} as offering no swaps', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    await expect(failure()).resolves.toBe('swapBackend.errorNoSwaps');
+  });
+  it.each([{ BTC: {} }, { BTC: { BTC: {} } }, { BTC: { BTC: null } }, null])(
+    'reports a missing or empty BTC pair (%j) as offering no swaps',
+    async (body) => {
+      mockFetch.mockResolvedValue({ ok: true, json: async () => body });
+      await expect(failure()).resolves.toBe('swapBackend.errorNoSwaps');
+    },
+  );
+  it.each([
+    ['an HTTP error', () => mockFetch.mockResolvedValue({ ok: false, status: 404 })],
+    [
+      'a network failure',
+      () => mockFetch.mockRejectedValue(new TypeError('Network request failed')),
+    ],
+    [
+      'a timeout',
+      () =>
+        mockFetch.mockRejectedValue(Object.assign(new Error('Aborted'), { name: 'AbortError' })),
+    ],
+  ])('reports %s as unreachable', async (_label, arrange) => {
+    arrange();
+    await expect(failure()).resolves.toBe('swapBackend.errorUnreachable');
+  });
+  it('reports a malformed quote or non-JSON body as incompatible', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ BTC: { BTC: { hash: 'x' } } }) });
+    await expect(failure()).resolves.toBe('swapBackend.errorIncompatible');
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError('Unexpected token <');
+      },
+    });
+    await expect(failure()).resolves.toBe('swapBackend.errorIncompatible');
+  });
+  it.each(['http://insecure.example', 'https://host?q=x', 'https://user:pw@host', 'https://h/v1'])(
+    'reports %s as an invalid URL without any request',
+    async (input) => {
+      await expect(failure(input)).resolves.toBe('swapBackend.errorInvalidUrl');
+      expect(mockFetch).not.toHaveBeenCalled();
+    },
+  );
+  it('falls back to the generic message for unclassified failures', () => {
+    expect(swapBackendSaveErrorKey(new Error('disk full'))).toBe('swapBackend.saveError');
+  });
 });

@@ -1,15 +1,18 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
+import { CheckCircle, CircleAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import ServerConnectionTest from './ServerConnectionTest';
 import { createSwapBackendSettingsStyles } from '../styles/SwapBackendSettings.styles';
+import { createServerConnectionTestStyles } from '../styles/ServerConnectionTest.styles';
 import {
   DEFAULT_SWAP_BACKEND,
   getSwapBackend,
   checkAndSaveSwapBackend,
   checkSwapBackend,
+  swapBackendSaveErrorKey,
 } from '../services/swapBackendService';
 
 export default function SwapBackendSettings() {
@@ -17,10 +20,12 @@ export default function SwapBackendSettings() {
   const t = useTranslation();
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createSwapBackendSettingsStyles(), []);
+  const resultStyles = useMemo(() => createServerConnectionTestStyles(colors), [colors]);
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [failed, setFailed] = useState(false);
   const mounted = useRef(true);
   const translation = useRef(t);
   translation.current = t;
@@ -33,7 +38,9 @@ export default function SwapBackendSettings() {
         if (active) setUrl(value);
       })
       .catch(() => {
-        if (active) setMessage(translation.current('swapBackend.loadError'));
+        if (!active) return;
+        setFailed(true);
+        setMessage(translation.current('swapBackend.loadError'));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -53,10 +60,12 @@ export default function SwapBackendSettings() {
       const saved = await checkAndSaveSwapBackend(url);
       if (!mounted.current) return;
       setUrl(saved);
+      setFailed(false);
       setMessage(t(saved ? 'swapBackend.saved' : 'swapBackend.cleared'));
     } catch (error) {
       if (!mounted.current) return;
-      setMessage(`${t('swapBackend.saveError')} ${error instanceof Error ? error.message : ''}`);
+      setFailed(true);
+      setMessage(t(swapBackendSaveErrorKey(error)));
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -102,6 +111,24 @@ export default function SwapBackendSettings() {
           {t(busy ? 'swapBackend.checking' : 'swapBackend.save')}
         </Text>
       </TouchableOpacity>
+      {!!message && (
+        <View
+          style={[resultStyles.result, failed ? resultStyles.error : resultStyles.success]}
+          accessibilityLiveRegion="polite"
+          testID="swap-backend-message"
+        >
+          {failed ? (
+            <CircleAlert size={20} color={colors.red} />
+          ) : (
+            <CheckCircle size={20} color={colors.greenDark} />
+          )}
+          <Text
+            style={[resultStyles.text, failed ? resultStyles.errorText : resultStyles.successText]}
+          >
+            {message}
+          </Text>
+        </View>
+      )}
       <TouchableOpacity
         style={styles.reset}
         onPress={() => {
@@ -116,15 +143,6 @@ export default function SwapBackendSettings() {
       >
         <Text style={shared.fieldHint}>{t('swapBackend.default')}</Text>
       </TouchableOpacity>
-      {!!message && (
-        <Text
-          style={shared.fieldHint}
-          accessibilityLiveRegion="polite"
-          testID="swap-backend-message"
-        >
-          {message}
-        </Text>
-      )}
     </View>
   );
 }
