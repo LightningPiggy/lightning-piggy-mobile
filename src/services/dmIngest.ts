@@ -1,4 +1,9 @@
-import { selectKnownEventIds, upsertDmMessages, type DmMessageRow } from './dmDb';
+import {
+  selectKnownEventIds,
+  upsertDmMessages,
+  upsertDmMessagesIf,
+  type DmMessageRow,
+} from './dmDb';
 
 // Decrypt-once ingest for NIP-17 gift wraps (#695). This is the heart of the
 // Messages-tab freeze fix: instead of re-walking and re-decrypting the whole
@@ -43,6 +48,9 @@ export interface IngestOptions {
   onProgress?: (decrypted: number, freshTotal: number) => void;
   /** Abort cooperatively (e.g. signer/identity changed mid-refresh). */
   signal?: { aborted: boolean };
+  /** Checked before and inside the save; false drops the rows (e.g. the
+   * account was signed out while a background write was decrypting). */
+  persistIf?: () => boolean;
 }
 
 const DEFAULT_YIELD_EVERY = 25;
@@ -108,9 +116,14 @@ export async function ingestWraps<W extends IngestableWrap>(
   // Flushing here makes every decrypt decrypt-once regardless of abort. (Note:
   // the skip-set and emitted UI entries stay abort-suppressed one layer up in
   // dmWrapIngest — those ARE partial-state and #412 intentionally drops them.)
-  if (fresh.length > 0) {
-    await upsertDmMessages(fresh);
-    result.ingested = fresh.length;
+  if (fresh.length > 0 && options.persistIf?.() !== false) {
+    // Re-checked inside the write transaction, where a wipe can't slip in.
+    // Re-checked inside the write transaction, where a wipe can't slip in;
+    // only rows actually saved count.
+    const written = options.persistIf
+      ? await upsertDmMessagesIf(fresh, options.persistIf)
+      : (await upsertDmMessages(fresh), true);
+    if (written) result.ingested = fresh.length;
   }
   return result;
 }

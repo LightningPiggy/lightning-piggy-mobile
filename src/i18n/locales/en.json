@@ -2580,7 +2580,12 @@
         "addCountry": "Add country",
         "removeCountry": "Remove {{country}}",
         "remove": "Remove shipping option",
-        "defaultName": "Standard shipping"
+        "defaultName": "Standard shipping",
+        "untitled": "Untitled shipping option",
+        "countryCount": {
+          "one": "{{count}} country",
+          "other": "{{count}} countries"
+        }
       },
       "editor": {
         "newTitle": "Sell an item",
@@ -3339,6 +3344,7 @@
     "security": "Protocol and security",
     "mlsSecurity": "End-to-end encryption with MLS. Devices share group keys.",
     "nip17Security": "End-to-end encrypted messages with sealed sender identity.",
+    "nip171Security": "End-to-end encrypted group. Members share one group key, and the owner changes it when someone leaves.",
     "nip04Security": "Legacy encryption. Upgrade to NIP-17 for better privacy.",
     "devices": "Devices in this chat",
     "relays": "Group relays",
@@ -3398,6 +3404,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Operator & policies",
     "runBy": "Run by",
+    "tipOperator": "Tip the operator",
+    "tipOperatorLabel": "Send a zap to {{name}}, who runs this relay",
     "copyUrl": "Copy relay URL",
     "terms_of_service": "Terms of service",
     "privacy_policy": "Privacy policy",
@@ -3493,6 +3501,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning Address (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "NIP-171 group",
+    "full": "You're in the most NIP-171 groups you can join. Leave one to accept this invitation."
   },
   "marmotInvitation": {
     "pending": "Invitation pending",

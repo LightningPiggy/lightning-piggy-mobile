@@ -2580,7 +2580,12 @@
         "addCountry": "Ország hozzáadása",
         "removeCountry": "Ország eltávolítása: {{country}}",
         "remove": "Szállítási lehetőség eltávolítása",
-        "defaultName": "Normál szállítás"
+        "defaultName": "Normál szállítás",
+        "untitled": "Névtelen szállítási mód",
+        "countryCount": {
+          "one": "{{count}} ország",
+          "other": "{{count}} ország"
+        }
       },
       "editor": {
         "newTitle": "Termék eladása",
@@ -3339,6 +3344,7 @@
     "security": "Protokoll és biztonság",
     "mlsSecurity": "Végpontok közötti titkosítás MLS-sel. Az eszközök megosztják a csoportkulcsokat.",
     "nip17Security": "Végpontok között titkosított üzenetek rejtett feladóazonossággal.",
+    "nip171Security": "Végpontok között titkosított csoport. A tagok közös csoportkulcsot használnak, amelyet a tulajdonos lecserél, ha valaki kilép.",
     "nip04Security": "Régi titkosítás. Válts NIP-17-re a jobb adatvédelemért.",
     "devices": "Eszközök a csevegésben",
     "relays": "A csoport reléi",
@@ -3398,6 +3404,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Üzemeltető és szabályzatok",
     "runBy": "Üzemeltető",
+    "tipOperator": "Borravaló az üzemeltetőnek",
+    "tipOperatorLabel": "Küldj egy zapot {{name}} részére, aki ezt a relét üzemelteti",
     "copyUrl": "Relé URL másolása",
     "terms_of_service": "Felhasználási feltételek",
     "privacy_policy": "Adatvédelmi szabályzat",
@@ -3493,6 +3501,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning-cím (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "NIP-171 csoport",
+    "full": "Elérted a NIP-171 csoporttagságok maximális számát. Lépj ki egy csoportból, hogy elfogadhasd ezt a meghívást."
   },
   "marmotInvitation": {
     "pending": "Függőben lévő meghívás",

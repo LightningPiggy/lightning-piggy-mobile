@@ -33,7 +33,9 @@ type Lookup = (
  * background couldn't decrypt carries only the wrap id; once the app has
  * decrypted and stored that wrap (inbox refresh / live sub after the tap), its
  * row names the conversation. Polls until then, up to `timeoutMs`; null if it
- * never appears (e.g. decryption was declined).
+ * never appears (e.g. decryption was declined). If the first look misses,
+ * `fetchNow` fetches and stores just that wrap, so the tap doesn't wait on a
+ * whole inbox refresh (#1325).
  */
 export async function resolveWrapConversation(
   owner: string,
@@ -43,12 +45,15 @@ export async function resolveWrapConversation(
     intervalMs = 750,
     lookup = getConversationForEvent,
     shouldStop = () => false,
+    fetchNow,
   }: {
     timeoutMs?: number;
     intervalMs?: number;
     lookup?: Lookup;
     /** True once the result is no longer wanted (the user moved on). */
     shouldStop?: () => boolean;
+    /** Fetch and store the wrap directly; run once, after the first miss. */
+    fetchNow?: () => Promise<void>;
   } = {},
 ): Promise<ResolvedConversation | null> {
   const deadline = Date.now() + timeoutMs;
@@ -67,6 +72,22 @@ export async function resolveWrapConversation(
           : {}),
         protocol: protocolForWireKind(row.wireKind, row.protocol),
       };
+    if (fetchNow) {
+      const fetch = fetchNow;
+      fetchNow = undefined;
+      // Bounded by the deadline: a stalled fetch mustn't hold the tap past
+      // it. The loop re-checks `shouldStop` straight after.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        fetch().catch(() => undefined),
+        new Promise<void>((r) => {
+          timer = setTimeout(r, Math.max(0, deadline - Date.now()));
+        }),
+      ]);
+      clearTimeout(timer);
+      if (Date.now() >= deadline) return null;
+      continue;
+    }
     if (Date.now() + intervalMs > deadline) return null;
     await new Promise((r) => setTimeout(r, intervalMs));
   }

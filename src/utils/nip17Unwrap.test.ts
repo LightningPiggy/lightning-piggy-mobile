@@ -6,7 +6,7 @@
  */
 
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
-import { wrapEvent } from 'nostr-tools/nip59';
+import { createRumor, createWrap, wrapEvent } from 'nostr-tools/nip59';
 import * as nip44 from 'nostr-tools/nip44';
 import {
   subjectFromRumor,
@@ -114,9 +114,51 @@ describe('partnerFromRumor (partner-pubkey extraction + validation, #849)', () =
     });
   });
 
+  it('fromMe: skips our own p tag, so a reaction to our own message finds the peer (#1319)', () => {
+    const tags = [
+      ['e', 'f'.repeat(64)],
+      ['p', ME],
+      ['p', PK_B],
+    ];
+    expect(partnerFromRumor(rumor({ pubkey: ME, kind: 7, tags }), ME)).toEqual({
+      partnerPubkey: PK_B,
+      fromMe: true,
+    });
+    // A lone self p tag is still a note to self.
+    expect(partnerFromRumor(rumor({ pubkey: ME, tags: [['p', ME]] }), ME)).toEqual({
+      partnerPubkey: ME,
+      fromMe: true,
+    });
+  });
+
   it('fromMe: returns null when the p-tag partner is missing or malformed', () => {
     expect(partnerFromRumor(rumor({ pubkey: ME, tags: [] }), ME)).toBeNull();
     expect(partnerFromRumor(rumor({ pubkey: ME, tags: [['p', 'nope']] }), ME)).toBeNull();
+  });
+});
+
+describe('textForRumor (wrapped reactions, #1321)', () => {
+  it('stores the content and the tags that name the target, nothing else', () => {
+    const out = textForRumor({
+      pubkey: PK_B,
+      created_at: 0,
+      kind: 7,
+      content: '🎉',
+      tags: [
+        ['e', 'f'.repeat(64)],
+        ['p', PK_A],
+        ['k', '14'],
+        ['client', 'Amethyst'],
+      ],
+    });
+    expect(JSON.parse(out)).toEqual({
+      content: '🎉',
+      tags: [
+        ['e', 'f'.repeat(64)],
+        ['p', PK_A],
+        ['k', '14'],
+      ],
+    });
   });
 });
 
@@ -315,6 +357,39 @@ describe('unwrapWrapNsec (NIP-17 nsec decrypt, post-#802)', () => {
   // Cast helper — `wrapEvent` returns a fully-typed VerifiedEvent; the
   // unwrap function takes the looser RawGiftWrapEvent shape.
   type WrapArg = Parameters<typeof unwrapWrapNsec>[0];
+
+  it("exposes the seal's invitation_proof (how Anagram signs a NIP-171 ticket)", () => {
+    const senderSk = generateSecretKey();
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+    const proof = 'ab'.repeat(64);
+    const sealWith = (tags: string[][]) => {
+      const rumor = createRumor({ kind: 1014, content: 'x', tags: [] }, senderSk);
+      const key = nip44.getConversationKey(senderSk, recipientPk);
+      const seal = finalizeEvent(
+        { kind: 13, created_at: 1, tags, content: nip44.encrypt(JSON.stringify(rumor), key) },
+        senderSk,
+      );
+      return createWrap(seal, recipientPk) as unknown as WrapArg;
+    };
+    expect(
+      unwrapWrapNsec(sealWith([['invitation_proof', proof]]), recipientSk)?.sealInvitationProof,
+    ).toBe(proof);
+    // Missing, duplicated or malformed: no proof.
+    expect(unwrapWrapNsec(sealWith([]), recipientSk)?.sealInvitationProof).toBeUndefined();
+    expect(
+      unwrapWrapNsec(
+        sealWith([
+          ['invitation_proof', proof],
+          ['invitation_proof', proof],
+        ]),
+        recipientSk,
+      )?.sealInvitationProof,
+    ).toBeUndefined();
+    expect(
+      unwrapWrapNsec(sealWith([['invitation_proof', 'nothex']]), recipientSk)?.sealInvitationProof,
+    ).toBeUndefined();
+  });
 
   it('round-trips a kind-14 rumor (decrypt works without a sig verify)', () => {
     const { wrap, recipientSk, senderPk } = makeWrap('hello piggy');

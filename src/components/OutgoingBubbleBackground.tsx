@@ -12,6 +12,7 @@ export default function OutgoingBubbleBackground({ fromMe }: { fromMe: boolean }
     <LinearGradient
       pointerEvents="none"
       colors={outgoingBubble.gradient}
+      locations={outgoingBubble.locations}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.fill}

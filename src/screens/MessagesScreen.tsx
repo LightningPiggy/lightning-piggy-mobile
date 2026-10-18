@@ -1,4 +1,5 @@
 import { MarmotInvitations } from '../components/MarmotInvitations';
+import { Nip171Invitations } from '../components/Nip171Invitations';
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { useLocale } from '../contexts/LocaleContext';
@@ -52,6 +53,7 @@ import {
 } from '../utils/conversationSummaries';
 import { useStableRowIdentity } from '../utils/stableRowIdentity';
 import { useNonFollowProfiles } from '../hooks/useNonFollowProfiles';
+import { groupPreviewPubkeys } from '../utils/chatMentions';
 import { useAccountDeferredValue } from '../contexts/useAccountState';
 import { EMPTY_DM_INBOX } from '../contexts/dmInboxScope';
 import { useFailedMarmotInvites } from '../hooks/useFailedMarmotInvites';
@@ -400,11 +402,14 @@ const MessagesScreen: React.FC = () => {
   // Single pubkey → ContactInfo lookup for the screen, shared by every
   // row + handler (#245), with non-followed DM senders' kind-0s fetched on
   // demand and layered in (#664). Scoped to the active account — see hook.
+  // Group senders + people mentioned in group previews need names too.
+  const groupPreviewPeople = useMemo(() => groupPreviewPubkeys(groupSummaries), [groupSummaries]);
   const { nonFollowProfiles, contactInfoMap } = useNonFollowProfiles({
     pubkey,
     dmInbox,
     contacts,
     fetchProfilesForPubkeys,
+    extraPubkeys: groupPreviewPeople,
   });
 
   // useDeferredValue lets React deprioritise the (O(n)) summary rebuild when an urgent update — e.g. a tab-bar tap, scroll gesture — comes in during a relay-burst flush. The user's tap renders against the previous dmInbox; the new summary lands on the next idle frame. Keeps the bottom nav snappy when 25 wraps batch-flush via the live-sub queue (queueInboxEntry / flushPendingInbox).
@@ -869,6 +874,7 @@ const MessagesScreen: React.FC = () => {
           </View>
         )}
         {isLoggedIn && <MarmotInvitations />}
+        {isLoggedIn && <Nip171Invitations />}
         {!isLoggedIn ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>{t('messagesScreen.connectNostr')}</Text>

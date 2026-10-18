@@ -1,6 +1,6 @@
 import BrandedSpinner from '../components/BrandedSpinner';
 import { SellerSigningError } from '../utils/sellerSigning';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -56,6 +56,8 @@ const MarketShopShippingScreen: React.FC<Props> = ({ navigation }) => {
   // revisions; a touched one asks before overwriting them.
   const [base, setBase] = useState<ShopBase | null>(null);
   const [dirty, setDirty] = useState(false);
+  // Options start collapsed; one the seller just added opens to be filled in.
+  const added = useRef(new Set<string>());
   const edit = useCallback((update: (prev: ShippingZoneDraft[]) => ShippingZoneDraft[]) => {
     setDirty(true);
     setZones((prev) => (prev ? update(prev) : prev));
@@ -87,10 +89,12 @@ const MarketShopShippingScreen: React.FC<Props> = ({ navigation }) => {
   );
   const onAddZone = useCallback(() => {
     const home = deviceCountryCode();
+    const dTag = newIdentifier('shipping');
+    added.current.add(dTag);
     edit((prev) => [
       ...prev,
       {
-        dTag: newIdentifier('shipping'),
+        dTag,
         name: t('market.sell.zone.defaultName'),
         countries: home ? [home] : [],
         cost: '',
@@ -221,6 +225,7 @@ const MarketShopShippingScreen: React.FC<Props> = ({ navigation }) => {
               onChange={onZoneChange}
               onRemove={onZoneRemove}
               onAddCountry={setPickingZone}
+              initiallyOpen={added.current.has(zone.dTag)}
             />
           ))}
           {zones.length < MAX_SHIPPING_ZONES ? (

@@ -1626,6 +1626,7 @@
     "payInvoiceA11y": "Pagar la factura de este pedido",
     "pay": "Pagar",
     "invoiceExpired": "Esta factura ha caducado",
+    "amountUnverified": "No se puede verificar esta factura con el total del pedido original. Carga el pedido original antes de pagar; si los importes son distintos, pide al vendedor una factura corregida.",
     "hideQrA11y": "Ocultar código QR de la factura",
     "showQrA11y": "Mostrar código QR de la factura",
     "hideQr": "Ocultar QR",
@@ -1634,7 +1635,6 @@
     "copy": "Copiar",
     "qrCodeA11y": "Código QR de la factura Lightning",
     "scanHint": "Escanea con cualquier cartera Lightning",
-    "amountUnverified": "No se puede verificar esta factura con el total del pedido original. Carga el pedido original antes de pagar; si los importes son distintos, pide al vendedor una factura corregida.",
     "receiptUnverified": "No se puede verificar este recibo con tu pedido original. Carga el pedido original para confirmar que se pagó."
   },
   "paymentProgressOverlay": {
@@ -2580,7 +2580,12 @@
         "addCountry": "Añadir país",
         "removeCountry": "Quitar {{country}}",
         "remove": "Quitar opción de envío",
-        "defaultName": "Envío estándar"
+        "defaultName": "Envío estándar",
+        "untitled": "Opción de envío sin nombre",
+        "countryCount": {
+          "one": "{{count}} país",
+          "other": "{{count}} países"
+        }
       },
       "editor": {
         "newTitle": "Vender un artículo",
@@ -3339,6 +3344,7 @@
     "security": "Protocolo y seguridad",
     "mlsSecurity": "Cifrado de extremo a extremo con MLS. Los dispositivos comparten las claves del grupo.",
     "nip17Security": "Mensajes cifrados de extremo a extremo con la identidad del remitente oculta.",
+    "nip171Security": "Grupo con cifrado de extremo a extremo. Los miembros comparten una única clave de grupo y el propietario la cambia cuando alguien sale del grupo.",
     "nip04Security": "Cifrado antiguo. Cambia a NIP-17 para mayor privacidad.",
     "devices": "Dispositivos en este chat",
     "relays": "Relés del grupo",
@@ -3398,6 +3404,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Operador y políticas",
     "runBy": "Administrado por",
+    "tipOperator": "Dale una propina al operador",
+    "tipOperatorLabel": "Envía un zap a {{name}}, quien gestiona este relay",
     "copyUrl": "Copiar URL del relay",
     "terms_of_service": "Términos del servicio",
     "privacy_policy": "Política de privacidad",
@@ -3493,6 +3501,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Dirección Lightning (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "Grupo NIP-171",
+    "full": "Ya alcanzaste el límite de grupos NIP-171. Sal de uno para aceptar esta invitación."
   },
   "marmotInvitation": {
     "pending": "Invitación pendiente",

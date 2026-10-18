@@ -17,6 +17,7 @@ import { useSafeExternalLink } from '../hooks/useSafeExternalLink';
 import { relayExternalLink } from '../utils/relayExternalLink';
 import { shortNpub } from '../utils/shortNpub';
 import ContactProfileSheet from './ContactProfileSheet';
+import RelayOperatorTip from './RelayOperatorTip';
 
 export default function RelayOperatorSection({ info }: { info: RelayInformation }) {
   const t = useTranslation();
@@ -107,6 +108,14 @@ export default function RelayOperatorSection({ info }: { info: RelayInformation 
               {verifiedNip05 && <Text style={styles.value}>{verifiedNip05} ✓</Text>}
             </View>
           </TouchableOpacity>
+          {/* Hidden only once a fresh profile shows no Lightning address. */}
+          {profile?.hasLud16 !== false && (
+            <RelayOperatorTip
+              pubkey={contact.pubkey}
+              name={contact.name}
+              picture={contact.picture}
+            />
+          )}
         </>
       )}
       {links.map((key) => {

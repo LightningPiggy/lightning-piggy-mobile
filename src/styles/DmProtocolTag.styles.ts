@@ -13,4 +13,5 @@ export const createDmProtocolTagStyles = (colors: Palette) =>
     nip17: { color: colors.courseTeal },
     nip04: { color: colors.textSupplementary },
     marmot: { color: colors.brandPink },
+    nip171: { color: colors.brandPurple },
   });

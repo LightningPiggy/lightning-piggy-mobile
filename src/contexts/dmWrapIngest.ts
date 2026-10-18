@@ -1,3 +1,5 @@
+import { isChatReactionKind } from '../utils/nip17Reactions';
+import { placeOwnChatReaction } from './chatReactionPartner';
 import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -21,6 +23,7 @@ import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { loadNip17SkipSet, writeNip17SkipSet } from './nostrDmCache';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
+import { routeNip171Rumor } from './nip171InboxRouting';
 
 // The one NIP-17 inbox-wrap ingest engine (#848). Both refreshDmInbox signer
 // branches (nsec + Amber) and the cold thread-open path in
@@ -53,6 +56,8 @@ export interface InboxWrapIngestParams<W extends IngestableWrap> {
    * (#788) inside the pacing scheduler. */
   isColdStart?: boolean;
   signal?: AbortSignal;
+  /** Checked right before rows are saved (see dmIngest `persistIf`). */
+  persistIf?: () => boolean;
   /** Amber inbox refresh: a PERMISSION_NOT_GRANTED from the silent decrypt
    * path stops further decrypt attempts (one flag, no per-wrap dialog flood)
    * instead of being treated as an ordinary skip. */
@@ -191,6 +196,23 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
           }
           return null;
         }
+        // NIP-171 tickets and group rumors: not 1:1 DMs (nip171InboxRouting).
+        let nip171: boolean;
+        try {
+          nip171 = await routeNip171Rumor(rumor, owner);
+        } catch (e) {
+          // Storing a ticket failed: leave the wrap for the next refresh
+          // rather than stop this run or file it as a 1:1 DM.
+          if (__DEV__) console.warn('[NIP-171] inbox routing failed:', e);
+          return null;
+        }
+        if (nip171) {
+          if (skipKey) {
+            skipSet.add(wrap.id);
+            skipSetDirty = true;
+          }
+          return null;
+        }
         // Multi-recipient group rumors also bypass the DM follow gate.
         const routeResult =
           rumor.kind === 16 || rumor.kind === 17
@@ -209,7 +231,11 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
           }
           return null;
         }
-        const partnership = partnerFromRumor(rumor, owner);
+        const partnership = await placeOwnChatReaction(
+          rumor,
+          owner,
+          partnerFromRumor(rumor, owner),
+        );
         if (!partnership) return null;
         // B1 — free-text non-follows stay gated. Valid bounded orders
         // persist independently for Orders, but Messages keeps the gate. A
@@ -269,7 +295,9 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
         } catch {
           rumorId = undefined;
         }
-        if (showInMessages)
+        // A reaction / retraction is stored for its target's thread but is
+        // never an inbox entry or a bubble (#1321).
+        if (showInMessages && !isChatReactionKind(rumor.kind))
           entries.push({
             id: wrap.id,
             partnerPubkey: partnership.partnerPubkey,
@@ -296,10 +324,13 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
           content: text,
           fromMe: partnership.fromMe,
           wireKind: rumor.kind,
+          // Both directions (#1320): a received message needs it to be reacted
+          // to, and a stored reaction needs it so a kind 5 can retract it.
+          ...(rumorId ? { rumorId } : {}),
         };
       },
       // Pacing is the scheduler above; disable ingestWraps' count-based yield.
-      { yieldEvery: 0, signal },
+      { yieldEvery: 0, signal, persistIf: params.persistIf },
     );
 
     // Completion releases these claims itself; do not release a later retry claim.

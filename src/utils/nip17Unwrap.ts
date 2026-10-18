@@ -5,6 +5,7 @@ import { encodeEncryptedFileUrl } from './encryptedFileUrl';
 import { parseOrderEvent, serializeOrder } from './orderEvents';
 import { POLL_KIND, VOTE_KIND, serializePollFromRumor, serializeVoteFromRumor } from './nip88Poll';
 import { liveMarkerTextForRumor } from '../services/liveLocationWire';
+import { isChatReactionKind, serializeChatReactionRumor } from './nip17Reactions';
 
 /**
  * Shape of a decoded NIP-17 message after two layers of NIP-44 decrypt.
@@ -16,6 +17,13 @@ export interface DecodedRumor {
   kind: number;
   tags: string[][];
   content: string;
+  /** Kept when the inner event is a signed event, as a NIP-171 ticket is
+   * (its signature is the members' invitation proof). Rumors are unsigned. */
+  id?: string;
+  sig?: string;
+  /** The seal's single `invitation_proof` tag: a NIP-171 ticket's signature
+   * travels there (Anagram), the ticket rumor itself stays unsigned. */
+  sealInvitationProof?: string;
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -78,6 +86,8 @@ function parseRumor(raw: string): DecodedRumor | null {
     kind: r.kind as number,
     content: r.content as string,
     tags: r.tags as string[][],
+    ...(typeof r.id === 'string' && HEX64.test(r.id) ? { id: r.id } : {}),
+    ...(typeof r.sig === 'string' && /^[0-9a-f]{128}$/.test(r.sig) ? { sig: r.sig } : {}),
   };
 }
 
@@ -136,13 +146,21 @@ function parseValidSeal(sealJson: string, skip: Skip) {
  * to a *different* pubkey (sender spoofing). Both unwrap paths call this one
  * implementation so they can't drift — the divergence that was gap #830.
  */
-function bindRumor(rumorJson: string, sealPubkey: string, skip: Skip): DecodedRumor | null {
+function bindRumor(
+  rumorJson: string,
+  seal: { pubkey: string; tags: string[][] },
+  skip: Skip,
+): DecodedRumor | null {
   const rumor = parseRumor(rumorJson);
   if (!rumor) return skip('rumor JSON malformed or wrong shape');
-  if (rumor.pubkey !== sealPubkey) {
+  if (rumor.pubkey !== seal.pubkey) {
     return skip(
-      `rumor pubkey ${rumor.pubkey.slice(0, 8)}… != seal pubkey ${sealPubkey.slice(0, 8)}…`,
+      `rumor pubkey ${rumor.pubkey.slice(0, 8)}… != seal pubkey ${seal.pubkey.slice(0, 8)}…`,
     );
+  }
+  const proofs = seal.tags.filter((t) => t[0] === 'invitation_proof');
+  if (proofs.length === 1 && /^[0-9a-f]{128}$/.test(proofs[0][1] ?? '')) {
+    rumor.sealInvitationProof = proofs[0][1];
   }
   return rumor;
 }
@@ -194,7 +212,7 @@ export async function unwrapWrapViaNip44(
     rethrowSignerDenial(error);
     return skip(`seal decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
-  return bindRumor(rumorJson, seal.pubkey, skip);
+  return bindRumor(rumorJson, seal, skip);
 }
 
 /**
@@ -242,7 +260,7 @@ export function unwrapWrapNsec(
   } catch (error) {
     return skip(`seal decrypt failed: ${(error as Error)?.message ?? 'unknown'}`);
   }
-  return bindRumor(rumorJson, seal.pubkey, skip);
+  return bindRumor(rumorJson, seal, skip);
 }
 
 /**
@@ -261,7 +279,13 @@ export function partnerFromRumor(
 ): { partnerPubkey: string; fromMe: boolean } | null {
   const me = viewerPubkey.toLowerCase();
   if (rumor.pubkey === me) {
-    const pTag = rumor.tags.find((t) => t[0] === 'p')?.[1]?.toLowerCase();
+    // The first `p` that isn't us; a lone self `p` is a note to self. A
+    // reaction to our own message tags us (the target's author) before the
+    // peer (#1319), so the first `p` alone would misfile it.
+    const pTags = rumor.tags
+      .filter((t) => t[0] === 'p' && typeof t[1] === 'string')
+      .map((t) => t[1].toLowerCase());
+    const pTag = pTags.find((p) => p !== me) ?? pTags[0];
     if (!pTag || !HEX64.test(pTag)) return null;
     return { partnerPubkey: pTag, fromMe: true };
   }
@@ -418,6 +442,8 @@ export function textForRumor(rumor: DecodedRumor): string {
     const vote = serializeVoteFromRumor(rumor);
     if (vote) return vote;
   }
+  // Wrapped reaction / retraction (#1321): keep the tags that name its target.
+  if (isChatReactionKind(rumor.kind)) return serializeChatReactionRumor(rumor);
   const meta = fileMetaFromRumor(rumor);
   // All supported AES-GCM files use the shared attachment cache and renderer.
   if (meta && meta.algorithm === 'aes-gcm') {

@@ -1,8 +1,10 @@
 const mockSelectKnown = jest.fn();
 const mockUpsert = jest.fn();
+const mockUpsertIf = jest.fn();
 jest.mock('./dmDb', () => ({
   selectKnownEventIds: (...args: unknown[]) => mockSelectKnown(...args),
   upsertDmMessages: (...args: unknown[]) => mockUpsert(...args),
+  upsertDmMessagesIf: (...args: unknown[]) => mockUpsertIf(...args),
 }));
 
 import { ingestWraps, type IngestableWrap } from './dmIngest';
@@ -51,6 +53,21 @@ describe('dmIngest.ingestWraps', () => {
     await ingestWraps(OWNER, [wrap('x'), wrap('y')], decrypt);
     expect(mockUpsert).toHaveBeenCalledTimes(1);
     expect(mockUpsert.mock.calls[0][0].map((r: DmMessageRow) => r.eventId)).toEqual(['x', 'y']);
+  });
+
+  it('saves through the guarded write when persistIf is given', async () => {
+    const decrypt = jest.fn(async (w: IngestableWrap) => rowFor(w.id));
+    // Fails before the write: nothing attempted.
+    await ingestWraps(OWNER, [wrap('x')], decrypt, { persistIf: () => false });
+    expect(mockUpsertIf).not.toHaveBeenCalled();
+    // A wipe landing inside the write transaction: nothing counted.
+    mockUpsertIf.mockResolvedValueOnce(false);
+    const lost = await ingestWraps(OWNER, [wrap('z')], decrypt, { persistIf: () => true });
+    expect(lost.ingested).toBe(0);
+    mockUpsertIf.mockResolvedValueOnce(true);
+    const saved = await ingestWraps(OWNER, [wrap('y')], decrypt, { persistIf: () => true });
+    expect(saved.ingested).toBe(1);
+    expect(mockUpsert).not.toHaveBeenCalled();
   });
 
   it('counts undecryptable wraps (decryptor returns null) and does not store them', async () => {

@@ -2580,7 +2580,12 @@
         "addCountry": "देश जोडा",
         "removeCountry": "{{country}} काढा",
         "remove": "शिपिंग पर्याय काढा",
-        "defaultName": "सामान्य शिपिंग"
+        "defaultName": "सामान्य शिपिंग",
+        "untitled": "नाव नसलेला शिपिंग पर्याय",
+        "countryCount": {
+          "one": "{{count}} देश",
+          "other": "{{count}} देश"
+        }
       },
       "editor": {
         "newTitle": "वस्तू विका",
@@ -3339,6 +3344,7 @@
     "security": "प्रोटोकॉल आणि सुरक्षा",
     "mlsSecurity": "MLS सह एंड-टू-एंड एन्क्रिप्शन. डिव्हाइस ग्रुपच्या की शेअर करतात.",
     "nip17Security": "पाठवणाऱ्याची ओळख लपवून एंड-टू-एंड एन्क्रिप्ट केलेले संदेश.",
+    "nip171Security": "एंड-टू-एंड एन्क्रिप्टेड ग्रुप. सर्व सदस्य एकच ग्रुप की वापरतात आणि कोणी ग्रुप सोडल्यावर मालक ती बदलतो.",
     "nip04Security": "जुने एन्क्रिप्शन. अधिक गोपनीयतेसाठी NIP-17 वापरा.",
     "devices": "या चॅटमधील डिव्हाइस",
     "relays": "ग्रुपचे रिले",
@@ -3398,6 +3404,8 @@
     "milliseconds": "%{count} ms",
     "operator": "संचालक आणि धोरणे",
     "runBy": "संचालक",
+    "tipOperator": "ऑपरेटरला टिप द्या",
+    "tipOperatorLabel": "हा रिले चालवणाऱ्या {{name}} यांना झॅप पाठवा",
     "copyUrl": "रिले URL कॉपी करा",
     "terms_of_service": "सेवेच्या अटी",
     "privacy_policy": "गोपनीयता धोरण",
@@ -3493,6 +3501,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning ॲड्रेस (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "NIP-171 ग्रुप",
+    "full": "तुम्ही सामील होऊ शकता तितक्या NIP-171 ग्रुपमध्ये आधीच आहात. हे आमंत्रण स्वीकारण्यासाठी एक ग्रुप सोडा."
   },
   "marmotInvitation": {
     "pending": "आमंत्रण प्रलंबित",

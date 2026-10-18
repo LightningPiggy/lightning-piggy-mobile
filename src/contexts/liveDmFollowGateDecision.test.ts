@@ -144,3 +144,22 @@ diagnosticTest.each([4, 1059] as const)('logs the exact deferral state for kind 
     log.mockRestore();
   }
 });
+
+it.each([true, false])(
+  'passes a non-followed partner we have replied to (#1623, hydrated=%s)',
+  (hydrated) => {
+    const buffer = createLiveSubFollowGateBuffer();
+    expect(
+      gateLiveDm({
+        entry: { ...entry, wireKind: 14 },
+        kind: 1059,
+        follows: new Set(),
+        hydrated,
+        buffer,
+        fresh: true,
+        replied: true,
+      }),
+    ).toBe('pass');
+    expect(buffer.size).toBe(0);
+  },
+);

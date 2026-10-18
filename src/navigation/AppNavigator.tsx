@@ -388,7 +388,10 @@ export const navigateFromNotification = (
         getActivePubkey() !== owner ||
         generation !== notificationNavGeneration;
       const resolved = data.wrapId
-        ? resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) =>
+        ? resolveWrapConversation(owner, data.wrapId, {
+            shouldStop: cancelled,
+            fetchNow: () => catchUpNotifiedWrap(owner, data.wrapId!),
+          }).then((target) =>
             target
               ? {
                   ...(target.shopOrderId || target.myOrderId || target.conversationPubkey
@@ -434,6 +437,15 @@ export const navigateFromNotification = (
  * onStateChange) rather than per-screen, to avoid growing the over-cap
  * Conversation / GroupConversation screen files (#703).
  */
+/** Fetch and store the message an alert was raised for (#1325). Loaded on
+ * demand so the inbox ingest stays out of the navigator's startup path. */
+function catchUpNotifiedWrap(owner: string, wrapId: string): Promise<void> {
+  const { catchUpWrapById } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep the inbox ingest out of startup.
+    require('../services/backgroundDmIngest') as typeof import('../services/backgroundDmIngest');
+  return catchUpWrapById(owner, wrapId);
+}
+
 function syncActiveThreadFromNav(): void {
   const route = navigationRef.getCurrentRoute();
   if (route?.name === 'Conversation') {

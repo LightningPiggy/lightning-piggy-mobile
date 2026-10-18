@@ -108,7 +108,11 @@ function cancelResume(owner: string) {
   resumeWork.delete(owner);
 }
 
-/** True for any Welcome (including own/malformed ones): never send it to DM storage. */
+/**
+ * True for any Welcome (including own/malformed ones): never send it to DM
+ * storage. `followed` no longer decides anything: every invitation waits for
+ * the user (kept so the ingest paths' calls don't change).
+ */
 export async function routeMarmotWelcome(
   rumor: DecodedRumor,
   owner: string,
@@ -126,7 +130,7 @@ export async function routeMarmotWelcome(
   } catch {
     return true;
   }
-  await controller(owner).receive(wrapId, full, followed, isFresh, replacesContentlessAlert);
+  await controller(owner).receive(wrapId, full, isFresh, replacesContentlessAlert);
   if (shouldAbort()) return true;
   // Do not hold the relay decrypt queue while MLS starts or joins.
   resume(owner);

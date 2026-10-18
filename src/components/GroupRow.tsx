@@ -31,7 +31,7 @@ interface Props {
 }
 
 /** Resolve a friendly display name for a sender pubkey (kind-0 displayName
- * → name → petname → npub-prefix fallback). When a parent has supplied
+ * → name → petname → short npub fallback, never raw hex). When a parent has supplied
  * `contactInfoMap` we read from it (O(1)); otherwise we fall back to a
  * linear scan of `contacts` (legacy path for non-list call sites). */
 function senderName(
@@ -47,7 +47,7 @@ function senderName(
     c?.profile?.displayName?.trim() ||
     c?.profile?.name?.trim() ||
     c?.petname?.trim() ||
-    `${pubkey.slice(0, 8)}…`
+    shortNpub(pubkey)
   );
 }
 

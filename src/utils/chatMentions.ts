@@ -91,6 +91,23 @@ export function previewMentions(
     .join('');
 }
 
+/**
+ * People a Messages-list group row may need a name for: each row's last
+ * sender and everyone mentioned in its last message (deduped, lowercase).
+ * Without these, a mention of someone the viewer doesn't follow previews as a
+ * bare key.
+ */
+export function groupPreviewPubkeys(
+  rows: readonly { activity: { lastSenderPubkey?: string | null; lastText?: string | null } }[],
+): string[] {
+  const out = new Set<string>();
+  for (const { activity } of rows) {
+    if (activity.lastSenderPubkey) out.add(activity.lastSenderPubkey.toLowerCase());
+    for (const pk of mentionedPubkeys(activity.lastText ?? '')) out.add(pk.toLowerCase());
+  }
+  return [...out];
+}
+
 // ---------------------------------------------------------------------------
 // Composer side
 // ---------------------------------------------------------------------------

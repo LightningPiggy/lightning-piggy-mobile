@@ -86,7 +86,7 @@ interface ActionedMessage {
   authorPubkey: string;
   fromMe: boolean;
   // kind-14 (NIP-17 chat) or kind-4 (NIP-04 DM); goes in the kind-7 `k` tag.
-  targetKind: 14 | 4;
+  targetKind: 14 | 15 | 4;
   // Plain chat text or a sanitized attachment filename, offered as "Copy text".
   // Never expose stored encryption keys or structured payloads.
   copyText?: string;
@@ -545,7 +545,9 @@ export function useConversationReactions({
           ? myPubkey
           : peerPubkey;
       if (!authorPubkey) return null;
-      const targetKind: 14 | 4 = item.kind === 'message' && item.wireKind === 4 ? 4 : 14;
+      // NIP-25 `k`: the target's kind (kind-15 files included).
+      const wireKind = item.kind === 'message' ? item.wireKind : undefined;
+      const targetKind: 14 | 15 | 4 = wireKind === 4 ? 4 : wireKind === 15 ? 15 : 14;
       const text = item.kind === 'message' ? (item.text ?? '') : '';
       const file = item.kind === 'message' ? item.file : undefined;
       const copyText =

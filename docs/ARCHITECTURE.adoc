@@ -244,7 +244,7 @@ full wire formats.
 | 3 | Contact list (follows) | `nostrService.ts`, `NostrContext.tsx`
 | 4 | NIP-04 legacy encrypted DM | inbox fetch stores `wire_kind=4`
 | 5 | NIP-09 deletion | your own listings, shipping options, comments, reviews and reaction retractions; others' deletions are honoured when reading (`utils/nip09.ts`)
-| 7 | NIP-25 reaction | DM reactions (`utils/reactions.ts`, `nostrReactions.ts`)
+| 7 | NIP-25 reaction | Chat reactions: gift-wrapped rumors in NIP-17 chats (`utils/nip17Reactions.ts`, `services/nip17ReactionSource.ts`), public in NIP-04 chats and for Market likes (`utils/reactions.ts`, `nostrReactions.ts`)
 | 13 | NIP-59 seal (inner layer of a gift wrap) | `nostrService.ts` wrap builders
 | 14 | NIP-17 chat rumor (1:1 + group) | `nostrService.ts` (`buildChatRumor` / `buildGroupMessageRumor`)
 | 16 / 17 | Gamma Markets order messages (order, payment request, status, shipping) / payment receipt | `utils/marketOrder.ts`, `utils/orderEvents.ts`

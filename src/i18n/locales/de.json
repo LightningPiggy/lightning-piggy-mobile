@@ -2580,7 +2580,12 @@
         "addCountry": "Land hinzufügen",
         "removeCountry": "{{country}} entfernen",
         "remove": "Versandoption entfernen",
-        "defaultName": "Standardversand"
+        "defaultName": "Standardversand",
+        "untitled": "Unbenannte Versandoption",
+        "countryCount": {
+          "one": "{{count}} Land",
+          "other": "{{count}} Länder"
+        }
       },
       "editor": {
         "newTitle": "Produkt verkaufen",
@@ -3339,6 +3344,7 @@
     "security": "Protokoll und Sicherheit",
     "mlsSecurity": "Ende-zu-Ende-Verschlüsselung mit MLS. Geräte teilen die Gruppenschlüssel.",
     "nip17Security": "Ende-zu-Ende-verschlüsselte Nachrichten mit verborgener Absenderidentität.",
+    "nip171Security": "Ende-zu-Ende-verschlüsselte Gruppe. Alle Mitglieder teilen sich einen Gruppenschlüssel. Der Gruppeninhaber ändert ihn, wenn jemand die Gruppe verlässt.",
     "nip04Security": "Veraltete Verschlüsselung. Wechsle für mehr Privatsphäre zu NIP-17.",
     "devices": "Geräte in diesem Chat",
     "relays": "Gruppen-Relays",
@@ -3398,6 +3404,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Betreiber und Richtlinien",
     "runBy": "Betrieben von",
+    "tipOperator": "Dem Betreiber Trinkgeld geben",
+    "tipOperatorLabel": "Sende einen Zap an {{name}}, der dieses Relay betreibt",
     "copyUrl": "Relay-URL kopieren",
     "terms_of_service": "Nutzungsbedingungen",
     "privacy_policy": "Datenschutzrichtlinie",
@@ -3493,6 +3501,10 @@
     "websiteHost": "lightningpiggy.com",
     "licenceType": "MIT",
     "lightningAddress": "Lightning-Adresse (LUD-16)"
+  },
+  "nip171Invitation": {
+    "group": "NIP-171-Gruppe",
+    "full": "Du hast die maximale Anzahl an NIP-171-Gruppen erreicht. Verlasse eine, um diese Einladung anzunehmen."
   },
   "marmotInvitation": {
     "pending": "Einladung ausstehend",
