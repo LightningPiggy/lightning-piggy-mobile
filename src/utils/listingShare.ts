@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 // Sharing a Market listing (#1541) — pure helpers, no I/O.
 //
 // Both share paths carry the listing as a NIP-21 `nostr:naddr1…` reference
@@ -28,7 +29,7 @@ export function listingNaddr(event: Pick<Event, 'kind' | 'pubkey' | 'tags'>): st
       kind: event.kind,
       pubkey: event.pubkey,
       identifier,
-      relays: MARKET_RELAYS,
+      relays: enabledAppRelays('market', MARKET_RELAYS),
     });
   } catch {
     // An identifier over 255 bytes can't be TLV-encoded.
@@ -50,35 +51,38 @@ export function listingShareContent(
   return { message: label && !SHARE_LINE.test(label) ? `${label}\n${uri}` : uri, uri };
 }
 
-/**
- * A shared listing in a DM: a line that is only a `nostr:naddr1…` reference
- * to a kind-30402 listing. A reference inside a sentence stays text.
- */
+/** Standalone references and a listing at the end of a message become cards.
+ * Inline references followed by prose stay text. Never discard sender text. */
 export function extractSharedListing(text: string): AddressRef | null {
-  if (!text || !text.includes('naddr1')) return null;
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (!SHARE_LINE.test(line)) continue;
-    const ref = decodeNostrEntity(line);
-    if (ref?.type === 'address' && ref.kind === LISTING_KIND) return ref;
-  }
-  return null;
+  return (
+    sharedListingParts(text).find((part): part is AddressRef => typeof part !== 'string') ?? null
+  );
 }
 
-/** Preserve all sender text and listing references in their original order. */
 export function sharedListingParts(text: string): (string | AddressRef)[] {
+  if (!text?.includes('naddr1')) return [text];
   const parts: (string | AddressRef)[] = [];
-  let lines: string[] = [];
-  for (const line of text.split('\n')) {
-    const ref = extractSharedListing(line);
-    if (ref) {
-      if (lines.length) parts.push(lines.join('\n'));
-      lines = [];
-      parts.push(ref);
-    } else {
-      lines.push(line);
-    }
+  const pattern = /nostr:naddr1[0-9a-z]+/g;
+  let start = 0;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index!;
+    const end = index + match[0].length;
+    const before = text.slice(text.lastIndexOf('\n', index - 1) + 1, index);
+    const after = text.slice(
+      end,
+      text.indexOf('\n', end) < 0 ? text.length : text.indexOf('\n', end),
+    );
+    const standalone = !before.trim() && !after.trim();
+    const trailing = (index === 0 || /\s/.test(text[index - 1])) && !text.slice(end).trim();
+    if (!standalone && !trailing) continue;
+    const ref = decodeNostrEntity(match[0]);
+    if (ref?.type !== 'address' || ref.kind !== LISTING_KIND) continue;
+    const label = text.slice(start, index).trim();
+    if (label) parts.push(label);
+    parts.push(ref);
+    start = end;
   }
-  if (lines.length) parts.push(lines.join('\n'));
+  const rest = text.slice(start);
+  if (rest.trim()) parts.push(start ? rest.trim() : rest);
   return parts;
 }

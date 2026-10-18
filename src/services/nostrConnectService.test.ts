@@ -9,6 +9,7 @@ import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
  */
 import type { Nip46Connection } from '../types/nostr';
 
+import { NIP46_PERMS } from './signerPermissions';
 import * as svc from './nostrConnectService';
 import { NostrConnectError } from './signerErrors';
 import { isTransientKind4Error } from '../contexts/kind4RetryStore';
@@ -17,6 +18,7 @@ jest.mock('./nostrPool', () => ({ pool: {} }));
 
 const mockSigner = {
   connect: jest.fn(),
+  sendRequest: jest.fn(),
   getPublicKey: jest.fn(),
   signEvent: jest.fn(),
   nip04Encrypt: jest.fn(),
@@ -43,6 +45,7 @@ jest.mock('nostr-tools/nip46', () => ({
 }));
 
 jest.mock('@noble/hashes/utils.js', () => ({
+  ...jest.requireActual('@noble/hashes/utils.js'),
   hexToBytes: jest.fn(() => new Uint8Array([1, 2, 3, 4])),
   bytesToHex: jest.fn((b: Uint8Array) =>
     Array.from(b, (x) => x.toString(16).padStart(2, '0')).join(''),
@@ -65,6 +68,7 @@ beforeEach(async () => {
   await svc.setActiveConnection(null);
   jest.clearAllMocks();
   mockSigner.connect.mockResolvedValue(undefined);
+  mockSigner.sendRequest.mockResolvedValue('ack');
   mockSigner.getPublicKey.mockResolvedValue('userpubkeyhex');
   mockSigner.signEvent.mockResolvedValue({
     id: 'eventid',
@@ -85,6 +89,21 @@ beforeEach(async () => {
 });
 
 describe('buildPairingUri', () => {
+  it('URL-encodes explicit relay-login permission using the real nostr-tools builder', () => {
+    mockCreateNostrConnectURI.mockImplementationOnce(
+      jest.requireActual('nostr-tools/nip46').createNostrConnectURI,
+    );
+    const uri = svc.buildPairingUri({
+      clientPubkey: 'clientpub',
+      relays: ['wss://relay.example'],
+      secret: 'deadbeef',
+      perms: NIP46_PERMS,
+      name: 'Lightning Piggy',
+    });
+    expect(uri).toContain('sign_event%3A22242');
+    expect(new URL(uri).searchParams.get('perms')).toBe(NIP46_PERMS.join(','));
+  });
+
   it('delegates to mockCreateNostrConnectURI with every pairing relay', () => {
     const uri = svc.buildPairingUri({
       clientPubkey: 'clientpub',
@@ -136,6 +155,23 @@ describe('setActiveConnection / getActiveConnection', () => {
 });
 
 describe('getSigner (via requestPublicKey)', () => {
+  it('sends the new pairing permissions in the bunker connect request', async () => {
+    await svc.setActiveConnection(conn({ perms: NIP46_PERMS.join(',') }));
+    await svc.requestPublicKey();
+    expect(mockSigner.sendRequest).toHaveBeenCalledWith('connect', [
+      'bunkerpubkeyhex',
+      '',
+      NIP46_PERMS.join(','),
+    ]);
+  });
+
+  it('keeps a legacy pairing without saved permissions unchanged', async () => {
+    await svc.setActiveConnection(conn({ perms: '' }));
+    await svc.requestPublicKey();
+    expect(mockSigner.connect).toHaveBeenCalledTimes(1);
+    expect(mockSigner.sendRequest).not.toHaveBeenCalled();
+  });
+
   it('throws when no connection is set', async () => {
     await expect(svc.requestPublicKey()).rejects.toThrow('NIP-46 signer not connected');
   });
@@ -145,11 +181,16 @@ describe('getSigner (via requestPublicKey)', () => {
     await svc.requestPublicKey();
     await svc.requestPublicKey();
     expect(mockFromBunker).toHaveBeenCalledTimes(1);
-    expect(mockSigner.connect).toHaveBeenCalledTimes(1);
+    expect(mockSigner.sendRequest).toHaveBeenCalledTimes(1);
+    expect(mockSigner.sendRequest).toHaveBeenCalledWith('connect', [
+      'bunkerpubkeyhex',
+      '',
+      conn().perms,
+    ]);
   });
 
   it('wraps a connect() failure in a clear error', async () => {
-    mockSigner.connect.mockRejectedValueOnce(new Error('relay down'));
+    mockSigner.sendRequest.mockRejectedValueOnce(new Error('relay down'));
     await svc.setActiveConnection(conn());
     await expect(svc.requestPublicKey()).rejects.toThrow(
       'NIP-46 signer could not connect: relay down',
@@ -236,18 +277,21 @@ describe('requestNip44DecryptSilent', () => {
 
 describe('awaitBunkerPair', () => {
   it('builds the URI, resolves the user pubkey, and returns a persistable connection', async () => {
+    mockCreateNostrConnectURI.mockImplementationOnce(
+      jest.requireActual('nostr-tools/nip46').createNostrConnectURI,
+    );
     const result = await svc.awaitBunkerPair({
       clientSecretKey: new Uint8Array([1, 2, 3, 4]),
       clientPubkey: 'clientpub',
       relays: ['wss://relay.example'],
       secret: 'deadbeef',
-      perms: ['sign_event', 'nip44_decrypt'],
+      perms: NIP46_PERMS,
       name: 'Lightning Piggy',
       maxWaitSeconds: 60,
     });
     expect(mockFromURI).toHaveBeenCalledWith(
       new Uint8Array([1, 2, 3, 4]),
-      'nostrconnect://mock-uri',
+      expect.stringContaining('sign_event%3A22242'),
       { pool: {} },
       60_000,
     );
@@ -257,7 +301,7 @@ describe('awaitBunkerPair', () => {
       userPubkey: 'userpubkeyhex',
       relays: ['wss://relay.example'],
       clientSecretKeyHex: '01020304',
-      perms: 'sign_event,nip44_decrypt',
+      perms: NIP46_PERMS.join(','),
     });
     // Copilot #1: awaitBunkerPair does NOT mutate module globals — the caller
     // adopts the live signer explicitly after it has committed to the login.
@@ -301,7 +345,7 @@ it.each([
 
 it('discards a signer that finishes connecting after lockdown begins', async () => {
   let finish!: () => void;
-  mockSigner.connect.mockImplementationOnce(
+  mockSigner.sendRequest.mockImplementationOnce(
     () =>
       new Promise<void>((resolve) => {
         finish = resolve;

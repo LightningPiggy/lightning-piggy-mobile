@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { DEFAULT_RELAYS, pool } from './nostrService';
@@ -46,7 +47,7 @@ export interface FindLogZap {
 export const subscribeFindLogZaps = (
   logIds: string[],
   onZap: (zap: FindLogZap) => void,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = enabledAppRelays('default', DEFAULT_RELAYS),
 ): (() => void) => {
   if (logIds.length === 0) return () => {};
   const filter: Filter = { kinds: [9735], '#e': logIds };

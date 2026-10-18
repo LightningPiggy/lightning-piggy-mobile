@@ -3,6 +3,7 @@
 // who is on how many devices, which app each one is, and draws the alpha
 // "joined on N devices" notice locally from the commit. WebCrypto removed
 // (Hermes has none), like the other session tests.
+import { DM_DEVICE_SYNC_COOLDOWN_MS } from './marmotDmDeviceSync';
 import { MARMOT_GROUP_ID_PREFIX } from './marmotSession';
 import {
   makeInstall,
@@ -11,6 +12,7 @@ import {
   makeSigner,
   unwrapWelcomes,
   waitFor,
+  waitForSettled,
 } from './marmotSessionTestKit';
 
 const mlsId = (appGroupId: string) => appGroupId.slice(MARMOT_GROUP_ID_PREFIX.length);
@@ -105,5 +107,71 @@ describe('MarmotSession devices per person (no WebCrypto)', () => {
     expect(relay.requests.length).toBe(requests);
 
     [big, phone, tablet].forEach((p) => p.session.stop());
+  }, 90_000);
+
+  it('resolves our two new devices from their published tags after a peer adds them', async () => {
+    const relay = makeRelay();
+    const big = makeSession(relay);
+    const phone = makeSession(relay);
+    const tablet = makeInstall(relay, phone);
+    const desktop = makeInstall(relay, phone);
+    const installs = [big, phone, tablet, desktop];
+    try {
+      await Promise.all([big, phone].map((p) => p.session.start()));
+      await waitFor(() => relay.events.filter((e) => e.kind === 30443).length >= 2);
+      const dm = await big.session.getOrCreateDm(phone.pubkey);
+      await phone.session.acceptWelcome(unwrapWelcomes(relay, phone)[0]);
+      const id = mlsId(dm.id);
+      await waitForSettled(big.session, dm.id);
+      await Promise.all([tablet, desktop].map((p) => p.session.start()));
+      await waitFor(
+        () =>
+          new Set(
+            relay.events
+              .filter((e) => e.kind === 30443 && e.pubkey === phone.pubkey)
+              .map((e) => e.tags.find((t) => t[0] === 'd')?.[1]),
+          ).size === 3,
+      );
+      // Only Big holds the invitation keys when the Add commit is sent.
+      const now = Date.now();
+      const clock = jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(now + DM_DEVICE_SYNC_COOLDOWN_MS + 1_000);
+      try {
+        await big.session.syncDmDevices(dm.id, 'send');
+      } finally {
+        clock.mockRestore();
+      }
+      await waitFor(() => phone.session.devices.counts(id)?.get(phone.pubkey) === 3);
+      await phone.session.devices.devices(id); // drain the observation write
+      const before = await phone.session.devices.notices(id);
+      expect(before).toEqual([
+        expect.objectContaining({
+          pubkey: phone.pubkey,
+          joined: false,
+          clients: [null, null],
+        }),
+      ]);
+      const bigNotice = (await big.session.devices.notices(id)).find((n) => !n.joined);
+      expect(bigNotice?.clients).toEqual(['Lightning Piggy', 'Lightning Piggy']);
+      const published = relay.events.length;
+      const stored = await phone.backend.get('deviceNotices', id);
+      const changed = jest.fn();
+      phone.session.devices.subscribe(changed);
+      // The notice surface must request the same read-only lookup as the sheet.
+      expect(await phone.session.devices.resolveClients(id)).toBe(true);
+      const after = await phone.session.devices.notices(id);
+      expect(after).toEqual([
+        {
+          ...before[0],
+          clients: ['Lightning Piggy', 'Lightning Piggy'],
+        },
+      ]);
+      expect(changed).toHaveBeenCalledWith(id);
+      expect(await phone.backend.get('deviceNotices', id)).toBe(stored);
+      expect(relay.events).toHaveLength(published);
+    } finally {
+      installs.forEach((p) => p.session.stop());
+    }
   }, 90_000);
 });

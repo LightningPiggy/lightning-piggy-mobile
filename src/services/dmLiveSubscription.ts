@@ -7,8 +7,7 @@ import { pool, trackRelays, DM_INBOX_LIMIT, type RawInboxDmEvent } from './nostr
 const DM_LIVE_SUB_MAX_LOOKBACK_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
 /**
- * Long-lived kind-4 (NIP-04) + kind-1059 (NIP-17 gift wrap) + kind-16/17
- * (plaintext marketplace order/receipt) inbox subscription for the current
+ * Long-lived kind-4 (NIP-04) + kind-1059 (NIP-17 gift wrap) inbox subscription for the current
  * viewer (#349). Returns a cleanup function.
  *
  * All filters share one REQ per relay so small relay budgets cannot starve
@@ -43,8 +42,8 @@ export function subscribeInboxDmsForViewer(input: {
   onWrapsClose?: (reasons: string[]) => void;
   // Native-engine mode (Stage 2 M2 of #1036): the rust-nostr pool owns the
   // kind-1059 filter, so the JS pool must not open a competing wrap sub —
-  // only kind-4 and the kind-16/17 order stream. `onWrapsClose` then rides
-  // combined kind-4/order sub: it is the remaining JS stream, and the
+  // only kind-4. `onWrapsClose` then rides
+  // kind-4 sub: it is the remaining JS stream, and the
   // self-re-arm (#934/#958) must keep working for it (the engine reconnects
   // its own sockets independently).
   skipWraps?: boolean;
@@ -70,12 +69,6 @@ export function subscribeInboxDmsForViewer(input: {
     ...(!input.skipWraps
       ? [{ kinds: [1059], '#p': [input.viewerPubkey], limit: input.wrapsLimit ?? DM_INBOX_LIMIT }]
       : []),
-    {
-      kinds: [16, 17],
-      '#p': [input.viewerPubkey],
-      since: lookbackFloor,
-      limit: DM_INBOX_LIMIT,
-    },
   ];
   let eosed = false;
   const sub = pool.subscribeMap(

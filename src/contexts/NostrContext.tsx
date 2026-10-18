@@ -1,9 +1,11 @@
+import { useAppNetworkRelays } from '../hooks/useAppNetworkRelays';
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useActiveNostrAccount } from './useActiveNostrAccount';
 import { useFollowHydration } from './useFollowHydration';
 import { reconcileCachedContactFollows } from './reconcileContactFollows';
 import { buildFollowSet } from '../utils/followPubkeys';
 import { readFollowSnapshot } from '../services/contactFollowFreshness';
-import { signAccountEvent } from '../services/signAccountEvent';
+import { useRelayAuthSigner } from './useRelayAuthSigner';
 import React, {
   createContext,
   useContext,
@@ -26,7 +28,7 @@ import {
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import type { NostrProfile, NostrContact, RelayConfig, SignerType, Nip46Connection } from '../types/nostr'; // prettier-ignore
-import { getUserRelays, setUserRelays, mergeRelays } from '../services/nostrRelayStorage';
+import { getUserRelays, setUserRelays } from '../services/nostrRelayStorage';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
   loadIdentities,
@@ -305,12 +307,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  // `nip65Relays` mirrors the user's published kind-10002 list (or the
-  // last cached snapshot of it). `userRelays` are explicit in-app
-  // overrides persisted to AsyncStorage by the Nostr settings screen
-  // (#202). The exposed `relays` memo is the merge — defaults +
-  // NIP-65 + user overrides — so every existing read/write filter
-  // call site picks up user-added relays without further plumbing.
+  // App defaults are per-account; personal NIP-65 and device choices keep precedence.
   const {
     nip65Relays,
     dmInboxRelays,
@@ -321,12 +318,9 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     applyPublishedRelayList,
   } = useNip65Relays();
   const [userRelays, setUserRelaysState] = useState<RelayConfig[]>([]);
-  const relays = useMemo(
-    () => mergeRelays({ nip65: nip65Relays, user: userRelays }),
-    [nip65Relays, userRelays],
-  );
+  const [pubkey, setPubkey] = useActiveNostrAccount(loadRelays);
+  const relays = useAppNetworkRelays(pubkey, nip65Relays, userRelays);
   const [signerType, setSignerType] = useState<SignerType | null>(null);
-  const [pubkey, setPubkey] = useActiveNostrAccount();
   const [profile, setProfile, profileSetterFor] = useAccountState<NostrProfile | null>(
     pubkey,
     null,
@@ -401,7 +395,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const getReadRelays = useCallback((): string[] => {
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const base = readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
+    const base =
+      readRelays.length > 0 ? readRelays : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
     // Others deliver NIP-17 DMs to the user's own DM inbox relays — read them too.
     return [...new Set([...base, ...dmInboxRelays])];
   }, [relays, dmInboxRelays]);
@@ -788,7 +783,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const COLD_START_GRACE_MS = 1500;
         setTimeout(() => {
           InteractionManager.runAfterInteractions(async () => {
-            let workingRelays: string[] = nostrService.DEFAULT_RELAYS;
+            let workingRelays: string[] = enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
             // Ignore the timestamp here — even a stale cached relay list is
             // better than DEFAULT_RELAYS for reaching user-only relays.
             const { value: cachedRelays } = await readCachedWithTtl<RelayConfig[]>(
@@ -1265,7 +1260,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       try {
         const event = nostrService.createProfileEvent(profileData);
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-        const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
+        const targetRelays =
+          writeRelays.length > 0
+            ? writeRelays
+            : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
@@ -1357,11 +1355,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     relays,
   });
 
-  const signEvent = useCallback(
-    (event: Parameters<typeof signAccountEvent>[0]) =>
-      signAccountEvent(event, { pubkey, isLoggedIn, signerType }),
-    [pubkey, isLoggedIn, signerType],
-  );
+  const signEvent = useRelayAuthSigner(pubkey, isLoggedIn, signerType, nip65Relays, dmInboxRelays);
 
   const signZapRequest = useCallback(
     async (

@@ -1,3 +1,4 @@
+import { CHAT_CARD_MAX_WIDTH } from './chatCardWidth';
 import { StyleSheet } from 'react-native';
 import type { Palette } from '../styles/palettes';
 
@@ -5,7 +6,7 @@ import type { Palette } from '../styles/palettes';
 // screen file under the #703 size cap. Themed via the active Palette.
 export type ConversationStyles = ReturnType<typeof createConversationScreenStyles>;
 
-export const createConversationScreenStyles = (colors: Palette) =>
+export const createConversationScreenStyles = (colors: Palette, cardWidth = CHAT_CARD_MAX_WIDTH) =>
   StyleSheet.create({
     container: {
       flex: 1,
@@ -125,8 +126,7 @@ export const createConversationScreenStyles = (colors: Palette) =>
     zapCard: {
       flexDirection: 'row',
       alignItems: 'center',
-      maxWidth: '85%',
-      minWidth: 240,
+      width: cardWidth,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,
@@ -190,67 +190,8 @@ export const createConversationScreenStyles = (colors: Palette) =>
     zapCardCommentMe: {
       color: colors.white,
     },
-    // Marketplace order / receipt card (#market) — a structured card for a
-    // kind-16/17 event, distinct from a chat bubble. Accent uses the bitcoin
-    // orange to read as transactional.
-    orderRow: {
-      flexDirection: 'row',
-      marginVertical: 4,
-    },
-    orderRowLeft: { justifyContent: 'flex-start' },
-    orderRowRight: { justifyContent: 'flex-end' },
-    orderCard: {
-      maxWidth: '85%',
-      minWidth: 220,
-      paddingVertical: 12,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      backgroundColor: colors.surface,
-      borderColor: colors.bitcoinOrange,
-      borderLeftWidth: 4,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.05,
-      shadowRadius: 2,
-      elevation: 1,
-    },
-    orderCardHeaderRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    orderCardEmoji: {
-      fontSize: 16,
-    },
-    orderCardLabel: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-    },
-    orderCardId: {
-      fontSize: 13,
-      color: colors.textBody,
-      marginTop: 6,
-    },
-    orderCardAmount: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginTop: 2,
-    },
-    orderCardMeta: {
-      fontSize: 13,
-      color: colors.textBody,
-      marginTop: 2,
-    },
-    orderCardMessage: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 6,
-    },
+    // Marketplace order / receipt card styles moved to
+    // ConversationOrderCard.styles.ts with the card itself.
     // composer + composerInput + composerSendButton + composerAttachButton
     // moved to ConversationComposer (#251) — kept in sync with the group
     // screen via that shared component.

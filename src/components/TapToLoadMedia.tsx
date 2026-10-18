@@ -1,7 +1,7 @@
 import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
 import React, { useMemo } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
-import { ImageIcon, Link2 } from 'lucide-react-native';
+import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ImageIcon, Link2, Link2Off } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { createTapToLoadMediaStyles } from '../styles/TapToLoadMedia.styles';
@@ -25,30 +25,50 @@ interface Props {
   /** Omit when a parent touchable owns the tap (the image bubble does, so a
    *  long-press still reaches the message menu). */
   onPress?: () => void;
+  /** Match the image geometry supplied by the containing chat bubble. */
+  style?: StyleProp<ViewStyle>;
 }
 
 /**
  * Placeholder for chat media that didn't auto-load because the sender isn't
  * someone the reader follows (#1338). Nothing is fetched until it's tapped.
  */
-const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress }) => {
+const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress, style }) => {
   const colors = useThemeColors();
   const { t } = useLocale();
   const styles = useMemo(() => createTapToLoadMediaStyles(colors, fromMe), [colors, fromMe]);
   const host = displayHost(url);
+  // White only on the preview card, which sits on our pink bubble.
   const iconColor = fromMe ? colors.white : colors.brandPink;
+  const onLightBox = variant !== 'preview';
 
   if (!checkRemoteUrl(url, { kind: variant === 'preview' ? 'preview' : 'media' }).ok) {
     return (
-      <View style={styles.textCol} testID={testID}>
-        <Text style={styles.label}>{t('messageBubble.blockedLink')}</Text>
+      <View
+        style={[
+          variant === 'image'
+            ? styles.imageBox
+            : variant === 'thumb'
+              ? styles.thumbBox
+              : styles.textCol,
+          style,
+          onLightBox && styles.boxTint,
+        ]}
+        testID={testID}
+      >
+        {onLightBox ? (
+          <Link2Off size={variant === 'thumb' ? 20 : 28} color={colors.brandPink} />
+        ) : null}
+        <Text style={onLightBox ? styles.boxLabel : styles.label}>
+          {t('messageBubble.blockedLink')}
+        </Text>
       </View>
     );
   }
 
   if (variant === 'thumb') {
     return (
-      <View style={styles.thumbBox} testID={testID}>
+      <View style={[styles.thumbBox, styles.boxTint]} testID={testID}>
         <ImageIcon size={20} color={colors.brandPink} />
         <Text style={styles.thumbLabel} numberOfLines={2}>
           {t('messageBubble.tapToLoadImage')}
@@ -59,12 +79,12 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
 
   if (variant === 'image') {
     return (
-      <View style={styles.imageBox} testID={testID}>
-        <ImageIcon size={28} color={iconColor} />
-        <Text style={[styles.label, styles.labelCentered]}>
+      <View style={[styles.imageBox, style, styles.boxTint]} testID={testID}>
+        <ImageIcon size={28} color={colors.brandPink} />
+        <Text style={[styles.boxLabel, styles.labelCentered]}>
           {t('messageBubble.tapToLoadImage')}
         </Text>
-        <Text style={[styles.host, styles.labelCentered]} numberOfLines={1}>
+        <Text style={[styles.boxHost, styles.labelCentered]} numberOfLines={1}>
           {t('messageBubble.loadsFrom', { host })}
         </Text>
       </View>

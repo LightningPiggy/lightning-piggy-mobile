@@ -1,3 +1,4 @@
+import { CHAT_CARD_MAX_WIDTH } from './chatCardWidth';
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
@@ -6,12 +7,10 @@ import type { Palette } from './palettes';
  * "Shared" copy. Presentation only — extracted per the repo convention that
  * every component's StyleSheet lives in its own `src/styles/<Name>.styles.ts`.
  */
-export const createNwcShareCardStyles = (colors: Palette) =>
+export const createNwcShareCardStyles = (colors: Palette, cardWidth = CHAT_CARD_MAX_WIDTH) =>
   StyleSheet.create({
     row: {
-      paddingHorizontal: 12,
       paddingVertical: 4,
-      maxWidth: '86%',
     },
     rowLeft: {
       alignSelf: 'flex-start',
@@ -20,6 +19,7 @@ export const createNwcShareCardStyles = (colors: Palette) =>
       alignSelf: 'flex-end',
     },
     card: {
+      width: cardWidth,
       backgroundColor: colors.surface,
       borderRadius: 16,
       borderWidth: 1,

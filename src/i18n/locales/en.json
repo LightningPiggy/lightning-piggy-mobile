@@ -280,6 +280,14 @@
     "shareTitle": "Share {{name}}",
     "shareSubtitle": "They'll receive an encrypted Nostr DM with a person card."
   },
+  "geocacheRail": {
+    "nearest": "Nearest Piglets",
+    "empty": "No Piglets nearby yet",
+    "hide": "Hide a Piglet",
+    "error": "Couldn’t load nearby Piglets.",
+    "retry": "Retry",
+    "hidden": "Some nearby caches are hidden by your trust filter."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} — see all",
     "seeAll": "See all"
@@ -627,6 +635,7 @@
   "imageGallery": {
     "open": "Open image",
     "position": "Image {{current}} of {{total}}",
+    "showImage": "Show image {{current}} of {{total}}",
     "openHint": "Opens the image full screen"
   },
   "gifPickerSheet": {
@@ -1304,10 +1313,12 @@
     "unknownSender": "Someone",
     "file": "File",
     "fileBytes": "{{size}} bytes",
-    "fileShare": "Save / Share",
+    "fileShare": "Share",
     "filePreparing": "Preparing file…",
     "fileUnavailable": "File unavailable",
     "fileShareFailed": "Could not prepare or share this file. Try again.",
+    "filePlainUrl": "Not end-to-end encrypted · Unverified",
+    "fileUploadLimit": "Choose files up to 16 MB.",
     "devFiles": "Dev files",
     "devFilesA11y": "Seed a dev file conversation",
     "fileSave": "Save",
@@ -1317,7 +1328,13 @@
     "fileTypeMismatch": "Filename does not match the declared type: {{type}}",
     "blockedLink": "Blocked link",
     "invalidUpload": "The storage server returned an invalid media URL. Please try another server.",
-    "uploadFailedAllServers": "Couldn't upload to any storage server. Check your connection and try again, or add another storage server in Settings."
+    "uploadFailedAllServers": "Couldn't upload to any storage server. Check your connection and try again, or add another storage server in Settings.",
+    "fileLabelText": "Text",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Video",
+    "fileSaveLabel": "Save %{filename}",
+    "fileShareLabel": "Share %{filename}",
+    "fileSaved": "Saved to %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Edited",
@@ -1560,6 +1577,10 @@
     "failedToRemoveRelay": "Failed to remove relay.",
     "geoCacheRelays": "Geo-cache relays",
     "geoCacheRelaysHint": "Dedicated relays for Piglets and other geo-caches (NIP-GC). These mirror what the treasures.to web app reads and searches, so your Piglets stay discoverable on the web. They’re always used for geo-cache publishing and reading, in addition to any relays you add above.",
+    "marmotRelays": "Group messaging relays (Marmot)",
+    "marmotRelaysHint": "Well-known relays for Marmot group messaging, shared with White Noise. Your invitation keys (key packages) are published here and to your own relays, so people can start an encrypted group chat with you even if your relays are offline. Advertised in your key-package relay list (kind 10051).",
+    "marketRelays": "Marketplace relays (Gamma)",
+    "marketRelaysHint": "Relays Lightning Piggy reads Market listings from and publishes your shop listings to, shared with other Gamma Markets apps (Plebeian, Conduit, Shopstr).",
     "encryptedMessages": "Encrypted Messages (NIP-17)",
     "amberPermissionHint": "Amber hasn’t granted NIP-44 decrypt permission to this app yet — tap below to grant it. One dialog, then subsequent encrypted messages decrypt silently. Messages from people you don’t follow stay hidden either way.",
     "amberPermissionTitle": "Amber permission",
@@ -1575,7 +1596,7 @@
     "nativeCryptoActiveYes": "Active this session: yes",
     "nativeCryptoActiveNo": "Active this session: no",
     "notInUse": "Not in use right now",
-    "advancedRelays": "Advanced",
+    "advancedRelays": "App Relays",
     "defaultRelaysTitle": "App default relays",
     "defaultRelaysHint": "Built into the app and always used as a fallback alongside your relays.",
     "deviceRelaysTitle": "Device-only relays",
@@ -2309,7 +2330,14 @@
       "emptyNoMatch": "No products match your search or filters.",
       "emptyMerchantMissing": "No listings from {{name}} right now — pull to refresh.",
       "emptyNoFriends": "None of your Nostr friends are selling Lightning Piggy products yet.",
-      "emptyNone": "No products available right now."
+      "emptyNoFof": "No one in your friends-of-friends network is selling yet.",
+      "emptyNoAll": "No listings found on your relays right now.",
+      "allScopeNote": "Experimental: listings from anyone, unvetted",
+      "fofBuilding": "Building your network… {{done}}/{{total}}",
+      "fofBuildingStart": "Building your network…",
+      "fofFailed": "Couldn’t build your network — showing your friends’ listings.",
+      "emptyNone": "No products available right now.",
+      "myOrders": "My orders"
     },
     "card": {
       "featured": "Featured",
@@ -2323,7 +2351,10 @@
       "buyFrom": "Buy from {{seller}}",
       "buyAccessibility": "Buy {{title}} from {{seller}}",
       "noFeedback": "Reviews and comments aren't available for this seller yet — they need a Nostr identity to anchor feedback on.",
-      "refreshFailed": "Couldn't refresh this product — check your connection and try again."
+      "refreshFailed": "Couldn't refresh this product — check your connection and try again.",
+      "buy": "Buy",
+      "outOfStock": "Out of stock",
+      "invoiceNote": "The seller sends an invoice for your order"
     },
     "modes": {
       "comingSoon": "{{label}} — coming soon",
@@ -2350,7 +2381,11 @@
       "sellers": "Sellers",
       "friends": "Friends (people you follow)",
       "friendsOfFriends": "Friends of friends",
+      "allSellers": "All (anyone)",
+      "experimental": "Experimental",
       "friendsChip": "Friends",
+      "friendsOfFriendsChip": "Friends of friends",
+      "allChip": "All",
       "comingSoon": "Coming soon",
       "clearScope": "Reset sellers to Lightning Piggy Preferred Sellers",
       "changeScope": "{{label}}. Opens Filters to change sellers",
@@ -2443,7 +2478,25 @@
         "relayUnreachable": "Couldn't reach a relay to place your order. Please try again.",
         "generic": "Something went wrong placing your order. Please try again."
       },
-      "rateUpdated": "Shipping cost updated. Check the new total and tap Place order again."
+      "rateUpdated": "The exchange rate moved, so the total changed. Check the new total and tap Place order again.",
+      "unitPriceSats": "{{amount}} sats each",
+      "addressLabel": "Delivery address",
+      "addressPlaceholder": "Name, street, town, postcode, country",
+      "addressHint": "Sent privately (gift-wrapped) with your order, only to {{seller}}.",
+      "outOfStock": "Out of stock",
+      "inStock": "In stock: {{stock}}",
+      "delivery": {
+        "name": "Name",
+        "line1": "Address line 1",
+        "line2": "Address line 2 (optional)",
+        "town": "Town / city",
+        "postcode": "Postcode",
+        "country": "Country",
+        "nameHint": "Any name the courier can deliver to — a nickname is fine if it’s on your letterbox",
+        "remember": "Remember on this phone",
+        "postcodeInvalid": "Enter a valid postcode for the selected country",
+        "tooLong": "Keep the complete delivery address within 500 characters"
+      }
     },
     "shipping": {
       "label": "Shipping",
@@ -2470,6 +2523,8 @@
     },
     "live": {
       "loading": "Loading listings from your friends…",
+      "loadingNetwork": "Loading listings from your network…",
+      "loadingAll": "Loading listings from everyone…",
       "partialToast": "Some sellers didn’t respond. Pull to refresh.",
       "contactSeller": "Message seller"
     },
@@ -2678,7 +2733,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Orders from buyers for your listings. Tap one to open the chat.",
+        "hint": "Orders from buyers for your listings. Tap one to view the order.",
         "emptyBody": "When someone buys one of your listings, their order shows up here.",
         "rowAccessibility": "Order from {{name}}: {{items}}, {{time}}"
       },
@@ -2731,7 +2786,8 @@
       "pickerSubtitle": "They'll get it as a private message.",
       "sentTo": "Sent to {{name}}",
       "sendFailed": "Couldn't send this item",
-      "sharedItem": "Shared item"
+      "sharedItem": "Shared item",
+      "marketListing": "Market listing"
     },
     "liked": {
       "title": "Liked items",
@@ -2742,6 +2798,26 @@
       "loadFailed": "Couldn't load your liked items — pull down to try again.",
       "signedOut": "Sign in with Nostr to see the items you have liked.",
       "signIn": "Sign in"
+    },
+    "republish": {
+      "coverage": "On %{count} of %{total} relays",
+      "checking": "Checking relays…",
+      "action": "Republish",
+      "all": "Republish all",
+      "missing": "Missing from relays",
+      "resign": "Re-sign and publish",
+      "confirm": "No signed copy is available. Rebuild this listing and approve signing once to publish it again?",
+      "results": "Republish results",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "noResponse": "No response",
+      "alreadyPresent": "Already present",
+      "close": "Close",
+      "failed": "Republish failed"
+    },
+    "shortcuts": {
+      "liked": "Liked",
+      "startSelling": "Start selling"
     }
   },
   "dmProtocol": {
@@ -2842,7 +2918,8 @@
       "payment": "Payment",
       "zap": "Zap",
       "cache": "Piglet find",
-      "swap": "Swap"
+      "swap": "Swap",
+      "market": "Listing activity"
     }
   },
   "blossomServers": {
@@ -3259,6 +3336,7 @@
     "security": "Protocol and security",
     "mlsSecurity": "End-to-end encryption with MLS. Devices share group keys.",
     "nip17Security": "End-to-end encrypted messages with sealed sender identity.",
+    "nip171Security": "End-to-end encrypted group. Members share one group key, and the owner changes it when someone leaves.",
     "nip04Security": "Legacy encryption. Upgrade to NIP-17 for better privacy.",
     "devices": "Devices in this chat",
     "relays": "Group relays",
@@ -3318,6 +3396,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Operator & policies",
     "runBy": "Run by",
+    "tipOperator": "Tip the operator",
+    "tipOperatorLabel": "Send a zap to {{name}}, who runs this relay",
     "copyUrl": "Copy relay URL",
     "terms_of_service": "Terms of service",
     "privacy_policy": "Privacy policy",
@@ -3414,6 +3494,10 @@
     "licenceType": "MIT",
     "lightningAddress": "Lightning Address (LUD-16)"
   },
+  "nip171Invitation": {
+    "group": "NIP-171 group",
+    "full": "You're in the most NIP-171 groups you can join. Leave one to accept this invitation."
+  },
   "marmotInvitation": {
     "pending": "Invitation pending",
     "accept": "Accept",
@@ -3489,5 +3573,119 @@
   "profileSafety": {
     "unavailable": "Profile unavailable",
     "unverified": "unverified"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Waiting for the seller's invoice",
+    "viewOrder": "View order"
+  },
+  "myOrders": {
+    "moreItems": "+{{count}} more",
+    "title": "My orders",
+    "empty": "No orders yet — tap Buy on a listing.",
+    "open": "My orders",
+    "openWithPayNow": "My orders — {{invoices}} to pay",
+    "viewAll": "View my orders",
+    "rowA11y": "Order from {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Ask the seller for a new invoice"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Awaiting invoice",
+    "payNow": "Pay now",
+    "paid": "Paid",
+    "shipped": "Shipped",
+    "completed": "Completed",
+    "cancelled": "Cancelled",
+    "needsInvoice": "Needs invoice",
+    "invoiceSent": "Awaiting payment",
+    "all": "All",
+    "empty": "No orders match this status.",
+    "invoiceExpired": "Invoice expired"
+  },
+  "sellerActivity": {
+    "settings": "Comments & reviews on my listings",
+    "generic": "New listing activity",
+    "listing": "your listing",
+    "sellerReplied": "Seller replied",
+    "reply": "%{name} replied to your comment",
+    "comment": "New comment on %{title}",
+    "review": "New review on %{title} ★%{stars}",
+    "replyAction": "Reply"
+  },
+  "sellerOrders": {
+    "buyerNote": "Note from buyer",
+    "newOrderNotification": "New order: {{items}}",
+    "yourShopOrder": "Order for your shop",
+    "loadingShop": "Loading your shop to price this order…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} each",
+    "overStock": "More than your stock ({{stock}} left)",
+    "shippingLine": "Shipping: {{title}}",
+    "shippingNotOffered": "This shipping option isn't one your listing offers.",
+    "shippingMissing": "The buyer didn't choose shipping for a physical item.",
+    "total": "Total",
+    "waitingForRate": "Waiting for exchange rate…",
+    "fiatAtRate": "{{amount}} {{currency}}, converted at today's rate",
+    "amountDiffers": "The buyer's order said {{buyer}} sats, which doesn't match your current prices. Invoicing is blocked until the buyer places a new order at the current total.",
+    "shipTo": "Ship to:",
+    "contact": "Contact:",
+    "receiptUnverified": "The buyer sent a payment receipt, but it doesn't prove payment of your invoice.",
+    "sendInvoice": "Send invoice",
+    "confirmSend": "Create and send invoice",
+    "checkPayment": "Check payment",
+    "waitingForPayment": "Invoice sent — waiting for payment",
+    "markPaid": "Mark paid",
+    "buyerNotified": "Paid — buyer notified",
+    "invoiceSent": "Invoice sent",
+    "notPaidYet": "Not paid yet",
+    "couldNotConfirmPayment": "Couldn't confirm payment",
+    "orderNumber": "Order #{{id}}",
+    "rowA11y": "Order from {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "This order is for listings that aren't yours.",
+      "missingListing": "One of these items isn't in your shop any more.",
+      "badPrice": "One of these listings has no fixed price to invoice.",
+      "unknownShipping": "The chosen shipping option isn't one you publish.",
+      "noRate": "Waiting for exchange rate…"
+    },
+    "errors": {
+      "noWallet": "Choose a wallet to receive the payment.",
+      "invoiceFailed": "That wallet couldn't create an invoice. Check it's connected and allowed to receive.",
+      "amountMismatch": "The wallet created an invoice for a different amount, so it wasn't sent.",
+      "shopChanged": "Your shop prices or shipping changed. Review the order before sending an invoice.",
+      "sendFailed": "Couldn't send to the buyer. Check your connection and try again.",
+      "notSignedIn": "Sign in to manage orders."
+    },
+    "wallet": {
+      "none": "None of your wallets can create invoices. Add a Lightning (NWC) wallet with permission to receive.",
+      "checking": "Checking it can receive…",
+      "offline": "Not connected",
+      "receiveTo": "Receive payments to",
+      "receiveToHint": "Order invoices are created on this wallet. Saved on this device.",
+      "remember": "Remember for my shop",
+      "choose": "Choose a wallet",
+      "saveFailed": "Couldn't save the wallet choice."
+    },
+    "sendNewInvoice": "Send new invoice",
+    "checkWalletFirst": "Check your wallet first",
+    "unknownInvoiceWarning": "We couldn't confirm whether the earlier invoice was paid. If it was, don't send a new one."
+  },
+  "relayPublishSheet": {
+    "waiting": "Waiting for signer…",
+    "title": "Publishing %{title}",
+    "accepted": "Accepted",
+    "rejected": "Rejected",
+    "noResponse": "No response",
+    "pending": "Publishing…"
+  },
+  "appRelays": {
+    "toggle": "Use %{host}",
+    "saveFailed": "Could not save relay preference",
+    "warning": {
+      "default": "App fallback connections are off",
+      "indexers": "Relay list discovery is off",
+      "geocache": "Geo-caches may not load",
+      "marmot": "Group key discovery may not work",
+      "market": "Market listings won’t load"
+    }
   }
 }

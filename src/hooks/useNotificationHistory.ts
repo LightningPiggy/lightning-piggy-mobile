@@ -58,16 +58,19 @@ export function useNotificationHistory() {
         .catch(() => {});
     };
     load();
-    const unsubscribe = subscribeNotificationHistory(load);
     // Live inbox signals precede persistence. Resolve only after a committed
     // write, coalescing bursts so decrypt backfills don't set state per event.
     let storageTimer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribeStorage = subscribeDmStorage((owner) => {
-      if (owner !== pubkey || storageTimer !== null) return;
+    const scheduleLoad = () => {
+      if (storageTimer !== null) return;
       storageTimer = setTimeout(() => {
         storageTimer = null;
         load();
       }, 100);
+    };
+    const unsubscribe = subscribeNotificationHistory(scheduleLoad);
+    const unsubscribeStorage = subscribeDmStorage((owner) => {
+      if (owner === pubkey) scheduleLoad();
     });
     // A background worker may record in a separate JS context, whose listeners
     // can't reach this one: re-read on resume, staggered like other non-urgent

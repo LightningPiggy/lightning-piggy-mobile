@@ -85,7 +85,15 @@ describe('market relay listings', () => {
     expect(p.listing?.priceLabel).toBe('50 USD');
     expect(distinctCurrencies([p])).toEqual(['USD']);
     expect(p.listing?.event).toEqual(e);
-    expect(marketCheckoutTarget(p, sellerOf(p))).toBeNull();
+    // A signed one-off 30402 is orderable in-app (Gamma order, priced in sats
+    // at checkout) — but never by its own author.
+    expect(marketCheckoutTarget(p, sellerOf(p))).toMatchObject({
+      source: 'listing',
+      vendorPubkey: e.pubkey,
+      listingDTag: 'product-1',
+      price: { amount: 50, currency: 'USD' },
+    });
+    expect(marketCheckoutTarget(p, sellerOf(p), e.pubkey)).toBeNull();
     const address = nip19.decode(p.url.split('/').at(-1)!);
     expect(address.type).toBe('naddr');
     expect(marketFeedbackContext(p, sellerOf(p))).toMatchObject({

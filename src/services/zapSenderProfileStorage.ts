@@ -47,6 +47,14 @@ interface Entry {
 type CacheShape = Record<string, Entry>;
 
 let memoryCache: CacheShape | null = null;
+const listeners = new Set<() => void>();
+/** Batch writers notify display consumers; consumers coalesce before rendering. */
+export function subscribeProfilesChanged(receive: () => void): () => void {
+  listeners.add(receive);
+  return () => {
+    listeners.delete(receive);
+  };
+}
 
 async function load(): Promise<CacheShape> {
   if (memoryCache) return memoryCache;
@@ -138,6 +146,7 @@ export async function setMany(profiles: Map<string, CachedZapSenderProfile>): Pr
     for (const [k] of drop) delete cache[k];
   }
 
+  for (const receive of listeners) receive();
   await persist(cache);
 }
 

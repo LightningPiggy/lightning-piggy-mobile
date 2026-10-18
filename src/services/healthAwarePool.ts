@@ -206,34 +206,41 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
         () => {
           const current = ++generation;
           let ended = false;
-          const sub = relay.subscribe(filters, {
-            ...params,
-            abort: undefined,
-            onevent: (event) => {
-              if (!closed && current === generation) {
-                noteNetworkActivity();
-                params.onevent?.(event);
-              }
-            },
-            oneose: () => {
-              if (!closed && current === generation) {
-                try {
-                  params.oneose?.();
-                } finally {
-                  if (options.mode === 'oneshot') close('closed automatically on eose');
+          const sub = openRelayReq(
+            { ensureRelay: async () => relay, seenOn: this.seenOn, trackRelays: this.trackRelays },
+            url,
+            filters,
+            {
+              ...params,
+              abort: undefined,
+              onevent: (event) => {
+                if (!closed && current === generation) {
+                  noteNetworkActivity();
+                  params.onevent?.(event);
                 }
-              }
+              },
+              oneose: () => {
+                if (!closed && current === generation) {
+                  try {
+                    params.oneose?.();
+                  } finally {
+                    if (options.mode === 'oneshot') close('closed automatically on eose');
+                  }
+                }
+              },
+              onclose: (reasons) => {
+                const reason = reasons.join('; ');
+                ended = true;
+                if (closed || current !== generation) return;
+                if (isReqLimitError(reason)) queueMicrotask(() => handle?.retry());
+                else {
+                  handle?.close();
+                  notify(reason);
+                }
+              },
             },
-            onclose: (reason) => {
-              ended = true;
-              if (closed || current !== generation) return;
-              if (isReqLimitError(reason)) queueMicrotask(() => handle?.retry());
-              else {
-                handle?.close();
-                notify(reason);
-              }
-            },
-          });
+            relay,
+          );
           return {
             close: (reason) => {
               generation++;

@@ -96,6 +96,13 @@ export function useInvitationKeys() {
     });
   }, [run, pubkey, t]);
 
+  const retryPublication = useCallback(() => {
+    void run(async () => {
+      const session = getMarmotSession();
+      if (session?.pubkey === pubkey) await session.ensureKeyPackage();
+    });
+  }, [run, pubkey]);
+
   const remove = useCallback(
     (devices: InvitationDevice[], bulk: boolean) => {
       void run(async () => {
@@ -194,11 +201,13 @@ export function useInvitationKeys() {
   return {
     devices,
     partial: inventory.partial,
+    publicationFailed: inventory.publicationFailed,
     loading,
     busy,
     error,
     reload,
     refresh,
+    retryPublication,
     stopInvites,
     removeOld,
     oldCount: oldDevices.length,

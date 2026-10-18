@@ -5,8 +5,10 @@ export interface Group {
   createdAt: number;
   updatedAt: number;
   /** Marmot (MLS) group — id is `marmot:<mls group id>`; membership lives in
-   * the MLS session, not AsyncStorage. Absent = NIP-17 group. */
-  protocol?: 'marmot';
+   * the MLS session, not AsyncStorage. NIP-171 epoch-ticketed group — id is
+   * `nip171:<group identity pubkey>`; membership is the tickets we hold.
+   * Absent = NIP-17 group. */
+  protocol?: 'marmot' | 'nip171';
   /** Marmot only: pubkeys allowed to rename / add / remove. */
   adminPubkeys?: string[];
 }

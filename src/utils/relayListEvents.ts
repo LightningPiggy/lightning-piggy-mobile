@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { getCurrentUserPubkey } from '../services/nostrActiveAccount';
 import type { RelayConfig } from '../types/nostr';
@@ -153,7 +154,9 @@ export function dmInboxRelaysFromTags(tags: string[][]): string[] {
  */
 export function relayListPublishTargets(previous: string[], next: string[]): string[] {
   if (isTestRelayLockdown(getCurrentUserPubkey())) return [TEST_RELAY_URL];
-  return [...new Set([...previous, ...next, ...RELAY_LIST_INDEXERS].map(norm))].filter(
-    isPublishableRelayUrl,
-  );
+  return [
+    ...new Set(
+      [...previous, ...next, ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS)].map(norm),
+    ),
+  ].filter(isPublishableRelayUrl);
 }

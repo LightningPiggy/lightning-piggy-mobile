@@ -15,6 +15,7 @@ import type { NotificationHistoryEntry } from '../services/notificationHistory';
 import type { NotificationsScreenStyles } from '../styles/NotificationsScreen.styles';
 
 const ICONS: Record<NotificationKind, LucideIcon> = {
+  market: MessageCircle,
   dm: MessageCircle,
   group: Users,
   payment: Wallet,

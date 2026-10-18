@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from '../hooks/useAppRelayPrefs';
 import { createHuntScreenStyles as createStyles } from '../styles/HuntScreen.styles';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -51,6 +52,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const relayScope = useAppRelayPrefs();
   const { pubkey, relays, profile } = useNostr();
   const [pos, setPos] = useState<{ lat: number; lon: number; accuracy: number | null } | null>(
     null,
@@ -253,7 +255,8 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
         // blur aren't stranded in the pending buffer until next focus.
         flushCaches();
       };
-    }, [pos, enqueueCache, flushCaches]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- The subscription reads app relay preferences.
+    }, [pos, enqueueCache, flushCaches, relayScope]),
   );
 
   const sortedCaches = useMemo(() => {

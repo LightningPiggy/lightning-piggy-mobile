@@ -254,6 +254,57 @@ describe('MarmotDeviceTracker', () => {
     sigKey.mockRestore();
   });
 
+  it('matches our other installs by signature key without assuming they run our app', async () => {
+    const t = setup();
+    const tracker = t.make();
+    const initial = [
+      { pubkey: me, key: 1 },
+      { pubkey: peer, key: 2 },
+    ];
+    await tracker.observe(group('g1', initial, 0));
+    const updated = group(
+      'g1',
+      [...initial, { pubkey: me, key: 3 }, { pubkey: me, key: 4 }, { pubkey: me, key: 5 }],
+      1,
+    );
+    t.groups.set('g1', updated);
+    await tracker.observe(updated);
+    const event = (key: number, client?: string) =>
+      ({
+        kind: 30443,
+        pubkey: me,
+        content: String(key),
+        created_at: 123,
+        tags: client ? [['client', client]] : [],
+      }) as NostrEvent;
+    t.fetchKeyPackages.mockImplementation(async (pk) =>
+      pk === me
+        ? [event(3, 'Lightning Piggy'), event(4, 'White Noise'), event(5), event(99, 'Wrong key')]
+        : [],
+    );
+    const signature = jest
+      .spyOn(devices, 'keyPackageSignatureKey')
+      .mockImplementation((e) => keyHex(Number(e.content)));
+    try {
+      expect((await tracker.notices('g1'))[0].clients).toEqual([null, null, null]);
+      expect(await tracker.resolveClients('g1')).toBe(true);
+      expect(t.fetchKeyPackages).toHaveBeenCalledWith(me);
+      expect((await tracker.notices('g1'))[0].clients).toEqual([
+        'Lightning Piggy',
+        'White Noise',
+        null,
+      ]);
+      // Persisted key records repair the original notice after a restart too.
+      expect((await t.make().notices('g1'))[0].clients).toEqual([
+        'Lightning Piggy',
+        'White Noise',
+        null,
+      ]);
+    } finally {
+      signature.mockRestore();
+    }
+  });
+
   it('a failed lookup is just "unknown"', async () => {
     const t = setup(
       jest.fn(async (_pk: string): Promise<NostrEvent[]> => Promise.reject(new Error('offline'))),

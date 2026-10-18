@@ -49,6 +49,7 @@ interface BoundedOptions {
   redirects: 'https-only';
   maxRedirects: 3;
   headers?: Record<string, string>;
+  method?: 'HEAD';
   kind?: 'media' | 'payment';
 }
 
@@ -87,6 +88,7 @@ export async function fetchBounded(url: string, options: BoundedOptions) {
         signal: controller.signal,
         redirect: 'manual',
         credentials: 'omit',
+        ...(options.method ? { method: options.method } : {}),
         headers: options.headers,
       });
       const redirect = res.status >= 300 && res.status < 400;
@@ -106,6 +108,8 @@ export async function fetchBounded(url: string, options: BoundedOptions) {
       if (!res.ok) throw new Error(`Remote fetch failed (${res.status})`);
       const length = res.headers.get('content-length');
       if (length && Number(length) > options.maxBytes) throw new Error('Remote body exceeds limit');
+      if (options.method === 'HEAD')
+        return { bytes: new Uint8Array(), url: current, headers: res.headers };
       if (!res.body?.getReader) throw new Error('Remote streaming unavailable');
       const reader = res.body.getReader();
       const chunks: Uint8Array[] = [];

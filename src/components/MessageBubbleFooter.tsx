@@ -26,7 +26,8 @@ const DeliveryTick: React.FC<{
   styles: Styles;
   status: DeliveryStatus;
   testID: string;
-}> = ({ styles, status, testID }) => {
+  tint?: string;
+}> = ({ styles, status, testID, tint }) => {
   const t = useTranslation();
   const { ok, total } = summariseDelivery(status);
   // Wrap the lucide SVG in a View so the testID + accessibilityLabel land on a
@@ -39,7 +40,10 @@ const DeliveryTick: React.FC<{
   if (status.pending) {
     return (
       <View testID={testID} accessibilityLabel={t('messageBubbleFooter.messageSending')}>
-        <Clock size={12} color={StyleSheet.flatten(styles.deliveryTickPending).color as string} />
+        <Clock
+          size={12}
+          color={tint ?? (StyleSheet.flatten(styles.deliveryTickPending).color as string)}
+        />
       </View>
     );
   }
@@ -59,7 +63,7 @@ const DeliveryTick: React.FC<{
 
   // Theme-driven delivered-tick colour (white today, may change by theme) — not
   // necessarily green, so name it semantically rather than by hue.
-  const deliveredColor = StyleSheet.flatten(styles.deliveryTickDelivered).color as string;
+  const deliveredColor = tint ?? (StyleSheet.flatten(styles.deliveryTickDelivered).color as string);
   // All target relays acked → double tick; otherwise ≥1 → single tick.
   if (ok === total) {
     return (
@@ -104,6 +108,7 @@ export const BubbleFooter: React.FC<{
   // coloured (sent) bubble, supplementary grey on a surface (received) one — so
   // it reads on either background.
   infoTint: string;
+  deliveryTint?: string;
   // Marmot edit: prefix the time with an "Edited" mark.
   edited?: boolean;
 }> = ({
@@ -115,6 +120,7 @@ export const BubbleFooter: React.FC<{
   deliveryStatus,
   onOpenInfo,
   infoTint,
+  deliveryTint,
   edited,
 }) => {
   const t = useTranslation();
@@ -174,6 +180,7 @@ export const BubbleFooter: React.FC<{
         <DeliveryTick
           styles={styles}
           status={deliveryStatus as DeliveryStatus}
+          tint={deliveryTint}
           testID={`dm-bubble-delivery-tick-${messageId}`}
         />
       ) : null}

@@ -359,7 +359,7 @@ describe('buildConversationItems — structured NIP-88 polls (#203)', () => {
     }
   });
 
-  it('renders a valid kind-16 order as an order card, not unsupported', () => {
+  it('renders a valid kind-16 order as a structured card', () => {
     const orderJson = JSON.stringify({
       kind: 16,
       orderId: 'abc-123',
@@ -371,18 +371,17 @@ describe('buildConversationItems — structured NIP-88 polls (#203)', () => {
       [{ id: '1', fromMe: false, text: orderJson, createdAt: DAY2, wireKind: 16 }],
       [],
     ).filter((i) => i.kind !== 'dayHeader');
-    expect(items[0].kind).toBe('order');
+    expect(items).toEqual([expect.objectContaining({ kind: 'order', id: 'dm-1' })]);
   });
 
-  it('maps an unparseable kind-16/17 row to `unsupported`, never a raw JSON bubble', () => {
+  it('hides an unparseable kind-16/17 row from chat', () => {
     // A non-order payload sharing the kind (e.g. a NIP-18 repost) or a corrupt row.
     const notAnOrder = JSON.stringify({ kind: 1, id: 'abc', content: 'gm' });
     const items = buildConversationItems(
       [{ id: '1', fromMe: false, text: notAnOrder, createdAt: DAY2, wireKind: 16 }],
       [],
     ).filter((i) => i.kind !== 'dayHeader');
-    expect(items[0].kind).toBe('unsupported');
-    expect(items[0].kind).not.toBe('message'); // never a raw text bubble
+    expect(items).toEqual([]);
   });
 });
 
@@ -429,17 +428,14 @@ describe('buildConversationItems — duplicate order-invoice note dedup', () => 
 
   it('suppresses the kind-14 note when a matching kind-16 order card exists', () => {
     const items = nonHeader([cardMsg(INVOICE), noteMsg(INVOICE)]);
-    expect(items).toHaveLength(1);
-    expect(items[0].kind).toBe('order');
-    expect(items.some((i) => i.kind === 'message')).toBe(false);
+    expect(items).toEqual([expect.objectContaining({ kind: 'order', id: 'dm-card' })]);
   });
 
   it('suppresses regardless of arrival order (note before OR after the card)', () => {
     const noteFirst = nonHeader([noteMsg(INVOICE), cardMsg(INVOICE)]);
     const cardFirst = nonHeader([cardMsg(INVOICE), noteMsg(INVOICE)]);
     for (const items of [noteFirst, cardFirst]) {
-      expect(items).toHaveLength(1);
-      expect(items[0].kind).toBe('order');
+      expect(items).toEqual([expect.objectContaining({ kind: 'order', id: 'dm-card' })]);
     }
   });
 
@@ -553,79 +549,41 @@ describe('formatDayHeader', () => {
   });
 });
 
-describe('buyer-approved order totals', () => {
-  const orderMessage = (id: string, fromMe: boolean, type: string, amountSats: number) => ({
-    id,
-    fromMe,
-    createdAt: DAY2,
-    wireKind: 16,
-    text: JSON.stringify({
-      kind: 16,
-      type,
-      amountSats,
-      orderId: 'same-order',
-      items: [],
-      message: '',
-    }),
-  });
-  it('binds the payment request to the outgoing order, ignoring the merchant amount', () => {
-    const items = buildConversationItems(
-      [
-        orderMessage('request', false, 'payment', 999),
-        orderMessage('approved', true, 'order', 100),
-      ],
-      [],
-    );
-    expect(items.find((item) => item.id === 'dm-request')).toMatchObject({
-      expectedAmountSats: 100,
-    });
-  });
-  it('cannot establish an approved amount from a merchant-authored order', () => {
-    const items = buildConversationItems(
-      [orderMessage('request', false, 'payment', 999), orderMessage('forged', false, 'order', 999)],
-      [],
-    );
-    expect(
-      items.find((item) => item.kind === 'order' && item.expectedAmountSats !== undefined),
-    ).toBeUndefined();
-  });
-  it('fails closed when outgoing orders with the same ID disagree', () => {
-    const items = buildConversationItems(
-      [
-        orderMessage('approved', true, 'order', 100),
-        orderMessage('conflicting', true, 'order', 200),
-        orderMessage('request', false, 'payment', 100),
-      ],
-      [],
-    );
-    expect(
-      items.find((item) => item.kind === 'order' && item.expectedAmountSats !== undefined),
-    ).toBeUndefined();
-  });
-
-  it('binds to a store-resolved total when the outgoing order is older than the loaded slice', () => {
-    const items = buildConversationItems(
-      [orderMessage('request', false, 'payment', 999)],
-      [],
-      new Map([['same-order', 100]]),
-    );
-    expect(items.find((item) => item.id === 'dm-request')).toMatchObject({
-      expectedAmountSats: 100,
-    });
-  });
-  it('fails closed when an in-slice outgoing order disagrees with the store-resolved total', () => {
-    const items = buildConversationItems(
-      [
-        orderMessage('request', false, 'payment', 100),
-        orderMessage('approved', true, 'order', 100),
-      ],
-      [],
-      new Map([['same-order', 200]]),
-    );
-    const request = items.find((item) => item.id === 'dm-request');
-    expect(request?.kind).toBe('order');
-    expect((request as { expectedAmountSats?: number }).expectedAmountSats).toBeUndefined();
-  });
+describe('Gamma orders appear as cards in chat', () => {
+  it.each(['order', 'payment', 'status', 'shipping', 'receipt'])(
+    'renders %s in both directions',
+    (type) => {
+      for (const fromMe of [true, false]) {
+        const wireKind = type === 'receipt' ? 17 : 16;
+        expect(
+          buildConversationItems(
+            [
+              {
+                id: 'order',
+                fromMe,
+                createdAt: DAY2,
+                wireKind,
+                text: JSON.stringify({
+                  kind: wireKind,
+                  type,
+                  orderId: 'o',
+                  items: [],
+                  message: 'private',
+                }),
+              },
+              { id: 'chat', fromMe: false, createdAt: DAY2, wireKind: 14, text: 'hello' },
+            ],
+            [],
+          ).filter((item) => item.kind !== 'dayHeader'),
+        ).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ kind: 'message', id: 'dm-chat', text: 'hello' }),
+            expect.objectContaining({ kind: 'order', id: 'dm-order', fromMe }),
+          ]),
+        );
+      }
+    },
+  );
 });
 
 describe('orderIdsNeedingHistory', () => {

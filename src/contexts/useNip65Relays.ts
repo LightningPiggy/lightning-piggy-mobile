@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useRef, useState } from 'react';
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -102,8 +103,8 @@ export function useNip65Relays() {
         ...new Set([
           ...nip65WriteRelays,
           ...cached,
-          ...nostrService.DEFAULT_RELAYS,
-          ...RELAY_LIST_INDEXERS,
+          ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS),
+          ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
         ]),
       ]);
       // Never let an older relay copy replace a newer cached list.
@@ -185,15 +186,20 @@ export function useNip65Relays() {
         hydrateInbox(cached);
         if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
         const readRelays = cached.filter((r) => r.read).map((r) => r.url);
-        return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
+        return readRelays.length > 0
+          ? readRelays
+          : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       }
-      const fetched = await nostrService.fetchRelayListEvent(pk, nostrService.DEFAULT_RELAYS);
+      const fetched = await nostrService.fetchRelayListEvent(
+        pk,
+        enabledAppRelays('default', nostrService.DEFAULT_RELAYS),
+      );
       if (fetched === null) {
         // Network couldn't produce a kind-10002 — fall back to defaults
         // and DON'T persist (so we don't poison the cache with a blip).
         if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
         hydrateInbox(cached ?? []);
-        return nostrService.DEFAULT_RELAYS;
+        return enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       }
       const createdAtKey = perAccountKey(RELAY_LIST_CREATED_AT_KEY_BASE, pk);
       // A relay that missed the user's last in-app publish can still serve an
@@ -202,7 +208,7 @@ export function useNip65Relays() {
         if (cached && current()) setNip65Relays(cached);
         hydrateInbox(cached ?? []);
         const read = (cached ?? []).filter((r) => r.read).map((r) => r.url);
-        return read.length > 0 ? read : nostrService.DEFAULT_RELAYS;
+        return read.length > 0 ? read : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       }
       const relayList = fetched.list;
       if (__DEV__)
@@ -211,7 +217,7 @@ export function useNip65Relays() {
       // A list published in-app while this load was in flight wins.
       if (!current()) {
         const read = relayList.filter((r) => r.read).map((r) => r.url);
-        return read.length > 0 ? read : nostrService.DEFAULT_RELAYS;
+        return read.length > 0 ? read : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       }
       setNip65Relays(relayList);
       remember(createdAtKey, fetched.createdAt);
@@ -228,7 +234,9 @@ export function useNip65Relays() {
         AsyncStorage.setItem(createdAtKey, String(fetched.createdAt)).catch(() => {});
       });
       const readRelays = relayList.filter((r) => r.read).map((r) => r.url);
-      return readRelays.length > 0 ? readRelays : nostrService.DEFAULT_RELAYS;
+      return readRelays.length > 0
+        ? readRelays
+        : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
     },
     [loadDmInboxRelays, baselineOf],
   );

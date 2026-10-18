@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 // Relay fetch for a merchant's kind-30406 shipping options (#948 Option A).
 // Thin I/O shell over the PURE parsing/filtering in utils/marketShipping —
 // query the merchant's addressable shipping-option events once per checkout
@@ -33,7 +34,9 @@ export async function fetchShippingOptions(input: {
   relays: string[];
   signal?: AbortSignal;
 }): Promise<ShippingOption[]> {
-  const relays = Array.from(new Set([...input.relays, ...DEFAULT_RELAYS]));
+  const relays = Array.from(
+    new Set([...input.relays, ...enabledAppRelays('default', DEFAULT_RELAYS)]),
+  );
   trackRelays(relays);
   const merchantPubkey = input.merchantPubkey.trim().toLowerCase();
   const events = await querySyncAbortable(
@@ -175,7 +178,9 @@ export async function fetchShippingOptionsForDisplay(input: {
 }): Promise<ShippingOption[]> {
   const references = displayReferences(input.coordinates);
   if (references.size === 0) return [];
-  const relays = Array.from(new Set([...input.relays, ...DEFAULT_RELAYS]));
+  const relays = Array.from(
+    new Set([...input.relays, ...enabledAppRelays('default', DEFAULT_RELAYS)]),
+  );
   trackRelays(relays);
   const params = {
     maxWait: FETCH_MAX_WAIT_MS,

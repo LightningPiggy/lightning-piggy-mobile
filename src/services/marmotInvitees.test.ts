@@ -324,6 +324,7 @@ describe('selectDeviceKeyPackages', () => {
     const ownOtherInstall = await publishDevice(big, slot(99));
     const network = {
       request: jest.fn(async (_relays: string[], filter: unknown) => {
+        if (Array.isArray(filter)) return [];
         const f = filter as { kinds: number[]; authors: string[]; limit?: number };
         expect(typeof f.limit).toBe('number'); // bounded (perf rules)
         if (!f.kinds.includes(30443)) return [];

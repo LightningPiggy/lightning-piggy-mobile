@@ -23,6 +23,10 @@ export interface MarketListing {
   seenOn?: string[];
 }
 
+/** Authors a reduction accepts: a Set, or `{ has: () => true }` for everyone
+ * (the Market's All scope). Only membership is ever asked. */
+export type AuthorScope = Pick<ReadonlySet<string>, 'has'>;
+
 /** Stable product id of a listing address (`kind` + author + `d`). */
 export function marketListingProductId(kind: number, pubkey: string, d: string): string {
   return `nostr-${kind}-${pubkey}-${encodeURIComponent(d)}`;
@@ -179,7 +183,7 @@ function listingAddress(event: Event): string | null {
 /** NIP-09: whether an author's own kind-5 withdrew this listing revision. */
 function deletionIndex(
   events: readonly Event[],
-  authors: ReadonlySet<string>,
+  authors: AuthorScope,
 ): (event: Event, address: string) => boolean {
   const deletedIds = new Set<string>();
   const deletedAddresses = new Map<string, number>();
@@ -200,7 +204,7 @@ function deletionIndex(
 /** Newest addressable revision wins, including sold/malformed revisions. */
 export function reduceMarketListings(
   events: readonly Event[],
-  authors: ReadonlySet<string>,
+  authors: AuthorScope,
   now?: number,
 ): MarketProduct[] {
   const isDeleted = deletionIndex(events, authors);
@@ -285,7 +289,7 @@ function createCandidateHeap() {
  */
 export async function selectVerifiedListings(
   events: readonly Event[],
-  authors: ReadonlySet<string>,
+  authors: AuthorScope,
   opts: {
     verify: (event: Event) => boolean;
     maybeYield: () => Promise<void>;

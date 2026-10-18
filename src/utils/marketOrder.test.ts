@@ -8,6 +8,8 @@ import {
   shortOrderId,
   PRODUCT_COORD_KIND,
   ORDER_MESSAGE_TYPE,
+  MAX_ORDER_ADDRESS_LENGTH,
+  normalizeOrderAddress,
   type MarketOrderLine,
 } from './marketOrder';
 import { parseOrderEvent } from './orderEvents';
@@ -112,6 +114,40 @@ describe('buildMarketOrder', () => {
     expect(rumor.content).toContain('Total: 207,500 sats');
     // parseOrderEvent reads the shipping coordinate straight back.
     expect(parseOrderEvent(rumor)?.shipping).toBe(shippingCoord);
+  });
+
+  it('adds the Gamma address tag for a physical order, normalised, after shipping', () => {
+    const { rumor } = buildMarketOrder({
+      buyerPubkey: BUYER,
+      vendorPubkey: VENDOR,
+      lines: [{ merchantPubkey: VENDOR, dTag: 'mug', quantity: 2, priceSats: 100 }],
+      orderId: 'order-addr',
+      createdAt: 1,
+      shipping: { coordinate: `30406:${VENDOR}:uk`, costSats: 50, title: 'Royal Mail' },
+      address: '  Jane Doe \n\n 1 High St\r\n London  ',
+    });
+    expect(rumor.tags).toEqual([
+      ['p', VENDOR],
+      ['subject', 'Order orderadd'],
+      ['type', '1'],
+      ['order', 'order-addr'],
+      ['amount', '250'],
+      ['item', `30402:${VENDOR}:mug`, '2'],
+      ['shipping', `30406:${VENDOR}:uk`],
+      ['address', 'Jane Doe\n1 High St\nLondon'],
+    ]);
+  });
+
+  it('omits a blank address and caps a long one', () => {
+    const base = {
+      buyerPubkey: BUYER,
+      vendorPubkey: VENDOR,
+      lines: [{ merchantPubkey: VENDOR, dTag: 'mug', quantity: 1, priceSats: 1 }],
+    };
+    expect(
+      buildMarketOrder({ ...base, address: ' \n ' }).rumor.tags.some((t) => t[0] === 'address'),
+    ).toBe(false);
+    expect(normalizeOrderAddress('x'.repeat(2000))).toHaveLength(MAX_ORDER_ADDRESS_LENGTH);
   });
 
   it('emits no shipping tag and an unchanged amount without a shipping input', () => {

@@ -1,3 +1,4 @@
+import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import { act, renderHook } from '@testing-library/react-native';
 import type { Event } from 'nostr-tools';
 import type { MarketProduct } from '../data/marketProducts';
@@ -146,7 +147,7 @@ test('keeps fresh cached shipping when fetching a new coordinate fails', async (
   expect(result.current.byProduct.get('new-product')).toEqual({ kind: 'unknown' });
 });
 
-test.each(['wss://relay.plebeian.market', 'wss://nostr.mom'])(
+test.each(MARKET_RELAYS)(
   'resolves shipping published only on marketplace relay %s',
   async (shippingRelay) => {
     fetchMock.mockImplementation(async ({ relays }: { relays: string[] }) =>
@@ -154,11 +155,7 @@ test.each(['wss://relay.plebeian.market', 'wss://nostr.mom'])(
     );
     const { result } = renderHook(() => useMarketShipsTo(products, true));
     await settle();
-    expect(fetchMock.mock.calls[0][0].relays).toEqual([
-      'wss://relay.plebeian.market',
-      'wss://nostr.mom',
-      'wss://example.com',
-    ]);
+    expect(fetchMock.mock.calls[0][0].relays).toEqual([...MARKET_RELAYS, 'wss://example.com']);
     expect(result.current.byProduct.get('product')).toEqual({
       kind: 'countries',
       countries: ['GB'],

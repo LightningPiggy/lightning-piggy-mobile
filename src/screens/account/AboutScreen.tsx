@@ -1,3 +1,5 @@
+import { useAppRelayPrefs } from '../../hooks/useAppRelayPrefs';
+import { enabledAppRelays } from '../../services/appRelayPrefs';
 import BrandedSpinner from '../../components/BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, Image, Linking } from 'react-native';
@@ -40,6 +42,7 @@ const AboutScreen: React.FC = () => {
   const styles = useMemo(() => createAboutScreenStyles(colors), [colors]);
   const { isLoggedIn, signerType, sendDirectMessage } = useNostr();
 
+  const relayScope = useAppRelayPrefs();
   const [teamProfile, setTeamProfile] = useState<NostrProfile | null>(null);
   const [teamProfileLoading, setTeamProfileLoading] = useState(true);
   const [teamPictureError, setTeamPictureError] = useState(false);
@@ -76,7 +79,10 @@ const AboutScreen: React.FC = () => {
             await AsyncStorage.setItem(TEAM_PROFILE_CACHE_KEY, cached);
           }
         }
-        const fetched = await fetchProfile(decoded.data, DEFAULT_RELAYS);
+        const fetched = await fetchProfile(
+          decoded.data,
+          enabledAppRelays('default', DEFAULT_RELAYS),
+        );
         if (!cancelled && fetched) {
           setTeamProfile(fetched);
           await AsyncStorage.setItem(TEAM_PROFILE_CACHE_KEY, JSON.stringify(fetched));
@@ -94,7 +100,7 @@ const AboutScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [relayScope]);
 
   return (
     <AccountScreenLayout title={t('aboutScreen.title')}>

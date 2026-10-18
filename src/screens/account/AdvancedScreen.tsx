@@ -25,7 +25,7 @@ const AdvancedScreen: React.FC = () => {
       return;
     }
     Alert.alert(t('advancedScreen.secretConfirmTitle'), t('advancedScreen.secretConfirmBody'), [
-      { text: t('accountDrawerContent.cancel'), style: 'cancel' },
+      { text: t('linkAction.cancel'), style: 'cancel' },
       { text: t('advancedScreen.enableSecret'), onPress: () => setSecretMode(true) },
     ]);
   };

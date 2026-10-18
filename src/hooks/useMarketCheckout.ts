@@ -1,12 +1,11 @@
 import { useCallback, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import * as nostrService from '../services/nostrService';
-import * as amberService from '../services/amberService';
-import * as nostrConnectService from '../services/nostrConnectService';
-import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
+import { Nip17SendError, canSendNip17, sendNip17Rumor } from '../services/nip17RumorSend';
+import { buyerOrderTitleGeneration, recordBuyerOrderTitles } from '../services/buyerOrderTitles';
 import {
   buildMarketOrder,
+  productCoordinate,
   type MarketOrderLine,
   type OrderShippingInput,
 } from '../utils/marketOrder';
@@ -36,26 +35,28 @@ class CheckoutError extends Error {
   }
 }
 
+/** Map the shared NIP-17 send failure onto the checkout's copy keys. */
+function checkoutCode(e: unknown): CheckoutErrorCode {
+  if (e instanceof CheckoutError) return e.code;
+  if (e instanceof Nip17SendError) return e.code === 'noRecipient' ? 'noSellerIdentity' : e.code;
+  return 'generic';
+}
+
 // In-app Market checkout orchestration (#market). The PURE order-building lives
-// in utils/marketOrder (unit-tested); this thin hook adds the signer + relay
-// side: it gift-wraps the kind-16 order rumor to the merchant (NIP-17) and
-// publishes it, reusing the SAME nostrService NIP-17 send primitives the DM
-// composer uses (`sendNip17ToManyWithNsec` / `WithSigner`). It deliberately does
-// NOT route through NostrContext's exposed API — that file is at its size
-// baseline (#703) and must not grow — so the signer dispatch here mirrors
-// contexts/useMessageSend rather than adding a new context method.
+// in utils/marketOrder (unit-tested); this thin hook gift-wraps the kind-16
+// order rumor to the merchant via services/nip17RumorSend — ALWAYS NIP-17,
+// never Marmot (Gamma kinds 16/17 are wrap-only, see utils/wrapOnlyKinds).
 //
-// `wrapManyEvents` also wraps a copy to the sender, so the placed order echoes
-// back through the live DM subscription and threads into the vendor
-// conversation as a "🛒 Order Placed" card (partner = vendor) — no optimistic
-// local insert needed, and no duplicate-card risk.
+// The send also wraps a copy to the buyer, so the placed order echoes back
+// through the live DM subscription and threads into the vendor conversation
+// as an order card (partner = vendor) — no optimistic local insert needed.
 
 export type CheckoutStatus = 'idle' | 'placing' | 'sent' | 'error';
 
 export interface PlaceOrderInput {
   /** Merchant's Nostr pubkey (hex) — gift-wrap recipient + order `p` tag. */
   vendorPubkey: string;
-  /** `d` tag of the seller's own listing (the product's `checkout.listingDTag`). */
+  /** `d` tag of the seller's listing (kind 30402) the `item` tag references. */
   dTag: string;
   /** Unit price in satoshis. */
   priceSats: number;
@@ -65,6 +66,10 @@ export interface PlaceOrderInput {
   note?: string;
   /** Chosen shipping option (coordinate + all-in sats cost), when any (#948). */
   shipping?: OrderShippingInput;
+  /** Shipping address for a physical order (Gamma `address` tag). */
+  address?: string;
+  /** Product title, remembered locally for My orders (never sent). */
+  title?: string;
 }
 
 export interface PlaceOrderResult {
@@ -89,11 +94,6 @@ export function useMarketCheckout(): UseMarketCheckout {
   const [status, setStatus] = useState<CheckoutStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  const messageForCode = useCallback(
-    (code: CheckoutErrorCode): string => t(`market.checkout.errors.${code}`),
-    [t],
-  );
-
   const reset = useCallback(() => {
     setStatus('idle');
     setError(null);
@@ -114,17 +114,10 @@ export function useMarketCheckout(): UseMarketCheckout {
           );
         }
 
-        // Union the user's write relays with the defaults (publish uses
-        // Promise.any, so one responsive relay is enough) — same relay policy
-        // as the DM composer.
-        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-        const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
-
+        const titleGeneration = buyerOrderTitleGeneration(pubkey);
         setStatus('placing');
-        // Build the order INSIDE the guarded section: if construction throws
-        // synchronously (e.g. crypto/RNG unavailable, or an unexpected input
-        // shape), the catch below reliably flips status to 'error' and surfaces
-        // a message rather than leaving the sheet stuck with no feedback.
+        // Build INSIDE the guarded section: a synchronous throw (RNG missing,
+        // unexpected input) still flips status to 'error' with a message.
         const line: MarketOrderLine = {
           merchantPubkey: vendorPubkey,
           dTag: input.dTag,
@@ -137,86 +130,44 @@ export function useMarketCheckout(): UseMarketCheckout {
           lines: [line],
           note: input.note,
           shipping: input.shipping,
+          address: input.address,
         });
 
-        let delivered = false;
-        let sendError: string | undefined;
+        await sendNip17Rumor({
+          senderPubkey: pubkey,
+          signerType,
+          relays,
+          rumor,
+          recipientPubkey: vendorPubkey,
+        });
 
-        if (signerType === 'nsec') {
-          // Pubkey-checked read: the shared SecureStore slot must decode to the
-          // ACTIVE identity, or the rumor (authored as `pubkey`) would be sealed
-          // and published with a different key — a stale/corrupt slot or a mid-
-          // switch race must fail closed rather than send a mismatched order.
-          const secretKey = await getMemoisedSecretKey(pubkey);
-          if (!secretKey) {
-            throw new CheckoutError(
-              'signingKeyMissing',
-              'Signing key not found or does not match the active identity',
-            );
-          }
-          const result = await nostrService.sendNip17ToManyWithNsec({
-            senderSecretKey: secretKey,
-            rumor,
-            recipientPubkeys: [vendorPubkey],
-            relays: targetRelays,
-          });
-          delivered = result.wrapsPublished > 0 && result.errors.length === 0;
-          sendError = result.errors[0];
-        } else if (signerType === 'amber' || signerType === 'nip46') {
-          const signer = signerType === 'amber' ? amberService : nostrConnectService;
-          const result = await nostrService.sendNip17ToManyWithSigner({
-            senderPubkey: pubkey,
-            rumor,
-            recipientPubkeys: [vendorPubkey],
-            relays: targetRelays,
-            signerNip44Encrypt: (plain, recipient) =>
-              signer.requestNip44Encrypt(plain, recipient, pubkey),
-            signerSignSeal: async (unsignedSeal) => {
-              // Keep pubkey on the seal — Amber misroutes kind=13 sign_event
-              // intents without it (#356). Same rule as the DM send path.
-              const { event: signedEventJson } = await signer.requestEventSignature(
-                JSON.stringify(unsignedSeal),
-                '',
-                pubkey,
-              );
-              if (!signedEventJson) throw new Error('Signer returned an empty signed seal');
-              return JSON.parse(signedEventJson);
-            },
-          });
-          delivered = result.wrapsPublished > 0 && result.errors.length === 0;
-          sendError = result.errors[0];
-        } else {
-          throw new CheckoutError('unsupportedSigner', 'Unsupported signer — cannot place order');
+        if (input.title) {
+          // Best effort — only labels My orders.
+          void recordBuyerOrderTitles(
+            pubkey,
+            orderId,
+            { [productCoordinate(vendorPubkey, input.dTag)]: input.title },
+            titleGeneration,
+          ).catch(() => undefined);
         }
-
-        if (!delivered) {
-          throw new CheckoutError(
-            'relayUnreachable',
-            sendError ?? 'Could not reach a relay to place the order',
-          );
-        }
-
         setStatus('sent');
         return { orderId, totalSats };
       } catch (e) {
         // Keep the raw Error for diagnostics/logs; show localized copy in the UI.
         if (__DEV__) console.warn('[market] place order failed:', e);
-        const code: CheckoutErrorCode = e instanceof CheckoutError ? e.code : 'generic';
         setStatus('error');
-        setError(messageForCode(code));
+        setError(t(`market.checkout.errors.${checkoutCode(e)}`));
         throw e instanceof Error ? e : new Error('Failed to place order');
       }
     },
-    [pubkey, isLoggedIn, signerType, relays, messageForCode],
+    [pubkey, isLoggedIn, signerType, relays, t],
   );
 
   return {
     status,
     error,
     isPlacing: status === 'placing',
-    canOrder: Boolean(
-      pubkey && isLoggedIn && ['nsec', 'amber', 'nip46'].includes(signerType ?? ''),
-    ),
+    canOrder: Boolean(isLoggedIn && canSendNip17(pubkey, signerType)),
     placeOrder,
     reset,
   };

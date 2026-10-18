@@ -1,9 +1,11 @@
 import { isMarmotMediaVersion } from './encryptedFileUrl';
-import { isPublicHttpUrl } from './publicUrl';
+import { checkRemoteUrl } from './remoteUrlPolicy';
 import type { ParsedImageMessage } from './messageContent';
 
 export interface FileAttachment extends ParsedImageMessage {
   name: string;
+  /** Plain URL explicitly classified from a text message, without a sender hash. */
+  plainUrl?: boolean;
   size?: number;
   available: boolean;
   caption?: string;
@@ -28,7 +30,7 @@ export function sanitizeAttachmentCaption(value: string): string {
 }
 
 export function isSafeFileUrl(url: string): boolean {
-  return url.startsWith('https://') && isPublicHttpUrl(url);
+  return checkRemoteUrl(url, { kind: 'media' }).ok;
 }
 const DANGEROUS_EXTENSIONS = new Set(
   'apk exe msi dmg pkg sh bat cmd ps1 js jar html htm xhtml svg lnk scr iso'.split(' '),
@@ -94,6 +96,11 @@ const MIME_EXTENSIONS: Record<string, string[]> = {
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['docx'],
   'application/vnd.ms-excel': ['xls'],
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['xlsx'],
+  'application/vnd.ms-powerpoint': ['ppt'],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['pptx'],
+  'application/epub+zip': ['epub'],
+  'application/vnd.oasis.opendocument.text': ['odt'],
+  'application/rtf': ['rtf'],
   'application/json': ['json'],
   'text/csv': ['csv'],
 };
@@ -201,9 +208,16 @@ export function parseFileAttachment(text: string): FileAttachment | null {
   const p = new URLSearchParams(fragment);
   if (p.get('lpe') !== '1') return null;
   const mime = displayMetadata('', p.get('m') ?? 'application/octet-stream').mime;
-  if ((mime.startsWith('image/') && mime !== 'image/svg+xml') || mime.startsWith('audio/'))
-    return null;
   const alg = p.get('alg') ?? 'aes-gcm';
+  // Attach → File supplies a filename; gallery images do not. Keep these
+  // named NIP-17 images as file cards so recipients can Save the actual bytes.
+  // Marmot image filenames are required encryption metadata, not file intent.
+  const namedImageFile = alg === 'aes-gcm' && !!p.get('f');
+  if (
+    (mime.startsWith('image/') && mime !== 'image/svg+xml' && !namedImageFile) ||
+    mime.startsWith('audio/')
+  )
+    return null;
   const nonceHex = p.get('n') ?? undefined;
   const keyHex = p.get('k') ?? undefined;
   const filename = p.get('f') ?? '';
@@ -213,7 +227,7 @@ export function parseFileAttachment(text: string): FileAttachment | null {
     isMarmotMediaVersion(alg) && keyHex && filename && plaintextSha256 && ciphertextSha256
       ? { version: alg, keysHex: keyHex.split(','), filename, plaintextSha256, ciphertextSha256 }
       : undefined;
-  const size = p.get('size');
+  const size = p.get('s') ?? p.get('size');
   return {
     url,
     ...displayMetadata(filename || p.get('name') || urlBasename(url), mime),
@@ -221,6 +235,7 @@ export function parseFileAttachment(text: string): FileAttachment | null {
       attachmentSafety(filename || p.get('name') || urlBasename(url), mime).dangerous ||
       attachmentSafety(urlBasename(url), '').dangerous,
     encrypted: true,
+    ...(p.has('x') ? { sha256: p.get('x')! } : {}),
     keyHex,
     nonceHex,
     marmot,
@@ -228,7 +243,14 @@ export function parseFileAttachment(text: string): FileAttachment | null {
     ...(size && /^\d+$/.test(size) && Number.isSafeInteger(Number(size))
       ? { size: Number(size) }
       : {}),
-    available: isSafeFileUrl(url) && !!nonceHex && (!!marmot || (alg === 'aes-gcm' && !!keyHex)),
+    available:
+      isSafeFileUrl(url) &&
+      !!nonceHex &&
+      (!!marmot ||
+        (alg === 'aes-gcm' &&
+          /^[a-f0-9]{64}$/i.test(keyHex ?? '') &&
+          /^[a-f0-9]{24}$/i.test(nonceHex) &&
+          /^[a-f0-9]{64}$/i.test(p.get('x') ?? ''))),
   };
 }
 
@@ -244,4 +266,40 @@ export function classifyAttachment(
   if (mime?.startsWith('image/')) return 'image';
   if (mime?.startsWith('audio/')) return 'voice';
   return 'text';
+}
+
+/** Recognise whole-message document URLs only; ordinary web links stay links.
+ * No request is made during classification, even for followed senders. */
+export function parsePlainFileAttachment(text: string): FileAttachment | null {
+  const raw = text.trim();
+  if (!/^https?:\/\/[^\s]+$/i.test(raw)) return null;
+  try {
+    const url = new URL(raw);
+    if (new URLSearchParams(url.hash.slice(1)).get('lpe') === '1') return null;
+    const name = urlBasename(raw);
+    const extension = sanitizeAttachmentText(name)
+      .replace(/[.\s]+$/u, '')
+      .split('.')
+      .pop()
+      ?.toLowerCase();
+    const mime = Object.entries(MIME_EXTENSIONS).find(([, extensions]) =>
+      extensions.includes(extension ?? ''),
+    )?.[0];
+    if (
+      !mime &&
+      !DANGEROUS_EXTENSIONS.has(extension ?? '') &&
+      !['ppt', 'pptx', 'epub', 'odt', 'rtf', '7z', 'gz', 'tar'].includes(extension ?? '')
+    )
+      return null;
+    if (/^(image|audio)\//.test(mime ?? '') && mime !== 'image/svg+xml') return null;
+    return {
+      url: raw,
+      encrypted: false,
+      plainUrl: true,
+      available: isSafeFileUrl(raw),
+      ...displayMetadata(name, mime ?? 'application/octet-stream'),
+    };
+  } catch {
+    return null;
+  }
 }

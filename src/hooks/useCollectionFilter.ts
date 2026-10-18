@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event } from 'nostr-tools';
@@ -16,6 +17,7 @@ export function useCollectionFilter(
   merchant: string | null,
 ) {
   const { relays } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const relayKey = relays
     .filter((r) => r.read)
     .map((r) => r.url)
@@ -62,7 +64,8 @@ export function useCollectionFilter(
             }));
         });
       return () => controller.abort();
-    }, [enabled, merchant, key, relayKey, scopedProducts]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- The service reads market app relays.
+    }, [enabled, merchant, key, relayKey, scopedProducts, relayScope]),
   );
   const collections = enabled && merchant && state.key === key ? state.events : [];
   const selected = selection.key === key ? selection.coordinate : null;

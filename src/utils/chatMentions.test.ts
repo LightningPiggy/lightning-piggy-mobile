@@ -5,6 +5,7 @@ import {
   encodeMentions,
   filterMentionCandidates,
   findMentionQuery,
+  groupPreviewPubkeys,
   mentionedPubkeys,
   messageMentions,
   previewMentions,
@@ -207,5 +208,21 @@ describe('previewMentions', () => {
         () => 'y',
       ),
     ).toBe('plain');
+  });
+});
+
+describe('groupPreviewPubkeys', () => {
+  it("collects each row's last sender and everyone its preview mentions, once each", () => {
+    const rows = [
+      {
+        activity: {
+          lastSenderPubkey: BOB,
+          lastText: `ping nostr:${npub(ALICE)} and nostr:${npub(ALICE)}`,
+        },
+      },
+      { activity: { lastSenderPubkey: ALICE.toUpperCase(), lastText: 'no mentions' } },
+      { activity: { lastSenderPubkey: null, lastText: null } },
+    ];
+    expect(groupPreviewPubkeys(rows).sort()).toEqual([ALICE, BOB].sort());
   });
 });

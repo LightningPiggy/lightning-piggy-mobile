@@ -1,7 +1,6 @@
+import MarketHeader from '../components/MarketHeader';
 import React, { useCallback, useMemo, useState } from 'react';
 import { FlatList, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
-import { Image } from 'expo-image';
-import { ChevronLeft } from 'lucide-react-native';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import MarketProductCard from '../components/MarketProductCard';
 import NostrLoginSheet from '../components/NostrLoginSheet';
@@ -66,27 +65,12 @@ const MarketLikedItemsScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.container} testID="market-liked-items-screen">
-      <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-        />
-        <View style={styles.headerOverlay} />
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            accessibilityLabel={t('market.liked.back')}
-            testID="market-liked-items-back"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{t('market.liked.title')}</Text>
-          <View style={styles.headerSpacer} />
-        </View>
-      </View>
+      <MarketHeader
+        title={t('market.liked.title')}
+        backLabel={t('market.liked.back')}
+        onBack={() => navigation.goBack()}
+        testID="market-liked-items-back"
+      />
 
       <FlatList
         data={products}

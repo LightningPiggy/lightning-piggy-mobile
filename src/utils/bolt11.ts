@@ -1,5 +1,17 @@
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 
+/** Absolute expiry in Unix seconds; BOLT11 defaults to one hour without an x tag. */
+export function expiresAtFromBolt11(bolt11: string): number | null {
+  try {
+    const { sections } = bolt11Decode(bolt11);
+    const timestamp = sections.find((s) => s.name === 'timestamp')?.value;
+    const expiry = sections.find((s) => s.name === 'expiry')?.value ?? 3600;
+    return typeof timestamp === 'number' && typeof expiry === 'number' ? timestamp + expiry : null;
+  } catch {
+    return null;
+  }
+}
+
 // Pull the `payment_hash` field off a bolt11 invoice. Used wherever
 // we need to correlate a generated invoice with a settlement event
 // (ReceiveSheet, NfcReadSheet, …) — `WalletContext.expectPayment`

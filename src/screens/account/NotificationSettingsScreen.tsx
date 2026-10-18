@@ -1,3 +1,4 @@
+import SellerActivitySetting from '../../components/SellerActivitySetting';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { BellRing, Radio, MapPin, Server, BellOff, KeyRound } from 'lucide-react-native';
@@ -112,6 +113,7 @@ const NotificationSettingsScreen: React.FC = () => {
 
       <SettingsSection scope="account" testID="notifications-account">
         <MarmotPushSection permissionGranted={permissionGranted} />
+        <SellerActivitySetting />
 
         <SettingsRow
           kind="navigate"

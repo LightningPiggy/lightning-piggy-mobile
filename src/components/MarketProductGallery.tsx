@@ -1,10 +1,11 @@
 // Hero of the Market product page (#1531). One image (or none) renders the
 // classic single hero at the image's real proportions; a listing with several
-// images becomes a horizontally paged gallery with position dots and a
+// images becomes a horizontally paged gallery with thumbnails and a
 // "2 / 5" counter, and tapping any page opens the full-screen viewer there.
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  FlatList,
   Pressable,
   Text,
   View,
@@ -27,6 +28,7 @@ import {
   createMarketProductGalleryStyles,
   type MarketProductGalleryStyles,
 } from '../styles/MarketProductGallery.styles';
+import { titleInitial } from '../utils/titleInitial';
 
 interface Props {
   /** The product's main image (`''` when it has none). */
@@ -49,7 +51,7 @@ const aspectOf = (e: ImageLoadEventData): number | null => {
 
 const Fallback = ({ title, styles }: { title: string; styles: MarketProductGalleryStyles }) => (
   <View style={styles.imageFallback}>
-    <Text style={styles.imageFallbackText}>{title.charAt(0).toUpperCase()}</Text>
+    <Text style={styles.imageFallbackText}>{titleInitial(title)}</Text>
   </View>
 );
 
@@ -146,33 +148,74 @@ const GalleryPage = React.memo(
 
 GalleryPage.displayName = 'GalleryPage';
 
-interface DotProps {
+interface ThumbnailProps {
+  url: string;
+  title: string;
   index: number;
+  total: number;
   selected: boolean;
   activeColor: string;
   inactiveColor: string;
   scrollIndex: SharedValue<number>;
   styles: MarketProductGalleryStyles;
+  onSelect: (index: number) => void;
 }
 
-// Highlight follows the scroll on the UI thread (no React render per frame);
-// `selected` is the settled page, committed on momentum end.
-const GalleryDot = React.memo(
-  ({ index, selected, activeColor, inactiveColor, scrollIndex, styles }: DotProps) => {
+// Highlight follows the scroll on the UI thread; React only commits settled pages.
+const GalleryThumbnail = React.memo(
+  ({
+    url,
+    title,
+    index,
+    total,
+    selected,
+    activeColor,
+    inactiveColor,
+    scrollIndex,
+    styles,
+    onSelect,
+  }: ThumbnailProps) => {
+    const t = useTranslation();
+    const [failed, setFailed] = useState(false);
     const highlight = useAnimatedStyle(() => ({
-      backgroundColor: scrollIndex.value === index ? activeColor : inactiveColor,
+      borderColor: scrollIndex.value === index ? activeColor : inactiveColor,
+      borderWidth: scrollIndex.value === index ? 2 : styles.thumbnail.borderWidth,
     }));
     return (
-      <Animated.View
-        style={[styles.dot, highlight]}
-        testID={`market-product-gallery-dot-${index}`}
+      <Pressable
+        onPress={() => onSelect(index)}
+        testID={`market-product-gallery-thumb-${index}`}
+        accessibilityRole="button"
         accessibilityState={{ selected }}
-      />
+        accessibilityLabel={t('imageGallery.showImage', { current: index + 1, total })}
+      >
+        <Animated.View style={[styles.thumbnail, highlight]}>
+          {failed ? (
+            <View style={styles.imageFallback}>
+              <Text style={styles.thumbnailFallbackText}>{title.charAt(0).toUpperCase()}</Text>
+            </View>
+          ) : (
+            <Image
+              source={{ uri: url }}
+              style={styles.image}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={url}
+              onError={() => setFailed(true)}
+            />
+          )}
+        </Animated.View>
+      </Pressable>
     );
   },
 );
+GalleryThumbnail.displayName = 'GalleryThumbnail';
 
-GalleryDot.displayName = 'GalleryDot';
+const getThumbnailLayout = (_: ArrayLike<string> | null | undefined, index: number) => ({
+  length: 56,
+  offset: 16 + 64 * index,
+  index,
+});
 
 const galleryKey = (url: string, index: number) => `${index}:${url}`;
 
@@ -187,12 +230,42 @@ const Gallery = ({
 }) => {
   const colors = useThemeColors();
   const { width } = useWindowDimensions();
+  const galleryRef = useRef<FlatList<string>>(null);
+  const thumbnailsRef = useRef<FlatList<string>>(null);
   const [aspect, setAspect] = useState<number | null>(null);
   const [current, setCurrent] = useState(0);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
   const scrollIndex = useSharedValue(0);
   const total = images.length;
   const pageHeight = width / (aspect ?? 1);
+
+  useEffect(() => {
+    thumbnailsRef.current?.scrollToIndex({ index: current, viewPosition: 0.5, animated: true });
+  }, [current]);
+  const onSelect = useCallback(
+    (index: number) => {
+      galleryRef.current?.scrollToOffset({ offset: index * width, animated: true });
+      setCurrent(index);
+    },
+    [width],
+  );
+  const renderThumbnail = useCallback(
+    ({ item, index }: { item: string; index: number }) => (
+      <GalleryThumbnail
+        url={item}
+        title={title}
+        index={index}
+        total={total}
+        selected={index === current}
+        activeColor={colors.brandPink}
+        inactiveColor={colors.divider}
+        scrollIndex={scrollIndex}
+        styles={styles}
+        onSelect={onSelect}
+      />
+    ),
+    [title, total, current, colors.brandPink, colors.divider, scrollIndex, styles, onSelect],
+  );
 
   const onFirstLoad = useCallback((e: ImageLoadEventData) => {
     const next = aspectOf(e);
@@ -252,6 +325,8 @@ const Gallery = ({
     <View testID="market-product-gallery">
       <View style={[styles.imageWrap, { aspectRatio: aspect ?? 1 }]}>
         <Animated.FlatList
+          ref={galleryRef}
+          testID="market-product-gallery-pages"
           data={images}
           horizontal
           pagingEnabled
@@ -273,19 +348,18 @@ const Gallery = ({
           </Text>
         </View>
       </View>
-      <View style={styles.dots}>
-        {images.map((url, index) => (
-          <GalleryDot
-            key={galleryKey(url, index)}
-            index={index}
-            selected={index === current}
-            activeColor={colors.brandPink}
-            inactiveColor={colors.divider}
-            scrollIndex={scrollIndex}
-            styles={styles}
-          />
-        ))}
-      </View>
+      <FlatList
+        ref={thumbnailsRef}
+        data={images}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        keyExtractor={galleryKey}
+        getItemLayout={getThumbnailLayout}
+        renderItem={renderThumbnail}
+        extraData={current}
+        contentContainerStyle={styles.thumbnails}
+        testID="market-product-gallery-thumbnails"
+      />
       <FullscreenImageModal url={viewerUrl} urls={images} onClose={onCloseViewer} />
     </View>
   );

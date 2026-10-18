@@ -1,24 +1,8 @@
-// Marketplace order / receipt events (#market). Plebeian / Gamma-style Nostr
-// markets address transactional updates to a buyer as PLAINTEXT events tagged
-// with the recipient's pubkey (`["p", <buyer>]`):
-//
-//   - kind 16, `["type","1"]`  → Order placed
-//   - kind 16, `["type","2"]`  → Payment (invoice to pay)
-//   - kind 16, `["type","3"]`  → Order status update (`["status", …]`)
-//   - kind 16, `["type","4"]`  → Shipping update (`["status", …]`, opt `["tracking", …]`)
-//   - kind 17                  → Payment receipt (`["subject","order-receipt"]`)
-//
-// Every order event carries an `["order", <uuid>]` tag plus, for kind 16, a
-// `["type","1".."4"]` tag. NIP-18 generic reposts ALSO use kind 16 but never
-// carry that pair (they have `["alt","Generic repost"]`, a `["k", …]` repost-
-// target tag, or JSON-of-another-event content), so `parseOrderEvent` rejects
-// anything that doesn't match the order shape — that's how we tell a market
-// order apart from a repost on the same kind.
-//
-// Dependency-light on purpose: `nip17Unwrap` (a hot decrypt-loop module) and
-// the conversation renderer both import it, so it must not pull in a heavy
-// graph or create an import cycle.
+import { buyerOrderNote } from './orderPresentation';
 
+// Gamma kind-16 order types 1–4 and kind-17 receipts are ONLY NIP-17 rumors.
+// Public events of those kinds have unrelated NIP-18 / NIP-25 meanings.
+// parseOrderEvent accepts decoded rumor shapes; transport boundaries reject public events.
 export type OrderEventType = 'order' | 'payment' | 'status' | 'shipping' | 'receipt';
 
 /** A product line on an order: its `a`-coordinate ref + quantity. */
@@ -56,16 +40,28 @@ export interface ParsedOrderEvent {
   shipping?: string;
   /** Lightning payment detail (kind-16 type-2 request, or kind-17 receipt). */
   payment?: OrderPayment;
-  /** The event's free-text content. */
+  /** Buyer's shipping address on a type-1 order (Gamma `address` tag). */
+  address?: string;
+  /** Buyer contact on a type-1 order (Gamma `email` / `phone` tags). */
+  email?: string;
+  phone?: string;
+  contact?: string;
+  notes?: string;
+  /** Bounded free text, excluding checkout-generated itemisation. */
   message: string;
 }
 
 /** Minimal event shape the parser needs — works for a raw event OR an unwrapped rumor. */
 export interface OrderEventInput {
   kind: number;
+  /** Signed public events must never be interpreted as order rumors. */
+  sig?: string;
   tags: string[][];
   content: string;
 }
+
+export const MAX_ORDER_ITEMS = 50;
+export const MAX_ORDER_ITEM_QUANTITY = 1_000;
 
 const firstTag = (tags: string[][], name: string): string[] | undefined =>
   tags.find((t) => t[0] === name);
@@ -90,7 +86,7 @@ const ORDER_TYPES = new Set<OrderEventType>(['order', 'payment', 'status', 'ship
  * never does.
  */
 export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
-  if (ev.kind !== 16 && ev.kind !== 17) return null;
+  if (ev.sig !== undefined || (ev.kind !== 16 && ev.kind !== 17)) return null;
   if (!Array.isArray(ev.tags)) return null;
 
   // NIP-18 generic-repost guard: reposts ride on kind 16 but advertise
@@ -106,9 +102,15 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
   let type: OrderEventType;
   if (ev.kind === 17) {
     // kind 17 is also used by NIP-25 (reactions to websites), so an `order`
-    // tag alone is too weak — require the market receipt subject so unrelated
-    // kind-17 events aren't misclassified as receipts, stored, and notified.
-    if (tagValue(ev.tags, 'subject') !== 'order-receipt') return null;
+    // tag alone is too weak. A Gamma receipt carries the market receipt
+    // subject (spec example) OR a `payment` proof tag (spec: "at least one
+    // required" — `["payment", <medium>, <reference>, <proof>]`); clients
+    // differ on the subject (Robotechy sends "Payment for order <id>"), but a
+    // website reaction never carries a payment proof.
+    const payTag = firstTag(ev.tags, 'payment');
+    const hasProof =
+      typeof payTag?.[1] === 'string' && payTag[1].length > 0 && typeof payTag[2] === 'string';
+    if (tagValue(ev.tags, 'subject') !== 'order-receipt' && !hasProof) return null;
     type = 'receipt';
   } else {
     const typeVal = tagValue(ev.tags, 'type');
@@ -124,12 +126,24 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
       : undefined;
 
   const items: OrderItemRef[] = [];
+  const byRef = new Map<string, OrderItemRef>();
+  let itemTags = 0;
   for (const t of ev.tags) {
-    if (t[0] !== 'item' || typeof t[1] !== 'string') continue;
+    if (t[0] !== 'item') continue;
+    if (++itemTags > MAX_ORDER_ITEMS) return null;
+    if (typeof t[1] !== 'string') continue;
     // Trim + require a string (mirrors `amount`), then keep a positive integer.
     const qtyRaw = typeof t[2] === 'string' ? t[2].trim() : undefined;
     const qtyNum = qtyRaw !== undefined && /^\d+$/.test(qtyRaw) ? Number(qtyRaw) : 1;
-    items.push({ ref: t[1], quantity: qtyNum > 0 ? qtyNum : 1 });
+    const quantity = Math.min(MAX_ORDER_ITEM_QUANTITY, qtyNum > 0 ? qtyNum : 1);
+    const existing = byRef.get(t[1]);
+    if (existing) {
+      existing.quantity = Math.min(MAX_ORDER_ITEM_QUANTITY, existing.quantity + quantity);
+    } else {
+      const item = { ref: t[1], quantity };
+      byRef.set(t[1], item);
+      items.push(item);
+    }
   }
 
   let payment: OrderPayment | undefined;
@@ -144,13 +158,38 @@ export function parseOrderEvent(ev: OrderEventInput): ParsedOrderEvent | null {
     type,
     orderId,
     amountSats,
-    status: tagValue(ev.tags, 'status'),
-    tracking: tagValue(ev.tags, 'tracking'),
+    status: boundedText(tagValue(ev.tags, 'status')),
+    tracking: boundedText(tagValue(ev.tags, 'tracking')),
     items,
     shipping: tagValue(ev.tags, 'shipping'),
     payment,
-    message: typeof ev.content === 'string' ? ev.content : '',
+    ...(type === 'order' ? contactFields(ev.tags) : {}),
+    // Strip the complete generated suffix before the text cap can cut it in half.
+    message: typeof ev.content === 'string' ? buyerOrderNote(ev.content).slice(0, 500) : '',
   };
+}
+
+/** Longest buyer-supplied contact value kept (an address, not a document). */
+const MAX_CONTACT_LENGTH = 500;
+
+/** Bounded string, or undefined. */
+const boundedText = (raw: unknown): string | undefined =>
+  typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, MAX_CONTACT_LENGTH) : undefined;
+
+/** Buyer address / email / phone off a type-1 order's tags. */
+function contactFields(
+  tags: string[][],
+): Pick<ParsedOrderEvent, 'address' | 'email' | 'phone' | 'contact' | 'notes'> {
+  const out: Pick<ParsedOrderEvent, 'address' | 'email' | 'phone' | 'contact' | 'notes'> = {};
+  const address = boundedText(tagValue(tags, 'address'));
+  const email = boundedText(tagValue(tags, 'email'));
+  const phone = boundedText(tagValue(tags, 'phone'));
+  if (address) out.address = address;
+  if (email) out.email = email;
+  if (phone) out.phone = phone;
+  out.contact = boundedText(tagValue(tags, 'contact'));
+  out.notes = boundedText(tagValue(tags, 'notes'));
+  return out;
 }
 
 /** True when the event is a marketplace order/receipt (vs a repost / unrelated). */
@@ -201,8 +240,8 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
       // Only a finite, non-negative integer — never NaN/Infinity/negative/float
       // (which would surface as "NaN sats" etc. for a corrupt row).
       amountSats: isFiniteNonNegInt(o.amountSats) ? o.amountSats : undefined,
-      status: typeof o.status === 'string' ? o.status : undefined,
-      tracking: typeof o.tracking === 'string' ? o.tracking : undefined,
+      status: boundedText(o.status),
+      tracking: boundedText(o.tracking),
       // Keep only well-formed items and coerce a missing/invalid quantity to 1
       // so a corrupt row can't render NaN totals downstream.
       items: Array.isArray(o.items)
@@ -221,7 +260,12 @@ export function parseStoredOrder(content: string): ParsedOrderEvent | null {
         : [],
       shipping: typeof o.shipping === 'string' ? o.shipping : undefined,
       payment: parseStoredPayment(o.payment),
-      message: typeof o.message === 'string' ? o.message : '',
+      address: boundedText(o.address),
+      email: boundedText(o.email),
+      phone: boundedText(o.phone),
+      contact: boundedText(o.contact),
+      notes: boundedText(o.notes),
+      message: typeof o.message === 'string' ? buyerOrderNote(o.message).slice(0, 500) : '',
     };
   } catch {
     return null;
@@ -306,10 +350,7 @@ export function bolt11FromText(text: string): string | null {
 export function orderPreviewText(order: ParsedOrderEvent, locale?: string): string {
   const { emoji, label } = orderCardHeader(order.type);
   const parts: string[] = [`${emoji} ${label}`];
-  if (order.type === 'status' && order.status) parts.push(order.status);
-  else if (order.type === 'shipping' && order.status) parts.push(order.status);
-  else if (order.amountSats !== undefined)
-    parts.push(`${order.amountSats.toLocaleString(locale)} sats`);
+  if (order.amountSats !== undefined) parts.push(`${order.amountSats.toLocaleString(locale)} sats`);
   return parts.join(' · ');
 }
 

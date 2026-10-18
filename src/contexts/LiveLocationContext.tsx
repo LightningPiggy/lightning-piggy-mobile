@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 /**
  * Sender-side live-location share orchestrator (#206, #1300). Owns:
  *
@@ -181,7 +182,7 @@ export const LiveLocationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       Array.from(
         new Set([
           ...relays.filter((r) => r.write).map((r) => r.url),
-          ...nostrService.DEFAULT_RELAYS,
+          ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS),
         ]),
       ),
     [relays],

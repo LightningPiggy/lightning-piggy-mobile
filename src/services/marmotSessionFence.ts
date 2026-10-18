@@ -73,6 +73,7 @@ export function fenceSigner(signer: EventSigner, gate: StopGate): EventSigner {
 /** `backend`, but writes are dropped once the gate is fenced. */
 export function fenceBackend(backend: MarmotKvBackend, gate: StopGate): MarmotKvBackend {
   return {
+    owner: backend.owner,
     get: (ns, key) => backend.get(ns, key),
     keys: (ns) => backend.keys(ns),
     remove: async (ns, key) => {

@@ -1,0 +1,57 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: NIP-17 and NIP-04 file bubbles
+---
+# Existing signed-in Piggy test account only. Seeds local rows, never sends.
+# Cold encrypted download/share and integrity failures are covered by Jest.
+- tapOn:
+    id: 'conversation-back'
+    optional: true
+- tapOn:
+    id: 'tab-messages'
+- extendedWaitUntil:
+    visible:
+      id: 'messages-dev-seed-files-nip17'
+    timeout: 60000
+- tapOn:
+    id: 'messages-dev-seed-files-nip17'
+- extendedWaitUntil:
+    visible:
+      id: 'chat-file-bubble-dmfile01'
+    timeout: 60000
+- tapOn:
+    id: 'conversation-scroll-to-bottom'
+    optional: true
+- tapOn:
+    id: 'conversation-new-messages'
+    optional: true
+- assertVisible:
+    text: 'invoice-nip17.pdf'
+- assertVisible:
+    text: 'report.docx'
+- assertVisible:
+    id: 'file-share-dm-dmfile0100000000000000000000000000000000000000000000000000000000'
+# Exercise the native picker bridge; cancel without selecting or sending.
+- tapOn:
+    id: 'conversation-attach'
+- tapOn:
+    id: 'attach-send-file'
+- extendedWaitUntil:
+    visible:
+      text: 'Recent|Downloads|Open from'
+    timeout: 15000
+- back
+# Open the legacy thread independently: do not switch accounts or publish.
+- back
+- tapOn:
+    id: 'messages-dev-seed-files-nip04'
+- extendedWaitUntil:
+    visible:
+      id: 'chat-file-bubble-dmfile03'
+    timeout: 60000
+- tapOn:
+    id: 'conversation-scroll-to-bottom'
+    optional: true
+- assertVisible:
+    text: 'invoice-nip04.pdf'
+- assertVisible:
+    id: 'file-share-dm-dmfile0300000000000000000000000000000000000000000000000000000000'

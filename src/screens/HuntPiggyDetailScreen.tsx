@@ -1,3 +1,4 @@
+import { useCacheDetailHydration } from '../hooks/useCacheDetailHydration';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import BrandedSpinner from '../components/BrandedSpinner';
 import { createHuntPiggyDetailScreenStyles as createStyles } from '../styles/HuntPiggyDetailScreen.styles';
@@ -65,7 +66,7 @@ import { useCompassNavigation } from '../hooks/useCompassNavigation';
 import { useUserLocation } from '../contexts/UserLocationContext';
 import { shortNpub } from '../utils/shortNpub';
 import { fetchCache, publishCacheEvent } from '../services/nostrPlacesPublisher';
-import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
+import { peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { lastClaimForPiggyId } from '../services/claimHistoryService';
 import NfcReadSheet from '../components/NfcReadSheet';
@@ -212,50 +213,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   // a −45° offset; Navigation2 is cleaner for compass use.)
   const arrowRotation = bearing !== null && heading !== null ? bearing - heading : null;
 
-  useEffect(() => {
-    let cancelled = false;
-    const parts = parseCacheCoord(coord);
-    if (!parts) {
-      setError('Invalid cache coordinate.');
-      setLoading(false);
-      return;
-    }
-    (async () => {
-      // Paint from disk first (cold deep-link path) to hide relay latency.
-      if (!cache) {
-        try {
-          const onDisk = await loadCachedCaches();
-          if (cancelled) return;
-          const local = onDisk.find((c) => c.coord === coord);
-          if (local) {
-            setCache(local);
-            setLoading(false);
-          }
-        } catch {
-          // AsyncStorage hiccups are non-fatal — fall through to relays.
-        }
-      }
-      try {
-        const c = await fetchCache(parts.pubkey, parts.d);
-        if (cancelled) return;
-        if (!c) {
-          // Only error when there's no cached snapshot to fall back on.
-          if (!cache) setError('Cache not found on relays — it may have expired.');
-        } else {
-          setCache(c);
-        }
-      } catch (e) {
-        if (!cancelled && !cache) setError((e as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // Capture the listing snapshot for this coordinate; setCache must not restart the fetch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coord]);
+  useCacheDetailHydration(coord, cache, setCache, setLoading, setError);
 
   // Refetch on return from HuntCreate (edit) or on pull-to-refresh so
   // renames/spec changes show immediately (mount effect fires once only).

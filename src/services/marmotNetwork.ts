@@ -1,3 +1,4 @@
+import { appRelayPrefsRevision, enabledAppRelays } from './appRelayPrefs';
 import {
   isTestRelayLockdown,
   TEST_PUSH_DISABLED,
@@ -20,6 +21,7 @@ import { requireRelayAcknowledgement } from '../utils/relayPublishResult';
 import { dmInboxRelaysFromTags, isRelayUrl } from '../utils/relayListEvents';
 import { isPublicRelayUrl } from '../utils/publicUrl';
 import { pool, trackRelays } from './nostrPool';
+import { selectHealthyRelays } from './relayHealth';
 import { DEFAULT_RELAYS, MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
 
 const REQUEST_MAX_WAIT_MS = 6_000;
@@ -93,7 +95,10 @@ export function createMarmotNetwork(
       ? [TEST_RELAY_URL]
       : cleaned.length > 0
         ? cleaned
-        : cleanRelays([...getFallbackRelays(), ...DEFAULT_RELAYS]);
+        : cleanRelays([
+            ...getFallbackRelays(),
+            ...enabledAppRelays('default', DEFAULT_RELAYS, ownerPubkey),
+          ]);
   };
   const groupSubscribe = createGroupSubscriptionMux(
     (url, filters, next, onReqOpen, onClose) =>
@@ -125,11 +130,14 @@ export function createMarmotNetwork(
       if (generation !== resumeGeneration || groupOwners.size === 0) return;
       reconnect?.();
     });
-  const inboxCache = new Map<string, { relays: string[]; at: number }>();
+  const inboxCache = new Map<string, { relays: string[]; at: number; revision: number }>();
 
   return {
     async publish(relays, event) {
-      const targets = relaysOr(relays);
+      const requested = relaysOr(relays);
+      const targets = [443, 30443, 10051].includes(event.kind)
+        ? selectHealthyRelays(requested)
+        : requested;
       trackRelays(targets);
       const settled = await Promise.allSettled(
         pool
@@ -204,7 +212,12 @@ export function createMarmotNetwork(
 
     async getUserInboxRelays(pubkey) {
       const cached = inboxCache.get(pubkey);
-      if (cached && Date.now() - cached.at < INBOX_CACHE_TTL_MS) return cached.relays;
+      if (
+        cached?.revision === appRelayPrefsRevision() &&
+        Date.now() - cached.at < INBOX_CACHE_TTL_MS
+      )
+        return cached.relays;
+      const revision = appRelayPrefsRevision();
       const lookup = relaysOr(getFallbackRelays());
       const events = await pool.querySync(
         lookup,
@@ -213,7 +226,7 @@ export function createMarmotNetwork(
       );
       const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
       const relays = relaysOr(latest ? dmInboxRelaysFromTags(latest.tags) : []);
-      inboxCache.set(pubkey, { relays, at: Date.now() });
+      inboxCache.set(pubkey, { relays, at: Date.now(), revision });
       return relays;
     },
   };
@@ -247,7 +260,7 @@ export function createPushTransport(
     const relays = cleanRelays([
       ...MARMOT_PUSH_SERVER_RELAYS,
       ...getLookupRelays(),
-      ...DEFAULT_RELAYS,
+      ...enabledAppRelays('default', DEFAULT_RELAYS, initiatingPubkey),
     ]);
     trackRelays(relays); // closed on sign-out like every other relay we open
     const events = await pool.querySync(

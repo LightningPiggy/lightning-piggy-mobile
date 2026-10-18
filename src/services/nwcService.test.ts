@@ -15,6 +15,7 @@
 // real Nostr relays. The mock provider stores a configurable
 // implementation that each test swaps in.
 import {
+  lookupInvoice,
   connect,
   disconnect,
   getBalance,
@@ -33,6 +34,8 @@ jest.mock('light-bolt11-decoder', () => ({
 }));
 
 let mockGetBalanceImpl: () => Promise<{ balance: number }> = async () => ({ balance: 0 });
+const mockRawLookupInvoice = jest.fn();
+const mockRawListTransactions = jest.fn();
 const mockGetInfo = jest.fn();
 const mockEnable = jest.fn(async () => undefined);
 // pay_invoice + lookupInvoice are driven per-test for the ambiguous
@@ -58,7 +61,12 @@ jest.mock('@getalby/sdk', () => ({
     close: jest.fn(),
     // `client.connected` is read by ensureConnected(); make it look
     // healthy so the reconnect path isn't triggered mid-test.
-    client: { connected: true, pool: undefined },
+    client: {
+      connected: true,
+      pool: undefined,
+      lookupInvoice: mockRawLookupInvoice,
+      listTransactions: mockRawListTransactions,
+    },
   })),
 }));
 
@@ -392,3 +400,132 @@ it.each([
 });
 // Expo fetch requires a native module; these SDK tests never use HTTPS verification.
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
+
+describe('raw invoice settlement lookup', () => {
+  it.each(['settled', 'expired', 'pending', 'failed', 'missing', 'mismatch', 'error'])(
+    'checks raw proof rather than the lossy WebLN paid flag: %s',
+    async (state) => {
+      const preimage = 'c'.repeat(64);
+      const response = {
+        payment_hash: state === 'mismatch' ? 'd'.repeat(64) : mockPaymentHash,
+        settled_at: state === 'missing' ? undefined : 100,
+        state,
+        preimage,
+        invoice: 'lnbc1fixture',
+      };
+      if (state === 'error') mockRawLookupInvoice.mockRejectedValueOnce(new Error('NOT_FOUND'));
+      else mockRawLookupInvoice.mockResolvedValueOnce(response);
+      mockLookupInvoiceImpl = async () => ({ paid: true, preimage });
+      const result = await lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 5000 });
+      expect(mockRawLookupInvoice).toHaveBeenLastCalledWith({ payment_hash: mockPaymentHash });
+      expect(result?.paid === true).toBe(state === 'settled');
+      if (state === 'settled') expect(result).toMatchObject({ settledAt: 100, preimage });
+    },
+  );
+});
+
+describe.each(['incoming', 'outgoing'])('ambiguous %s LNbits lookups', (type) => {
+  it.each([undefined, 'settled'])('checks successful history with state %s', async (state) => {
+    for (const history of [
+      'absent',
+      'listed',
+      'listed-no-preimage',
+      'unsupported',
+      'wrong-hash',
+      'wrong-direction',
+      'unsettled',
+      'failed',
+    ]) {
+      const response = {
+        type,
+        state,
+        invoice: 'lnbc1fixture',
+        payment_hash: mockPaymentHash,
+        preimage: 'c'.repeat(64),
+        created_at: 100,
+        settled_at: 100,
+        expires_at: 200,
+      };
+      mockRawLookupInvoice.mockResolvedValueOnce(response);
+      if (history === 'unsupported')
+        mockRawListTransactions.mockRejectedValueOnce(new Error('NOT_IMPLEMENTED'));
+      else
+        mockRawListTransactions.mockResolvedValueOnce({
+          transactions:
+            history === 'absent'
+              ? []
+              : [
+                  {
+                    ...response,
+                    type:
+                      history === 'wrong-direction'
+                        ? type === 'incoming'
+                          ? 'outgoing'
+                          : 'incoming'
+                        : type,
+                    payment_hash: history === 'wrong-hash' ? 'd'.repeat(64) : mockPaymentHash,
+                    settled_at: history === 'unsettled' ? undefined : 100,
+                    preimage: history === 'listed-no-preimage' ? undefined : response.preimage,
+                    invoice: undefined,
+                    ...(history === 'failed' ? { state: 'failed' } : {}),
+                  },
+                ],
+        });
+      const result = await lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 5000 });
+      expect(result?.paid === true).toBe(history.startsWith('listed'));
+      if (!history.startsWith('listed')) expect(result).toEqual({ paid: null });
+      else
+        expect(result).toMatchObject({
+          invoice: response.invoice,
+          preimage: response.preimage,
+          settledAt: 100,
+        });
+      expect(mockRawListTransactions).toHaveBeenLastCalledWith({
+        from: 40,
+        until: Math.floor(Date.now() / 1000),
+        type,
+        unpaid: false,
+        limit: 50,
+      });
+    }
+  });
+});
+
+it.each([undefined, 'settled'])(
+  'trusts LNbits proof before expiry without list permission (state %s)',
+  async (state) => {
+    mockRawLookupInvoice.mockResolvedValueOnce({
+      type: 'incoming',
+      state,
+      invoice: 'lnbc1fixture',
+      payment_hash: mockPaymentHash,
+      preimage: 'c'.repeat(64),
+      created_at: 100,
+      settled_at: 100,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const calls = mockRawListTransactions.mock.calls.length;
+    expect(await lookupInvoice(WALLET_ID, mockPaymentHash)).toMatchObject({ paid: true });
+    expect(mockRawListTransactions).toHaveBeenCalledTimes(calls);
+  },
+);
+
+it.each(['NOT_IMPLEMENTED', 'RESTRICTED', 'UNAUTHORIZED', 'timeout'])(
+  'returns explicit unknown for expired LNbits when history fails: %s',
+  async (code) => {
+    mockRawLookupInvoice.mockResolvedValueOnce({
+      type: 'incoming',
+      payment_hash: mockPaymentHash,
+      preimage: 'c'.repeat(64),
+      created_at: 100,
+      settled_at: 100,
+      expires_at: 200,
+    });
+    if (code === 'timeout')
+      mockRawListTransactions.mockImplementationOnce(() => new Promise(() => {}));
+    else mockRawListTransactions.mockRejectedValueOnce(Object.assign(new Error(code), { code }));
+    const pending = lookupInvoice(WALLET_ID, mockPaymentHash, { replyTimeoutMs: 10 });
+    await jest.advanceTimersByTimeAsync(10);
+    expect(await pending).toEqual({ paid: null });
+  },
+);

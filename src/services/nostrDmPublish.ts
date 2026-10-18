@@ -19,7 +19,15 @@ export interface RelayPublisher {
 // Result of a NIP-17 multi-wrap DM send. `wrapsPublished` / `errors` are the
 // original fields callers' partial-send logic relies on; `delivery` is the
 // added per-relay breakdown for the sent bubble's tick (#856).
+export interface WrapPublishOutcome {
+  recipientPubkey: string | undefined;
+  published: boolean;
+  error?: string;
+}
+
 export interface DmSendResult {
+  /** One outcome per wrap, in input order; contains no rumor plaintext. */
+  wrapOutcomes: WrapPublishOutcome[];
   wrapsPublished: number;
   errors: string[];
   delivery: DeliveryStatus;
@@ -83,6 +91,10 @@ async function attemptPublish(
 ): Promise<AttemptOutcome> {
   const errors: string[] = [];
   let published = 0;
+  const wrapOutcomes: WrapPublishOutcome[] = wraps.map((wrap) => ({
+    recipientPubkey: wrap.tags?.find((tag) => tag[0] === 'p')?.[1],
+    published: false,
+  }));
   // Settles seen so far, shared across the early-resolve and background phases.
   // A relay that accepts ANY wrap is `ok`; aggregateRelayResults folds repeats.
   const settles: RelaySettle[] = [];
@@ -92,7 +104,8 @@ async function attemptPublish(
   const fullSettlePromises: Promise<void>[] = [];
 
   await Promise.all(
-    wraps.map(async (wrap) => {
+    wraps.map(async (wrap, index) => {
+      const wrapOutcome = wrapOutcomes[index];
       const perRelay = pool.publish(relays, wrap);
       // Relays that produced a real settle (accept OR reject) for THIS wrap —
       // used to tell "relay answered" apart from "socket black-holed" in the
@@ -158,16 +171,19 @@ async function attemptPublish(
           // Neutral wording: some relays may have answered (with a rejection)
           // while others never settled — the only universal fact on this
           // branch is that nothing ACCEPTED within the window.
-          errors.push('publish timed out — no relay accepted within the window');
+          wrapOutcome.error = 'publish timed out — no relay accepted within the window';
+          errors.push(wrapOutcome.error);
         } else {
           published++;
+          wrapOutcome.published = true;
         }
       } catch (e) {
         // `Promise.any` AggregateError — every relay rejected. Pull the first
         // individual reason so the message is a concrete relay error.
         const agg = e as AggregateError;
         const firstReason = agg?.errors?.[0] as Error | undefined;
-        errors.push(firstReason?.message ?? (e as Error)?.message ?? 'publish failed');
+        wrapOutcome.error = firstReason?.message ?? (e as Error)?.message ?? 'publish failed';
+        errors.push(wrapOutcome.error);
       } finally {
         if (timer) clearTimeout(timer);
       }
@@ -192,6 +208,7 @@ async function attemptPublish(
 
   return {
     result: {
+      wrapOutcomes,
       wrapsPublished: published,
       errors,
       delivery: aggregateRelayResults(settles, meta, targetRelayCount),

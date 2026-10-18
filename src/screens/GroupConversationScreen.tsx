@@ -199,6 +199,7 @@ const GroupConversationScreen: React.FC = () => {
   const memberPubkeys = group?.memberPubkeys ?? EMPTY_PUBKEYS;
   const memberProfiles = useGroupMemberProfiles({
     memberPubkeys,
+    messages,
     selfPubkey: myPubkey,
     contacts,
     // One bounded batch supplies sender avatars while the thread is focused.
@@ -264,6 +265,7 @@ const GroupConversationScreen: React.FC = () => {
     sendText,
     handleSend,
     handlePickAndSendImage,
+    handlePickAndSendFile,
     handleTakeAndSendPhoto,
     handleShareLocation,
     handleSendGif,
@@ -744,6 +746,7 @@ const GroupConversationScreen: React.FC = () => {
               <AttachPanel
                 onShareLocation={liveLoc.openLocation}
                 onSendImage={handlePickAndSendImage}
+                onSendFile={handlePickAndSendFile}
                 onTakePhoto={handleTakeAndSendPhoto}
                 onSendGif={isGifConfigured() ? () => setGifPickerOpen(true) : undefined}
                 // Zap renders but stays disabled — there's no single recipient

@@ -8,12 +8,6 @@ export const createMarketLikedItemsStyles = (colors: Palette) => {
   const market = createMarketScreenStyles(colors);
   return StyleSheet.create({
     container: market.container,
-    header: { ...market.header, minHeight: 0 },
-    headerImage: market.headerImage,
-    headerOverlay: market.headerOverlay,
-    headerRow: market.headerRow,
-    headerTitle: market.headerTitle,
-    headerSpacer: { width: 24 },
     gridContent: market.gridContent,
     gridRow: market.gridRow,
     emptyWrap: market.emptyWrap,

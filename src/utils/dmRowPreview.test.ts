@@ -91,3 +91,10 @@ it('never previews raw unknown-kind JSON, phishing text or marker payloads', () 
 it.each([9, 1234, 99999])('redacts every stored kind outside the renderable set (%s)', (kind) => {
   expect(dmRowPreview('phishing text', kind)).toBe(`Unsupported message type (kind ${kind})`);
 });
+
+it.each([4, 14])('redacts plain document URLs and access tokens in kind %s previews', (kind) => {
+  const preview = dmRowPreview('https://example.com/invoice.pdf?token=private', kind);
+  expect(preview).not.toContain('private');
+  expect(preview).not.toContain('https://');
+  expect(preview).toContain('📎');
+});

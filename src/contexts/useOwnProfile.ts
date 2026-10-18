@@ -47,6 +47,11 @@ export function useOwnProfile(
         if (__DEV__) console.log(`[Nostr] fetchProfile: skipped (cache fresh)`);
         return;
       }
+      // A switched account may have no live profile yet. Keep its saved
+      // display name visible while refreshing stale metadata, including when
+      // the current relays no longer carry its kind-0. Never replace newer
+      // in-memory state with this stale seed.
+      if (cached) setProfile((prev) => prev ?? cached);
       const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
       if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
       if (fetchedProfile) {

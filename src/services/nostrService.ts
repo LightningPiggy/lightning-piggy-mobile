@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import { fetchSingleLatest } from './nostrLatestQuery';
 import {
   generateSecretKey,
@@ -133,7 +134,7 @@ export function buildProfileRelayHints(
   const contactRelay = viewerContacts.find((c) => c.pubkey === targetPubkey)?.relay;
   if (contactRelay) hints.push(contactRelay);
   for (const r of viewerReadRelays) hints.push(r);
-  for (const r of DEFAULT_RELAYS) hints.push(r);
+  for (const r of enabledAppRelays('default', DEFAULT_RELAYS)) hints.push(r);
   const deduped: string[] = [];
   for (const r of hints) {
     if (!r) continue;
@@ -157,7 +158,7 @@ export function buildProfileRelayHints(
 // discovery if these hints go dead.
 export function buildOwnProfileRelayHints(ownWriteRelays: string[], max = 2): string[] {
   const deduped: string[] = [];
-  for (const r of [...ownWriteRelays, ...DEFAULT_RELAYS]) {
+  for (const r of [...ownWriteRelays, ...enabledAppRelays('default', DEFAULT_RELAYS)]) {
     if (!r) continue;
     if (deduped.includes(r)) continue;
     deduped.push(r);
@@ -464,7 +465,7 @@ async function fetchZapReceiptsByTag(
   const arr = Array.isArray(pubkeys) ? pubkeys : [pubkeys];
   const deduped = [...new Set(arr.filter(Boolean))];
   if (deduped.length === 0) return [];
-  const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+  const allRelays = [...new Set([...relays, ...enabledAppRelays('default', DEFAULT_RELAYS)])];
   trackRelays(allRelays);
   const baseFilter = {
     kinds: [9735],
@@ -611,7 +612,7 @@ export async function fetchDirectMessageEvents(
   relays: string[],
   options: { limit?: number; since?: number } = {},
 ): Promise<RawDmEvent[]> {
-  const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+  const allRelays = [...new Set([...relays, ...enabledAppRelays('default', DEFAULT_RELAYS)])];
   trackRelays(allRelays);
   const limit = options.limit ?? 200;
   // Damus's trick (SubscriptionManager.swift:293-300): pad `since` back
@@ -687,7 +688,7 @@ export async function fetchInboxDmEvents(
   relays: string[],
   options: { limit?: number; since?: number; signal?: AbortSignal } = {},
 ): Promise<FetchedInboxEvents> {
-  const allRelays = [...new Set([...relays, ...DEFAULT_RELAYS])];
+  const allRelays = [...new Set([...relays, ...enabledAppRelays('default', DEFAULT_RELAYS)])];
   trackRelays(allRelays);
   // Share the live-sub limit and retry-store capacity policy (#383).
   const limit = options.limit ?? DM_INBOX_LIMIT;
@@ -800,7 +801,7 @@ export function generateKeypair(): { secretKey: Uint8Array; pubkey: string; nsec
 }
 
 export function cleanup(): void {
-  pool.close([...connectedRelays, ...DEFAULT_RELAYS]);
+  pool.close([...connectedRelays, ...enabledAppRelays('default', DEFAULT_RELAYS)]);
   connectedRelays.clear();
 }
 

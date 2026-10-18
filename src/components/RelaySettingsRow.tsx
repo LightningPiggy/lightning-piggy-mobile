@@ -6,7 +6,6 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createPublishedRelayListsSectionStyles } from '../styles/PublishedRelayListsSection.styles';
 import { relayAccessTag, relayRowHost, relayDisplayName } from '../utils/relayDetails';
-import { isPublishableRelayUrl } from '../utils/relayListEvents';
 
 export default React.memo(function RelaySettingsRow({
   url,
@@ -55,9 +54,6 @@ export default React.memo(function RelaySettingsRow({
         />
         <View style={styles.urlColumn}>
           <Text style={styles.url}>{relayDisplayName(url)}</Text>
-          {!isPublishableRelayUrl(url) && (
-            <Text style={styles.urlWarning}>{t('publishedRelays.notPublishable')}</Text>
-          )}
         </View>
         {inUse && (
           <Text

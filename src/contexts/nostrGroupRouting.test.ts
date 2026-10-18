@@ -12,6 +12,7 @@ import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
 import { fireMessageNotification } from '../services/notificationService';
 import { notifyDmMessage, notifyGroupMessage } from './nostrEventBus';
 import { textForRumor, type DecodedRumor } from '../utils/nip17Unwrap';
+import { dmRowPreview } from '../utils/dmRowPreview';
 import { NWC_SHARE_KIND, serializeNwcShare } from '../utils/nwcShareMessage';
 import type { Group } from '../types/groups';
 
@@ -62,110 +63,35 @@ afterEach(() => {
   setSyntheticGroupReconciler(null);
 });
 
-it.each(['room', 'no-room', 'cancelled'] as const)(
-  'waits for pending reconciliation before routing concurrent ordinary live arrivals (%s)',
-  async (outcome) => {
-    setKnownGroups([], ME);
-    let finish!: (group: Group | null) => void;
-    const reconcile = jest.fn(
-      (_input: SyntheticRoomInput) => new Promise<Group | null>((resolve) => (finish = resolve)),
-    );
-    setSyntheticGroupReconciler(reconcile, ME);
-    const queueInboxEntry = jest.fn();
-    const writes: Promise<void>[] = [];
-    let cancelled = false;
-    const surface = createLiveRumorSurfacer({
-      viewerPubkey: ME,
-      isCancelled: () => cancelled,
-      shouldAbort: () => cancelled,
-      followPubkeysRef: { current: new Set([PEER]) },
-      followGateBuffer: { defer: jest.fn(), reevaluate: jest.fn(), clear: jest.fn(), size: 0 },
-      isFollowHydrated: () => true,
-      isFreshArrival: () => true,
-      queueInboxEntry,
-      knownWrapIds: new Set(),
-      seen: new Set(),
-      chainWrite: (task) => {
-        writes.push(task());
-      },
-    });
-    const first = surface(
-      {
-        ...rumor(14),
-        tags: [
-          ['p', ME],
-          ['subject', 'Family'],
-        ],
-      },
-      'first',
-    );
-    // Welcome routing now completes before group reconciliation starts.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(reconcile).toHaveBeenCalledTimes(1);
-    const followup = surface({ ...rumor(14), content: 'follow-up', created_at: 21 }, 'followup');
-    // Let ordinary live delivery proceed while room creation is still blocked.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const prematureInboxCalls = queueInboxEntry.mock.calls.length;
-    const prematureDmWrites = jest.mocked(upsertDmMessages).mock.calls.length;
-    const prematureNotifications = jest.mocked(fireMessageNotification).mock.calls.length;
-    cancelled = outcome === 'cancelled';
-    const input = reconcile.mock.calls[0][0];
-    finish(
-      outcome === 'no-room'
-        ? null
-        : {
-            id: input.groupId,
-            name: input.name,
-            memberPubkeys: input.memberPubkeys,
-            createdAt: 1,
-            updatedAt: 1,
-          },
-    );
-    await Promise.all([first, followup]);
-    await Promise.all(writes);
-    expect(prematureInboxCalls).toBe(0);
-    expect(prematureDmWrites).toBe(0);
-    expect(prematureNotifications).toBe(0);
-    if (outcome === 'room') {
-      expect(appendGroupMessage).toHaveBeenCalledTimes(2);
-      for (const id of ['first', 'followup']) {
-        expect(appendGroupMessage).toHaveBeenCalledWith(
-          ME,
-          input.groupId,
-          expect.objectContaining({ id }),
-        );
-        expect(notifyGroupMessage).toHaveBeenCalledWith(
-          input.groupId,
-          expect.objectContaining({ id }),
-        );
-      }
-      expect(fireMessageNotification).toHaveBeenCalledTimes(2);
-      expect(fireMessageNotification).toHaveBeenCalledWith(
-        expect.objectContaining({
-          kind: 'group',
-          threadId: input.groupId,
-          body: 'follow-up',
-        }),
-      );
-      expect(queueInboxEntry).not.toHaveBeenCalled();
-      expect(upsertDmMessages).not.toHaveBeenCalled();
-      expect(notifyDmMessage).not.toHaveBeenCalled();
-    } else if (outcome === 'no-room') {
-      expect(queueInboxEntry).toHaveBeenCalledTimes(1);
-      expect(queueInboxEntry).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'followup', partnerPubkey: PEER }),
-      );
-      expect(upsertDmMessages).toHaveBeenCalledTimes(1);
-      expect(appendGroupMessage).not.toHaveBeenCalled();
-      expect(fireMessageNotification).toHaveBeenCalledWith(expect.objectContaining({ kind: 'dm' }));
-    } else {
-      expect(queueInboxEntry).not.toHaveBeenCalled();
-      expect(upsertDmMessages).not.toHaveBeenCalled();
-      expect(appendGroupMessage).not.toHaveBeenCalled();
-      expect(fireMessageNotification).not.toHaveBeenCalled();
-    }
-  },
-);
+it('does not wait for a concurrent room creation before delivering an unmarked DM', async () => {
+  setKnownGroups([], ME);
+  let finish!: (group: Group | null) => void;
+  const reconcile = jest.fn(
+    (_input: SyntheticRoomInput) => new Promise<Group | null>((resolve) => (finish = resolve)),
+  );
+  setSyntheticGroupReconciler(reconcile, ME);
+  const marked = {
+    ...rumor(14),
+    tags: [
+      ['p', ME],
+      ['subject', 'Family'],
+    ],
+  };
+  const first = tryRouteGroupRumor(marked, ME, 'first', undefined, () => true);
+  expect(reconcile).toHaveBeenCalledTimes(1);
+  expect(await tryRouteGroupRumor(rumor(14), ME, 'direct')).toMatchObject({ kind: 'not-group' });
+  expect(appendGroupMessage).not.toHaveBeenCalled();
+  const input = reconcile.mock.calls[0][0];
+  finish({
+    id: input.groupId,
+    name: input.name,
+    memberPubkeys: [PEER],
+    createdAt: 1,
+    updatedAt: 1,
+  });
+  expect(await first).toMatchObject({ kind: 'routed' });
+  expect(appendGroupMessage).toHaveBeenCalledTimes(1);
+});
 
 it.each([15, 444, NWC_SHARE_KIND])(
   'leaves subjectless kind-%s rumors on their specialized DM path despite a matching room',
@@ -216,6 +142,35 @@ describe.each([
     return queueInboxEntry.mock.calls[0]?.[0];
   }
 
+  it.each([false, true])('routes text by its marker (sender echo=%s)', async (senderEcho) => {
+    const message = rumor(14);
+    if (senderEcho) {
+      message.pubkey = ME;
+      message.tags = [
+        ['p', PEER],
+        ['p', ME],
+        ['p', PEER],
+      ];
+    }
+    const entry = await receive(message, hasSubject ? 0 : 1);
+    if (hasSubject) {
+      expect(entry).toBeUndefined();
+      expect(upsertDmMessages).not.toHaveBeenCalled();
+      expect(appendGroupMessage).toHaveBeenCalledWith(
+        ME,
+        'family',
+        expect.objectContaining({ text: 'hello', senderPubkey: message.pubkey }),
+      );
+    } else {
+      expect(entry).toMatchObject({ partnerPubkey: PEER, fromMe: senderEcho, text: 'hello' });
+      expect(upsertDmMessages).toHaveBeenCalledWith([
+        expect.objectContaining({ conversation: PEER, content: 'hello', fromMe: senderEcho }),
+      ]);
+      expect(appendGroupMessage).not.toHaveBeenCalled();
+      expect(notifyGroupMessage).not.toHaveBeenCalled();
+    }
+  });
+
   if (!hasSubject) {
     it.each([['subject', ''], ['subject', ' \t\n '], ['subject']])(
       'delivers a two-party message with invalid subject %j and no matching room as a DM',
@@ -230,6 +185,67 @@ describe.each([
         ]);
         expect(appendGroupMessage).not.toHaveBeenCalled();
         expect(notifyGroupMessage).not.toHaveBeenCalled();
+      },
+    );
+  }
+
+  if (hasSubject) {
+    it.each([
+      ['image/jpeg', false, false],
+      ['audio/mp4', false, false],
+      ['application/pdf', false, false],
+      ['application/pdf', true, false],
+      ['application/pdf', false, true],
+    ] as const)(
+      'routes %s to group storage and redacts notifications (sender echo=%s, multi-party=%s)',
+      async (mime, senderEcho, multiParty) => {
+        const third = 'c'.repeat(64);
+        const members = multiParty ? [PEER, third] : [PEER];
+        setKnownGroups(
+          [{ id: 'family', name: 'Family', memberPubkeys: members, createdAt: 1, updatedAt: 1 }],
+          ME,
+        );
+        const message = rumor(15);
+        message.pubkey = senderEcho ? ME : PEER;
+        message.content = 'https://files.example/attachment?token=private';
+        message.tags = [
+          ['p', senderEcho ? PEER : ME],
+          ...(multiParty ? [['p', third]] : []),
+          ['file-type', mime],
+          ['decryption-key', SECRET],
+          ['decryption-nonce', 'e'.repeat(24)],
+          ['imeta', 'name statement.pdf', 'size 2048'],
+        ];
+        const entry = await receive(message, 0);
+        const converted = textForRumor(message);
+        expect(converted).toContain(SECRET);
+        expect(entry).toBeUndefined();
+        expect(upsertDmMessages).not.toHaveBeenCalled();
+        expect(notifyDmMessage).not.toHaveBeenCalled();
+        expect(appendGroupMessage).toHaveBeenCalledWith(
+          ME,
+          'family',
+          expect.objectContaining({ text: converted, wireKind: 15 }),
+        );
+        expect(notifyGroupMessage).toHaveBeenCalledWith(
+          'family',
+          expect.objectContaining({ text: converted, wireKind: 15 }),
+        );
+        if (path === 'live' && !senderEcho) {
+          expect(fireMessageNotification).toHaveBeenCalledWith(
+            expect.objectContaining({
+              kind: 'group',
+              threadId: 'family',
+              body: dmRowPreview(converted, 15),
+            }),
+          );
+          const notifications = JSON.stringify(jest.mocked(fireMessageNotification).mock.calls);
+          for (const secret of [SECRET, 'e'.repeat(24), 'token=private', '[FILE]', '#lpe=1']) {
+            expect(notifications).not.toContain(secret);
+          }
+        } else {
+          expect(fireMessageNotification).not.toHaveBeenCalled();
+        }
       },
     );
   }
@@ -281,18 +297,28 @@ describe.each([
       ['decryption-key', SECRET],
       ['decryption-nonce', 'e'.repeat(24)],
     );
-    const entry = await receive(message);
+    const entry = await receive(message, hasSubject ? 0 : 1);
     const converted = textForRumor(message);
     expect(converted).toContain('#lpe=1');
     expect(converted).toContain(SECRET);
-    expect(upsertDmMessages).toHaveBeenCalledWith([
-      expect.objectContaining({ conversation: PEER, content: converted, wireKind: 15 }),
-    ]);
-    expect(entry.text).toBe('📎 Attachment');
-    expect(appendGroupMessage).not.toHaveBeenCalled();
+    if (hasSubject) {
+      expect(entry).toBeUndefined();
+      expect(upsertDmMessages).not.toHaveBeenCalled();
+      expect(appendGroupMessage).toHaveBeenCalledWith(
+        ME,
+        'family',
+        expect.objectContaining({ text: converted, wireKind: 15 }),
+      );
+    } else {
+      expect(upsertDmMessages).toHaveBeenCalledWith([
+        expect.objectContaining({ conversation: PEER, content: converted, wireKind: 15 }),
+      ]);
+      expect(entry.text).toBe('📎 Attachment');
+      expect(appendGroupMessage).not.toHaveBeenCalled();
+    }
     if (path === 'live') {
       expect(fireMessageNotification).toHaveBeenCalledWith(
-        expect.objectContaining({ kind: 'dm', body: '📎 Attachment' }),
+        expect.objectContaining({ kind: hasSubject ? 'group' : 'dm', body: '📎 Attachment' }),
       );
     }
   });

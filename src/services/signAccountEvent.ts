@@ -35,7 +35,7 @@ export async function signAccountEvent(
     }
     return null;
   } catch (error) {
-    if (__DEV__) console.warn('[Nostr] signEvent failed:', error);
+    if (__DEV__ && event.kind !== 22242) console.warn('[Nostr] signEvent failed:', error);
     return null;
   }
 }

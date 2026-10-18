@@ -1,9 +1,10 @@
+import { CHAT_CARD_MAX_WIDTH } from './chatCardWidth';
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
 // Presentation for MessageBubble + its ImageBubble sub-component. Extracted
 // from the component (#703 size cap) — pure data, no state closure.
-export const createMessageBubbleStyles = (colors: Palette) =>
+export const createMessageBubbleStyles = (colors: Palette, cardWidth = CHAT_CARD_MAX_WIDTH) =>
   StyleSheet.create({
     bubbleRow: {
       flexDirection: 'row',
@@ -169,7 +170,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       color: colors.outgoingBubble.foreground,
     },
     invoiceCard: {
-      width: 240,
+      width: cardWidth,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,
@@ -287,8 +288,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       backgroundColor: 'rgba(0,0,0,0.08)',
     },
     contactCard: {
-      maxWidth: '85%',
-      minWidth: 240,
+      width: cardWidth,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,
@@ -356,8 +356,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       color: colors.outgoingBubble.foreground,
     },
     gifCard: {
-      maxWidth: '85%',
-      minWidth: 240,
+      width: cardWidth,
       borderRadius: 14,
       overflow: 'hidden',
       shadowColor: '#000',
@@ -374,8 +373,8 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
     },
     gifImage: {
-      width: 240,
-      height: 240,
+      width: '100%',
+      aspectRatio: 1,
       backgroundColor: colors.background,
     },
     gifTime: {
@@ -389,8 +388,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       color: colors.outgoingBubble.foreground,
     },
     locationCard: {
-      maxWidth: '85%',
-      minWidth: 240,
+      width: cardWidth,
       borderRadius: 14,
       borderWidth: 1,
       overflow: 'hidden',
@@ -452,8 +450,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       color: colors.outgoingBubble.foreground,
     },
     imageBubble: {
-      maxWidth: '85%',
-      minWidth: 240,
+      width: cardWidth,
       borderRadius: 14,
       overflow: 'hidden',
       shadowColor: '#000',
@@ -470,8 +467,8 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
     },
     imageBubbleImage: {
-      width: 240,
-      height: 240,
+      width: '100%',
+      aspectRatio: 1,
       backgroundColor: colors.background,
     },
     imageBubbleTime: {
@@ -485,8 +482,7 @@ export const createMessageBubbleStyles = (colors: Palette) =>
       color: colors.outgoingBubble.foreground,
     },
     pollCard: {
-      maxWidth: '85%',
-      minWidth: 240,
+      width: cardWidth,
       paddingTop: 12,
       paddingBottom: 4,
       paddingHorizontal: 14,

@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as nip19 from 'nostr-tools/nip19';
 import * as AmberSigner from '../../modules/amber-signer';
+import { AMBER_PERMISSIONS_JSON } from './signerPermissions';
 import { AmberSignerError, toAmberSignerError } from './amberErrors';
 
 /**
@@ -34,7 +35,7 @@ export async function requestPublicKey(): Promise<string> {
   if (!isAmberSupported()) {
     throw new Error('Amber is only supported on Android');
   }
-  const result = await viaAmber(() => AmberSigner.getPublicKey());
+  const result = await viaAmber(() => AmberSigner.getPublicKey(AMBER_PERMISSIONS_JSON));
   let pk = requireAnswer(result.pubkey);
 
   // Amber may return npub (bech32) instead of hex — convert if needed

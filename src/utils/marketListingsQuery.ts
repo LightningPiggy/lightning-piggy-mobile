@@ -1,6 +1,7 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { getCurrentUserPubkey } from '../services/nostrActiveAccount';
-// Relay plan for the WoT: Friends market snapshot. Pure (no I/O) so the
+// Relay plan for the market snapshots (author-scoped, or the All scope). Pure (no I/O) so the
 // bounding rules are unit-testable.
 //
 // Two passes keep the JS thread out of other people's history:
@@ -23,7 +24,12 @@ export const MARKET_LISTING_KINDS = [30018, 30402];
  * Plebeian Market writes to its own relay, and Robotechy's listing is on
  * nostr.mom, which isn't even in Robotechy's own kind-10002 list.
  */
-export const MARKET_RELAYS = ['wss://relay.plebeian.market', 'wss://nostr.mom'];
+export const MARKET_RELAYS = [
+  'wss://relay.plebeian.market',
+  'wss://relay.conduit.market',
+  'wss://relay.weeksfamily.me',
+  'wss://nostr.mom',
+];
 
 /** Authors per filter — relays reject very long `authors` arrays. */
 export const AUTHOR_BATCH = 64;
@@ -50,13 +56,37 @@ export function marketSnapshotRelays(userRelays: readonly string[]): {
     return { urls: [TEST_RELAY_URL], dropped: false };
   const seen = new Set<string>();
   const all: string[] = [];
-  for (const raw of [...MARKET_RELAYS, ...userRelays]) {
+  for (const raw of [...enabledAppRelays('market', MARKET_RELAYS), ...userRelays]) {
     const url = normaliseRelay(raw);
     if (!/^wss:\/\/[^/\s]+/.test(url) || seen.has(url)) continue;
     seen.add(url);
     all.push(url);
   }
   return { urls: all.slice(0, MAX_SNAPSHOT_RELAYS), dropped: all.length > MAX_SNAPSHOT_RELAYS };
+}
+
+/**
+ * Per-relay cap for the All scope's author-less listing query. Sized so even
+ * fully disjoint replies from every snapshot relay (8 × 150) fit the
+ * service's 1,200-event listing budget — the sample never trips its
+ * "budget exhausted" path.
+ */
+export const OPEN_LISTING_LIMIT = 150;
+/** How far back the All scope looks for listings. */
+export const OPEN_LISTING_WINDOW_DAYS = 90;
+
+/** `since` (epoch seconds) for the All scope's window. */
+export function openListingSince(nowMs: number = Date.now()): number {
+  return Math.floor(nowMs / 1000) - OPEN_LISTING_WINDOW_DAYS * 24 * 60 * 60;
+}
+
+/**
+ * All scope, pass 1: the newest listings from ANYONE — no `authors` — bounded
+ * by `limit` and a `since` window. Pass 2 (deletions) is unchanged: it is
+ * scoped to the authors of the listings this pass found.
+ */
+export function openListingFilters(since: number): Filter[] {
+  return [{ kinds: MARKET_LISTING_KINDS, since, limit: OPEN_LISTING_LIMIT }];
 }
 
 /** Pass 1: listing kinds by followed authors, in bounded batches. */

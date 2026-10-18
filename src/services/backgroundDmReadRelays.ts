@@ -1,3 +1,5 @@
+import { enabledAppRelays, loadAppRelayPrefs } from './appRelayPrefs';
+import { DEFAULT_RELAYS } from './nostrService';
 import { lockRelays } from '../config/testRelayLockdown';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RelayConfig } from '../types/nostr';
@@ -19,6 +21,7 @@ import {
  * always folds in DEFAULT_RELAYS, so this can't return an empty read set.
  */
 export async function resolveReadRelays(pubkey: string): Promise<string[]> {
+  await loadAppRelayPrefs(pubkey);
   let nip65: RelayConfig[] = [];
   try {
     const raw = await AsyncStorage.getItem(perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pubkey));
@@ -37,7 +40,11 @@ export async function resolveReadRelays(pubkey: string): Promise<string[]> {
     // Unreadable cache just means defaults + user overrides.
   }
   const user = await getUserRelays().catch(() => []);
-  const read = mergeRelays({ nip65, user })
+  const read = mergeRelays({
+    nip65,
+    user,
+    defaults: enabledAppRelays('default', DEFAULT_RELAYS, pubkey),
+  })
     .filter((r) => r.read)
     .map((r) => r.url);
   // Others deliver NIP-17 DMs to the user's own DM inbox relays — watch them too.

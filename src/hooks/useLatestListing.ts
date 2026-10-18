@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useMemo, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { DEFAULT_RELAYS } from '../services/nostrService';
@@ -19,7 +20,7 @@ export function useLatestListing(product: MarketProduct | undefined) {
   const { relays } = useNostr();
   const readRelays = useMemo(() => {
     const r = relays.filter((x) => x.read).map((x) => x.url);
-    return r.length > 0 ? r : DEFAULT_RELAYS;
+    return r.length > 0 ? r : enabledAppRelays('default', DEFAULT_RELAYS);
   }, [relays]);
   const [fresh, setFresh] = useState<MarketProduct | null>(null);
   const [withdrawn, setWithdrawn] = useState(false);

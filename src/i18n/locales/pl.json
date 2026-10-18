@@ -280,6 +280,14 @@
     "shareTitle": "Udostępnij: {{name}}",
     "shareSubtitle": "Odbiorca dostanie zaszyfrowaną wiadomość prywatną Nostr z kartą osoby."
   },
+  "geocacheRail": {
+    "nearest": "Najbliższe Piglets",
+    "empty": "W pobliżu nie ma jeszcze Piglets",
+    "hide": "Ukryj Piglet",
+    "error": "Nie udało się wczytać pobliskich Piglets.",
+    "retry": "Ponów",
+    "hidden": "Twój filtr zaufania ukrywa niektóre pobliskie skrytki."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} — zobacz wszystko",
     "seeAll": "Zobacz wszystko"
@@ -627,6 +635,7 @@
   "imageGallery": {
     "open": "Otwórz obraz",
     "position": "Obraz {{current}} z {{total}}",
+    "showImage": "Pokaż obraz {{current}} z {{total}}",
     "openHint": "Otwiera obraz na pełnym ekranie"
   },
   "gifPickerSheet": {
@@ -1304,10 +1313,12 @@
     "unknownSender": "Ktoś",
     "file": "Plik",
     "fileBytes": "{{size}} bajtów",
-    "fileShare": "Zapisz / Udostępnij",
+    "fileShare": "Udostępnij",
     "filePreparing": "Przygotowywanie pliku…",
     "fileUnavailable": "Plik niedostępny",
     "fileShareFailed": "Nie udało się przygotować lub udostępnić pliku. Spróbuj ponownie.",
+    "filePlainUrl": "Bez szyfrowania end-to-end · Niezweryfikowany",
+    "fileUploadLimit": "Wybierz pliki o rozmiarze do 16 MB.",
     "devFiles": "Pliki testowe",
     "devFilesA11y": "Utwórz rozmowę testową z plikami",
     "fileSave": "Zapisz",
@@ -1317,7 +1328,13 @@
     "fileTypeMismatch": "Nazwa pliku nie odpowiada zadeklarowanemu typowi: {{type}}",
     "blockedLink": "Zablokowany link",
     "invalidUpload": "Serwer przechowywania zwrócił nieprawidłowy adres URL multimediów. Spróbuj innego serwera.",
-    "uploadFailedAllServers": "Nie udało się przesłać na żaden serwer przechowywania. Sprawdź połączenie i spróbuj ponownie albo dodaj inny serwer przechowywania w Ustawieniach."
+    "uploadFailedAllServers": "Nie udało się przesłać na żaden serwer przechowywania. Sprawdź połączenie i spróbuj ponownie albo dodaj inny serwer przechowywania w Ustawieniach.",
+    "fileLabelText": "Tekst",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Wideo",
+    "fileSaveLabel": "Zapisz %{filename}",
+    "fileShareLabel": "Udostępnij %{filename}",
+    "fileSaved": "Zapisano w %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Edytowano",
@@ -1560,6 +1577,10 @@
     "failedToRemoveRelay": "Nie udało się usunąć przekaźnika.",
     "geoCacheRelays": "Przekaźniki geocache",
     "geoCacheRelaysHint": "Dedykowane przekaźniki do skrytek Piglet i innych skrytek geocachingowych (NIP-GC). Odzwierciedlają to, co odczytuje i przeszukuje aplikacja internetowa treasures.to, dzięki czemu twoje skrytki Piglet pozostają widoczne w sieci. Są zawsze używane do publikowania i odczytu skrytek, oprócz przekaźników dodanych powyżej.",
+    "marmotRelays": "Przekaźniki czatów grupowych (Marmot)",
+    "marmotRelaysHint": "Znane przekaźniki czatów grupowych Marmot, używane też przez White Noise. Twoje klucze zaproszeń (pakiety kluczy) są publikowane tutaj i na twoich przekaźnikach, aby inni mogli rozpocząć z tobą szyfrowany czat grupowy, nawet gdy twoje przekaźniki są offline. Są ogłaszane na twojej liście przekaźników pakietów kluczy (typ 10051).",
+    "marketRelays": "Przekaźniki rynku (Gamma)",
+    "marketRelaysHint": "Przekaźniki, z których Lightning Piggy odczytuje oferty Rynku i na których publikuje oferty Twojego sklepu, współdzielone z innymi aplikacjami Gamma Markets (Plebeian, Conduit, Shopstr).",
     "encryptedMessages": "Wiadomości szyfrowane (NIP-17)",
     "amberPermissionHint": "Amber nie przyznał jeszcze tej aplikacji uprawnienia do odszyfrowywania NIP-44 — dotknij poniżej, aby je przyznać. Jedno okno, a potem kolejne szyfrowane wiadomości będą odszyfrowywane po cichu. Wiadomości od osób, których nie obserwujesz, i tak pozostają ukryte.",
     "amberPermissionTitle": "Uprawnienie Amber",
@@ -1575,7 +1596,7 @@
     "nativeCryptoActiveYes": "Aktywne w tej sesji: tak",
     "nativeCryptoActiveNo": "Aktywne w tej sesji: nie",
     "notInUse": "Teraz nieużywane",
-    "advancedRelays": "Zaawansowane",
+    "advancedRelays": "Przekaźniki aplikacji",
     "defaultRelaysTitle": "Domyślne przekaźniki aplikacji",
     "defaultRelaysHint": "Wbudowane w aplikację i zawsze używane jako zapasowe obok twoich przekaźników.",
     "deviceRelaysTitle": "Przekaźniki tylko na urządzeniu",
@@ -2311,7 +2332,14 @@
       "emptyNoMatch": "Żaden produkt nie pasuje do wyszukiwania ani filtrów.",
       "emptyMerchantMissing": "Brak ofert od {{name}} w tej chwili — pociągnij, aby odświeżyć.",
       "emptyNoFriends": "Nikt z twoich znajomych z Nostr nie sprzedaje jeszcze produktów Lightning Piggy.",
-      "emptyNone": "Brak dostępnych produktów."
+      "emptyNoFof": "Nikt w twojej sieci znajomych znajomych jeszcze nic nie sprzedaje.",
+      "emptyNoAll": "Na twoich przekaźnikach nie znaleziono teraz żadnych ofert.",
+      "allScopeNote": "Eksperymentalne: oferty od kogokolwiek, niezweryfikowane",
+      "fofBuilding": "Budowanie twojej sieci… {{done}}/{{total}}",
+      "fofBuildingStart": "Budowanie twojej sieci…",
+      "fofFailed": "Nie udało się zbudować twojej sieci — pokazujemy oferty twoich znajomych.",
+      "emptyNone": "Brak dostępnych produktów.",
+      "myOrders": "Moje zamówienia"
     },
     "card": {
       "featured": "Polecane",
@@ -2325,7 +2353,10 @@
       "buyFrom": "Kup — sprzedawca: {{seller}}",
       "buyAccessibility": "Kup: {{title}}, sprzedawca: {{seller}}",
       "noFeedback": "Opinie i komentarze nie są jeszcze dostępne dla tego sprzedawcy — potrzebuje on tożsamości Nostr, do której można je przypiąć.",
-      "refreshFailed": "Nie udało się odświeżyć produktu — sprawdź połączenie i spróbuj ponownie."
+      "refreshFailed": "Nie udało się odświeżyć produktu — sprawdź połączenie i spróbuj ponownie.",
+      "buy": "Kup",
+      "outOfStock": "Brak w magazynie",
+      "invoiceNote": "Sprzedawca wyśle fakturę za Twoje zamówienie"
     },
     "modes": {
       "comingSoon": "{{label}} — wkrótce",
@@ -2352,7 +2383,11 @@
       "sellers": "Sprzedawcy",
       "friends": "Znajomi (osoby, które obserwujesz)",
       "friendsOfFriends": "Znajomi znajomych",
+      "allSellers": "Wszyscy (ktokolwiek)",
+      "experimental": "Eksperymentalne",
       "friendsChip": "Znajomi",
+      "friendsOfFriendsChip": "Znajomi znajomych",
+      "allChip": "Wszyscy",
       "comingSoon": "Wkrótce",
       "clearScope": "Przywróć preferowanych sprzedawców Lightning Piggy",
       "changeScope": "{{label}}. Otwiera filtry, aby zmienić sprzedawców",
@@ -2447,7 +2482,25 @@
         "relayUnreachable": "Nie udało się połączyć z przekaźnikiem, aby złożyć zamówienie. Spróbuj ponownie.",
         "generic": "Coś poszło nie tak przy składaniu zamówienia. Spróbuj ponownie."
       },
-      "rateUpdated": "Koszt dostawy został zaktualizowany. Sprawdź nową sumę i dotknij Złóż zamówienie ponownie."
+      "rateUpdated": "Kurs wymiany się zmienił, więc zmieniła się suma. Sprawdź nową sumę i ponownie stuknij Złóż zamówienie.",
+      "unitPriceSats": "{{amount}} sats za sztukę",
+      "addressLabel": "Adres dostawy",
+      "addressPlaceholder": "Imię i nazwisko, ulica, miasto, kod pocztowy, kraj",
+      "addressHint": "Wysyłany prywatnie (zaszyfrowany) razem z zamówieniem, tylko do {{seller}}.",
+      "outOfStock": "Brak w magazynie",
+      "inStock": "W magazynie: {{stock}}",
+      "delivery": {
+        "name": "Imię",
+        "line1": "Adres, wiersz 1",
+        "line2": "Adres, wiersz 2 (opcjonalnie)",
+        "town": "Miejscowość / miasto",
+        "postcode": "Kod pocztowy",
+        "country": "Kraj",
+        "nameHint": "Dowolne imię, pod które kurier może dostarczyć przesyłkę — pseudonim jest w porządku, jeśli widnieje na skrzynce pocztowej",
+        "remember": "Zapamiętaj na tym telefonie",
+        "postcodeInvalid": "Wpisz prawidłowy kod pocztowy dla wybranego kraju",
+        "tooLong": "Pełny adres dostawy może mieć najwyżej 500 znaków"
+      }
     },
     "shipping": {
       "label": "Dostawa",
@@ -2474,6 +2527,8 @@
     },
     "live": {
       "loading": "Wczytywanie ofert od twoich znajomych…",
+      "loadingNetwork": "Ładowanie ofert z twojej sieci…",
+      "loadingAll": "Ładowanie ofert od wszystkich…",
       "partialToast": "Niektórzy sprzedawcy nie odpowiedzieli. Pociągnij w dół, aby odświeżyć.",
       "contactSeller": "Napisz do sprzedawcy"
     },
@@ -2642,33 +2697,33 @@
         "noOrders": "Brak zamówień",
         "shippingCount": {
           "one": "{{count}} opcja",
-          "other": "{{count}} opcji",
           "few": "{{count}} opcje",
-          "many": "{{count}} opcji"
+          "many": "{{count}} opcji",
+          "other": "{{count}} opcji"
         },
         "collectionsCount": {
           "one": "{{count}} kolekcja",
-          "other": "{{count}} kolekcji",
           "few": "{{count}} kolekcje",
-          "many": "{{count}} kolekcji"
+          "many": "{{count}} kolekcji",
+          "other": "{{count}} kolekcji"
         },
         "listingsCount": {
           "one": "{{count}} wystawiona",
-          "other": "{{count}} wystawionych",
           "few": "{{count}} wystawione",
-          "many": "{{count}} wystawionych"
+          "many": "{{count}} wystawionych",
+          "other": "{{count}} wystawionych"
         },
         "ordersCount": {
           "one": "{{count}} zamówienie",
-          "other": "{{count}} zamówień",
           "few": "{{count}} zamówienia",
-          "many": "{{count}} zamówień"
+          "many": "{{count}} zamówień",
+          "other": "{{count}} zamówień"
         },
         "ordersNeedInvoice": {
           "one": "{{count}} czeka na fakturę",
-          "other": "{{count}} czeka na fakturę",
           "few": "{{count}} czekają na fakturę",
-          "many": "{{count}} czeka na fakturę"
+          "many": "{{count}} czeka na fakturę",
+          "other": "{{count}} czeka na fakturę"
         }
       },
       "currencies": {
@@ -2692,7 +2747,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Zamówienia od kupujących na twoje oferty. Dotknij, aby otworzyć czat.",
+        "hint": "Zamówienia kupujących dotyczące Twoich ofert. Dotknij zamówienia, aby je wyświetlić.",
         "emptyBody": "Gdy ktoś kupi jedną z twoich ofert, zamówienie pojawi się tutaj.",
         "rowAccessibility": "Zamówienie od {{name}}: {{items}}, {{time}}"
       },
@@ -2713,9 +2768,9 @@
       "noCollections": "Brak kolekcji.",
       "collectionListings": {
         "one": "{{count}} oferta",
-        "other": "{{count}} ofert",
         "few": "{{count}} oferty",
-        "many": "{{count}} ofert"
+        "many": "{{count}} ofert",
+        "other": "{{count}} ofert"
       }
     },
     "markdown": {
@@ -2747,7 +2802,8 @@
       "pickerSubtitle": "Otrzyma go jako prywatną wiadomość.",
       "sentTo": "Wysłano do: {{name}}",
       "sendFailed": "Nie udało się wysłać tego produktu",
-      "sharedItem": "Udostępniony produkt"
+      "sharedItem": "Udostępniony produkt",
+      "marketListing": "Oferta na rynku"
     },
     "liked": {
       "title": "Polubione produkty",
@@ -2758,6 +2814,26 @@
       "loadFailed": "Nie udało się wczytać polubionych produktów — przeciągnij w dół, aby spróbować ponownie.",
       "signedOut": "Zaloguj się przez Nostr, aby zobaczyć polubione produkty.",
       "signIn": "Zaloguj się"
+    },
+    "republish": {
+      "coverage": "Na %{count} z %{total} przekaźników",
+      "checking": "Sprawdzanie przekaźników…",
+      "action": "Opublikuj ponownie",
+      "all": "Opublikuj wszystko ponownie",
+      "missing": "Brak na przekaźnikach",
+      "resign": "Podpisz i opublikuj ponownie",
+      "confirm": "Brak podpisanej kopii. Odtworzyć tę ofertę i zatwierdzić jeden podpis, aby opublikować ją ponownie?",
+      "results": "Wyniki ponownej publikacji",
+      "accepted": "Zaakceptowano",
+      "rejected": "Odrzucono",
+      "noResponse": "Brak odpowiedzi",
+      "alreadyPresent": "Już istnieje",
+      "close": "Zamknij",
+      "failed": "Ponowna publikacja nie powiodła się"
+    },
+    "shortcuts": {
+      "liked": "Polubione",
+      "startSelling": "Zacznij sprzedawać"
     }
   },
   "dmProtocol": {
@@ -2862,7 +2938,8 @@
       "payment": "Płatność",
       "zap": "Zap",
       "cache": "Znaleziony Piglet",
-      "swap": "Wymiana"
+      "swap": "Wymiana",
+      "market": "Aktywność w ofercie"
     }
   },
   "blossomServers": {
@@ -3194,17 +3271,17 @@
     "secureChat": "Bezpieczny czat",
     "secureChatDevices": {
       "one": "Bezpieczny czat · {{count}} urządzenie",
-      "other": "Bezpieczny czat · {{count}} urządzenia",
       "few": "Bezpieczny czat · {{count}} urządzenia",
-      "many": "Bezpieczny czat · {{count}} urządzeń"
+      "many": "Bezpieczny czat · {{count}} urządzeń",
+      "other": "Bezpieczny czat · {{count}} urządzenia"
     },
     "bylineA11y": "Pokaż, kto jest na tym czacie i na jakich urządzeniach",
     "inThisChat": "Na tym czacie",
     "deviceCount": {
       "one": "{{count}} urządzenie",
-      "other": "{{count}} urządzenia",
       "few": "{{count}} urządzenia",
-      "many": "{{count}} urządzeń"
+      "many": "{{count}} urządzeń",
+      "other": "{{count}} urządzenia"
     },
     "showDevicesA11y": "Pokaż urządzenia: {{name}}",
     "hideDevicesA11y": "Ukryj urządzenia: {{name}}",
@@ -3216,24 +3293,24 @@
     "sentFrom": "Wysłano z",
     "oneOfDevices": {
       "one": "Jedno z {{count}} urządzeń",
-      "other": "Jedno z {{count}} urządzeń",
       "few": "Jedno z {{count}} urządzeń",
-      "many": "Jedno z {{count}} urządzeń"
+      "many": "Jedno z {{count}} urządzeń",
+      "other": "Jedno z {{count}} urządzeń"
     },
     "readableOn": "Można odczytać na",
     "readableOnPerson": "{{name}}: {{count}}",
     "you": "Ty",
     "noticeJoined": {
       "one": "{{name}} · na czacie na {{count}} urządzeniu ({{apps}})",
-      "other": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
       "few": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
-      "many": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})"
+      "many": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})",
+      "other": "{{name}} · na czacie na {{count}} urządzeniach ({{apps}})"
     },
     "noticeAdded": {
       "one": "{{name}} · nowe urządzenie ({{apps}})",
-      "other": "{{name}} · {{count}} nowych urządzeń ({{apps}})",
       "few": "{{name}} · {{count}} nowe urządzenia ({{apps}})",
-      "many": "{{name}} · {{count}} nowych urządzeń ({{apps}})"
+      "many": "{{name}} · {{count}} nowych urządzeń ({{apps}})",
+      "other": "{{name}} · {{count}} nowych urządzeń ({{apps}})"
     },
     "showChanges": "Pokazuj zmiany urządzeń na czatach",
     "showChangesHint": "Alfa: szara linia na czatach Marmot, gdy ktoś dołącza z urządzenia lub dodaje urządzenie. Widoczna tylko na tym telefonie; nic nie jest wysyłane."
@@ -3313,6 +3390,7 @@
     "security": "Protokół i bezpieczeństwo",
     "mlsSecurity": "Szyfrowanie end-to-end z MLS. Urządzenia współdzielą klucze grupy.",
     "nip17Security": "Wiadomości szyfrowane end-to-end z ukrytą tożsamością nadawcy.",
+    "nip171Security": "Grupa z szyfrowaniem end-to-end. Członkowie korzystają ze wspólnego klucza grupy, a właściciel zmienia go, gdy ktoś opuszcza grupę.",
     "nip04Security": "Starsze szyfrowanie. Przejdź na NIP-17, aby zwiększyć prywatność.",
     "devices": "Urządzenia w tym czacie",
     "relays": "Przekaźniki grupy",
@@ -3372,6 +3450,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Operator i zasady",
     "runBy": "Prowadzony przez",
+    "tipOperator": "Wyślij napiwek operatorowi",
+    "tipOperatorLabel": "Wyślij zap do {{name}} za prowadzenie tego przekaźnika",
     "copyUrl": "Kopiuj URL przekaźnika",
     "terms_of_service": "Warunki korzystania",
     "privacy_policy": "Polityka prywatności",
@@ -3468,6 +3548,10 @@
     "licenceType": "MIT",
     "lightningAddress": "Adres Lightning (LUD-16)"
   },
+  "nip171Invitation": {
+    "group": "Grupa NIP-171",
+    "full": "Należysz już do maksymalnej liczby grup NIP-171. Opuść jedną z nich, aby przyjąć to zaproszenie."
+  },
   "marmotInvitation": {
     "pending": "Zaproszenie oczekuje",
     "accept": "Akceptuj",
@@ -3543,5 +3627,119 @@
   "profileSafety": {
     "unavailable": "Profil niedostępny",
     "unverified": "niezweryfikowany"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Czekamy na fakturę od sprzedawcy",
+    "viewOrder": "Zobacz zamówienie"
+  },
+  "myOrders": {
+    "moreItems": "+{{count}} więcej",
+    "title": "Moje zamówienia",
+    "empty": "Brak zamówień — stuknij Kup przy ogłoszeniu.",
+    "open": "Moje zamówienia",
+    "openWithPayNow": "Moje zamówienia — do zapłaty: {{invoices}}",
+    "viewAll": "Zobacz moje zamówienia",
+    "rowA11y": "Zamówienie u {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Poproś sprzedawcę o nową fakturę"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Czeka na fakturę",
+    "payNow": "Zapłać teraz",
+    "paid": "Opłacone",
+    "shipped": "Wysłane",
+    "completed": "Zrealizowane",
+    "cancelled": "Anulowane",
+    "needsInvoice": "Wymaga faktury",
+    "invoiceSent": "Czeka na płatność",
+    "all": "Wszystkie",
+    "empty": "Brak zamówień z tym statusem.",
+    "invoiceExpired": "Faktura wygasła"
+  },
+  "sellerActivity": {
+    "settings": "Komentarze i recenzje moich ofert",
+    "generic": "Nowa aktywność w ofercie",
+    "listing": "Twoja oferta",
+    "sellerReplied": "Sprzedawca odpowiedział",
+    "reply": "%{name} odpowiedział(a) na Twój komentarz",
+    "comment": "Nowy komentarz do %{title}",
+    "review": "Nowa recenzja %{title} ★%{stars}",
+    "replyAction": "Odpowiedz"
+  },
+  "sellerOrders": {
+    "buyerNote": "Notatka od kupującego",
+    "newOrderNotification": "Nowe zamówienie: {{items}}",
+    "yourShopOrder": "Zamówienie w Twoim sklepie",
+    "loadingShop": "Wczytywanie sklepu, aby wycenić zamówienie…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} za sztukę",
+    "overStock": "Więcej niż masz w magazynie (zostało {{stock}})",
+    "shippingLine": "Wysyłka: {{title}}",
+    "shippingNotOffered": "Twoje ogłoszenie nie oferuje tej opcji wysyłki.",
+    "shippingMissing": "Kupujący nie wybrał wysyłki dla fizycznego przedmiotu.",
+    "total": "Suma",
+    "waitingForRate": "Czekam na kurs wymiany…",
+    "fiatAtRate": "{{amount}} {{currency}}, przeliczone po dzisiejszym kursie",
+    "amountDiffers": "Zamówienie kupującego opiewało na {{buyer}} sats, co nie odpowiada Twoim aktualnym cenom. Nie możesz wysłać faktury, dopóki kupujący nie złoży nowego zamówienia na aktualną kwotę.",
+    "shipTo": "Wyślij do:",
+    "contact": "Kontakt:",
+    "receiptUnverified": "Kupujący wysłał potwierdzenie płatności, ale nie dowodzi ono zapłaty Twojej faktury.",
+    "sendInvoice": "Wyślij fakturę",
+    "confirmSend": "Utwórz i wyślij fakturę",
+    "checkPayment": "Sprawdź płatność",
+    "waitingForPayment": "Faktura wysłana — czekam na płatność",
+    "markPaid": "Oznacz jako opłacone",
+    "buyerNotified": "Opłacone — kupujący powiadomiony",
+    "invoiceSent": "Faktura wysłana",
+    "notPaidYet": "Jeszcze nieopłacone",
+    "couldNotConfirmPayment": "Nie udało się potwierdzić płatności",
+    "orderNumber": "Zamówienie nr {{id}}",
+    "rowA11y": "Zamówienie od {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "To zamówienie dotyczy nie Twoich ogłoszeń.",
+      "missingListing": "Jednego z tych przedmiotów nie ma już w Twoim sklepie.",
+      "badPrice": "Jedno z tych ogłoszeń nie ma stałej ceny do zafakturowania.",
+      "unknownShipping": "Wybrana opcja wysyłki nie jest jedną z Twoich.",
+      "noRate": "Czekam na kurs wymiany…"
+    },
+    "errors": {
+      "noWallet": "Wybierz portfel do odbioru płatności.",
+      "invoiceFailed": "Ten portfel nie mógł utworzyć faktury. Sprawdź, czy jest połączony i może odbierać.",
+      "amountMismatch": "Portfel utworzył fakturę na inną kwotę, więc jej nie wysłano.",
+      "shopChanged": "Ceny lub opcje wysyłki w Twoim sklepie się zmieniły. Sprawdź zamówienie przed wysłaniem faktury.",
+      "sendFailed": "Nie udało się wysłać do kupującego. Sprawdź połączenie i spróbuj ponownie.",
+      "notSignedIn": "Zaloguj się, aby zarządzać zamówieniami."
+    },
+    "wallet": {
+      "none": "Żaden z Twoich portfeli nie może tworzyć faktur. Dodaj portfel Lightning (NWC) z uprawnieniem do odbioru.",
+      "checking": "Sprawdzam, czy może odbierać…",
+      "offline": "Niepołączony",
+      "receiveTo": "Odbieraj płatności na",
+      "receiveToHint": "Faktury za zamówienia są tworzone w tym portfelu. Zapisane na tym urządzeniu.",
+      "remember": "Zapamiętaj dla mojego sklepu",
+      "choose": "Wybierz portfel",
+      "saveFailed": "Nie udało się zapisać wyboru portfela."
+    },
+    "sendNewInvoice": "Wyślij nową fakturę",
+    "checkWalletFirst": "Najpierw sprawdź portfel",
+    "unknownInvoiceWarning": "Nie udało się potwierdzić, czy poprzednia faktura została opłacona. Jeśli tak, nie wysyłaj nowej."
+  },
+  "relayPublishSheet": {
+    "waiting": "Oczekiwanie na podpis…",
+    "title": "Publikowanie: %{title}",
+    "accepted": "Zaakceptowano",
+    "rejected": "Odrzucono",
+    "noResponse": "Brak odpowiedzi",
+    "pending": "Publikowanie…"
+  },
+  "appRelays": {
+    "toggle": "Używaj %{host}",
+    "saveFailed": "Nie udało się zapisać ustawienia przekaźnika",
+    "warning": {
+      "default": "Zapasowe połączenia aplikacji są wyłączone",
+      "indexers": "Wyszukiwanie list przekaźników jest wyłączone",
+      "geocache": "Skrytki mogą się nie załadować",
+      "marmot": "Wyszukiwanie kluczy grup może nie działać",
+      "market": "Oferty na rynku nie będą się ładować"
+    }
   }
 }

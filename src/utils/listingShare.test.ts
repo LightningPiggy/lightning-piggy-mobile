@@ -100,3 +100,16 @@ it('preserves warnings, sender titles, trailing text and every standalone listin
     'Afterword',
   ]);
 });
+
+it.each([' ', '\t', '\r\n'])(
+  'recognises a listing as the final whitespace token (%j)',
+  (separator) => {
+    const uri = `nostr:${listingNaddr(listing)!}`;
+    const message = `Bitcoin Satskull${separator}${uri}  `;
+    expect(extractSharedListing(message)).toMatchObject({ identifier: 'widget' });
+    expect(sharedListingParts(message)).toEqual([
+      'Bitcoin Satskull',
+      expect.objectContaining({ identifier: 'widget' }),
+    ]);
+  },
+);

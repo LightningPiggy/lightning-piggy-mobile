@@ -1,3 +1,4 @@
+import FiatAmount from './FiatAmount';
 import BrandedSpinner from './BrandedSpinner';
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
@@ -26,6 +27,9 @@ interface Props {
   costSatsByCoordinate: Map<string, number | null>;
   sellerName: string;
   onMessageShop: () => void;
+  /** False when the sheet collects the address itself (relay listings), so
+   * the "the seller asks for it in chat" note would be wrong. */
+  showAddressNote?: boolean;
 }
 
 /** "Ships worldwide" vs a short country list for an option row's sub-label. */
@@ -57,6 +61,7 @@ const MarketShippingSection: React.FC<Props> = ({
   costSatsByCoordinate,
   sellerName,
   onMessageShop,
+  showAddressNote = true,
 }) => {
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
@@ -177,6 +182,7 @@ const MarketShippingSection: React.FC<Props> = ({
                     : costSats === 0
                       ? t('market.free')
                       : t('market.sats', { amount: costSats.toLocaleString(formatLocale) })}
+                  <FiatAmount inline sats={costSats} />
                 </Text>
               </TouchableOpacity>
             );
@@ -186,9 +192,11 @@ const MarketShippingSection: React.FC<Props> = ({
 
       {/* The order carries only the chosen shipping option — there is no
           address form, so say where the address actually gets collected. */}
-      <Text style={styles.addressNote} testID="market-shipping-address-note">
-        {t('market.shipping.addressInChat', { seller: sellerName })}
-      </Text>
+      {showAddressNote ? (
+        <Text style={styles.addressNote} testID="market-shipping-address-note">
+          {t('market.shipping.addressInChat', { seller: sellerName })}
+        </Text>
+      ) : null}
     </View>
   );
 };

@@ -18,10 +18,18 @@ jest.mock('../services/boltzService', () => ({ isBitcoinAddress: () => false }))
 
 // Real BOLT11 bech32 shape (same builder as orderInvoiceAmount.test.ts), so
 // the amount check runs the production decoder. `lnbc1u` = 100 sats.
-function invoice(hrp: string): string {
+const NOW = 1_800_000_000;
+beforeEach(() => jest.spyOn(Date, 'now').mockReturnValue(NOW * 1000));
+afterEach(() => jest.restoreAllMocks());
+
+function invoice(hrp: string, timestamp = NOW): string {
+  const timestampWords = Array.from(
+    { length: 7 },
+    (_, i) => Math.floor(timestamp / 32 ** (6 - i)) % 32,
+  );
   return bech32.encode(
     hrp,
-    [...Array(7).fill(0), 1, 1, 20, ...bech32.toWords(Buffer.alloc(32, 1)), ...Array(104).fill(0)],
+    [...timestampWords, 1, 1, 20, ...bech32.toWords(Buffer.alloc(32, 1)), ...Array(104).fill(0)],
     2000,
   );
 }
@@ -60,6 +68,16 @@ function renderActions(props: Partial<React.ComponentProps<typeof OrderPaymentAc
 }
 
 describe('OrderPaymentActions payment boundary', () => {
+  test('an unpaid invoice past its default expiry has no Pay button', () => {
+    const { ui } = renderActions({
+      order: paymentRequest(invoice('lnbc1u', NOW - 3601)),
+      expectedAmountSats: 100,
+      isInvoicePaid: () => false,
+    });
+    expect(ui.getByTestId('c-order-expired-1')).toBeTruthy();
+    expect(ui.queryByTestId('c-order-pay-1')).toBeNull();
+  });
+
   test('an invoice for exactly the approved total is payable', () => {
     const { ui, onPayInvoice } = renderActions({
       expectedAmountSats: 100,

@@ -1,3 +1,4 @@
+import type { GroupProtocol } from '../utils/groupProtocol';
 import type { SearchableMessage } from '../utils/chatSearch';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 import type { SettingsPickerParams } from '../utils/settingsPicker';
@@ -73,7 +74,7 @@ export type RootStackParamList = {
   ChatInfo: {
     name: string;
     picture?: string | null;
-    protocol: DmProtocol;
+    protocol: GroupProtocol;
     contact?: ContactProfileBodyData;
     groupId?: string;
     members?: GroupMemberRow[];
@@ -98,7 +99,11 @@ export type RootStackParamList = {
   // Products tab or an embedded `nostr:naddr` product card (#1332). Same
   // screen and params as Explore's `MarketProductDetail`, registered on the
   // root stack so Back returns to the profile / note it was opened from.
-  ProductDetail: { productId: string; product?: MarketProduct };
+  ProductDetail: {
+    productId: string;
+    product?: MarketProduct;
+    feedbackTab?: 'comments' | 'reviews';
+  };
   // Graceful fallback when a scanned tag / nostr: link resolves to an
   // entity Lightning Piggy can't display. `entity` is a human-readable
   // label for the message + warning log; `detail` carries the raw value.
@@ -169,16 +174,23 @@ export type ExploreStackParamList = {
   // MARKET_PRODUCTS (see src/data/marketProducts.ts).
   // `preview` renders an unpublished draft from the listing editor: no
   // seller actions, reviews or comments (#1273).
-  MarketProductDetail: { productId: string; product?: MarketProduct; preview?: boolean };
+  MarketProductDetail: {
+    productId: string;
+    product?: MarketProduct;
+    preview?: boolean;
+    feedbackTab?: 'comments' | 'reviews';
+  };
   // Seller side (#1273): the user's own shop, its settings (name, currency,
   // shipping zones) and the listing editor (`dTag` = edit that listing).
   MarketMyShop: undefined;
+  // Buyer side: every Gamma order I placed, from the encrypted DM store.
+  MarketMyOrders: { orderId: string; sellerPubkey: string } | undefined;
   // My shop hub sub-screens (#1534).
   MarketShopCurrencies: undefined;
   MarketShopShipping: undefined;
   MarketShopCollections: undefined;
   MarketShopListings: undefined;
-  MarketShopOrders: undefined;
+  MarketShopOrders: { orderId?: string; eventId?: string; buyerPubkey: string } | undefined;
   // `digital` presets a new listing's item type (the "It's a digital item"
   // way past the shipping gate).
   MarketListingEditor: { dTag?: string; returnToMyShop?: boolean; digital?: boolean } | undefined;

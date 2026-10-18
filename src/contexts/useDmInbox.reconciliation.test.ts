@@ -614,3 +614,22 @@ it.each(['abort', 'database', 'metadata', 'exception', 'complete'] as const)(
     }
   },
 );
+
+it.each([false, true])(
+  'filters stored non-friend order cards when hydrating Messages (%s)',
+  async (includeNonFollows) => {
+    relayEvents = [];
+    const invoice: DmInboxEntry = {
+      id: 'stored-invoice',
+      partnerPubkey: STRANGER,
+      fromMe: false,
+      createdAt: BASE,
+      wireKind: 16,
+      text: '💳 Payment',
+    };
+    jest.mocked(loadInboxEntries).mockResolvedValue([invoice]);
+    const { result } = renderInbox();
+    await act(() => result.current.refreshDmInbox({ force: true, includeNonFollows }));
+    expect(result.current.dmInbox).toEqual(includeNonFollows ? [invoice] : []);
+  },
+);

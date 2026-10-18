@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { npubEncode } from 'nostr-tools/nip19';
@@ -30,7 +31,7 @@ export function useRelayOperator(pubkey?: string) {
             const read = relays.filter((relay) => relay.read).map((relay) => relay.url);
             const targets = [
               ...new Set([
-                ...(read.length ? read : DEFAULT_RELAYS),
+                ...(read.length ? read : enabledAppRelays('default', DEFAULT_RELAYS)),
                 ...dmInboxRelays,
                 ...PROFILE_RELAYS,
               ]),

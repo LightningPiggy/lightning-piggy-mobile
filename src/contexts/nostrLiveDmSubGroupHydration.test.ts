@@ -1,9 +1,12 @@
 import { startLiveDmSubscription, type LiveDmSubscriptionParams } from './nostrLiveDmSub';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
-import { upsertDmMessages } from '../services/dmDb';
+import { selectDmWrapIds, upsertDmMessages } from '../services/dmDb';
 
 import { setKnownGroups, setSyntheticGroupReconciler } from '../services/groupRoutingRegistry';
-import { appendGroupMessage } from '../services/groupMessagesStorageService';
+import {
+  appendGroupMessage,
+  listPersistedGroupWrapIds,
+} from '../services/groupMessagesStorageService';
 import { notifyGroupMessage } from './nostrEventBus';
 import type { DeferredFollowGateEntry } from './liveSubFollowGate';
 import { syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
@@ -196,6 +199,7 @@ it.each([false, true])(
         senderPubkey: ALICE,
         text: 'hello while hydrating',
         createdAt: now,
+        wireKind: 14,
       };
       expect(reconcile).toHaveBeenCalledTimes(1);
       expect(appendGroupMessage).toHaveBeenCalledWith(VIEWER, groupId, message);
@@ -219,7 +223,7 @@ it.each([false, true])(
   },
 );
 
-it('replays a subject-tagged message before its subjectless follow-up after follows hydrate', async () => {
+it('replays marked group messages after follows hydrate', async () => {
   let finishReconcile!: () => void;
   const pendingReconcile = new Promise<void>((resolve) => {
     finishReconcile = resolve;
@@ -245,7 +249,7 @@ it('replays a subject-tagged message before its subjectless follow-up after foll
   const now = Math.floor(Date.now() / 1000);
   const messages = [
     { id: 'room-start', text: 'hello while hydrating', tags: [['subject', 'Family']] },
-    { id: 'room-follow-up', text: 'subjectless follow-up', tags: [] },
+    { id: 'room-follow-up', text: 'marked follow-up', tags: [['subject', 'Family']] },
   ];
   for (const message of messages) {
     capturedOnEvent!({
@@ -272,7 +276,7 @@ it('replays a subject-tagged message before its subjectless follow-up after foll
   params.followHydratedRef!.current = true;
   params.followGateBuffer.reevaluate(params.followPubkeysRef.current, replay);
   await flush();
-  // The second rumor must wait for the first to register the new room.
+  // Replay keeps marked group messages out of the DM inbox while reconciling.
   expect(reconcile).toHaveBeenCalledTimes(1);
   expect(params.setDmInbox).not.toHaveBeenCalled();
   expect(mockNotifyDm).not.toHaveBeenCalled();
@@ -284,7 +288,13 @@ it('replays a subject-tagged message before its subjectless follow-up after foll
   expect(notifyGroupMessage).toHaveBeenCalledTimes(2);
   expect(mockFireNotification).toHaveBeenCalledTimes(2);
   messages.forEach((message, index) => {
-    const stored = { id: message.id, senderPubkey: ALICE, text: message.text, createdAt: now };
+    const stored = {
+      id: message.id,
+      senderPubkey: ALICE,
+      text: message.text,
+      createdAt: now,
+      wireKind: 14,
+    };
     expect(appendGroupMessage).toHaveBeenNthCalledWith(index + 1, VIEWER, groupId, stored);
     expect(notifyGroupMessage).toHaveBeenNthCalledWith(index + 1, groupId, stored);
     expect(mockFireNotification).toHaveBeenNthCalledWith(
@@ -337,6 +347,38 @@ it('keeps a deferred subjectless chat as a DM when hydration establishes no room
     expect.objectContaining({ kind: 'dm', body: 'ordinary chat' }),
   );
   expect(appendGroupMessage).not.toHaveBeenCalled();
+  expect(notifyGroupMessage).not.toHaveBeenCalled();
+  stop();
+});
+
+it('does not reclassify persisted direct or subjectless group rows on live replay', async () => {
+  jest.mocked(selectDmWrapIds).mockResolvedValueOnce(['old-direct']);
+  jest.mocked(listPersistedGroupWrapIds).mockResolvedValueOnce(['old-group']);
+  const params = makeParams();
+  const stop = startLiveDmSubscription(params);
+  await flush();
+  for (const id of ['old-direct', 'old-group']) {
+    capturedOnEvent!({
+      id,
+      kind: 1059,
+      pubkey: ALICE,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [],
+      content: 'wrapped',
+      rumor: {
+        pubkey: ALICE,
+        kind: 14,
+        created_at: 20,
+        tags: [['p', VIEWER]],
+        content: 'old history',
+      },
+    });
+  }
+  await flush();
+  expect(appendGroupMessage).not.toHaveBeenCalled();
+  expect(upsertDmMessages).not.toHaveBeenCalled();
+  expect(params.setDmInbox).not.toHaveBeenCalled();
+  expect(mockNotifyDm).not.toHaveBeenCalled();
   expect(notifyGroupMessage).not.toHaveBeenCalled();
   stop();
 });

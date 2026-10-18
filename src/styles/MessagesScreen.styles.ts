@@ -40,6 +40,7 @@ export const createMessagesScreenStyles = (colors: Palette) =>
     },
     filterChipRow: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       alignItems: 'center',
       gap: 8,
       marginTop: 12,

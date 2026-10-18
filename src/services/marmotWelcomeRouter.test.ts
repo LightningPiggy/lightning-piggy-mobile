@@ -98,7 +98,7 @@ it('stores a cold-start stranger durably, then previews without joining when Mar
     rumor.content,
   );
 });
-it('live and backfill delivery of a followed wrap hand off exactly once', async () => {
+it("live and backfill delivery of a followed sender's wrap: one invitation, one alert, no auto-join", async () => {
   const owner = 'c'.repeat(64);
   mockSession = {
     pubkey: owner,
@@ -111,8 +111,8 @@ it('live and backfill delivery of a followed wrap hand off exactly once', async 
     routeMarmotWelcome(rumor, owner, 'same-wrap', true, false),
   ]);
   await settle();
-  expect(mockAccept).toHaveBeenCalledTimes(1);
-  expect(fireMessageNotification).not.toHaveBeenCalled();
+  expect(mockAccept).not.toHaveBeenCalled();
+  expect(fireMessageNotification).toHaveBeenCalledTimes(1);
 });
 it('does not join or notify own, malformed, or cancelled Welcomes', async () => {
   const owner = 'd'.repeat(64);

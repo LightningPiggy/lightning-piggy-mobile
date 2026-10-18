@@ -274,10 +274,8 @@ describe('orderPreviewText', () => {
   it('summarises an order with amount', () => {
     expect(orderPreviewText(parseOrderEvent(orderPlaced)!)).toBe('🛒 Order Placed · 21 sats');
   });
-  it('summarises a status update with status', () => {
-    expect(orderPreviewText(parseOrderEvent(statusUpdate)!)).toBe(
-      '📋 Order Status Update · confirmed',
-    );
+  it('summarises a status update without free text', () => {
+    expect(orderPreviewText(parseOrderEvent(statusUpdate)!)).toBe('📋 Order Status Update');
   });
   it('summarises a receipt with amount', () => {
     expect(orderPreviewText(parseOrderEvent(receipt)!)).toBe('🧾 Payment Receipt · 21 sats');
@@ -425,4 +423,148 @@ describe('bolt11FromText', () => {
   it('ignores a too-short lnbc-shaped token (below the {50,} floor)', () => {
     expect(bolt11FromText('here is lnbc1short for you')).toBeNull();
   });
+});
+
+describe('seller-side fields and spec-shaped receipts', () => {
+  it('keeps the buyer address / email / phone on a type-1 order and round-trips them', () => {
+    const order = parseOrderEvent({
+      kind: 16,
+      content: '',
+      tags: [
+        ['type', '1'],
+        ['order', 'o-1'],
+        ['item', `30402:${'a'.repeat(64)}:mug`, '1'],
+        ['address', '  1 High St, London '],
+        ['email', 'jane@example.com'],
+        ['phone', '+44 1234'],
+      ],
+    })!;
+    expect(order).toMatchObject({
+      address: '1 High St, London',
+      email: 'jane@example.com',
+      phone: '+44 1234',
+    });
+    expect(parseStoredOrder(serializeOrder(order))).toMatchObject({
+      address: '1 High St, London',
+      email: 'jane@example.com',
+    });
+  });
+
+  it('accepts a kind-17 receipt with a payment proof whatever its subject (Robotechy-style)', () => {
+    const receipt = parseOrderEvent({
+      kind: 17,
+      content: '',
+      tags: [
+        ['subject', 'Payment for order o-1'],
+        ['order', 'o-1'],
+        ['payment', 'lightning', 'lnbc1invoice', 'preimage'],
+      ],
+    });
+    expect(receipt).toMatchObject({ type: 'receipt', payment: { preimage: 'preimage' } });
+  });
+
+  it('still rejects a kind-17 with neither the receipt subject nor a payment proof (NIP-25)', () => {
+    expect(
+      parseOrderEvent({
+        kind: 17,
+        content: '+',
+        tags: [
+          ['order', 'o-1'],
+          ['r', 'https://x'],
+        ],
+      }),
+    ).toBeNull();
+  });
+});
+
+it('caps all order free text on ingest and on reading older stored rows', () => {
+  const long = 'x'.repeat(5000);
+  const parsed = parseOrderEvent({
+    kind: 16,
+    content: long,
+    tags: [
+      ['type', '1'],
+      ['order', 'o'],
+      ['address', long],
+      ['email', long],
+      ['phone', long],
+      ['contact', long],
+      ['notes', long],
+    ],
+  })!;
+  for (const field of ['message', 'address', 'email', 'phone', 'contact', 'notes'] as const)
+    expect(parsed[field]).toHaveLength(500);
+  const stored = parseStoredOrder(
+    JSON.stringify({ ...parsed, message: long, notes: long, contact: long }),
+  )!;
+  expect(stored.message).toHaveLength(500);
+  expect(stored.notes).toHaveLength(500);
+  expect(stored.contact).toHaveLength(500);
+});
+it.each([16, 17])('rejects signed public kind %s even with order tags', (kind) => {
+  expect(
+    parseOrderEvent({
+      kind,
+      sig: 'public signature',
+      content: '',
+      tags: [
+        ['type', '1'],
+        ['order', 'o'],
+        ['subject', 'order-receipt'],
+      ],
+    }),
+  ).toBeNull();
+});
+
+it.each(['order', 'payment', 'status', 'shipping', 'receipt'] as const)(
+  'keeps %s previews free of delivery details and all free text',
+  (type) => {
+    const order = {
+      ...parseOrderEvent(orderPlaced)!,
+      type,
+      address: 'private address',
+      email: 'private email',
+      phone: 'private phone',
+      contact: 'private contact',
+      notes: 'private notes',
+      message: 'private message',
+      status: 'private status',
+      tracking: 'private tracking',
+    };
+    const preview = orderPreviewText(order);
+    expect(preview).toBe(`${orderCardHeader(type).emoji} ${orderCardHeader(type).label} · 21 sats`);
+    expect(orderPreviewFromContent(serializeOrder(order), 16)).toBe(preview);
+  },
+);
+
+it('rejects more than 50 item tags, including duplicate refs', () => {
+  const tags = Array.from({ length: 51 }, () => ['item', 'product', '1']);
+  expect(
+    parseOrderEvent({
+      ...orderPlaced,
+      tags: [...orderPlaced.tags.filter((t) => t[0] !== 'item'), ...tags],
+    }),
+  ).toBeNull();
+  expect(
+    parseOrderEvent({
+      ...orderPlaced,
+      tags: [...orderPlaced.tags.filter((t) => t[0] !== 'item'), ...tags.slice(0, 50)],
+    })?.items,
+  ).toEqual([{ ref: 'product', quantity: 50 }]);
+});
+it('merges duplicate item refs and caps individual and summed quantities', () => {
+  const tags = [
+    ['item', 'one', '600'],
+    ['item', 'one', '600'],
+    ['item', 'two', '9'.repeat(400)],
+  ];
+  expect(
+    parseOrderEvent({
+      ...orderPlaced,
+      tags: [...orderPlaced.tags.filter((t) => t[0] !== 'item'), ...tags],
+    })?.items,
+  ).toEqual([
+    { ref: 'one', quantity: 1000 },
+    { ref: 'two', quantity: 1000 },
+  ]);
 });

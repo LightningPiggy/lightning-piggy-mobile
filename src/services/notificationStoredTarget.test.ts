@@ -44,3 +44,12 @@ it('ignores a late read once a newer tap/account/navigation has superseded it', 
     await resolveStoredNotificationTarget('big', 'ping', { lookup, shouldStop: () => stopped }),
   ).toBeNull();
 });
+
+it('retains a rewritten shop order target without a conversation route', async () => {
+  const data = { shopOrderId: 'o1', shopBuyerPubkey: 'buyer' };
+  expect(
+    await resolveStoredNotificationTarget('big', 'ping', {
+      lookup: async () => [{ ...entry, data }],
+    }),
+  ).toEqual({ ...data, kind: 'dm', owner: 'big' });
+});

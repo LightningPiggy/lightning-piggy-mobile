@@ -121,7 +121,7 @@ export function usePaidInvoiceTracker(messages: TrackedMessage[]): {
           result = null;
         }
         if (cancelled) return;
-        if (result) {
+        if (result && result.paid !== null) {
           gotResult = true;
           if (result.paid) {
             setPaidHashes((prev) => {

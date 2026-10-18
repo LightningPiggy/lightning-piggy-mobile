@@ -1,5 +1,7 @@
 // The strict push transport's server-inbox (kind 10050) lookup. The pool is
 // mocked: these tests never touch a real relay.
+import { forgetAppRelayPrefs, setAppRelayEnabled } from './appRelayPrefs';
+import { DEFAULT_RELAYS } from './nostrRelayDefaults';
 import type { Event } from 'nostr-tools';
 import { AppState, type AppStateStatus } from 'react-native';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
@@ -552,11 +554,51 @@ test('session-owned Welcome lookup and anonymous publications stay on LAN after 
   finishLookup([inboxEvent(['wss://public.example'])]);
   const inbox = await pending;
   expect(inbox).toEqual([TEST_RELAY_URL]);
-  for (const kind of [1059, 445, 443]) {
+  for (const kind of [1059, 445, 443, 30443, 10051]) {
     await network.publish(['wss://public.example'], { kind, pubkey: SERVER } as Event);
     expect(mockPublish.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
   }
   mockQuerySync.mockResolvedValue([]);
-  await network.request(['wss://public.example'], { kinds: [443], limit: 1 });
+  await network.request(
+    ['wss://public.example'],
+    [
+      { kinds: [10051], authors: [SERVER], limit: 1 },
+      { kinds: [10002], authors: [SERVER], limit: 1 },
+    ],
+  );
   expect(mockQuerySync.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
+});
+
+test('session and push fallbacks retain owner preferences across an account switch', async () => {
+  const owner = 'c'.repeat(64);
+  await forgetAppRelayPrefs(owner);
+  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], false);
+  const network = createMarmotNetwork(() => [], undefined, owner);
+  const push = createPushTransport(() => [], owner);
+  setCurrentUserPubkey(null);
+  mockQuerySync.mockResolvedValue([]);
+  await network.getUserInboxRelays(SERVER);
+  const networkTargets = mockQuerySync.mock.calls.at(-1)[0];
+  expect(networkTargets).not.toContain(DEFAULT_RELAYS[0]);
+  expect(networkTargets).toContain(DEFAULT_RELAYS[1]);
+  await push.inboxRelays(SERVER);
+  const pushTargets = mockQuerySync.mock.calls.at(-1)[0];
+  expect(pushTargets).not.toContain(DEFAULT_RELAYS[0]);
+  expect(pushTargets).toContain(DEFAULT_RELAYS[1]);
+  await forgetAppRelayPrefs(owner);
+});
+
+it('invalidates cached fallback inbox targets after hydration and preference changes', async () => {
+  const owner = 'a'.repeat(64);
+  await forgetAppRelayPrefs(owner);
+  setCurrentUserPubkey(owner);
+  mockQuerySync.mockResolvedValue([]);
+  const network = createMarmotNetwork(() => [], undefined, owner);
+  expect(await network.getUserInboxRelays(SERVER)).toEqual([]);
+  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], true);
+  expect(await network.getUserInboxRelays(SERVER)).toContain(DEFAULT_RELAYS[0]);
+  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], false);
+  expect(await network.getUserInboxRelays(SERVER)).not.toContain(DEFAULT_RELAYS[0]);
+  setCurrentUserPubkey(null);
+  await forgetAppRelayPrefs(owner);
 });

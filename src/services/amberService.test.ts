@@ -39,6 +39,14 @@ const PUBKEY = 'a'.repeat(64);
 beforeEach(() => jest.resetAllMocks());
 
 describe('amberService Intent calls', () => {
+  it('passes relay-login pre-approval JSON to the native getPublicKey method', async () => {
+    mockNative.getPublicKey.mockResolvedValueOnce({ pubkey: PUBKEY, package: 'amber' });
+    await expect(amberService.requestPublicKey()).resolves.toBe(PUBKEY);
+    const [permissionsJson] = mockNative.getPublicKey.mock.calls[0];
+    expect(typeof permissionsJson).toBe('string');
+    expect(JSON.parse(permissionsJson)).toEqual([{ type: 'sign_event', kind: 22242 }]);
+  });
+
   const calls: [string, keyof typeof mockNative, () => Promise<unknown>][] = [
     ['requestPublicKey', 'getPublicKey', () => amberService.requestPublicKey()],
     [

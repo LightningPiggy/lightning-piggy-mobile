@@ -3,10 +3,15 @@ import {
   AUTHOR_BATCH,
   DELETION_TAG_CHUNK,
   MARKET_RELAYS,
+  MARKET_LISTING_KINDS,
   MAX_SNAPSHOT_RELAYS,
+  OPEN_LISTING_LIMIT,
+  OPEN_LISTING_WINDOW_DAYS,
   deletionFilters,
   listingFilters,
   marketSnapshotRelays,
+  openListingFilters,
+  openListingSince,
 } from './marketListingsQuery';
 
 const pk = (n: number) => n.toString(16).padStart(64, '0');
@@ -38,7 +43,7 @@ describe('marketSnapshotRelays', () => {
       ...user,
     ]);
     expect(urls).toHaveLength(MAX_SNAPSHOT_RELAYS);
-    expect(urls.slice(0, 2)).toEqual(MARKET_RELAYS);
+    expect(urls.slice(0, MARKET_RELAYS.length)).toEqual(MARKET_RELAYS);
     expect(urls.some((u) => !u.startsWith('wss://'))).toBe(false);
     expect(dropped).toBe(true);
   });
@@ -101,5 +106,19 @@ describe('deletionFilters', () => {
 
   it('returns no filters when nothing was found', () => {
     expect(deletionFilters([])).toEqual([]);
+  });
+});
+
+describe('All scope (author-less) query', () => {
+  it('asks for every listing kind from anyone, bounded by limit and since', () => {
+    const since = openListingSince(Date.UTC(2026, 0, 91));
+    expect(since).toBe(Date.UTC(2026, 0, 91) / 1000 - OPEN_LISTING_WINDOW_DAYS * 86400);
+    const filters = openListingFilters(since);
+    expect(filters).toEqual([{ kinds: MARKET_LISTING_KINDS, since, limit: OPEN_LISTING_LIMIT }]);
+    expect(filters[0]).not.toHaveProperty('authors');
+  });
+
+  it('sizes the per-relay limit so every snapshot relay fits the listing budget', () => {
+    expect(OPEN_LISTING_LIMIT * MAX_SNAPSHOT_RELAYS).toBeLessThanOrEqual(1200);
   });
 });

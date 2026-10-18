@@ -7,28 +7,6 @@ import type { Palette } from './palettes';
 export const createMarketProductDetailStyles = (colors: Palette) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 14,
-      backgroundColor: colors.brandPink,
-      minHeight: 96,
-      overflow: 'hidden',
-    },
-    headerImage: { ...StyleSheet.absoluteFillObject },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
-    },
-    headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    headerSpacer: { width: 24 },
 
     scrollContent: { paddingBottom: 40 },
 
@@ -52,6 +30,14 @@ export const createMarketProductDetailStyles = (colors: Palette) =>
       marginTop: 4,
     },
     buyText: { color: colors.white, fontWeight: '800', fontSize: 15 },
+    buyButtonDisabled: { opacity: 0.5 },
+    // Under a Nostr listing's Buy: the seller answers the order with an invoice.
+    invoiceNote: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      textAlign: 'center',
+      marginTop: 8,
+    },
     // Replaces the buy affordances when a refresh finds the listing gone.
     withdrawn: {
       padding: 14,

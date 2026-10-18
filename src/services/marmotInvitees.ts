@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 // Which of a contact's devices to invite into a Marmot group, and the ONE
 // Add commit that brings every one of them in.
 //
@@ -29,7 +30,13 @@ import {
 import type { Event as NostrEvent } from 'nostr-tools';
 
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
-import { relayListFromTags } from '../utils/relayListEvents';
+import {
+  cleanKeyPackageRelays,
+  MAX_KEY_PACKAGE_RELAYS,
+  MARMOT_KEY_PACKAGE_RELAYS,
+  parseKeyPackageRelayList,
+} from './marmotKeyPackageRelays';
+import { RELAY_LIST_INDEXERS, relayListFromTags } from '../utils/relayListEvents';
 import {
   isUsableKeyPackage,
   MarmotNoKeyPackageError,
@@ -66,8 +73,8 @@ type CommitIntent = ReturnType<typeof createInviteIntent>;
 type Yield = () => Promise<void> | void;
 
 /**
- * A peer's kind-30443 events from the write relays of their NEWEST kind-10002
- * (lookup relays can lag, #1202) plus our lookup relays. Bounded: `limit` on
+ * A peer's kind-30443 events via their newest 10051, NIP-65 and well-known
+ * Marmot relays. Bounded: `limit` on
  * both filters, and the network resolves each request on EOSE or timeout.
  */
 export async function fetchKeyPackageEvents(
@@ -76,19 +83,37 @@ export async function fetchKeyPackageEvents(
   peer: string,
 ): Promise<NostrEvent[]> {
   const author = peer.toLowerCase();
-  const relayList = newestEvent(
-    (await network.request(lookupRelays, {
-      kinds: [10002],
-      authors: [author],
-      limit: 1,
-    })) as NostrEvent[],
+  const lookup = cleanKeyPackageRelays([
+    ...cleanKeyPackageRelays(lookupRelays, 6),
+    ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS),
+    ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
+  ]);
+  const lists = (await network.request(lookup, [
+    { kinds: [10051], authors: [author], limit: 1 },
+    { kinds: [10002], authors: [author], limit: 1 },
+  ])) as NostrEvent[];
+  const latest = (kind: number) =>
+    newestEvent(lists.filter((e) => e.kind === kind && e.pubkey === author));
+  const keyRelays = latest(10051);
+  const nip65 = latest(10002);
+  // A single bounded request keeps all device slots visible, in preference
+  // order: advertised key-package relays, NIP-65 writes, well-known relays.
+  const targets = cleanKeyPackageRelays(
+    [
+      ...(keyRelays ? parseKeyPackageRelayList(keyRelays.tags) : []),
+      ...(nip65
+        ? cleanKeyPackageRelays(
+            relayListFromTags(nip65.tags)
+              .filter((r) => r.write)
+              .map((r) => r.url),
+          )
+        : []),
+      ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS),
+      ...lookupRelays,
+    ],
+    2 * MAX_KEY_PACKAGE_RELAYS + enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS).length,
   );
-  const writeSet = relayList
-    ? relayListFromTags(relayList.tags)
-        .filter((r) => r.write)
-        .map((r) => r.url)
-    : [];
-  return (await network.request([...new Set([...writeSet, ...lookupRelays])], {
+  return (await network.request(targets, {
     kinds: [KEY_PACKAGE_KIND],
     authors: [author],
     limit: KEY_PACKAGE_QUERY_LIMIT,

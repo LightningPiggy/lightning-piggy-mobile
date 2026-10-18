@@ -63,10 +63,11 @@ export function isMarketFilterActive(filter: MarketFilter): boolean {
 }
 
 /**
- * Whether the seller scope narrows the catalogue. Every scope short of the
- * whole web of trust (`wotAll`, not yet selectable) is a subset of what a
- * shopper could see — including the default Lightning Piggy preferred
- * sellers — so it counts as an applied filter on the header button.
+ * Whether the seller scope narrows the catalogue. Every scope short of All
+ * (`wotAll`: listings from anyone, no author filter — experimental) is a
+ * subset of what a shopper could see — including the default Lightning Piggy
+ * preferred sellers — so it counts as an applied filter on the header button.
+ * All is the unfiltered view, so it alone leaves the button without a badge.
  */
 export function isMarketScopeNarrowing(mode: MarketMode): boolean {
   return mode !== 'wotAll';

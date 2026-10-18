@@ -1,3 +1,4 @@
+import { listingShareContent, listingNaddr, extractSharedListing } from '../utils/listingShare';
 import { mergeConversationMessages, DM_CONV_CAP } from '../contexts/nostrDmCache';
 import { NWC_SHARE_KIND } from '../utils/nwcShareMessage';
 import { sendSharedDm } from './sendSharedDm';
@@ -90,3 +91,17 @@ test.each([
     }
   },
 );
+
+test('a NIP-17 listing share preserves the newline in its unacknowledged local row', async () => {
+  const text = listingShareContent(
+    'Bitcoin Satskull',
+    listingNaddr({ kind: 30402, pubkey: 'a'.repeat(64), tags: [['d', 'skull']] })!,
+  ).message;
+  send.mockResolvedValue({ success: true, delivery: { ...delivery, delivered: false } });
+  await sendSharedDm({ peer: 'big', text, protocol: 'nip17', send, append });
+  const row = append.mock.calls[0][1];
+  expect(row.text).toBe(text);
+  expect(row.text).toContain('Bitcoin Satskull\nnostr:naddr1');
+  expect(extractSharedListing(row.text)).toMatchObject({ identifier: 'skull' });
+  expect(row.deliveryStatus.delivered).toBe(false);
+});

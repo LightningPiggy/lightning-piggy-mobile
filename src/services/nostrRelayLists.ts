@@ -56,6 +56,7 @@ export async function publishToRelays(
   event: Event,
   relays: string[],
   timeoutMs = 8_000,
+  onResult?: (result: RelayPublishResult) => void,
 ): Promise<RelayPublishResult[]> {
   relays = eventAuthorRelays(relays, event);
   const allowed = await Promise.all(relays.map((url) => relayAllowsKind(url, event.kind)));
@@ -65,8 +66,16 @@ export async function publishToRelays(
   let attemptIndex = 0;
   return Promise.all(
     relays.map(async (url, i): Promise<RelayPublishResult> => {
-      if (!allowed[i])
-        return { url, ok: false, skipped: 'kind', message: `kind ${event.kind} not accepted` };
+      if (!allowed[i]) {
+        const result: RelayPublishResult = {
+          url,
+          ok: false,
+          skipped: 'kind',
+          message: `kind ${event.kind} not accepted`,
+        };
+        onResult?.(result);
+        return result;
+      }
       const index = attemptIndex++;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<RelayPublishResult>((resolve) => {
@@ -91,7 +100,9 @@ export async function publishToRelays(
         }),
       );
       try {
-        return await Promise.race([attempt, timeout]);
+        const result = await Promise.race([attempt, timeout]);
+        onResult?.(result);
+        return result;
       } finally {
         clearTimeout(timer);
       }

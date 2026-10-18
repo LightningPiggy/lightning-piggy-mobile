@@ -280,6 +280,14 @@
     "shareTitle": "分享{{name}}",
     "shareSubtitle": "对方会收到一条带有名片的加密Nostr私信。"
   },
+  "geocacheRail": {
+    "nearest": "最近的 Piglets",
+    "empty": "附近还没有 Piglets",
+    "hide": "藏一个 Piglet",
+    "error": "无法加载附近的 Piglets。",
+    "retry": "重试",
+    "hidden": "你的信任筛选器隐藏了附近的部分藏宝点。"
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}}——查看全部",
     "seeAll": "查看全部"
@@ -627,6 +635,7 @@
   "imageGallery": {
     "open": "打开图片",
     "position": "第 {{current}} 张图片，共 {{total}} 张",
+    "showImage": "显示第 {{current}} 张图片，共 {{total}} 张",
     "openHint": "全屏打开图片"
   },
   "gifPickerSheet": {
@@ -1304,10 +1313,12 @@
     "unknownSender": "有人",
     "file": "文件",
     "fileBytes": "{{size}} 字节",
-    "fileShare": "保存 / 分享",
+    "fileShare": "分享",
     "filePreparing": "正在准备文件…",
     "fileUnavailable": "文件不可用",
     "fileShareFailed": "无法准备或分享此文件。请重试。",
+    "filePlainUrl": "未端到端加密 · 未验证",
+    "fileUploadLimit": "请选择不超过 16 MB 的文件。",
     "devFiles": "测试文件",
     "devFilesA11y": "创建包含文件的测试会话",
     "fileSave": "保存",
@@ -1317,7 +1328,13 @@
     "fileTypeMismatch": "文件名与声明的类型不符：{{type}}",
     "blockedLink": "已阻止的链接",
     "invalidUpload": "存储服务器返回了无效的媒体链接。请尝试其他服务器。",
-    "uploadFailedAllServers": "无法上传到任何存储服务器。请检查网络连接后重试，或在设置中添加其他存储服务器。"
+    "uploadFailedAllServers": "无法上传到任何存储服务器。请检查网络连接后重试，或在设置中添加其他存储服务器。",
+    "fileLabelText": "文本",
+    "fileLabelAudio": "音频",
+    "fileLabelVideo": "视频",
+    "fileSaveLabel": "保存 %{filename}",
+    "fileShareLabel": "分享 %{filename}",
+    "fileSaved": "已保存到 %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "已编辑",
@@ -1560,6 +1577,10 @@
     "failedToRemoveRelay": "移除中继失败。",
     "geoCacheRelays": "地理藏宝中继",
     "geoCacheRelaysHint": "专用于Piglet和其他地理藏宝（NIP-GC）的中继。它们与treasures.to网页应用读取和搜索的内容保持一致，让你的Piglet在网页上也能被发现。除了你在上方添加的中继外，发布和读取地理藏宝时始终会使用它们。",
+    "marmotRelays": "群聊中继（Marmot）",
+    "marmotRelaysHint": "用于 Marmot 群聊的知名中继，White Noise 也使用这些中继。你的邀请密钥（密钥包）会发布到这里和你自己的中继上，因此即使你的中继离线，其他人也能与你发起加密群聊。这些中继会在你的密钥包中继列表（类型 10051）中公布。",
+    "marketRelays": "市场中继（Gamma）",
+    "marketRelaysHint": "Lightning Piggy 从这些中继读取市场商品，并向其发布你的店铺商品。这些中继与其他 Gamma Markets 应用（Plebeian、Conduit、Shopstr）共用。",
     "encryptedMessages": "加密消息（NIP-17）",
     "amberPermissionHint": "Amber尚未向此应用授予NIP-44解密权限——点按下方即可授权。只需确认一次，之后的加密消息就会静默解密。无论如何，你未关注的人发来的消息仍会保持隐藏。",
     "amberPermissionTitle": "Amber权限",
@@ -1575,7 +1596,7 @@
     "nativeCryptoActiveYes": "本次会话已启用：是",
     "nativeCryptoActiveNo": "本次会话已启用：否",
     "notInUse": "当前未使用",
-    "advancedRelays": "高级",
+    "advancedRelays": "应用中继",
     "defaultRelaysTitle": "应用默认中继",
     "defaultRelaysHint": "内置于应用中，并始终作为你的中继之外的备用。",
     "deviceRelaysTitle": "仅限本设备的中继",
@@ -2309,7 +2330,14 @@
       "emptyNoMatch": "没有符合搜索或筛选条件的商品。",
       "emptyMerchantMissing": "{{name}} 目前没有商品——下拉刷新。",
       "emptyNoFriends": "你的Nostr好友暂时还没有人销售Lightning Piggy商品。",
-      "emptyNone": "目前没有可购买的商品。"
+      "emptyNoFof": "你的好友的好友网络中还没有人在出售商品。",
+      "emptyNoAll": "目前在你的中继上没有找到商品。",
+      "allScopeNote": "实验性：来自任何人的商品，未经审核",
+      "fofBuilding": "正在构建你的网络…… {{done}}/{{total}}",
+      "fofBuildingStart": "正在构建你的网络……",
+      "fofFailed": "无法构建你的网络——正在显示好友的商品。",
+      "emptyNone": "目前没有可购买的商品。",
+      "myOrders": "我的订单"
     },
     "card": {
       "featured": "精选",
@@ -2323,7 +2351,10 @@
       "buyFrom": "向{{seller}}购买",
       "buyAccessibility": "向{{seller}}购买{{title}}",
       "noFeedback": "此卖家暂不支持评价和评论——需要有Nostr身份才能关联反馈。",
-      "refreshFailed": "无法刷新此商品，请检查网络连接后重试。"
+      "refreshFailed": "无法刷新此商品，请检查网络连接后重试。",
+      "buy": "购买",
+      "outOfStock": "缺货",
+      "invoiceNote": "卖家会为你的订单发送发票"
     },
     "modes": {
       "comingSoon": "{{label}}——即将推出",
@@ -2350,7 +2381,11 @@
       "sellers": "卖家",
       "friends": "好友（你关注的人）",
       "friendsOfFriends": "好友的好友",
+      "allSellers": "所有人（任何人）",
+      "experimental": "实验性",
       "friendsChip": "好友",
+      "friendsOfFriendsChip": "好友的好友",
+      "allChip": "所有人",
       "comingSoon": "即将推出",
       "clearScope": "将卖家重置为 Lightning Piggy 首选卖家",
       "changeScope": "{{label}}。打开筛选以更换卖家",
@@ -2443,7 +2478,25 @@
         "relayUnreachable": "无法连接中继提交订单，请重试。",
         "generic": "提交订单时出了点问题，请重试。"
       },
-      "rateUpdated": "运费已更新。请查看新的合计金额，然后再次点按“提交订单”。"
+      "rateUpdated": "汇率变动，总价已更新。请确认新的总价后再次点击“提交订单”。",
+      "unitPriceSats": "每件 {{amount}} sats",
+      "addressLabel": "收货地址",
+      "addressPlaceholder": "姓名、街道、城市、邮编、国家",
+      "addressHint": "随订单私密（加密）发送，仅 {{seller}} 可见。",
+      "outOfStock": "缺货",
+      "inStock": "库存：{{stock}}",
+      "delivery": {
+        "name": "姓名",
+        "line1": "地址第 1 行",
+        "line2": "地址第 2 行（可选）",
+        "town": "城镇 / 城市",
+        "postcode": "邮政编码",
+        "country": "国家",
+        "nameHint": "填写快递员能够投递的名字 — 如果信箱上写着昵称，也可以使用昵称",
+        "remember": "在此手机上记住",
+        "postcodeInvalid": "请输入所选国家的有效邮政编码",
+        "tooLong": "完整收货地址不得超过 500 个字符"
+      }
     },
     "shipping": {
       "label": "运费",
@@ -2470,6 +2523,8 @@
     },
     "live": {
       "loading": "正在加载好友的商品……",
+      "loadingNetwork": "正在加载你网络中的商品……",
+      "loadingAll": "正在加载所有人的商品……",
       "partialToast": "部分卖家未响应。下拉刷新。",
       "contactSeller": "给卖家发消息"
     },
@@ -2678,7 +2733,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "买家对你商品的订单。点按即可打开聊天。",
+        "hint": "买家对你的商品的订单。点按查看订单。",
         "emptyBody": "有人购买你的商品后，订单会显示在这里。",
         "rowAccessibility": "来自 {{name}} 的订单：{{items}}，{{time}}"
       },
@@ -2731,7 +2786,8 @@
       "pickerSubtitle": "对方将以私信形式收到。",
       "sentTo": "已发送给 {{name}}",
       "sendFailed": "无法发送此商品",
-      "sharedItem": "分享的商品"
+      "sharedItem": "分享的商品",
+      "marketListing": "市场商品"
     },
     "liked": {
       "title": "喜欢的商品",
@@ -2742,6 +2798,26 @@
       "loadFailed": "无法加载你喜欢的商品 — 下拉即可重试。",
       "signedOut": "使用 Nostr 登录以查看你喜欢的商品。",
       "signIn": "登录"
+    },
+    "republish": {
+      "coverage": "位于 %{total} 个中继中的 %{count} 个",
+      "checking": "正在检查中继…",
+      "action": "重新发布",
+      "all": "全部重新发布",
+      "missing": "中继上缺失",
+      "resign": "重新签名并发布",
+      "confirm": "没有可用的已签名副本。是否重建此商品信息并批准一次签名以重新发布？",
+      "results": "重新发布结果",
+      "accepted": "已接受",
+      "rejected": "已拒绝",
+      "noResponse": "无响应",
+      "alreadyPresent": "已存在",
+      "close": "关闭",
+      "failed": "重新发布失败"
+    },
+    "shortcuts": {
+      "liked": "已喜欢",
+      "startSelling": "开始卖货"
     }
   },
   "dmProtocol": {
@@ -2842,7 +2918,8 @@
       "payment": "付款",
       "zap": "打闪",
       "cache": "Piglet寻宝记录",
-      "swap": "兑换"
+      "swap": "兑换",
+      "market": "商品动态"
     }
   },
   "blossomServers": {
@@ -3259,6 +3336,7 @@
     "security": "协议与安全",
     "mlsSecurity": "使用 MLS 进行端到端加密。设备共享群组密钥。",
     "nip17Security": "端到端加密消息，隐藏发送者身份。",
+    "nip171Security": "端到端加密群组。成员共用一个群组密钥，有人退出时，群主会更换密钥。",
     "nip04Security": "旧版加密。切换到 NIP-17 以获得更好的隐私保护。",
     "devices": "此聊天中的设备",
     "relays": "群组中继",
@@ -3318,6 +3396,8 @@
     "milliseconds": "%{count} ms",
     "operator": "运营者与政策",
     "runBy": "运营者",
+    "tipOperator": "给运营者打赏",
+    "tipOperatorLabel": "向此中继的运营者 {{name}} 发送闪电打赏",
     "copyUrl": "复制中继 URL",
     "terms_of_service": "服务条款",
     "privacy_policy": "隐私政策",
@@ -3414,6 +3494,10 @@
     "licenceType": "MIT",
     "lightningAddress": "Lightning地址 (LUD-16)"
   },
+  "nip171Invitation": {
+    "group": "NIP-171 群组",
+    "full": "你加入的 NIP-171 群组数量已达上限。请先退出一个群组，再接受此邀请。"
+  },
   "marmotInvitation": {
     "pending": "邀请待处理",
     "accept": "接受",
@@ -3489,5 +3573,119 @@
   "profileSafety": {
     "unavailable": "个人资料不可用",
     "unverified": "未验证"
+  },
+  "orderCard": {
+    "waitingForInvoice": "正在等待卖家的发票",
+    "viewOrder": "查看订单"
+  },
+  "myOrders": {
+    "moreItems": "另有 {{count}} 件",
+    "title": "我的订单",
+    "empty": "还没有订单——在商品页点击“购买”。",
+    "open": "我的订单",
+    "openWithPayNow": "我的订单——{{invoices}} 笔待付款",
+    "viewAll": "查看我的订单",
+    "rowA11y": "来自 {{seller}} 的订单：{{items}}。{{status}}",
+    "askForNewInvoice": "请卖家提供新发票"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "等待发票",
+    "payNow": "立即付款",
+    "paid": "已付款",
+    "shipped": "已发货",
+    "completed": "已完成",
+    "cancelled": "已取消",
+    "needsInvoice": "待开发票",
+    "invoiceSent": "等待付款",
+    "all": "全部",
+    "empty": "没有此状态的订单。",
+    "invoiceExpired": "发票已过期"
+  },
+  "sellerActivity": {
+    "settings": "我的商品的评论和评价",
+    "generic": "商品有新动态",
+    "listing": "你的商品",
+    "sellerReplied": "卖家已回复",
+    "reply": "%{name} 回复了你的评论",
+    "comment": "%{title} 有新评论",
+    "review": "%{title} 有新评价 ★%{stars}",
+    "replyAction": "回复"
+  },
+  "sellerOrders": {
+    "buyerNote": "买家留言",
+    "newOrderNotification": "新订单：{{items}}",
+    "yourShopOrder": "你店铺的订单",
+    "loadingShop": "正在加载你的店铺以计算此订单…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "每件 {{amount}} {{currency}}",
+    "overStock": "超出你的库存（剩余 {{stock}}）",
+    "shippingLine": "配送：{{title}}",
+    "shippingNotOffered": "你的商品没有提供此配送方式。",
+    "shippingMissing": "买家没有为实物商品选择配送方式。",
+    "total": "总计",
+    "waitingForRate": "正在获取汇率…",
+    "fiatAtRate": "{{amount}} {{currency}}，按今日汇率换算",
+    "amountDiffers": "买家订单的金额为 {{buyer}} sats，与您当前的价格不符。在买家按当前总额重新下单之前，无法开具发票。",
+    "shipTo": "收货地址：",
+    "contact": "联系方式：",
+    "receiptUnverified": "买家发送了付款凭证，但无法证明已支付你的发票。",
+    "sendInvoice": "发送发票",
+    "confirmSend": "创建并发送发票",
+    "checkPayment": "检查付款",
+    "waitingForPayment": "发票已发送——等待付款",
+    "markPaid": "标记为已付款",
+    "buyerNotified": "已付款——已通知买家",
+    "invoiceSent": "发票已发送",
+    "notPaidYet": "尚未付款",
+    "couldNotConfirmPayment": "无法确认付款",
+    "orderNumber": "订单 #{{id}}",
+    "rowA11y": "来自 {{buyer}} 的订单：{{items}}。{{status}}",
+    "problems": {
+      "notMine": "此订单针对的不是你的商品。",
+      "missingListing": "其中一件商品已不在你的店铺中。",
+      "badPrice": "其中一件商品没有可开票的固定价格。",
+      "unknownShipping": "所选配送方式不是你发布的。",
+      "noRate": "正在获取汇率…"
+    },
+    "errors": {
+      "noWallet": "请选择接收付款的钱包。",
+      "invoiceFailed": "该钱包无法创建发票。请检查它已连接并允许收款。",
+      "amountMismatch": "钱包创建的发票金额不符，因此未发送。",
+      "shopChanged": "你的店铺价格或配送选项已更改。发送发票前请检查订单。",
+      "sendFailed": "无法发送给买家。请检查网络后重试。",
+      "notSignedIn": "请登录以管理订单。"
+    },
+    "wallet": {
+      "none": "你的钱包都无法创建发票。请添加具有收款权限的 Lightning（NWC）钱包。",
+      "checking": "正在检查是否可以收款…",
+      "offline": "未连接",
+      "receiveTo": "收款到",
+      "receiveToHint": "订单发票将在此钱包上创建。保存在此设备上。",
+      "remember": "为我的店铺记住",
+      "choose": "选择钱包",
+      "saveFailed": "无法保存所选钱包。"
+    },
+    "sendNewInvoice": "发送新发票",
+    "checkWalletFirst": "请先检查你的钱包",
+    "unknownInvoiceWarning": "我们无法确认之前的账单是否已支付。如果已支付，请勿发送新账单。"
+  },
+  "relayPublishSheet": {
+    "waiting": "等待签名器…",
+    "title": "正在发布%{title}",
+    "accepted": "已接受",
+    "rejected": "已拒绝",
+    "noResponse": "无响应",
+    "pending": "正在发布…"
+  },
+  "appRelays": {
+    "toggle": "使用 %{host}",
+    "saveFailed": "无法保存中继偏好设置",
+    "warning": {
+      "default": "应用备用连接已关闭",
+      "indexers": "中继列表发现已关闭",
+      "geocache": "地理缓存可能无法加载",
+      "marmot": "群组密钥发现可能无法正常工作",
+      "market": "市场商品将无法加载"
+    }
   }
 }

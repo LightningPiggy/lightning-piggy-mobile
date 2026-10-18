@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import { buildCacheListing } from './nostrPlacesService';
 import { GC_RELAYS } from './geocacheRelays';
 import { publishCacheEvent, type SignedEventLike } from './nostrPlacesPublisher';
@@ -75,7 +76,8 @@ export const republishPiggy = async (
   // GC_RELAYS is the geo-cache fallback (publishCacheEvent unions it in
   // regardless, but passing it here keeps the no-user-relays path explicit
   // and off the generic defaults that silently drop kind-37516). See #907.
-  const relays = writeRelays && writeRelays.length > 0 ? writeRelays : GC_RELAYS;
+  const relays =
+    writeRelays && writeRelays.length > 0 ? writeRelays : enabledAppRelays('geocache', GC_RELAYS);
   await publishCacheEvent(signed, relays);
   return { piggy: refreshed, newExpiresAt };
 };

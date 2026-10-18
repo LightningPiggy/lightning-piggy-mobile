@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import {
@@ -96,7 +97,10 @@ const AccountSwitcherSheet: React.FC<Props> = ({ visible, onClose, onBackupKey }
 
       // Phase 2 — relay fan-out for identities NOT in cache.
       const targetRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const fanOut = targetRelays.length > 0 ? targetRelays : nostrService.DEFAULT_RELAYS;
+      const fanOut =
+        targetRelays.length > 0
+          ? targetRelays
+          : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       for (const id of identities) {
         if (cancelled) return;
         if (seeded[id.pubkey] || profileById[id.pubkey]) continue;

@@ -34,7 +34,12 @@ it('queries every cache miss in bounded chunks using the profile relays', async 
     expect(filter.kinds).toEqual([0]);
     expect(filter.authors.length).toBeLessThanOrEqual(50);
     expect(filter.limit).toBeLessThanOrEqual(100);
-    expect(options).toEqual({ signal, maxWait: 8000 });
+    expect(options).toEqual({
+      signal,
+      maxWait: 8000,
+      rejectOnAllRelaysFailure: true,
+      rejectOnTimeout: true,
+    });
     requested.push(...filter.authors);
   }
   expect(requested).toEqual(authors);
@@ -111,4 +116,19 @@ it('preserves valid display metadata alongside malformed fields', async () => {
     nip05: null,
   });
   expect(save.mock.calls[0][0]).toEqual(profiles);
+});
+
+it('reports failed chunks as unresolved while preserving cached and successful profiles', async () => {
+  const authors = Array.from({ length: 52 }, (_, i) => key(i));
+  cached.mockResolvedValue(new Map([[key(0), { name: 'Cached' }]]));
+  query.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([]);
+  const unresolved = jest.fn();
+  const profiles = await fetchMarketMerchantProfiles(
+    authors,
+    new AbortController().signal,
+    unresolved,
+  );
+  expect(profiles.get(key(0))?.name).toBe('Cached');
+  expect(unresolved).toHaveBeenCalledWith(new Set(authors.slice(1, 51)));
+  expect(profiles.has(key(51))).toBe(false);
 });

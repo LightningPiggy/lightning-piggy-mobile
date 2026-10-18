@@ -22,6 +22,13 @@ import { subscribeFindLogZaps } from '../services/findLogZapsService';
 import { parseFoundLog, type FoundLog } from '../utils/foundLog';
 import type { VerifiedEvent } from 'nostr-tools';
 
+jest.mock('@react-navigation/native', () => ({
+  useFocusEffect: (callback: () => void) => {
+    const React = jest.requireActual('react');
+    React.useEffect(callback, [callback]);
+  },
+}));
+
 jest.mock('../services/nostrPlacesPublisher', () => ({
   subscribeFoundLogs: jest.fn(),
 }));

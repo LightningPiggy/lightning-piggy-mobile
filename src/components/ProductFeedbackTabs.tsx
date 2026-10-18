@@ -11,6 +11,7 @@ import ProductComments from './ProductComments';
 
 interface Props {
   /** Review coordinate `a:30402:<merchant>:<dTag>`. */
+  initialTab?: 'comments' | 'reviews';
   coord: string;
   /** The kind-30402 product event the comment thread roots on. */
   commentRoot: CommentRoot;
@@ -32,6 +33,7 @@ type Tab = 'reviews' | 'comments';
  */
 const ProductFeedbackTabs: React.FC<Props> = ({
   coord,
+  initialTab = 'reviews',
   commentRoot,
   onRequestSignIn,
   registerRefresh,
@@ -39,7 +41,7 @@ const ProductFeedbackTabs: React.FC<Props> = ({
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createProductFeedbackTabsStyles(colors), [colors]);
-  const [tab, setTab] = useState<Tab>('reviews');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [reviewCount, setReviewCount] = useState(0);
   const [commentCount, setCommentCount] = useState(0);
   // Lazy-mount: Reviews is the default tab so it mounts immediately; Comments
@@ -47,7 +49,7 @@ const ProductFeedbackTabs: React.FC<Props> = ({
   // landing on the product page fires ONE relay query, not two (Copilot review
   // on #948). Once visited a tab stays mounted (hidden) so switching back never
   // refetches or loses an in-progress compose.
-  const [commentsMounted, setCommentsMounted] = useState(false);
+  const [commentsMounted, setCommentsMounted] = useState(initialTab === 'comments');
 
   const selectTab = useCallback((next: Tab) => {
     setTab(next);

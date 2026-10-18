@@ -4,6 +4,7 @@ import type { TransactionDetailData } from '../components/TransactionDetailSheet
 import type { WalletState } from '../types/wallet';
 import { classifyStoredMessage } from './messageContent';
 import { POLL_KIND, VOTE_KIND, parseStoredPoll, type DisplayPoll } from './nip88Poll';
+import { isChatReactionKind } from './nip17Reactions';
 import { sanitizeDisplayText } from './sanitizeDisplayText';
 import type { DeliveryStatus } from './dmDeliveryStatus';
 import {
@@ -86,6 +87,9 @@ export type Item =
       fromMe: boolean;
       order: ParsedOrderEvent;
       expectedAmountSats?: number;
+      /** My own placed order (kind-16 type 1) the seller hasn't answered with
+       * a payment request (or cancelled) yet — the card says so. */
+      awaitingInvoice?: boolean;
       createdAt: number;
     }
   | {
@@ -311,6 +315,23 @@ export function collectApprovedOrderAmounts(
 }
 
 /**
+ * Order ids the peer has answered: a received payment request (kind-16
+ * type 2) or a received status update (type 3, e.g. cancelled / confirmed).
+ * My placed orders NOT in this set are still waiting for the seller.
+ */
+export function answeredOrderIds(messages: ConversationMessageInput[]): Set<string> {
+  const answered = new Set<string>();
+  for (const message of messages) {
+    if (message.fromMe || message.wireKind !== 16) continue;
+    const order = parseStoredOrder(message.text);
+    if (order && (order.type === 'payment' || order.type === 'status')) {
+      answered.add(order.orderId);
+    }
+  }
+  return answered;
+}
+
+/**
  * Order ids of RECEIVED payment requests (kind-16 carrying a payable invoice)
  * and receipts (kind-17) whose originating outgoing order isn't in `messages` — i.e. it's older than
  * the loaded thread slice (DM_CONV_CAP). The screen resolves these from the
@@ -348,42 +369,40 @@ export function buildConversationItems(
   deviceNotices: readonly DeviceNoticeInput[] = [],
   clearBoundary = 0,
 ): Item[] {
-  const expectedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
   const byId = indexMessagesById(messages);
+  const approvedAmounts = collectApprovedOrderAmounts(messages, olderOrderAmounts);
+  const answered = answeredOrderIds(messages);
+  const orderInvoices = new Set(
+    messages.flatMap((message) => {
+      if (message.wireKind !== 16) return [];
+      const order = parseStoredOrder(message.text);
+      const bolt11 = order ? payableBolt11(order) : null;
+      return bolt11 ? [bolt11] : [];
+    }),
+  );
   const msgItems: TimedItem[] = messages.flatMap((m): TimedItem[] => {
     // A Marmot invite's gift wrap: never a bubble. Joined ones have their
     // own chat; failed ones are drawn from the session's record below.
     if (m.wireKind === MARMOT_WELCOME_KIND) return [];
-    // Marketplace order / receipt rows (kind 16/17) store order JSON in `text`;
-    // render them as an order card rather than a chat bubble (#market).
+    // Structured cards never pass through the free-text/link classifier.
     if (m.wireKind === 16 || m.wireKind === 17) {
       const order = parseStoredOrder(m.text);
-      if (order) {
-        return [
-          {
-            kind: 'order',
-            id: `dm-${m.id}`,
-            fromMe: m.fromMe,
-            order,
-            expectedAmountSats: expectedAmounts.get(order.orderId),
-            createdAt: m.createdAt,
-          },
-        ];
-      }
-      // Unparseable order/receipt row (corrupt, or a non-order payload sharing
-      // the kind, e.g. a gift-wrapped NIP-18 repost) — render the muted
-      // placeholder rather than leaking the raw JSON blob into the thread
-      // (mirrors `orderPreviewFromContent` in the inbox preview).
+      if (!order) return [];
       return [
         {
-          kind: 'unsupported',
+          kind: 'order',
           id: `dm-${m.id}`,
           fromMe: m.fromMe,
-          rawKind: m.wireKind,
           createdAt: m.createdAt,
+          order,
+          expectedAmountSats: approvedAmounts.get(order.orderId),
+          awaitingInvoice: m.fromMe && order.type === 'order' && !answered.has(order.orderId),
         },
       ];
     }
+    // Older clients also sent a kind-14 copy of the same invoice. Hide that
+    // duplicate alongside its order, while ordinary chat invoices still render.
+    if (m.wireKind === 14 && orderInvoices.has(bolt11FromText(m.text) ?? '')) return [];
     // NWC wallet share (inner kind NWC_SHARE_KIND) — the row's `text` is the
     // card JSON (bearer connection string + optional name). Render an "Add NWC
     // Wallet" card. An unparseable / corrupt row falls back to the muted
@@ -451,6 +470,9 @@ export function buildConversationItems(
     // Structured NIP-88 vote (kind 1018) — never a bubble; it's aggregated into
     // the referenced poll's tally by the screen's poll hook. Drop from the list.
     if (m.wireKind === VOTE_KIND) return [];
+    // A wrapped reaction / retraction (#1321) renders as a pill on its target
+    // (useConversationReactions), never as its own bubble.
+    if (isChatReactionKind(m.wireKind)) return [];
     // Generic, future-proof fallback: a stored message whose wireKind we don't
     // render (an inner Nostr event of an unhandled kind) becomes a muted
     // placeholder rather than a blank text bubble. Only fires for a defined

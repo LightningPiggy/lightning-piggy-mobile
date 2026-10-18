@@ -26,6 +26,7 @@ const friendContact = { pubkey: FRIEND, relay: null, petname: null, profile: nul
 
 interface Props {
   memberPubkeys: string[];
+  messages?: { senderPubkey: string }[];
   enabled: boolean;
 }
 
@@ -51,6 +52,36 @@ beforeEach(async () => {
 });
 
 describe('useGroupMemberProfiles', () => {
+  it('batches historical senders with current members and resolves later arrivals', async () => {
+    const fetchProfiles = jest.fn(
+      async (pubkeys: string[]) =>
+        new Map(
+          pubkeys.map((pk) => [pk, fetched(pk, pk === STRANGER ? 'former member' : 'member')]),
+        ),
+    );
+    const { result, rerender } = setup(fetchProfiles, {
+      memberPubkeys: [CACHED],
+      messages: [SELF, FRIEND, STRANGER, STRANGER.toUpperCase(), CACHED].map((senderPubkey) => ({
+        senderPubkey,
+      })),
+      enabled: true,
+    });
+    await waitFor(() => expect(result.current.get(STRANGER)?.name).toBe('former member'));
+    expect(result.current.get(CACHED)?.name).toBe('member');
+    expect(fetchProfiles).toHaveBeenCalledTimes(1);
+    expect(fetchProfiles).toHaveBeenCalledWith([CACHED, STRANGER]);
+
+    const newcomer = 'd'.repeat(64);
+    rerender({
+      memberPubkeys: [CACHED],
+      messages: [STRANGER, newcomer].map((senderPubkey) => ({ senderPubkey })),
+      enabled: true,
+    });
+    await waitFor(() => expect(result.current.get(newcomer)?.name).toBe('member'));
+    expect(fetchProfiles).toHaveBeenCalledTimes(2);
+    expect(fetchProfiles).toHaveBeenLastCalledWith([newcomer]);
+  });
+
   it('does not touch relays while the sheet is closed', async () => {
     const fetchProfiles = jest.fn(async () => new Map<string, NostrProfile>());
     setup(fetchProfiles, { memberPubkeys: [SELF, FRIEND, STRANGER], enabled: false });

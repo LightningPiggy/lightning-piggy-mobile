@@ -44,13 +44,21 @@ beforeEach(() => {
 });
 afterEach(() => jest.useRealTimers());
 
-it('reads orders from the DM store (no relay subscription) and names the lines', async () => {
+it('loads an incoming buyer order for the seller and resolves its detail by id', async () => {
   (getShopOrderRows as jest.Mock).mockResolvedValue([orderRow('o1')]);
   const titles = new Map([['mug', 'Piggy mug']]);
   const { result } = renderHook(() => useShopOrders(titles));
   expect(result.current.orders).toBeNull();
   await waitFor(() => expect(result.current.orders).toHaveLength(1));
-  expect(result.current.orders![0].lines[0].title).toBe('Piggy mug');
+  const selected = result.current.orders!.find(
+    (order) => order.orderId === 'o1' && order.buyer === BUYER,
+  );
+  expect(selected?.lines[0].title).toBe('Piggy mug');
+  expect(result.current.threads.get(selected!.key)?.placed).toMatchObject({
+    type: 'order',
+    orderId: 'o1',
+    items: [{ ref: `30402:${SELLER}:mug`, quantity: 1 }],
+  });
   expect(getShopOrderRows).toHaveBeenCalledWith(SELLER);
 });
 

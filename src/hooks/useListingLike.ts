@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
@@ -9,7 +10,7 @@ import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import {
   LIKE_CONTENT,
   LISTING_KIND,
-  LISTING_RELAY_HINT,
+  listingRelayHint,
   listingCoordinate,
 } from '../utils/marketLikes';
 import type { MarketProduct } from '../data/marketProducts';
@@ -38,7 +39,7 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
   const coordinate = event ? listingCoordinate(event) : null;
   const readRelays = useMemo(() => {
     const r = relays.filter((x) => x.read).map((x) => x.url);
-    return r.length > 0 ? r : DEFAULT_RELAYS;
+    return r.length > 0 ? r : enabledAppRelays('default', DEFAULT_RELAYS);
   }, [relays]);
   const [state, setState] = useState<LikeState>(EMPTY);
   // Focus results captured before a toggle must not overwrite its result.
@@ -110,8 +111,8 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
           targetEventId: event.id,
           targetAuthorPubkey: event.pubkey,
           targetEventKind: LISTING_KIND,
-          targetAddress: { coordinate, relayHint: LISTING_RELAY_HINT },
-          extraRelays: MARKET_RELAYS,
+          targetAddress: { coordinate, relayHint: listingRelayHint() },
+          extraRelays: enabledAppRelays('market', MARKET_RELAYS),
         });
         if (!isCurrent()) return;
         if (id) setState({ count: (before.count ?? 0) + 1, myIds: [id] });
@@ -119,7 +120,7 @@ export function useListingLike(product: MarketProduct, onRequestSignIn: () => vo
       } else {
         setState({ count: Math.max(0, (before.count ?? 1) - 1), myIds: [] });
         const results = await Promise.all(
-          before.myIds.map((id) => deleteReaction(id, MARKET_RELAYS)),
+          before.myIds.map((id) => deleteReaction(id, enabledAppRelays('market', MARKET_RELAYS))),
         );
         if (!isCurrent()) return;
         const remaining = before.myIds.filter((_, i) => !results[i]);

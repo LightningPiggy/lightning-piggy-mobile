@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { PROFILE_RELAYS } from '../services/nostrRelayDefaults';
 import { getEventHash } from 'nostr-tools/pure';
 import { captureFollowSession } from '../services/followSetEvents';
@@ -106,7 +107,10 @@ export function useContactActions({
       if (!pubkey || !isLoggedIn || !isCurrentSession()) return false;
       try {
         const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-        const targetRelays = writeRelays.length > 0 ? writeRelays : nostrService.DEFAULT_RELAYS;
+        const targetRelays =
+          writeRelays.length > 0
+            ? writeRelays
+            : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
@@ -173,7 +177,7 @@ export function useContactActions({
           relays: [
             ...getReadRelays(),
             ...writeRelays,
-            ...nostrService.DEFAULT_RELAYS,
+            ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS),
             ...PROFILE_RELAYS,
           ],
           localContacts: contacts,

@@ -73,13 +73,15 @@ function requireOwnerKey(owner: string | null | undefined, groupId: string): str
   return groupMessagesKey(pk, groupId);
 }
 
-async function readLog(key: string): Promise<GroupMessage[]> {
+async function readLog(key: string, strict = false): Promise<GroupMessage[]> {
   try {
     const raw = await AsyncStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as GroupMessage[];
+    if (!Array.isArray(parsed) && strict) throw new Error('Invalid group history');
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (error) {
+    if (strict) throw error;
     return [];
   }
 }
@@ -87,10 +89,11 @@ async function readLog(key: string): Promise<GroupMessage[]> {
 export async function loadGroupMessages(
   owner: string | null | undefined,
   groupId: string,
+  options: { strict?: boolean } = {},
 ): Promise<GroupMessage[]> {
   await ensureGroupMessagesMigrated();
   const key = ownerKey(owner, groupId);
-  return key ? readLog(key) : [];
+  return key ? readLog(key, options.strict) : [];
 }
 
 // Window in seconds for matching an inbound real-event message against a
@@ -361,12 +364,13 @@ export async function removeGroupMessagesWhere(
   owner: string | null | undefined,
   groupId: string,
   shouldRemove: (message: GroupMessage) => boolean,
+  options: { strict?: boolean } = {},
 ): Promise<GroupMessage[]> {
   await ensureGroupMessagesMigrated();
   const key = requireOwnerKey(owner, groupId);
   return mutateGroupStorage(key, async () => {
     requireOwnerKey(owner, groupId);
-    const existing = await readLog(key);
+    const existing = await readLog(key, options.strict);
     const filtered = existing.filter((m) => !shouldRemove(m));
     if (filtered.length === existing.length) return existing;
     await AsyncStorage.setItem(key, JSON.stringify(filtered));

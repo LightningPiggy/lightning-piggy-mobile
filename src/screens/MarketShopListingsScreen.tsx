@@ -11,6 +11,8 @@ import { useSellItem } from '../hooks/useSellItem';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 import MarketSellerHeader from '../components/MarketSellerHeader';
+import ListingRepublishResults from '../components/ListingRepublishResults';
+import { useListingRepublish } from '../hooks/useListingRepublish';
 import SellerListingRow from '../components/SellerListingRow';
 import { createMarketSellerStyles } from '../styles/MarketSeller.styles';
 import { parseListingDraft, type ListingDraft } from '../utils/marketSellerEvents';
@@ -35,7 +37,8 @@ const MarketShopListingsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTranslation();
   const styles = useMemo(() => createMarketSellerStyles(colors), [colors]);
   const { snapshot, status, refresh } = useSellerShop();
-  const { deleteListing, busy } = useSellerActions(snapshot);
+  const { deleteListing, resignListing, busy } = useSellerActions(snapshot);
+  const republish = useListingRepublish(snapshot.listings, resignListing);
   const onSellItem = useSellItem({
     navigation,
     zoneCount: snapshot.zones.length,
@@ -105,14 +108,26 @@ const MarketShopListingsScreen: React.FC<Props> = ({ navigation }) => {
         onEdit={onEdit}
         onPreview={onPreview}
         onDelete={onDelete}
+        coverage={republish.coverage.get(item.draft.dTag)}
+        onRepublish={republish.republish}
+        republishBusy={busy || republish.busy || !republish.ready}
       />
     ),
-    [styles, onEdit, onPreview, onDelete],
+    [styles, onEdit, onPreview, onDelete, republish, busy],
   );
   const renderSeparator = useCallback(() => <View style={styles.separator} />, [styles]);
 
   const listHeader = (
     <View style={styles.listHeader}>
+      <TouchableOpacity
+        style={styles.primaryButton}
+        onPress={republish.republishAll}
+        disabled={busy || republish.busy || !republish.ready || !rows.length}
+        accessibilityLabel={t('market.republish.all')}
+        testID="listings-republish-all"
+      >
+        <Text style={styles.primaryButtonText}>{t('market.republish.all')}</Text>
+      </TouchableOpacity>
       {status === 'error' ? (
         <TouchableOpacity
           onPress={refresh}
@@ -140,9 +155,9 @@ const MarketShopListingsScreen: React.FC<Props> = ({ navigation }) => {
         title={t('market.sell.hub.listings')}
         backLabel={t('market.sell.back')}
         onBack={() => navigation.goBack()}
-        styles={styles}
         testID="shop-listings-back"
       />
+      <ListingRepublishResults summary={republish.summary} onClose={republish.close} />
       <FlatList
         data={rows}
         keyExtractor={rowKey}

@@ -1,4 +1,6 @@
 import { setRemoteMediaOwner } from '../services/remoteMediaCache';
+import { setDecryptedMediaOwner } from '../services/decryptedMediaCache';
+import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 import React from 'react';
 import { act, render } from '@testing-library/react-native';
 import { fetch as expoFetch } from 'expo/fetch';
@@ -33,8 +35,16 @@ jest.mock('expo-file-system/legacy', () => ({
 }));
 const mockFetch = expoFetch as unknown as jest.Mock;
 beforeEach(() => {
+  jest.useFakeTimers();
   jest.clearAllMocks();
+  // Match NostrContext's account publication and media-cache layout effects.
+  setActivePubkeyForWalletStorage('reader');
+  setDecryptedMediaOwner('reader');
   setRemoteMediaOwner('reader');
+});
+afterEach(() => {
+  jest.clearAllTimers();
+  jest.useRealTimers();
 });
 
 it.each([false, true])(
@@ -90,11 +100,12 @@ it('accepted plain images are fetched with the shared policy and render a local 
     },
   });
   const onResolved = jest.fn();
-  render(
+  const view = render(
     <DecryptedImage
       url="https://example.com/image.jpg"
       encrypted={false}
       onResolved={onResolved}
+      accessibilityLabel="Downloaded image"
     />,
   );
   await act(async () => {});
@@ -102,4 +113,8 @@ it('accepted plain images are fetched with the shared policy and render a local 
   expect(onResolved).toHaveBeenCalledWith(
     expect.stringMatching(/^file:\/\/\/cache\/remote-media-/),
   );
+  expect(view.getByLabelText('Downloaded image').props.source.uri).toBe(
+    onResolved.mock.calls[0][0],
+  );
+  expect(view.getByLabelText('Downloaded image').props.cachePolicy).toBe('memory');
 });

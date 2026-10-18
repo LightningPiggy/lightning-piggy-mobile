@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { loadSellerCurrency, subscribeSellerCurrency } from '../services/sellerPreferences';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
@@ -42,11 +43,13 @@ export interface UseSellerShop {
  */
 export function useSellerShop(): UseSellerShop {
   const { pubkey, relays, isLoggedIn, signerType } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const [version, setVersion] = useState(0);
   const [currency, setCurrency] = useState({ pubkey: '', shopId: '', value: 'SATS' });
   const [status, setStatus] = useState<UseSellerShop['status']>('idle');
   const [attempt, setAttempt] = useState(0);
   const forceNext = useRef(false);
+  const fetchedScope = useRef<string | null>(null);
   const relayList = useMemo(() => sellerRelays(relays), [relays]);
   const relayKey = relayList.join(',');
 
@@ -69,7 +72,11 @@ export function useSellerShop(): UseSellerShop {
           ([events, hidden]) => restoreSellerAccount(pubkey, events, hidden),
         );
       }
-      if (!forceNext.current && Date.now() - state.fetchedAt < STALE_MS) {
+      if (
+        !forceNext.current &&
+        fetchedScope.current === relayScope &&
+        Date.now() - state.fetchedAt < STALE_MS
+      ) {
         setStatus('ready');
         return () => {
           cancelled = true;
@@ -81,6 +88,7 @@ export function useSellerShop(): UseSellerShop {
       fetchSellerEvents({ pubkey, relays: relayKey.split(','), signal: controller.signal })
         .then((events) => {
           if (cancelled) return;
+          fetchedScope.current = relayScope;
           addSellerEvents(pubkey, events, true);
           void persistSellerSnapshot(pubkey);
           setStatus('ready');
@@ -94,7 +102,7 @@ export function useSellerShop(): UseSellerShop {
       };
       // attempt explicitly re-arms this focus effect for Retry / refresh.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [pubkey, relayKey, attempt]),
+    }, [pubkey, relayKey, attempt, relayScope]),
   );
 
   const refresh = useCallback(() => {

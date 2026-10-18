@@ -1,3 +1,5 @@
+import { useFocusEffect } from '@react-navigation/native';
+import { useAppRelayPrefs } from '../hooks/useAppRelayPrefs';
 import { createMyPigletsScreenStyles as createStyles } from '../styles/MyPigletsScreen.styles';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import BrandedSpinner from '../components/BrandedSpinner';
@@ -86,6 +88,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTranslation();
   const colors = useThemeColors();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const relayScope = useAppRelayPrefs();
   const { pubkey, signEvent, relays } = useNostr();
   const { trustSet } = useTrustGraph();
 
@@ -222,20 +225,22 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const myFinds = useCoalescedMap<FoundEntry>({
     shouldReplace: (existing, incoming) => incoming.createdAt > existing.createdAt,
   });
-  useEffect(() => {
-    if (!pubkey) return undefined;
-    myFinds.reset();
-    const close = subscribeFoundLogsByAuthors([pubkey], (e) => {
-      const entry = parseFoundEvent(e);
-      myFinds.enqueue(entry.coord, entry);
-    });
-    return () => {
-      close();
-      myFinds.flush();
-    };
-    // myFinds.reset / enqueue / flush are stable callbacks (useCallback).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pubkey]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!pubkey) return undefined;
+      myFinds.reset();
+      const close = subscribeFoundLogsByAuthors([pubkey], (e) => {
+        const entry = parseFoundEvent(e);
+        myFinds.enqueue(entry.coord, entry);
+      });
+      return () => {
+        close();
+        myFinds.flush();
+      };
+      // myFinds.reset / enqueue / flush are stable callbacks (useCallback).
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pubkey, relayScope]),
+  );
 
   // Friends' finds — kind 7516 authored by anyone in the trust set,
   // excluding me. `trustSet` includes the user per TrustGraphContext
@@ -258,20 +263,22 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     shouldReplace: () => false,
     maxSize: 200,
   });
-  useEffect(() => {
-    friendFinds.reset();
-    if (trustedAuthors.length === 0) return undefined;
-    const close = subscribeFoundLogsByAuthors(trustedAuthors, (e) => {
-      const entry = parseFoundEvent(e);
-      friendFinds.enqueue(entry.id, entry);
-    });
-    return () => {
-      close();
-      friendFinds.flush();
-    };
-    // friendFinds.reset / enqueue / flush are stable callbacks.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trustedAuthors]);
+  useFocusEffect(
+    useCallback(() => {
+      friendFinds.reset();
+      if (trustedAuthors.length === 0) return undefined;
+      const close = subscribeFoundLogsByAuthors(trustedAuthors, (e) => {
+        const entry = parseFoundEvent(e);
+        friendFinds.enqueue(entry.id, entry);
+      });
+      return () => {
+        close();
+        friendFinds.flush();
+      };
+      // friendFinds.reset / enqueue / flush are stable callbacks.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [trustedAuthors, relayScope]),
+  );
 
   const foundList = useMemo(
     () => [...myFinds.map.values()].sort((a, b) => b.createdAt - a.createdAt),

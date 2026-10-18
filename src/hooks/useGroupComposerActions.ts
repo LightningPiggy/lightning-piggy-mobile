@@ -1,3 +1,4 @@
+import { useNip17FileComposer } from './useNip17FileComposer';
 import React, { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { Alert } from '../components/BrandedAlert';
 import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
@@ -97,6 +98,7 @@ export function useGroupComposerActions(params: {
       targetGroup = group,
       targetPubkey = myPubkey,
       parent?: string,
+      wireKind?: number,
     ): { row: GroupMessage; persisted: Promise<boolean> } | null => {
       if (!targetGroup || !targetPubkey) return null;
       const local: GroupMessage = {
@@ -104,6 +106,7 @@ export function useGroupComposerActions(params: {
         senderPubkey: targetPubkey,
         ...(parent ? { replyTo: parent } : {}),
         text,
+        ...(wireKind !== undefined ? { wireKind } : {}),
         createdAt: Math.floor(Date.now() / 1000),
       };
       // Paint the bubble immediately in UI state — storage is async. The
@@ -243,7 +246,7 @@ export function useGroupComposerActions(params: {
   );
 
   const sendFile = useCallback(
-    async (file: EncryptedUpload, kind: 'voice' | 'image'): Promise<boolean> => {
+    async (file: EncryptedUpload, kind: 'voice' | 'image' | 'file'): Promise<boolean> => {
       if (!group || !myPubkey) return false;
 
       const fileText = encodeEncryptedFileUrl({
@@ -251,6 +254,9 @@ export function useGroupComposerActions(params: {
         mime: file.mime,
         keyHex: file.keyHex,
         nonceHex: file.nonceHex,
+        filename: file.filename,
+        size: file.size,
+        sha256: file.sha256Hex,
       });
 
       const optimistic: { current: { row: GroupMessage; persisted: Promise<boolean> } | null } = {
@@ -265,15 +271,25 @@ export function useGroupComposerActions(params: {
           file,
         },
         {
-          onRumorReady: () => {
-            optimistic.current = appendOptimisticGroupRow(fileText);
+          onRumorReady: ({ kind: wireKind }) => {
+            optimistic.current = appendOptimisticGroupRow(
+              fileText,
+              group,
+              myPubkey,
+              undefined,
+              wireKind,
+            );
           },
         },
       );
 
       if (!result.success) {
-        const what = kind === 'image' ? 'image' : 'voice note';
-        Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
+        if (kind === 'file') {
+          Alert.alert(t('messageBubble.file'), t('messageBubble.fileShareFailed'));
+        } else {
+          const what = kind === 'image' ? 'image' : 'voice note';
+          Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
+        }
         if (optimistic.current) {
           await optimistic.current.persisted;
           await removeOptimisticRow(optimistic.current.row.id);
@@ -291,6 +307,7 @@ export function useGroupComposerActions(params: {
     },
     [
       group,
+      t,
       myPubkey,
       sendGroupMessage,
       appendOptimisticGroupRow,
@@ -462,5 +479,19 @@ export function useGroupComposerActions(params: {
   // It's additionally re-exposed as `resendText` for the message-info sheet's
   // Re-publish (#856), mirroring the 1:1 hook — a re-publish is a fresh group
   // send (publish + optimistic row).
-  return { ...actions, sendText, handleSendInvoiceToGroup, resendText: sendText };
+  const fileComposer = useNip17FileComposer(
+    isMarmot ? 'marmot' : 'nip17',
+    sendFile,
+    setAttachPanelOpen,
+    canSend,
+    group?.id,
+  );
+  return {
+    ...actions,
+    handlePickAndSendFile: fileComposer.pickFile,
+    uploadingImage: actions.uploadingImage || fileComposer.uploading,
+    sendText,
+    handleSendInvoiceToGroup,
+    resendText: sendText,
+  };
 }

@@ -1,6 +1,8 @@
 import { MARKET_PRODUCTS, sellerOf, type MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
-import { marketCheckoutTarget } from './marketCheckout';
+import type { Event } from 'nostr-tools';
+import { maxOrderQuantity, marketCheckoutTarget } from './marketCheckout';
+import type { MarketListing } from './marketListings';
 
 const vendor: MarketVendor = {
   name: 'Robotechy',
@@ -55,6 +57,9 @@ describe('marketCheckoutTarget', () => {
       vendorPubkey: expect.stringMatching(/^[0-9a-f]{64}$/),
       listingDTag: 'seller-listing-42',
       fulfilment: 'none',
+      source: 'curated',
+      stock: null,
+      shippingRefs: [],
     });
   });
 });
@@ -70,5 +75,117 @@ describe('catalogue checkout opt-in', () => {
     for (const p of MARKET_PRODUCTS.filter((x) => !x.sellerName.endsWith('(TEST)'))) {
       expect(p.checkout).toBeUndefined();
     }
+  });
+});
+
+describe('marketCheckoutTarget — Nostr listings (Gamma kind 30402)', () => {
+  const SELLER = 'c'.repeat(64);
+  const BUYER = 'd'.repeat(64);
+  const SHIP = `30406:${SELLER}:uk`;
+
+  function listingProduct(tags: string[][], fields: Partial<Event> = {}): MarketProduct {
+    const event = {
+      id: 'e'.repeat(64),
+      sig: 'f'.repeat(128),
+      kind: 30402,
+      pubkey: SELLER,
+      created_at: 1,
+      content: '',
+      tags: [['d', 'mug'], ['title', 'Mug'], ...tags],
+      ...fields,
+    } as Event;
+    return {
+      ...product,
+      id: 'nostr-30402-mug',
+      listing: { event, currency: 'GBP', priceLabel: '', vendor } as MarketListing,
+    };
+  }
+
+  it('targets the listing author, its own d tag and price', () => {
+    const target = marketCheckoutTarget(listingProduct([['price', '12.50', 'gbp']]), vendor, BUYER);
+    expect(target).toEqual({
+      vendorPubkey: SELLER,
+      listingDTag: 'mug',
+      fulfilment: 'none',
+      source: 'listing',
+      price: { amount: 12.5, currency: 'GBP' },
+      stock: null,
+      shippingRefs: [],
+    });
+  });
+
+  it('a physical listing carries its stock and shipping_option refs (extra in the listing currency)', () => {
+    const target = marketCheckoutTarget(
+      listingProduct([
+        ['price', '2100', 'SAT'],
+        ['type', 'simple', 'physical'],
+        ['stock', '3'],
+        ['shipping_option', SHIP, '1.5'],
+      ]),
+      vendor,
+      BUYER,
+    );
+    expect(target).toMatchObject({
+      fulfilment: 'physical',
+      price: { amount: 2100, currency: 'SATS' },
+      stock: 3,
+      shippingRefs: [{ coordinate: SHIP, extraAmount: 1.5 }],
+    });
+  });
+
+  it('defaults to digital (no shipping) when the type tag is absent or digital', () => {
+    const digital = listingProduct([
+      ['price', '5', 'EUR'],
+      ['type', 'simple', 'digital'],
+      ['shipping_option', SHIP],
+    ]);
+    expect(marketCheckoutTarget(digital, vendor, BUYER)).toMatchObject({
+      fulfilment: 'none',
+      shippingRefs: [],
+    });
+  });
+
+  it('never targets your own listing', () => {
+    expect(
+      marketCheckoutTarget(listingProduct([['price', '1', 'USD']]), vendor, SELLER),
+    ).toBeNull();
+    expect(
+      marketCheckoutTarget(listingProduct([['price', '1', 'USD']]), vendor, SELLER.toUpperCase()),
+    ).toBeNull();
+  });
+
+  it.each([
+    ['no price', []],
+    ['a zero price', [['price', '0', 'USD']]],
+    ['a negative price', [['price', '-1', 'USD']]],
+    ['a non-numeric price', [['price', 'ten', 'USD']]],
+    ['an unknown currency', [['price', '1', 'XYZ']]],
+    ['msats (not converted by the reader)', [['price', '1000', 'MSAT']]],
+    ['a subscription price', [['price', '5', 'USD', 'M']]],
+    [
+      'a variable parent',
+      [
+        ['price', '5', 'USD'],
+        ['type', 'variable', 'physical'],
+      ],
+    ],
+  ])('rejects %s', (_label, tags) => {
+    expect(marketCheckoutTarget(listingProduct(tags as string[][]), vendor, BUYER)).toBeNull();
+  });
+
+  it('rejects classic NIP-15 (30018) products and a missing d tag', () => {
+    expect(
+      marketCheckoutTarget(listingProduct([['price', '1', 'USD']], { kind: 30018 }), vendor, BUYER),
+    ).toBeNull();
+    const noD = listingProduct([['price', '1', 'USD']]);
+    noD.listing!.event.tags = noD.listing!.event.tags.filter((t) => t[0] !== 'd');
+    expect(marketCheckoutTarget(noD, vendor, BUYER)).toBeNull();
+  });
+
+  it('caps the order quantity at stock', () => {
+    expect(maxOrderQuantity({ stock: null })).toBe(99);
+    expect(maxOrderQuantity({ stock: 3 })).toBe(3);
+    expect(maxOrderQuantity({ stock: 0 })).toBe(0);
+    expect(maxOrderQuantity({ stock: 500 })).toBe(99);
   });
 });

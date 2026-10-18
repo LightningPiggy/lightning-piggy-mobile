@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import type { Event as NostrEvent } from 'nostr-tools';
@@ -83,7 +84,7 @@ export function useProductReviews(coord: string | null): UseProductReviews {
 
   const readRelays = useMemo(() => {
     const r = relays.filter((x) => x.read).map((x) => x.url);
-    return r.length > 0 ? r : DEFAULT_RELAYS;
+    return r.length > 0 ? r : enabledAppRelays('default', DEFAULT_RELAYS);
   }, [relays]);
 
   // Focus-armed (repo rule: screens arm relay work with useFocusEffect, never
@@ -140,6 +141,8 @@ export function useProductReviews(coord: string | null): UseProductReviews {
         if (retryTimer) clearTimeout(retryTimer);
         controller.abort();
       };
+      // tick intentionally rearms a failed lookup.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [coord, readRelays, tick]),
   );
 

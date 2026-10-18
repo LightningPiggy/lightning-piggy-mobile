@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
@@ -26,6 +27,7 @@ export function useSellerProducts(
   sellerName: string,
 ) {
   const { relays } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const relaysKey = useMemo(
     () =>
       relays
@@ -35,7 +37,7 @@ export function useSellerProducts(
         .join(','),
     [relays],
   );
-  const key = `${pubkey ?? ''}|${relaysKey}|${reloadNonce}`;
+  const key = `${pubkey ?? ''}|${relaysKey}|${reloadNonce}|${relayScope}`;
   const [state, setState] = useState<State>({
     key: '',
     products: [],

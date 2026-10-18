@@ -1,3 +1,5 @@
+import { useMentionProfile } from '../hooks/useMentionProfile';
+import { shortNpubLabel } from '../utils/nip27';
 import { MessageHighlight } from './MessageHighlight';
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
@@ -22,6 +24,16 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
   senderName,
   ...bubble
 }: Props) {
+  // Observe the screen-owned member lookup through shared cache updates;
+  // rows must not start a second kind-0 request for unresolved senders.
+  const memberProfile =
+    senderName && !senderName.startsWith('npub1')
+      ? { name: senderName, picture: senderPicture }
+      : null;
+  const profile = useMentionProfile(senderPubkey, memberProfile, false);
+  const name = profile.name || senderName || shortNpubLabel(senderPubkey);
+  const avatar =
+    profile.picture && isSupportedImageUrl(profile.picture) ? profile.picture : senderPicture;
   const colors = useThemeColors();
   const styles = useMemo(() => createGroupMessageRowStyles(colors), [colors]);
   const [failedPicture, setFailedPicture] = useState<string | null>(null);
@@ -33,11 +45,7 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
         senderName={bubble.content.kind === 'unsupported' ? senderName : undefined}
       />
     );
-  const picture =
-    senderPicture && isSupportedImageUrl(senderPicture) && failedPicture !== senderPicture
-      ? senderPicture
-      : null;
-  const name = senderName ?? senderPubkey;
+  const picture = avatar && isSupportedImageUrl(avatar) && failedPicture !== avatar ? avatar : null;
   const colorIndex =
     Array.from(senderPubkey).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) %
     senderAvatarColors.length;
@@ -80,7 +88,7 @@ const GroupMessageRow = React.memo(function GroupMessageRow({
         ) : null}
         <MessageBubble
           {...bubble}
-          senderName={bubble.content.kind === 'unsupported' ? senderName : undefined}
+          senderName={bubble.content.kind === 'unsupported' ? name : undefined}
         />
       </View>
     </View>

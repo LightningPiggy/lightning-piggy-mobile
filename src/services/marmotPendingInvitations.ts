@@ -86,10 +86,15 @@ export class MarmotPendingInvitations {
     }
     return [...groups.values()];
   }
+  /**
+   * Store a received Welcome as an invitation. Every invitation waits for the
+   * user's Accept / Decline, whoever sent it (as White Noise does): following
+   * someone isn't consent to be added to their groups. True when it's newly
+   * pending (the caller may alert); false for a repeat or a decided one.
+   */
   receive(
     id: string,
     rumor: MarmotRumor,
-    followed: boolean,
     fresh = false,
     replacesContentlessAlert = false,
   ): Promise<boolean> {
@@ -103,9 +108,9 @@ export class MarmotPendingInvitations {
         rumor,
         fresh,
         replacesContentlessAlert,
-        status: followed ? 'approved' : 'pending',
+        status: 'pending',
       });
-      return !followed;
+      return true;
     });
     this.receiveChain = run.catch(() => undefined);
     return run;

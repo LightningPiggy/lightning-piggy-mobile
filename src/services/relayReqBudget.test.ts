@@ -1,3 +1,6 @@
+import { setRelayAuthAccount } from './relayAuth';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { finalizeEvent, getPublicKey } from 'nostr-tools/pure';
 import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import { RelayReqBudget, reqPriority, liveReqCap, type ReqOptions } from './relayReqBudget';
 import { withRelayHealth } from './healthAwarePool';
@@ -299,18 +302,32 @@ test('cancellation during AUTH prevents its eventual completion from opening a s
         authenticated = resolve;
       }),
   );
-  Object.assign(pool.relay, { auth });
-  const sub = pool.subscribeMap([{ url, filter: { kinds: [1], limit: 10 } }], {
-    onauth: jest.fn(),
+  const secret = new Uint8Array(32).fill(5);
+  const pubkey = getPublicKey(secret);
+  setCurrentUserPubkey(pubkey);
+  setRelayAuthAccount({
+    pubkey,
+    signerType: 'nsec',
+    ownRelays: [],
+    sign: async (event) => finalizeEvent(event, secret),
   });
+  Object.assign(pool.relay, {
+    auth,
+    challenge: 'test-challenge',
+    connectionPromise: Promise.resolve(),
+  });
+  const sub = pool.subscribeMap([{ url, filter: { kinds: [1], limit: 10 } }], {});
   await tick();
   const params = [...pool.active.values()][0];
   pool.active.clear();
   params.onclose?.('auth-required: challenge');
+  await tick();
   expect(auth).toHaveBeenCalledTimes(1);
   sub.close();
   authenticated();
   await tick();
+  setRelayAuthAccount(null);
+  setCurrentUserPubkey(null);
   expect(pool.active.size).toBe(0);
   expect(pool.serial).toBe(1);
   pool.destroy();

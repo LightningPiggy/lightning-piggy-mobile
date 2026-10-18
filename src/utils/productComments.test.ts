@@ -1,3 +1,4 @@
+import { reconcileComments } from './commentEdits';
 import type { Event as NostrEvent } from 'nostr-tools';
 import {
   COMMENT_KIND,
@@ -9,6 +10,7 @@ import {
   directReplies,
   isTopLevelComment,
   topLevelComments,
+  threadedComments,
 } from './productComments';
 
 const MERCHANT = 'a'.repeat(64);
@@ -163,5 +165,64 @@ describe('topLevelComments + directReplies', () => {
     const r2 = comment(buildCommentTags(product(), t1), { id: 'r2', created_at: 20 });
     const replies = directReplies([t1, r1, r2], 't1');
     expect(replies.map((c) => c.id)).toEqual(['r2', 'r1']);
+  });
+});
+
+describe('threadedComments after reconciliation', () => {
+  const root = product();
+  const original = comment(buildCommentTags(root), { id: 'original', pubkey: 'alice' });
+  const edit = comment([...buildCommentTags(root), ['edit', original.id]], {
+    id: 'edit',
+    pubkey: 'alice',
+    created_at: 2,
+  });
+  const reply = comment(buildCommentTags(root, original), { id: 'reply' });
+  const nested = comment(buildCommentTags(root, reply), { id: 'nested' });
+  const rows = (visible: NostrEvent[], ancestry = visible) =>
+    threadedComments(visible, root, ancestry).map(({ comment: c, depth }) => [c.id, depth]);
+
+  it('keeps replies under the latest edit across a chain, including hidden originals', () => {
+    const latest = { ...edit, id: 'latest', tags: [...buildCommentTags(root), ['edit', edit.id]] };
+    const ancestry = [original, edit, latest, reply, nested];
+    const visible = reconcileComments(ancestry, []);
+    expect(rows(visible, ancestry)).toEqual([
+      ['latest', 0],
+      ['reply', 1],
+      ['nested', 2],
+    ]);
+    // Relays may have honoured the deletion of the original already.
+    expect(rows([edit, reply, nested])).toEqual([
+      ['edit', 0],
+      ['reply', 1],
+      ['nested', 2],
+    ]);
+  });
+
+  it('renders orphan replies and descendants when the parent was deleted or not loaded', () => {
+    expect(rows([reply, nested])).toEqual([
+      ['reply', 0],
+      ['nested', 1],
+    ]);
+    const deletion = { ...original, kind: 5, id: 'deletion', tags: [['e', original.id]] };
+    const ancestry = [original, reply, nested];
+    expect(rows(reconcileComments(ancestry, [deletion]), ancestry)).toEqual([
+      ['reply', 0],
+      ['nested', 1],
+    ]);
+  });
+
+  it('does not attach replies to a forged edit by another author', () => {
+    const forged = { ...edit, pubkey: 'mallory' };
+    const result = rows([forged, original, reply]);
+    expect(result).toContainEqual(['reply', 1]);
+    expect(result.findIndex(([id]) => id === 'reply')).toBe(
+      result.findIndex(([id]) => id === 'original') + 1,
+    );
+    expect(rows([forged, reply])).toContainEqual(['reply', 0]);
+  });
+
+  it('bounds malformed cycles and renders each comment once', () => {
+    const cycle = { ...original, tags: buildCommentTags(root, reply) };
+    expect(rows([cycle, reply])).toHaveLength(2);
   });
 });

@@ -2,7 +2,7 @@ import { selectVerifiedListings } from '../utils/marketListings';
 import * as pacing from '../contexts/nostrDecryptPacing';
 import { finalizeEvent, getEventHash, getPublicKey, type Filter } from 'nostr-tools';
 import { fetchMarketListings, listingsCutMattered } from './marketListingsService';
-import { LISTING_LIMIT } from '../utils/marketListingsQuery';
+import { LISTING_LIMIT, MARKET_RELAYS } from '../utils/marketListingsQuery';
 import { nostrVerifyEvent } from './nostrCrypto';
 import { __resetVerifiedEventCache } from './nostrVerifyCache';
 jest.mock('../utils/marketListings', () => {
@@ -583,11 +583,7 @@ it('does not issue unscoped queries for an empty follow list', async () => {
 it('also queries the marketplace relays where sellers publish', async () => {
   const pending = start();
   await flush();
-  expect(ensureRelay.mock.calls.map((c) => c[0])).toEqual([
-    'wss://relay.plebeian.market',
-    'wss://nostr.mom',
-    'wss://example.com',
-  ]);
+  expect(ensureRelay.mock.calls.map((c) => c[0])).toEqual([...MARKET_RELAYS, 'wss://example.com']);
   await answer();
   await pending;
 });

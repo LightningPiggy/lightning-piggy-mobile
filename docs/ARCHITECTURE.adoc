@@ -22,7 +22,7 @@ custom native modules, so Expo Go is not used).
 |===
 | Layer | Responsibility
 
-| **Native / config** | Expo config plugins (`plugins/`) + four local native modules (`modules/`): the Amber signer bridge, the opt-in Android background service, a rust-nostr wrapper and a secure clipboard. See <<native>>.
+| **Native / config** | Expo config plugins (`plugins/`) + five local native modules (`modules/`): the Amber signer bridge, the opt-in Android background service, a rust-nostr wrapper a secure clipboard and Android document metadata. See <<native>>.
 | **Contexts** | Long-lived React state providers (`src/contexts/`) — identity, wallets, DMs, groups, live-location. Composed once near the app root.
 | **i18n** | `src/i18n/` — 9 locale catalogues (`en` is the source of truth), per-locale CLDR plural rules (`plurals.ts`) and a per-account app language. See `i18n/GLOSSARY.md`.
 | **Hooks / services** | Per-responsibility logic. UI-facing hooks (`src/hooks/`) and a large stateless service layer (`src/services/`) split by domain (Nostr, wallet, location, media, NFC, notifications).
@@ -191,7 +191,7 @@ A large, mostly-stateless service layer grouped by domain. Selected modules:
 | Zaps / caching | `bolt11SettlementCache.ts`, `zapCounterpartyStorage.ts`, `zapSenderProfileStorage.ts`, `findLogZapsService.ts`, `fiatService.ts`
 | Location / geofence | `locationService.ts`, `geofenceService.ts`, `btcMapService.ts`, `liveLocationService.ts`, `nearbyRadiusService.ts`
 | Notifications | `notificationService.ts`, `cacheNotifySubscription.ts`, `watcherPush*.ts` (opt-in alerts from Lightning Piggy's notification watcher). See `architecture/notifications.adoc`.
-| Market | `marketListingsService.ts` (bounded, signature-checked listing snapshot by source: preferred sellers or friends), `marketSellerService.ts` + `sellerEventStore.ts` (My shop: quorum reads of your own shop, zones and listings; publishes Gamma Markets events and NIP-09 deletes), `marketShippingService.ts`, `productFeedbackQueries.ts` (reviews and NIP-22 comments). Pure logic in `src/utils/market*.ts` (event build/parse, shipping quotes, the Markdown subset). See `SOLUTION_DESIGN.adoc` → "Market".
+| Market | `marketListingsService.ts` (bounded, signature-checked listing snapshot by source: preferred sellers or friends), `marketSellerService.ts` + `sellerEventStore.ts` (My shop: quorum reads of your own shop, zones and listings; publishes Gamma Markets events and NIP-09 deletes to marketplace relays plus capped write relays, with test-account lockdown), `marketShippingService.ts`, `productFeedbackQueries.ts` (reviews and NIP-22 comments). Pure logic in `src/utils/market*.ts` (event build/parse, shipping quotes, the Markdown subset). See `SOLUTION_DESIGN.adoc` → "Market".
 | Profiles & embeds | `authorFeedService.ts` (a person's kind 1 / 20 / 21 / 22 feed, paged with bounded `until` queries), `nostrEmbedCache.ts` (batched, cached, signature-checked NIP-27 embeds), with pure helpers `src/utils/nip27.ts`, `nip10.ts`, `noteMedia.ts`. Rendered by `components/nostr/NostrContent`.
 | Media | `imageUploadService.ts`, `blossomService.ts`, `giphyService.ts`, `linkPreviewFetcher.ts` (hop-validated redirects); `src/utils/publicUrl.ts` (the one "safe to contact automatically" check) and `mediaTrust.ts` (tap-to-load for people you don't follow). See `SECURITY.adoc`.
 | NFC | `nfcService.ts`, `nfcReaderMode.ts`, `nfcNostrWrite.ts`, `ntagLock.ts`
@@ -244,7 +244,7 @@ full wire formats.
 | 3 | Contact list (follows) | `nostrService.ts`, `NostrContext.tsx`
 | 4 | NIP-04 legacy encrypted DM | inbox fetch stores `wire_kind=4`
 | 5 | NIP-09 deletion | your own listings, shipping options, comments, reviews and reaction retractions; others' deletions are honoured when reading (`utils/nip09.ts`)
-| 7 | NIP-25 reaction | DM reactions (`utils/reactions.ts`, `nostrReactions.ts`)
+| 7 | NIP-25 reaction | Chat reactions: gift-wrapped rumors in NIP-17 chats (`utils/nip17Reactions.ts`, `services/nip17ReactionSource.ts`), public in NIP-04 chats and for Market likes (`utils/reactions.ts`, `nostrReactions.ts`)
 | 13 | NIP-59 seal (inner layer of a gift wrap) | `nostrService.ts` wrap builders
 | 14 | NIP-17 chat rumor (1:1 + group) | `nostrService.ts` (`buildChatRumor` / `buildGroupMessageRumor`)
 | 16 / 17 | Gamma Markets order messages (order, payment request, status, shipping) / payment receipt | `utils/marketOrder.ts`, `utils/orderEvents.ts`
@@ -287,6 +287,26 @@ otherwise the same kinds NIP-17 carries. See `PROTOCOLS.adoc` → "Marmot".
 | **Amber (NIP-55, Android)** | Shipped. IPC to the Amber app via the `amber-signer` native module — the key never enters this app's process.
 | **NIP-46 remote signer / Nostr Connect** | Shipped. Clave (iOS), Aegis, nsec.app over relays (`nostrConnectService.ts`); see `nip46-clave.adoc`.
 |===
+
+Read subscriptions and queries use `relayReqTransport.ts` and `relayAuth.ts`
+for NIP-42 login when a relay closes a REQ with `auth-required:`. The active
+account signs kind 22242 with the connected URL and challenge. Local keys sign
+silently; Amber/NIP-46 only sign for the user's own kind-10050 inbox or NIP-65
+read relays (not default relays, overrides or another user's lists). Each remote
+signer is asked at most once per account/relay per app session; success, decline
+and timeout are cached. A new socket challenge cannot reuse that signature and
+waits until a new app session to ask again. Signing and acknowledgement each
+have a 15-second deadline; concurrent reads share one auth operation per relay.
+A successful AUTH re-arms each closed REQ once. Test-account lockdown permits
+AUTH only on the configured LAN relay. AUTH payloads and challenges are never
+logged by this path.
+
+At the next connect/re-pair, Amber's NIP-55 `get_public_key` permissions extra
+and the NIP-46 pairing URI request pre-approval for kind 22242. NIP-46 `connect`
+requests also carry the pairing's saved permissions. Both formats derive from
+`SIGNER_PREAPPROVED_EVENT_KINDS` in `signerPermissions.ts`. Approval remains the
+signer's/user's choice, so relay-login prompts can still occur if it is denied.
+Existing pairings keep their saved permissions; no forced re-pair occurs.
 
 == Wallets
 
@@ -423,3 +443,103 @@ See `SOLUTION_DESIGN.adoc` → "Explore tab" and `PROTOCOLS.adoc` →
 * `architecture/notifications.adoc` — background + notification model.
 * `architecture/perf-and-state.adoc` — state management and performance notes.
 * `DEPLOYMENT.adoc` — build variants and the release workflow.
+
+== DM document attachments
+
+NIP-17 kind-15 documents use the same `MessageFileBubble`, `fileShare` and
+account-scoped `decryptedMediaCache` as Marmot files. `textForRumor` folds
+AES-GCM metadata into the internal `#lpe=1` URL, retaining the ciphertext
+`x` hash and encrypted size; the hash is checked before authenticated decrypt.
+The NIP-17 composer uses Expo FileSystem's system picker and uploads ciphertext
+to Blossom, with a 16 MiB plaintext upload limit. Android reads the provider's
+display name through the local `document-metadata` native module (a native
+rebuild is required). An optional `filename` tag carries the sanitized filename.
+Images picked via Attach → File are sanitized before encryption by
+`fileAttachmentMetadata` and the pure `imageMetadataStrip` byte parsers.
+Photo signatures (including TIFF) are checked even when the provider MIME is
+generic. Generic-MIME files with image extensions also require sanitization.
+JPEG drops APP1 (EXIF/XMP), APP13 (IPTC) and COM while preserving compressed
+image data, JFIF, ICC and Adobe segments. A fresh EXIF segment contains only a
+valid IFD0 Orientation, with no GPS pointers or thumbnail. PNG drops eXIf,
+tEXt, iTXt, zTXt and tIME after validating chunk CRCs; WebP drops EXIF/XMP and updates RIFF size and VP8X
+flags. Both retain image chunks verbatim. Unsupported images (including HEIC)
+and malformed streams use native metadata-stripping re-encoding; failure aborts
+the send. Re-encoded files use the output MIME and extension. This fallback
+can change quality and flatten animation. Non-images, including PDFs, retain
+their original bytes. Named NIP-17 image files retain file cards with Save and
+Share; gallery images keep image bubbles. Owner/session checks surround
+preparation and upload.
+
+Blossom learns the uploader's public key through signed BUD-02 authorization
+and sees their IP address. Downloading a file reveals the recipient's IP address
+to its hosting server; plain URLs can use an arbitrary sender-chosen host.
+Plain URL bubbles are labelled as unencrypted and unverified.
+
+Whole-message document URLs in NIP-04 kind 4 and NIP-17 kind 14 are classified
+by extension, without fetching. They have no sender-provided integrity hash;
+only this explicit plain-URL path may use the cache without one. Unencrypted
+Marmot imeta files still require their plaintext hash. Ordinary links remain
+links. Safe PDF previews follow image trust rules: followed senders and own
+messages load automatically; other senders require tap-to-load consent.
+Non-preview downloads and optional HEAD size metadata require a tap.
+HEAD is advisory; GET is independently
+stream-bounded to 50 MiB using `fetchBounded` and `checkRemoteUrl` at each
+redirect. Only public HTTPS endpoints are accepted.
+
+Names and MIME declarations pass the shared dangerous-type blocklist. Dangerous
+files require a warning and export as `attachment.bin` with generic MIME; other
+files share only a content-sniffed MIME. Sender-declared types never reach the
+OS chooser. File exports retain the existing account wipe and delayed cleanup
+rules. Inbox/notification previews redact document URLs and encryption metadata.
+The local-only dev fixtures and `messaging/flow-159-dm-files.yaml` exercise both
+DM protocols without publishing or changing accounts.
+
+PDF cards render the first page from the verified account-scoped local file,
+using `document-metadata.renderPdfFirstPageAsync` (Android PdfRenderer / iOS
+PDFKit) on a native async queue. PDFs over 10 MiB skip previews. Missing native
+support and rendering failures silently retain the icon card. Thumbnails live
+beside the attachment's hash-keyed cached file; native cache hits avoid repeat
+rendering. Preview writes join the account wipe publication barrier, and file
+expiry deletes the thumbnail too. No plaintext is sent to a rendering service.
+File cards share image bubble width and margins, display a friendly file type
+and human-readable size, and omit hosting domains and raw MIME declarations.
+Images prefer imeta dimensions, otherwise their loaded source dimensions,
+with aspect ratios clamped to 0.6–1.8.
+
+=== App relay preferences and publishing network lists
+
+Advanced → Nostr network keeps the public NIP-65, NIP-17 and Blossom list
+editors separate from the app's fallback infrastructure. Each list retains its
+protocol label and an information sheet. Publish opens a dismissible progress
+sheet before signing, then shows each destination's acceptance, rejection reason
+or lack of response. Closing the sheet does not cancel the operation; completion
+also reaches a branded toast when the sheet is no longer visible. Result updates
+are coalesced before rendering. Signer refusal and account changes cannot adopt
+another account's list or surface its late result.
+
+App Relays contains switches for defaults, relay-list indexers, geo-cache,
+Marmot key-package discovery and marketplace relays. `appRelayPrefs.ts` stores
+disabled URLs per group and account in AsyncStorage, loads before app fallbacks
+become available, serializes writes, and participates in account cache wiping.
+Every use of these app-provided lists goes through `enabledAppRelays`; a source
+consumer audit test guards new call sites. Explicit personal relay lists retain
+their precedence. Preference changes invalidate the foreground network plan;
+headless DM reads load the same account preferences. Empty groups remain empty
+and show a warning. Test-account lockdown overrides preferences and continues
+to route exclusively through the test relay.
+
+== Market shortcuts (#1616)
+
+The Market header exposes the shared profile avatar alongside search and filters.
+A horizontally scrollable row below it links to Liked, My orders and My shop
+(or Start selling when the account has no listings). The account drawer links
+to Orders and My shop through the Explore stack from every tab.
+
+`MarketShortcutsContext` shares memoised buyer and seller action counts between
+the row and drawer. Existing buyer/seller hooks read account-scoped local order
+snapshots; the seller shop hook reuses its shared store and bounded fetch. Buyer
+actions are unpaid or expired invoices; seller actions are missing or expired
+invoices, using the same status derivation as seller orders. Zero action badges
+are hidden. Liked uses `useLikedListings` while Market is focused, so returning
+from a product refreshes the count. No additional live relay subscriptions are
+created.

@@ -25,6 +25,7 @@ const NOSTR_BUILD_UPLOAD_URL = 'https://nostr.build/api/v2/upload/files';
 export async function stripImageMetadata(
   uri: string,
   pickerBase64?: string | null,
+  options: { preserveGif?: boolean } = {},
 ): Promise<{ uri: string; base64: string }> {
   // GIF: skip the manipulator re-encode so animation survives. GIF89a has
   // no EXIF chunk (nothing analogous to JPEG APP1), so typical GIFs from
@@ -36,7 +37,7 @@ export async function stripImageMetadata(
   // We rely on the picker's `base64: true` output here because reading
   // file:// URIs via fetch/XHR is unreliable on Android RN (see the
   // comment in blossomService.ts).
-  if (/\.gif$/i.test(uri)) {
+  if (options.preserveGif !== false && /\.gif$/i.test(uri)) {
     if (!pickerBase64) {
       throw new Error(
         'GIF upload requires picker base64 — call launchImageLibraryAsync with base64: true',
@@ -197,6 +198,7 @@ export interface EncryptedUpload {
   nonceHex: string;
   /** SHA-256 of the ciphertext — the `x` tag. */
   sha256Hex: string;
+  filename?: string;
   /** Ciphertext byte length — the `size` tag. */
   size: number;
   /** Original (decrypted) mime — the `file-type` tag. */

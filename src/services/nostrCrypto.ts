@@ -41,6 +41,7 @@ import {
 } from 'nostr-tools/pure';
 
 import { getNostrNative, type NostrNativeApi } from '../../modules/nostr-native';
+import { assertNotWrapOnlyKind } from '../utils/wrapOnlyKinds';
 
 // ---------------------------------------------------------------------------
 // Perf gate — active in dev (__DEV__) AND in EXPO_PUBLIC_KEEP_PERF_LOGS
@@ -419,6 +420,8 @@ export function nostrFinalizeEvent(
   event: { kind: number; created_at: number; tags: string[][]; content: string },
   secretKey: Uint8Array,
 ): VerifiedEvent {
+  // Gamma order kinds 16/17 are NIP-17 rumors only — never signed.
+  assertNotWrapOnlyKind(event.kind, 'sign');
   if (!PERF_ENABLED) {
     return finalizeEvent(event, secretKey);
   }

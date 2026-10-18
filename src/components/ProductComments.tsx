@@ -1,3 +1,7 @@
+import type { Event as NostrEvent } from 'nostr-tools';
+import { useAccountState } from '../contexts/useAccountState';
+import { commentRootRef } from '../utils/productComments';
+import ProductReplyComposer from './ProductReplyComposer';
 import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
@@ -35,10 +39,16 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createProductCommentsStyles(colors), [colors]);
-  const { topLevel, loading, error, refetch, refresh, addLocally, hideLocally } =
+  const { thread, topLevel, loading, error, refetch, refresh, addLocally, hideLocally } =
     useProductComments(root);
   useRegisterRefresher(registerRefresh, refresh);
   const { pubkey } = useNostr();
+  const [replyTo, setReplyTo] = useAccountState<NostrEvent | null>(
+    `${pubkey}:${commentRootRef(root)}`,
+    null,
+  );
+  const cancelReply = React.useCallback(() => setReplyTo(null), [setReplyTo]);
+  const isSeller = !(root instanceof URL) && root.pubkey === pubkey;
   const {
     content,
     setContent,
@@ -63,7 +73,7 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
   // Page the rows: the list sits in the product page's outer ScrollView, so a
   // large thread must not mount every row + profile lookup at once.
   const [visibleCount, setVisibleCount] = useState(FEEDBACK_PAGE_SIZE);
-  const hiddenCount = Math.max(0, topLevel.length - visibleCount);
+  const hiddenCount = Math.max(0, thread.length - visibleCount);
 
   return (
     <View testID="product-comments">
@@ -121,24 +131,37 @@ const ProductComments: React.FC<Props> = ({ root, onRequestSignIn, onCount, regi
         <Text style={styles.state}>{t('market.comments.empty')}</Text>
       ) : (
         <>
-          {topLevel.slice(0, visibleCount).map((c) => (
-            <ProductCommentItem
-              key={c.id}
-              comment={c}
-              styles={styles}
-              isMine={!!pubkey && c.pubkey === pubkey}
-              menuOpen={menuFor === c.id}
-              // Only the card being edited gets the draft, so typing
-              // re-renders that one memoised row, not the whole list.
-              editText={editDraft?.comment.id === c.id ? editDraft.text : null}
-              editSaving={savingEditIds.has(c.id)}
-              onToggleMenu={toggleMenu}
-              onEdit={startEdit}
-              onDelete={requestDelete}
-              onEditChange={setEditText}
-              onEditCancel={cancelEdit}
-              onEditSave={saveEdit}
-            />
+          {thread.slice(0, visibleCount).map(({ comment: c, depth }) => (
+            <View key={c.id} style={depth > 0 ? styles.reply : undefined}>
+              <ProductCommentItem
+                canReply={isSeller && canPublish}
+                onReply={setReplyTo}
+                comment={c}
+                styles={styles}
+                isMine={!!pubkey && c.pubkey === pubkey}
+                menuOpen={menuFor === c.id}
+                // Only the card being edited gets the draft, so typing
+                // re-renders that one memoised row, not the whole list.
+                editText={editDraft?.comment.id === c.id ? editDraft.text : null}
+                editSaving={savingEditIds.has(c.id)}
+                onToggleMenu={toggleMenu}
+                onEdit={startEdit}
+                onDelete={requestDelete}
+                onEditChange={setEditText}
+                onEditCancel={cancelEdit}
+                onEditSave={saveEdit}
+              />
+              {replyTo?.id === c.id && isSeller ? (
+                <ProductReplyComposer
+                  key={`${pubkey}:${c.id}`}
+                  root={root}
+                  parent={c}
+                  styles={styles}
+                  onPosted={addLocally}
+                  onCancel={cancelReply}
+                />
+              ) : null}
+            </View>
           ))}
           {hiddenCount > 0 ? (
             <TouchableOpacity

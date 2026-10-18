@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback } from 'react';
 import { sendNip04Message } from '../services/nostrNip04Send';
 import { sendMarmotDm } from '../services/marmotSend';
@@ -120,7 +121,9 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       // whose NIP-65 list has a single entry (and no in-app UI to edit it)
       // hits a single-point failure the moment that relay is slow.
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      const targetRelays = Array.from(
+        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
+      );
       try {
         if (protocol === 'nip04') {
           const result = await sendNip04Message({
@@ -270,7 +273,9 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         return sendMarmotDm(pubkey, peer, rumor, hooks);
       }
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      const targetRelays = Array.from(
+        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
+      );
       try {
         const eventId = directMessageRumorEventId(rumor);
         hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
@@ -321,6 +326,38 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           };
         }
 
+        if (signerType === 'nip46') {
+          // Same Encrypt → SignSeal → Publish shape as `sendDirectMessage`'s
+          // NIP-46 branch, so polls and chat reactions (#1319) work over a
+          // remote signer too.
+          const currentUser = pubkey;
+          const result = await nostrService.sendNip17ToManyWithSigner({
+            senderPubkey: currentUser,
+            rumor,
+            recipientPubkeys: normalized,
+            relays: targetRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
+            signerNip44Encrypt: (plain, recipient) =>
+              nostrConnectService.requestNip44Encrypt(plain, recipient, currentUser),
+            signerSignSeal: async (unsignedSeal) => {
+              const { event: signedEventJson } = await nostrConnectService.requestEventSignature(
+                JSON.stringify(unsignedSeal),
+                '',
+                currentUser,
+              );
+              if (!signedEventJson) {
+                throw new Error('NIP-46 signer returned empty signed seal');
+              }
+              return JSON.parse(signedEventJson);
+            },
+          });
+          return {
+            success: result.delivery.delivered,
+            delivery: result.delivery,
+            error: result.delivery.delivered ? undefined : (result.errors[0] ?? 'Send failed'),
+          };
+        }
+
         return { success: false, error: 'Unsupported signer type' };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to send';
@@ -347,7 +384,9 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         return { success: false, error: 'Invalid public key format' };
       }
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      const targetRelays = Array.from(
+        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
+      );
       try {
         const rumor = createFileMessageRumor({
           senderPubkey: pubkey,
@@ -358,6 +397,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
           nonceHex: file.nonceHex,
           sha256Hex: file.sha256Hex,
           size: file.size,
+          filename: file.filename,
         });
         const preferred = await preferredDmProtocol(pubkey, normalizedRecipientPubkey, protocol);
         if (preferred === 'marmot') {
@@ -483,7 +523,9 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         return { success: false, error: 'Invalid public key format' };
       }
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS]));
+      const targetRelays = Array.from(
+        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
+      );
       try {
         const rumor = {
           pubkey,

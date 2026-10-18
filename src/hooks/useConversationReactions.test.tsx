@@ -40,6 +40,14 @@ beforeEach(() => {
 });
 afterEach(() => setMarmotSession(null));
 
+// NIP-17 threads read wrapped reactions from the DM store (#1321).
+const mockReactionRows = jest.fn(async (_owner: string, _peer: string) => [] as unknown[]);
+jest.mock('../services/dmDb', () => ({
+  ...jest.requireActual('../services/dmDb'),
+  getConversationReactionRows: (owner: string, peer: string) => mockReactionRows(owner, peer),
+  subscribeDmStorage: () => () => {},
+}));
+
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (effect: () => void) =>
     jest.requireActual<typeof import('react')>('react').useEffect(effect, [effect]),
@@ -493,6 +501,19 @@ describe('cached reactions on initial message render', () => {
         return { close: jest.fn() };
       });
       (pool.ensureRelay as jest.Mock).mockResolvedValue({ subscribe });
+      mockReactionRows.mockResolvedValue([
+        {
+          owner: MY_PK,
+          eventId: 'wrap-cached',
+          conversation: PEER_PK,
+          createdAt: 1,
+          sender: PEER_PK,
+          content: JSON.stringify({ content: '👍', tags: [['e', TARGET]] }),
+          fromMe: false,
+          wireKind: 7,
+          rumorId: event.id,
+        },
+      ]);
       const relay = {
         fetchReactionsForMessages: (ids: string[]) => fetchReactions(ids, ['wss://relay']),
         fetchReactionDeletions: (ids: string[]) => fetchReactionDeletions(ids, ['wss://relay']),
@@ -500,6 +521,7 @@ describe('cached reactions on initial message render', () => {
         deleteReaction: jest.fn(),
       };
       const group = marmotReactionSource(MY_PK, PEER_PK, 'explicit-group');
+      const sendRumor = jest.fn(async () => ({ success: true }));
       const params = makeParams({
         scopeKey: `first-frame:${protocol}`,
         messages: [{ id: TARGET, rumorId: TARGET, text: 'cached', createdAt: 1, fromMe: true }],
@@ -510,6 +532,7 @@ describe('cached reactions on initial message render', () => {
           MY_PK,
           PEER_PK,
           relay,
+          sendRumor,
         );
         return useConversationReactions({
           ...params,
@@ -522,7 +545,9 @@ describe('cached reactions on initial message render', () => {
       await waitFor(() => expect(first.result.current.reactionsByTarget.get(TARGET)).toBeDefined());
       // Allow deletion reconciliation to settle before leaving the conversation.
       await waitFor(() => {
-        if (protocol === 'nip17') expect(subscribe).toHaveBeenCalledTimes(2);
+        // The live subscription's baseline, the reactions, then their
+        // retractions: all from the store.
+        if (protocol === 'nip17') expect(mockReactionRows).toHaveBeenCalledTimes(3);
         else
           expect(queryHistory).toHaveBeenCalledWith(
             protocol === 'group' ? 'explicit-group' : 'dm-group',
@@ -534,6 +559,7 @@ describe('cached reactions on initial message render', () => {
       first.unmount();
       const commits: boolean[] = [];
       queryHistory.mockImplementation(() => new Promise(() => {}));
+      mockReactionRows.mockImplementation(() => new Promise(() => {}));
       (pool.ensureRelay as jest.Mock).mockImplementation(() => new Promise(() => {}));
       const second = renderHook(() => {
         const value = useAdaptedReactions();

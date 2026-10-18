@@ -14,5 +14,7 @@ export const createNetworkSectionStyles = (colors: Palette) =>
     sheet: { padding: 24, paddingBottom: 40, gap: 16 },
     sheetTitle: { color: colors.textBody, fontSize: 18, fontWeight: '700' },
     sheetText: { color: colors.textBody, fontSize: 15, lineHeight: 22 },
+    resultRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    resultText: { flex: 1 },
     link: { color: colors.brandPink, fontWeight: '700', fontSize: 15 },
   });

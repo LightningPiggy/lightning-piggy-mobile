@@ -1,3 +1,9 @@
+import {
+  loadAppRelayPrefs,
+  setAppRelayEnabled,
+  forgetAppRelayPrefs,
+} from '../services/appRelayPrefs';
+import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
 import { Toast } from '../components/BrandedToast';
 import { act, renderHook } from '@testing-library/react-native';
 import { usePreferredMarketListings, usePreferredMarketSample } from './usePreferredMarketListings';
@@ -6,7 +12,7 @@ import {
   PREFERRED_SELLERS_ACCOUNT,
 } from '../services/marketPreferredSellers';
 import { useMarketListings } from './useMarketListings';
-import { MARKET_PRODUCTS } from '../data/marketProducts';
+import { MARKET_PRODUCTS, PIG_TEST_PRODUCTS } from '../data/marketProducts';
 import { preferredMarketScope } from '../utils/preferredMarketScope';
 import { ROBOTECHY_PUBKEY } from '../utils/marketSample';
 jest.mock('@react-navigation/native', () => ({
@@ -74,7 +80,7 @@ it('preserves cached listings on failure and respects a successful empty snapsho
   });
   const h = renderHook(() => usePreferredMarketListings());
   await act(async () => {});
-  expect(h.result.current.products).toBe(cached);
+  expect(h.result.current.products).toEqual([...PIG_TEST_PRODUCTS, ...cached]);
   live.mockReturnValue({
     products: [],
     hasSnapshot: true,
@@ -83,7 +89,7 @@ it('preserves cached listings on failure and respects a successful empty snapsho
     refresh,
   });
   h.rerender({});
-  expect(h.result.current.products).toEqual([]);
+  expect(h.result.current.products).toEqual(PIG_TEST_PRODUCTS);
 });
 
 describe('follow recovery', () => {
@@ -166,4 +172,21 @@ it('puts a live Robotechy listing in the Explore rail when absent from team foll
   expect(h.result.current).toHaveLength(8);
   expect(h.result.current).toContain(robot);
   expect(h.result.current.every((product) => product.id.startsWith('live-'))).toBe(true);
+});
+
+it('re-arms preferred-seller reads after market preference hydration and edits', async () => {
+  const owner = 'a'.repeat(64);
+  await forgetAppRelayPrefs(owner);
+  setCurrentUserPubkey(owner);
+  follows.mockResolvedValue([]);
+  const h = renderHook(() => usePreferredMarketListings());
+  await act(async () => {});
+  expect(follows).toHaveBeenCalledTimes(1);
+  await act(async () => loadAppRelayPrefs(owner));
+  expect(follows).toHaveBeenCalledTimes(2);
+  await act(async () => setAppRelayEnabled(owner, 'market', 'wss://market.example', false));
+  expect(follows).toHaveBeenCalledTimes(3);
+  h.unmount();
+  setCurrentUserPubkey(null);
+  await forgetAppRelayPrefs(owner);
 });

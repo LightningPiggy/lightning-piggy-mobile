@@ -50,6 +50,49 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - assertVisible:
     id: 'market-product-card-robotechy-lightning-piggy'
 
+# Search expands within the patterned header and closes with a cleared query.
+- assertNotVisible:
+    id: 'market-search-input'
+- tapOn:
+    id: 'market-header-search'
+- assertVisible:
+    id: 'market-search-input'
+- tapOn:
+    id: 'market-search-input'
+- inputText: 'piggy'
+- tapOn:
+    id: 'market-search-clear'
+- assertNotVisible:
+    id: 'market-search-input'
+
+# The profile menu links to buying and selling from every tab.
+- tapOn:
+    id: 'profile-icon'
+- assertVisible:
+    id: 'account-menu-shop'
+- assertVisible:
+    id: 'account-menu-orders'
+# Buyer's order history replaces the standalone receipt icon.
+- tapOn:
+    id: 'account-menu-orders'
+- extendedWaitUntil:
+    visible:
+      id: 'my-orders-screen'
+    timeout: 10000
+- tapOn:
+    id: 'my-orders-back'
+- extendedWaitUntil:
+    visible:
+      id: 'market-screen'
+    timeout: 10000
+# Liked listings are directly accessible from the shortcut row.
+- tapOn:
+    id: 'market-shortcut-liked'
+- assertVisible:
+    id: 'market-liked-items-screen'
+- tapOn:
+    id: 'market-liked-items-back'
+
 # The default preferred-sellers scope narrows the list, so the filter button
 # is already active with one filter.
 - assertVisible:
@@ -63,7 +106,7 @@ name: Market — grid → product detail → reviews/comments tabs (#948)
 - assertVisible:
     id: 'market-filter-sellers-preferred'
 - assertVisible:
-    id: 'market-filter-sellers-friends-of-friends'
+    id: 'market-scope-fof'
 # Ships to (replaced Country): chips come from sellers' published shipping
 # options; Worldwide is always offered and is the default selection.
 - assertVisible:

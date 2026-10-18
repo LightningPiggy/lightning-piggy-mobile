@@ -1,3 +1,9 @@
+import {
+  loadAppRelayPrefs,
+  setAppRelayEnabled,
+  forgetAppRelayPrefs,
+} from '../services/appRelayPrefs';
+import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
 import { Toast } from '../components/BrandedToast';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -484,4 +490,21 @@ it('keeps the existing retry policy when a complete first pass carries an unreac
   expect(h.result.current.sellersUnreachable).toBe(false);
   expect(fetch).toHaveBeenCalledTimes(1);
   h.unmount();
+});
+
+it('invalidates a fresh feed when only market preferences change', async () => {
+  const owner = 'a'.repeat(64);
+  setCurrentUserPubkey(owner);
+  await loadAppRelayPrefs(owner);
+  fetch.mockResolvedValue({ products: [], incomplete: false });
+  const h = renderHook(() => useMarketListings(true));
+  await act(async () => {});
+  expect(fetch).toHaveBeenCalledTimes(1);
+  const oldSignal = fetch.mock.calls[0][2];
+  await act(async () => setAppRelayEnabled(owner, 'market', 'wss://market.example', false));
+  expect(oldSignal.aborted).toBe(true);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  h.unmount();
+  setCurrentUserPubkey(null);
+  await forgetAppRelayPrefs(owner);
 });

@@ -2,6 +2,7 @@ import { shareFileAttachment } from './fileShare';
 import { parseFileAttachment } from '../utils/fileAttachment';
 import * as Sharing from 'expo-sharing';
 import {
+  captureDecryptedMediaSession,
   namedFileExport,
   retainDecryptedFile,
   resolveDecryptedMedia,
@@ -13,6 +14,7 @@ jest.mock('expo-sharing', () => ({
 }));
 const mockRelease = jest.fn();
 jest.mock('./decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
   namedFileExport: jest.fn(
     async (_uri: string, name: string) => `file:///safe.bin.share/${encodeURIComponent(name)}`,
   ),
@@ -115,5 +117,81 @@ it.each(['invoice.pdf', 'report.csv', 'budget.xlsx'])(
       `file:///safe.bin.share/${name}`,
       expect.any(Object),
     );
+  },
+);
+
+it('keeps plain-URL downloads independent of advertised size', async () => {
+  const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
+  await shareFileAttachment(
+    parsePlainFileAttachment('https://example.com/invoice.pdf')!,
+    jest.fn(),
+    jest.fn(),
+  );
+  expect(resolveDecryptedMedia).toHaveBeenCalledWith(
+    expect.objectContaining({ size: undefined, plainUrl: true, kind: 'file' }),
+    'alice',
+  );
+  expect(Sharing.shareAsync).toHaveBeenCalledWith(
+    'file:///safe.bin.share/invoice.pdf',
+    expect.objectContaining({ mimeType: 'application/pdf' }),
+  );
+});
+
+it('exports mismatched plain-URL content as generic bytes and reports the verified type', async () => {
+  const { parsePlainFileAttachment } = jest.requireActual('../utils/fileAttachment');
+  jest
+    .mocked(verifiedFileMetadata)
+    .mockReturnValueOnce({ mime: 'application/octet-stream', size: 9 });
+  const verified = jest.fn();
+  await shareFileAttachment(
+    parsePlainFileAttachment('https://example.com/invoice.pdf')!,
+    jest.fn(),
+    verified,
+  );
+  expect(verified).toHaveBeenCalledWith({ mime: 'application/octet-stream', size: 9 });
+  expect(namedFileExport).toHaveBeenCalledWith('file:///safe.bin', 'attachment.bin');
+  expect(Sharing.shareAsync).toHaveBeenCalledWith(
+    'file:///safe.bin.share/attachment.bin',
+    expect.objectContaining({ mimeType: 'application/octet-stream' }),
+  );
+});
+
+it.each(['confirmation', 'availability', 'download', 'export'])(
+  'cancels sharing when the session changes during %s',
+  async (stage) => {
+    let current = true;
+    jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
+      owner: 'alice',
+      assertCurrent: () => {
+        if (!current) throw new Error('session cancelled');
+      },
+    });
+    const changed = async () => {
+      current = false;
+      return true;
+    };
+    if (stage === 'availability')
+      jest.mocked(Sharing.isAvailableAsync).mockImplementationOnce(changed);
+    if (stage === 'download')
+      jest.mocked(resolveDecryptedMedia).mockImplementationOnce(async () => {
+        current = false;
+        return 'file:///safe.bin';
+      });
+    if (stage === 'export')
+      jest.mocked(namedFileExport).mockImplementationOnce(async () => {
+        current = false;
+        return 'file:///safe.bin.share/a.pdf';
+      });
+    await expect(
+      shareFileAttachment(
+        file('a.pdf', stage === 'confirmation' ? 'text/html' : 'application/pdf'),
+        changed,
+        jest.fn(),
+      ),
+    ).rejects.toThrow('session cancelled');
+    expect(Sharing.shareAsync).not.toHaveBeenCalled();
+    if (['confirmation', 'availability'].includes(stage))
+      expect(resolveDecryptedMedia).not.toHaveBeenCalled();
+    else expect(resolveDecryptedMedia).toHaveBeenCalledWith(expect.any(Object), 'alice');
   },
 );

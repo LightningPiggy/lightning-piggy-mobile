@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { RelayConfig } from '../types/nostr';
 import { DEFAULT_RELAYS } from './nostrService';
@@ -112,7 +113,7 @@ export function mergeRelays(input: {
   user: RelayConfig[];
   defaults?: string[];
 }): RelayConfig[] {
-  const defaults = input.defaults ?? DEFAULT_RELAYS;
+  const defaults = input.defaults ?? enabledAppRelays('default', DEFAULT_RELAYS);
   const byUrl = new Map<string, RelayConfig>();
   // Canonicalise per-source URLs before dedup. `validateRelayUrl`
   // strips trailing slashes for user-added rows, but NIP-65 / default

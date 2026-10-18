@@ -15,7 +15,9 @@
 // decision when the perf cost of re-polling matters; not yet.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const STORAGE_KEY = 'bolt11_settlement_v1';
+// v1 positives could originate from LNbits expired-invoice lookup responses.
+// Re-poll through the verified settlement path instead of retaining those badges.
+const STORAGE_KEY = 'bolt11_settlement_v2';
 // Cap on entries — invoices are short-lived so we don't need a deep
 // history. LRU-evict by checkedAt once we're over the cap.
 const MAX_ENTRIES = 1000;

@@ -27,6 +27,9 @@ export const createAdvancedRelaysSectionStyles = (colors: Palette) =>
       borderRadius: 10,
       paddingVertical: 4,
     },
+    appRow: { flexDirection: 'row', alignItems: 'center', paddingRight: 12 },
+    relayCell: { flex: 1 },
+    warning: { color: colors.white, padding: 12, fontSize: 13 },
     row: {
       flexDirection: 'row',
       alignItems: 'center',

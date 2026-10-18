@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useActivePubkey } from './useActivePubkey';
 import {
+  captureDecryptedMediaSession,
   DecryptedMediaCancelledError,
   peekDecryptedMedia,
   resolveDecryptedMedia,
@@ -30,6 +31,7 @@ export function useImageMediaUri(
     let cancelled = false;
     setState({ identity, uri: null, failed: false });
     if (allowed) {
+      const session = captureDecryptedMediaSession(owner);
       const media = currentRef.current;
       if (encrypted && ((!media.keyHex && !media.marmot) || !media.nonceHex)) {
         setState({ identity, uri: null, failed: true });
@@ -39,9 +41,16 @@ export function useImageMediaUri(
           setState({ identity, uri: memo, failed: false });
           onResolved?.(memo);
         } else {
-          void (encrypted ? resolveDecryptedMedia(media) : resolveRemoteMedia(media.url)).then(
+          void (
+            encrypted ? resolveDecryptedMedia(media, session.owner) : resolveRemoteMedia(media.url)
+          ).then(
             (uri) => {
               if (cancelled) return;
+              try {
+                session.assertCurrent();
+              } catch {
+                return;
+              }
               setState({ identity, uri, failed: false });
               onResolved?.(uri);
             },
@@ -56,7 +65,7 @@ export function useImageMediaUri(
     return () => {
       cancelled = true;
     };
-  }, [identity, allowed, encrypted, onResolved]);
+  }, [owner, identity, allowed, encrypted, onResolved]);
   // Hide the old account's URI during render, before effect cleanup runs.
   return state.identity === identity && allowed
     ? { uri: state.uri, failed: state.failed }

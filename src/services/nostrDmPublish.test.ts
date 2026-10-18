@@ -341,3 +341,35 @@ describe('publishWrapsTrackingRelays — per-wrap stale tracking (multi-wrap sen
     expect(result.delivery.delivered).toBe(true);
   });
 });
+
+it.each([true, false])(
+  'distinguishes recipient delivery from self-copy delivery (%s)',
+  async (recipientPublished) => {
+    const events = [
+      { ...wrap('self'), tags: [['p', 'sender']] },
+      { ...wrap('recipient'), tags: [['p', 'seller']] },
+    ] as VerifiedEvent[];
+    const pool: RelayPublisher = {
+      publish: (_relays, event) => [
+        (event.id === 'recipient') === recipientPublished
+          ? Promise.resolve('ok')
+          : Promise.reject(new Error('blocked')),
+      ],
+    };
+    const result = await publishWrapsTrackingRelays(events, ['wss://relay'], pool);
+    expect(result.wrapsPublished).toBe(1);
+    expect(result.errors).toEqual(['blocked']);
+    expect(result.wrapOutcomes).toEqual([
+      {
+        recipientPubkey: 'sender',
+        published: !recipientPublished,
+        ...(!recipientPublished ? {} : { error: 'blocked' }),
+      },
+      {
+        recipientPubkey: 'seller',
+        published: recipientPublished,
+        ...(recipientPublished ? {} : { error: 'blocked' }),
+      },
+    ]);
+  },
+);

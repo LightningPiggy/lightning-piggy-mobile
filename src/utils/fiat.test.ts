@@ -1,4 +1,4 @@
-import { fiatSymbol, formatFiatApprox } from './fiat';
+import { fiatSymbol, formatFiatApprox, formatInlineFiatApprox } from './fiat';
 
 describe('formatFiatApprox', () => {
   // 100,000 sats = 0.001 BTC; at $60,000/BTC that's $60.00
@@ -34,4 +34,13 @@ describe('formatFiatApprox', () => {
     expect(fiatSymbol('GBP')).toBe('£');
     expect(fiatSymbol('XYZ')).toBe('');
   });
+});
+
+it('formats inline conversion spacing only when a chosen-currency equivalent exists', () => {
+  expect(`95,633 sats${formatInlineFiatApprox(95633, 82608, 'USD', 'en-US')}`).toBe(
+    '95,633 sats  ≈ $79.00',
+  );
+  expect(formatInlineFiatApprox(100000, 60000, 'GBP', 'en-GB')).toBe('  ≈ £60.00');
+  expect(formatInlineFiatApprox(100000, 60000, 'XYZ', 'en-US')).toBe('  ≈ 60.00 XYZ');
+  expect(formatInlineFiatApprox(95633, null, 'USD')).toBeNull();
 });

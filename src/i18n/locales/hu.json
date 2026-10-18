@@ -280,6 +280,14 @@
     "shareTitle": "Megosztás: {{name}}",
     "shareSubtitle": "Titkosított Nostr-üzenetben kapja meg, személykártyaként."
   },
+  "geocacheRail": {
+    "nearest": "Legközelebbi Pigletek",
+    "empty": "Még nincsenek Piglets a közelben",
+    "hide": "Piglet elrejtése",
+    "error": "Nem sikerült betölteni a közeli Piglets rejtekhelyeket.",
+    "retry": "Újra",
+    "hidden": "A bizalmi szűrőd elrejt néhány közeli geoládát."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} – összes megtekintése",
     "seeAll": "Mind"
@@ -627,6 +635,7 @@
   "imageGallery": {
     "open": "Kép megnyitása",
     "position": "{{current}}. kép / {{total}}",
+    "showImage": "{{current}}. kép megjelenítése (összesen {{total}})",
     "openHint": "Teljes képernyőn megnyitja a képet"
   },
   "gifPickerSheet": {
@@ -1304,10 +1313,12 @@
     "unknownSender": "Valaki",
     "file": "Fájl",
     "fileBytes": "{{size}} bájt",
-    "fileShare": "Mentés / Megosztás",
+    "fileShare": "Megosztás",
     "filePreparing": "Fájl előkészítése…",
     "fileUnavailable": "A fájl nem érhető el",
     "fileShareFailed": "Nem sikerült előkészíteni vagy megosztani a fájlt. Próbáld újra.",
+    "filePlainUrl": "Nincs végpontok közötti titkosítás · Nem ellenőrzött",
+    "fileUploadLimit": "Legfeljebb 16 MB méretű fájlt válassz.",
     "devFiles": "Tesztfájlok",
     "devFilesA11y": "Tesztbeszélgetés létrehozása fájlokkal",
     "fileSave": "Mentés",
@@ -1317,7 +1328,13 @@
     "fileTypeMismatch": "A fájlnév nem egyezik a megadott típussal: {{type}}",
     "blockedLink": "Blokkolt hivatkozás",
     "invalidUpload": "A tárolószerver érvénytelen média-URL-t adott vissza. Próbálj másik szervert.",
-    "uploadFailedAllServers": "Egyik tárolószerverre sem sikerült feltölteni. Ellenőrizd a kapcsolatot, és próbáld újra, vagy adj hozzá másik tárolószervert a Beállításokban."
+    "uploadFailedAllServers": "Egyik tárolószerverre sem sikerült feltölteni. Ellenőrizd a kapcsolatot, és próbáld újra, vagy adj hozzá másik tárolószervert a Beállításokban.",
+    "fileLabelText": "Szöveg",
+    "fileLabelAudio": "Hang",
+    "fileLabelVideo": "Videó",
+    "fileSaveLabel": "%{filename} mentése",
+    "fileShareLabel": "%{filename} megosztása",
+    "fileSaved": "Mentve ide: %{folder}"
   },
   "messageBubbleFooter": {
     "edited": "Szerkesztve",
@@ -1560,6 +1577,10 @@
     "failedToRemoveRelay": "A relay-t nem sikerült eltávolítani.",
     "geoCacheRelays": "Geoláda-relay-ek",
     "geoCacheRelaysHint": "Dedikált relay-ek Pigletekhez és más geoládákhoz (NIP-GC). Ezek tükrözik, amit a treasures.to webalkalmazás olvas és keres, így a Pigletjeid a weben is megtalálhatók maradnak. A geoládák közzétételéhez és olvasásához mindig használatban vannak, a fent hozzáadott relay-eken felül.",
+    "marmotRelays": "Csoportos üzenetküldési relay-ek (Marmot)",
+    "marmotRelaysHint": "A Marmot csoportos üzenetküldés ismert relay-ei, amelyeket a White Noise is használ. A meghívókulcsaid (kulcscsomagjaid) itt és a saját relay-eiden is megjelennek, így mások akkor is indíthatnak veled titkosított csoportos csevegést, ha a relay-eid nem érhetők el. Ezeket a kulcscsomagok relay-listája (10051-es típus) hirdeti.",
+    "marketRelays": "Piactéri relayek (Gamma)",
+    "marketRelaysHint": "Relayek, amelyekről a Lightning Piggy beolvassa a Piac hirdetéseit, és amelyekre közzéteszi a boltod hirdetéseit. Más Gamma Markets alkalmazásokkal (Plebeian, Conduit, Shopstr) közösen használjuk őket.",
     "encryptedMessages": "Titkosított üzenetek (NIP-17)",
     "amberPermissionHint": "Az Amber még nem adott NIP-44 visszafejtési engedélyt ennek az alkalmazásnak – az engedélyezéshez koppints alább. Egy párbeszédablak, utána a további titkosított üzenetek csendben visszafejtődnek. A nem követett emberek üzenetei mindkét esetben rejtve maradnak.",
     "amberPermissionTitle": "Amber-engedély",
@@ -1575,7 +1596,7 @@
     "nativeCryptoActiveYes": "Ebben a munkamenetben aktív: igen",
     "nativeCryptoActiveNo": "Ebben a munkamenetben aktív: nem",
     "notInUse": "Jelenleg nincs használatban",
-    "advancedRelays": "Speciális",
+    "advancedRelays": "Alkalmazásrelayek",
     "defaultRelaysTitle": "Az alkalmazás alapértelmezett relay-ei",
     "defaultRelaysHint": "Az alkalmazásba beépítve, és a saját relay-eid mellett mindig tartaléknak használva.",
     "deviceRelaysTitle": "Csak az eszközön lévő relay-ek",
@@ -2309,7 +2330,14 @@
       "emptyNoMatch": "Nincs a keresésnek vagy szűrőknek megfelelő termék.",
       "emptyMerchantMissing": "{{name}} jelenleg nem kínál semmit — húzd le a frissítéshez.",
       "emptyNoFriends": "A Nostr-barátaid közül még senki sem árul Lightning Piggy termékeket.",
-      "emptyNone": "Jelenleg nincs elérhető termék."
+      "emptyNoFof": "A barátaid barátainak hálózatában még senki sem árul.",
+      "emptyNoAll": "A relay-eiden most nem található hirdetés.",
+      "allScopeNote": "Kísérleti: bárki hirdetései, ellenőrzés nélkül",
+      "fofBuilding": "Hálózatod felépítése… {{done}}/{{total}}",
+      "fofBuildingStart": "Hálózatod felépítése…",
+      "fofFailed": "Nem sikerült felépíteni a hálózatodat – a barátaid hirdetései láthatók.",
+      "emptyNone": "Jelenleg nincs elérhető termék.",
+      "myOrders": "Rendeléseim"
     },
     "card": {
       "featured": "Kiemelt",
@@ -2323,7 +2351,10 @@
       "buyFrom": "Vásárlás: {{seller}}",
       "buyAccessibility": "{{title}} megvásárlása, eladó: {{seller}}",
       "noFeedback": "Ennél az eladónál még nem érhetők el értékelések és hozzászólások – a visszajelzésekhez Nostr-azonosság kell.",
-      "refreshFailed": "Nem sikerült frissíteni a terméket – ellenőrizd a kapcsolatot, és próbáld újra."
+      "refreshFailed": "Nem sikerült frissíteni a terméket – ellenőrizd a kapcsolatot, és próbáld újra.",
+      "buy": "Vásárlás",
+      "outOfStock": "Elfogyott",
+      "invoiceNote": "Az eladó számlát küld a rendelésedről"
     },
     "modes": {
       "comingSoon": "{{label}} – hamarosan",
@@ -2350,7 +2381,11 @@
       "sellers": "Eladók",
       "friends": "Barátok (akiket követsz)",
       "friendsOfFriends": "Barátok barátai",
+      "allSellers": "Összes (bárki)",
+      "experimental": "Kísérleti",
       "friendsChip": "Barátok",
+      "friendsOfFriendsChip": "Barátok barátai",
+      "allChip": "Összes",
       "comingSoon": "Hamarosan",
       "clearScope": "Eladók visszaállítása a Lightning Piggy ajánlott eladóira",
       "changeScope": "{{label}}. Megnyitja a szűrőket az eladók módosításához",
@@ -2443,7 +2478,25 @@
         "relayUnreachable": "Nem értünk el relay-t a rendelésed leadásához. Próbáld újra.",
         "generic": "Valami félrement a rendelés leadásakor. Próbáld újra."
       },
-      "rateUpdated": "A szállítási díj frissült. Nézd meg az új végösszeget, és koppints újra a Rendelés leadására."
+      "rateUpdated": "Változott az árfolyam, ezért a végösszeg is. Ellenőrizd az új végösszeget, és koppints újra a Rendelés leadása gombra.",
+      "unitPriceSats": "{{amount}} sats darabonként",
+      "addressLabel": "Szállítási cím",
+      "addressPlaceholder": "Név, utca, település, irányítószám, ország",
+      "addressHint": "Privát módon (titkosítva) a rendeléseddel együtt küldjük, csak {{seller}} részére.",
+      "outOfStock": "Elfogyott",
+      "inStock": "Készleten: {{stock}}",
+      "delivery": {
+        "name": "Név",
+        "line1": "Cím 1. sora",
+        "line2": "Cím 2. sora (nem kötelező)",
+        "town": "Település / város",
+        "postcode": "Irányítószám",
+        "country": "Ország",
+        "nameHint": "Bármilyen név, amelyre a futár kézbesíteni tud — becenév is jó, ha szerepel a postaládán",
+        "remember": "Megjegyzés ezen a telefonon",
+        "postcodeInvalid": "Adj meg az adott országban érvényes irányítószámot",
+        "tooLong": "A teljes szállítási cím legfeljebb 500 karakter lehet"
+      }
     },
     "shipping": {
       "label": "Szállítás",
@@ -2470,6 +2523,8 @@
     },
     "live": {
       "loading": "A barátaid hirdetéseinek betöltése…",
+      "loadingNetwork": "Hirdetések betöltése a hálózatodból…",
+      "loadingAll": "Mindenki hirdetéseinek betöltése…",
       "partialToast": "Néhány eladó nem válaszolt. Húzd lefelé a frissítéshez.",
       "contactSeller": "Üzenet az eladónak"
     },
@@ -2678,7 +2733,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Vevők rendelései a hirdetéseidre. Koppints egyre a csevegés megnyitásához.",
+        "hint": "A hirdetéseidre érkezett vevői rendelések. Koppints egyre a rendelés megtekintéséhez.",
         "emptyBody": "Ha valaki megvesz egyet a hirdetéseid közül, a rendelése itt jelenik meg.",
         "rowAccessibility": "{{name}} rendelése: {{items}}, {{time}}"
       },
@@ -2731,7 +2786,8 @@
       "pickerSubtitle": "Privát üzenetként kapja meg.",
       "sentTo": "Elküldve neki: {{name}}",
       "sendFailed": "Nem sikerült elküldeni ezt a terméket",
-      "sharedItem": "Megosztott termék"
+      "sharedItem": "Megosztott termék",
+      "marketListing": "Piactéri hirdetés"
     },
     "liked": {
       "title": "Kedvelt termékek",
@@ -2742,6 +2798,26 @@
       "loadFailed": "Nem sikerült betölteni a kedvelt termékeidet – húzd le az újrapróbáláshoz.",
       "signedOut": "Jelentkezz be Nostrral a kedvelt termékeid megtekintéséhez.",
       "signIn": "Bejelentkezés"
+    },
+    "republish": {
+      "coverage": "%{count} / %{total} relén",
+      "checking": "Relék ellenőrzése…",
+      "action": "Újraközzététel",
+      "all": "Összes újraközzététele",
+      "missing": "Hiányzik a relékről",
+      "resign": "Új aláírás és közzététel",
+      "confirm": "Nincs aláírt példány. Újra létrehozza a hirdetést, és egyszeri aláírással ismét közzéteszi?",
+      "results": "Újraközzététel eredménye",
+      "accepted": "Elfogadva",
+      "rejected": "Elutasítva",
+      "noResponse": "Nincs válasz",
+      "alreadyPresent": "Már létezik",
+      "close": "Bezárás",
+      "failed": "Sikertelen újraközzététel"
+    },
+    "shortcuts": {
+      "liked": "Kedveltek",
+      "startSelling": "Eladás indítása"
     }
   },
   "dmProtocol": {
@@ -2842,7 +2918,8 @@
       "payment": "Fizetés",
       "zap": "Zap",
       "cache": "Piglet-találat",
-      "swap": "Swap"
+      "swap": "Swap",
+      "market": "Hirdetési tevékenység"
     }
   },
   "blossomServers": {
@@ -3259,6 +3336,7 @@
     "security": "Protokoll és biztonság",
     "mlsSecurity": "Végpontok közötti titkosítás MLS-sel. Az eszközök megosztják a csoportkulcsokat.",
     "nip17Security": "Végpontok között titkosított üzenetek rejtett feladóazonossággal.",
+    "nip171Security": "Végpontok között titkosított csoport. A tagok közös csoportkulcsot használnak, amelyet a tulajdonos lecserél, ha valaki kilép.",
     "nip04Security": "Régi titkosítás. Válts NIP-17-re a jobb adatvédelemért.",
     "devices": "Eszközök a csevegésben",
     "relays": "A csoport reléi",
@@ -3318,6 +3396,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Üzemeltető és szabályzatok",
     "runBy": "Üzemeltető",
+    "tipOperator": "Borravaló az üzemeltetőnek",
+    "tipOperatorLabel": "Küldj egy zapot {{name}} részére, aki ezt a relét üzemelteti",
     "copyUrl": "Relé URL másolása",
     "terms_of_service": "Felhasználási feltételek",
     "privacy_policy": "Adatvédelmi szabályzat",
@@ -3414,6 +3494,10 @@
     "licenceType": "MIT",
     "lightningAddress": "Lightning-cím (LUD-16)"
   },
+  "nip171Invitation": {
+    "group": "NIP-171 csoport",
+    "full": "Elérted a NIP-171 csoporttagságok maximális számát. Lépj ki egy csoportból, hogy elfogadhasd ezt a meghívást."
+  },
   "marmotInvitation": {
     "pending": "Függőben lévő meghívás",
     "accept": "Elfogadás",
@@ -3489,5 +3573,119 @@
   "profileSafety": {
     "unavailable": "A profil nem érhető el",
     "unverified": "nem ellenőrzött"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Várakozás az eladó számlájára",
+    "viewOrder": "Rendelés megtekintése"
+  },
+  "myOrders": {
+    "moreItems": "+{{count}} további",
+    "title": "Rendeléseim",
+    "empty": "Még nincs rendelés – koppints a Vásárlás gombra egy hirdetésnél.",
+    "open": "Rendeléseim",
+    "openWithPayNow": "Rendeléseim – {{invoices}} fizetendő",
+    "viewAll": "Rendeléseim megtekintése",
+    "rowA11y": "Rendelés tőle: {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Kérj új számlát az eladótól"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Számlára vár",
+    "payNow": "Fizetés most",
+    "paid": "Kifizetve",
+    "shipped": "Feladva",
+    "completed": "Teljesítve",
+    "cancelled": "Lemondva",
+    "needsInvoice": "Számla szükséges",
+    "invoiceSent": "Fizetésre vár",
+    "all": "Összes",
+    "empty": "Nincs ilyen állapotú rendelés.",
+    "invoiceExpired": "A számla lejárt"
+  },
+  "sellerActivity": {
+    "settings": "Hozzászólások és értékelések a hirdetéseimen",
+    "generic": "Új hirdetési tevékenység",
+    "listing": "a hirdetésed",
+    "sellerReplied": "Az eladó válaszolt",
+    "reply": "%{name} válaszolt a hozzászólásodra",
+    "comment": "Új hozzászólás: %{title}",
+    "review": "Új értékelés: %{title} ★%{stars}",
+    "replyAction": "Válasz"
+  },
+  "sellerOrders": {
+    "buyerNote": "A vásárló megjegyzése",
+    "newOrderNotification": "Új rendelés: {{items}}",
+    "yourShopOrder": "Rendelés a boltodba",
+    "loadingShop": "A boltod betöltése a rendelés árazásához…",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} darabonként",
+    "overStock": "Több, mint a készleted ({{stock}} maradt)",
+    "shippingLine": "Szállítás: {{title}}",
+    "shippingNotOffered": "Ezt a szállítási módot a hirdetésed nem kínálja.",
+    "shippingMissing": "A vevő nem választott szállítást egy fizikai termékhez.",
+    "total": "Összesen",
+    "waitingForRate": "Várakozás az árfolyamra…",
+    "fiatAtRate": "{{amount}} {{currency}}, a mai árfolyamon átváltva",
+    "amountDiffers": "A vevő rendelésében {{buyer}} sats szerepelt, ami nem egyezik a jelenlegi áraiddal. Addig nem küldhetsz számlát, amíg a vevő nem ad le új rendelést az aktuális végösszeggel.",
+    "shipTo": "Szállítási cím:",
+    "contact": "Elérhetőség:",
+    "receiptUnverified": "A vevő küldött fizetési bizonylatot, de az nem igazolja a számlád kifizetését.",
+    "sendInvoice": "Számla küldése",
+    "confirmSend": "Számla létrehozása és küldése",
+    "checkPayment": "Fizetés ellenőrzése",
+    "waitingForPayment": "Számla elküldve – várakozás a fizetésre",
+    "markPaid": "Megjelölés kifizetettként",
+    "buyerNotified": "Kifizetve – vevő értesítve",
+    "invoiceSent": "Számla elküldve",
+    "notPaidYet": "Még nincs kifizetve",
+    "couldNotConfirmPayment": "Nem sikerült megerősíteni a fizetést",
+    "orderNumber": "Rendelés #{{id}}",
+    "rowA11y": "Rendelés tőle: {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "Ez a rendelés nem a te hirdetéseidre szól.",
+      "missingListing": "Az egyik termék már nincs a boltodban.",
+      "badPrice": "Az egyik hirdetésnek nincs számlázható fix ára.",
+      "unknownShipping": "A választott szállítási mód nem szerepel a közzétett módjaid között.",
+      "noRate": "Várakozás az árfolyamra…"
+    },
+    "errors": {
+      "noWallet": "Válassz tárcát a fizetés fogadásához.",
+      "invoiceFailed": "Ez a tárca nem tudott számlát létrehozni. Ellenőrizd, hogy csatlakozik-e és fogadhat-e.",
+      "amountMismatch": "A tárca más összegű számlát hozott létre, ezért nem küldtük el.",
+      "shopChanged": "Megváltoztak a boltod árai vagy szállítási feltételei. Számla küldése előtt ellenőrizd a rendelést.",
+      "sendFailed": "Nem sikerült elküldeni a vevőnek. Ellenőrizd a kapcsolatot, és próbáld újra.",
+      "notSignedIn": "Jelentkezz be a rendelések kezeléséhez."
+    },
+    "wallet": {
+      "none": "Egyik tárcád sem tud számlát létrehozni. Adj hozzá fogadási engedéllyel rendelkező Lightning (NWC) tárcát.",
+      "checking": "Ellenőrzés, hogy tud-e fogadni…",
+      "offline": "Nincs csatlakoztatva",
+      "receiveTo": "Fizetések fogadása ide",
+      "receiveToHint": "A rendelések számlái ezen a tárcán készülnek. Ezen az eszközön mentve.",
+      "remember": "Megjegyzés a boltomhoz",
+      "choose": "Válassz tárcát",
+      "saveFailed": "Nem sikerült menteni a tárcaválasztást."
+    },
+    "sendNewInvoice": "Új számla küldése",
+    "checkWalletFirst": "Először ellenőrizd a tárcádat",
+    "unknownInvoiceWarning": "Nem tudtuk megerősíteni, hogy az előző számlát kifizették-e. Ha igen, ne küldj újat."
+  },
+  "relayPublishSheet": {
+    "waiting": "Várakozás az aláíróra…",
+    "title": "%{title} közzététele",
+    "accepted": "Elfogadva",
+    "rejected": "Elutasítva",
+    "noResponse": "Nincs válasz",
+    "pending": "Közzététel…"
+  },
+  "appRelays": {
+    "toggle": "%{host} használata",
+    "saveFailed": "Nem sikerült menteni a relay beállítását",
+    "warning": {
+      "default": "Az alkalmazás tartalék kapcsolatai kikapcsolva",
+      "indexers": "A relaylisták keresése kikapcsolva",
+      "geocache": "Előfordulhat, hogy a geoládák nem töltődnek be",
+      "marmot": "Előfordulhat, hogy a csoportkulcsok nem találhatók",
+      "market": "A piactéri hirdetések nem töltődnek be"
+    }
   }
 }

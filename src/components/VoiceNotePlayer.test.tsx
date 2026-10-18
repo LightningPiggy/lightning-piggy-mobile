@@ -1,5 +1,10 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import {
+  captureDecryptedMediaSession,
+  resolveDecryptedMedia,
+} from '../services/decryptedMediaCache';
+import { setAudioModeAsync } from 'expo-audio';
 import VoiceNotePlayer from './VoiceNotePlayer';
 import { resolveRemoteMedia } from '../services/remoteMediaCache';
 import { __resetForTests } from '../services/mediaRevealStore';
@@ -13,7 +18,11 @@ jest.mock('expo-audio', () => ({
 }));
 jest.mock('../hooks/useActivePubkey', () => ({ useActivePubkey: () => 'alice' }));
 jest.mock('../services/remoteMediaCache', () => ({ resolveRemoteMedia: jest.fn() }));
-jest.mock('../services/decryptedMediaCache', () => ({ resolveDecryptedMedia: jest.fn() }));
+jest.mock('../services/decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
+  resolveDecryptedMedia: jest.fn(),
+  DecryptedMediaCancelledError: class extends Error {},
+}));
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
 }));
@@ -50,3 +59,49 @@ it.each([false, true])(
     expect(view.queryByText('--:--')).toBeNull();
   },
 );
+
+it('cancels encrypted playback if the session changes while setting audio mode', async () => {
+  let current = true;
+  jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
+    owner: 'alice',
+    assertCurrent: () => {
+      if (!current) throw new Error('cancelled');
+    },
+  });
+  jest.mocked(setAudioModeAsync).mockImplementationOnce(async () => {
+    current = false;
+  });
+  const view = render(
+    <VoiceNotePlayer
+      url="https://example.com/voice"
+      fromMe={false}
+      createdAt={1}
+      encrypted
+      keyHex="key"
+      nonceHex="nonce"
+      testID="voice"
+    />,
+  );
+  await act(async () => fireEvent.press(view.getByTestId('voice-toggle')));
+  expect(resolveDecryptedMedia).not.toHaveBeenCalled();
+  expect(mockPlay).not.toHaveBeenCalled();
+});
+it('passes the initiating owner to encrypted voice resolution', async () => {
+  jest.mocked(resolveDecryptedMedia).mockResolvedValueOnce('file:///alice/voice');
+  const view = render(
+    <VoiceNotePlayer
+      url="https://example.com/voice"
+      fromMe={false}
+      createdAt={1}
+      encrypted
+      keyHex="key"
+      nonceHex="nonce"
+      testID="voice"
+    />,
+  );
+  await act(async () => fireEvent.press(view.getByTestId('voice-toggle')));
+  expect(resolveDecryptedMedia).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: 'voice' }),
+    'alice',
+  );
+});

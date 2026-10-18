@@ -1,3 +1,6 @@
+import { useFocusEffect } from '@react-navigation/native';
+import { useAppRelayPrefs } from './useAppRelayPrefs';
+import { getCurrentUserPubkey } from '../services/nostrActiveAccount';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseFoundLog, type FoundLog } from '../utils/foundLog';
 import { subscribeFoundLogs } from '../services/nostrPlacesPublisher';
@@ -26,6 +29,8 @@ export interface UseFoundLogIngestResult {
 }
 
 export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
+  const relayScope = useAppRelayPrefs();
+  const account = getCurrentUserPubkey();
   const [logs, setLogs] = useState<Map<string, FoundLog>>(new Map());
   // Zap totals per find-log id. Outer key is the kind-7516 log id; inner
   // Map is keyed by kind-9735 receipt id so the same zap arriving from
@@ -44,8 +49,6 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
   const zapFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-
     // Reset all derived output for this coord instance up front. `logs` /
     // `zapsByLog` are plain state, but `pendingZapsRef`/`zapFlushTimerRef`
     // are refs shared across effect instances (like pendingLogsRef above,
@@ -62,68 +65,75 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
       clearTimeout(zapFlushTimerRef.current);
       zapFlushTimerRef.current = null;
     }
+  }, [coord, account]);
 
-    const flushLogs = (): void => {
-      // Cancelled check MUST run first, before touching the timer ref.
-      // pendingLogsRef/logFlushTimerRef are declared outside this effect so
-      // the SAME refs are reused by the next effect instance after `coord`
-      // changes; a stale/cancelled flushLogs call that cleared the timer ref
-      // unconditionally could null out a timer the *new*, live instance had
-      // already scheduled, silently stalling its auto-flush until another
-      // event happened to arrive. Bailing out before the clearTimeout means
-      // a stale call can never touch state that belongs to a newer instance.
-      if (cancelled) return;
-      if (logFlushTimerRef.current) {
-        clearTimeout(logFlushTimerRef.current);
-        logFlushTimerRef.current = null;
-      }
-      if (pendingLogsRef.current.size === 0) return;
-      const batch = pendingLogsRef.current;
-      pendingLogsRef.current = new Map();
-      setLogs((prev) => {
-        // Dedupe: skip any id already committed so we don't clobber a
-        // newer optimistic insert (the handlePostLog path). Only allocate
-        // `next` when we actually find a new id — a relay echo of ids that
-        // are already in `prev` avoids the O(prev.size) clone entirely.
-        let next: Map<string, FoundLog> | null = null;
-        for (const [id, log] of batch) {
-          if (prev.has(id)) continue;
-          if (next === null) next = new Map(prev);
-          next.set(id, log);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      const flushLogs = (): void => {
+        // Cancelled check MUST run first, before touching the timer ref.
+        // pendingLogsRef/logFlushTimerRef are declared outside this effect so
+        // the SAME refs are reused by the next effect instance after `coord`
+        // changes; a stale/cancelled flushLogs call that cleared the timer ref
+        // unconditionally could null out a timer the *new*, live instance had
+        // already scheduled, silently stalling its auto-flush until another
+        // event happened to arrive. Bailing out before the clearTimeout means
+        // a stale call can never touch state that belongs to a newer instance.
+        if (cancelled) return;
+        if (logFlushTimerRef.current) {
+          clearTimeout(logFlushTimerRef.current);
+          logFlushTimerRef.current = null;
         }
-        return next ?? prev;
-      });
-    };
+        if (pendingLogsRef.current.size === 0) return;
+        const batch = pendingLogsRef.current;
+        pendingLogsRef.current = new Map();
+        setLogs((prev) => {
+          // Dedupe: skip any id already committed so we don't clobber a
+          // newer optimistic insert (the handlePostLog path). Only allocate
+          // `next` when we actually find a new id — a relay echo of ids that
+          // are already in `prev` avoids the O(prev.size) clone entirely.
+          let next: Map<string, FoundLog> | null = null;
+          for (const [id, log] of batch) {
+            if (prev.has(id)) continue;
+            if (next === null) next = new Map(prev);
+            next.set(id, log);
+          }
+          return next ?? prev;
+        });
+      };
 
-    const closer = subscribeFoundLogs(coord, (event) => {
-      // A relay event can arrive after cleanup (queued delivery, or a closer
-      // that isn't synchronous) — never buffer into the shared ref once this
-      // effect instance is cancelled, or stale logs from the previous coord
-      // could surface under the next one.
-      if (cancelled) return;
-      const log = parseFoundLog(event);
-      pendingLogsRef.current.set(log.id, log);
-      if (pendingLogsRef.current.size >= 25) {
-        flushLogs();
-        return;
-      }
-      if (logFlushTimerRef.current === null) logFlushTimerRef.current = setTimeout(flushLogs, 150);
-    });
-    return () => {
-      cancelled = true;
-      // Drop any buffered logs — after setting cancelled the flushLogs
-      // guard discards them without calling setLogs. On a real unmount
-      // the component is gone so committing is pointless; on a coord
-      // change the next effect opens a fresh subscription and a stale
-      // relay-echo for the previous coord shouldn't populate the new list.
-      pendingLogsRef.current = new Map();
-      if (logFlushTimerRef.current) {
-        clearTimeout(logFlushTimerRef.current);
-        logFlushTimerRef.current = null;
-      }
-      closer();
-    };
-  }, [coord]);
+      const closer = subscribeFoundLogs(coord, (event) => {
+        // A relay event can arrive after cleanup (queued delivery, or a closer
+        // that isn't synchronous) — never buffer into the shared ref once this
+        // effect instance is cancelled, or stale logs from the previous coord
+        // could surface under the next one.
+        if (cancelled) return;
+        const log = parseFoundLog(event);
+        pendingLogsRef.current.set(log.id, log);
+        if (pendingLogsRef.current.size >= 25) {
+          flushLogs();
+          return;
+        }
+        if (logFlushTimerRef.current === null)
+          logFlushTimerRef.current = setTimeout(flushLogs, 150);
+      });
+      return () => {
+        cancelled = true;
+        // Drop any buffered logs — after setting cancelled the flushLogs
+        // guard discards them without calling setLogs. On a real unmount
+        // the component is gone so committing is pointless; on a coord
+        // change the next effect opens a fresh subscription and a stale
+        // relay-echo for the previous coord shouldn't populate the new list.
+        pendingLogsRef.current = new Map();
+        if (logFlushTimerRef.current) {
+          clearTimeout(logFlushTimerRef.current);
+          logFlushTimerRef.current = null;
+        }
+        closer();
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- Re-arm the captured app relay defaults.
+    }, [coord, relayScope]),
+  );
 
   // ----- zap receipts subscription (coalesced) ----------------------------
 
@@ -131,76 +141,79 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
   // Keyed on sorted log ids so a new log re-opens the sub while an
   // unchanged set doesn't. Receipts deduped by receiptId across relays.
   const logIdsKey = useMemo(() => [...logs.keys()].sort().join(','), [logs]);
-  useEffect(() => {
-    const logIds = logIdsKey ? logIdsKey.split(',') : [];
-    if (logIds.length === 0) return undefined;
-    let cancelled = false;
+  useFocusEffect(
+    useCallback(() => {
+      const logIds = logIdsKey ? logIdsKey.split(',') : [];
+      if (logIds.length === 0) return undefined;
+      let cancelled = false;
 
-    const flush = (): void => {
-      // Cancelled check MUST run first, before touching the timer ref — the
-      // same stale-timer race flushLogs above guards against. pendingZapsRef
-      // / zapFlushTimerRef are shared across effect instances (reused on the
-      // next `logIdsKey` change), so a queued flush callback from a
-      // superseded instance could otherwise clear the *new* instance's
-      // already-scheduled timer, stalling its auto-flush until another zap
-      // happened to arrive.
-      if (cancelled) return;
-      if (zapFlushTimerRef.current) {
-        clearTimeout(zapFlushTimerRef.current);
-        zapFlushTimerRef.current = null;
-      }
-      if (pendingZapsRef.current.length === 0) return;
-      const batch = pendingZapsRef.current;
-      pendingZapsRef.current = [];
-      setZapsByLog((prev) => {
-        // Mirror the found-log flush: only allocate the cloned outer Map on
-        // the first genuinely new (logId, receiptId) pair — a batch of
-        // duplicate receipts echoed from multiple relays exits without the
-        // O(prev.size) clone entirely.
-        let next: Map<string, Map<string, number>> | null = null;
-        for (const { receiptId, logId, sats } of batch) {
-          const inner = (next ?? prev).get(logId);
-          if (inner && inner.has(receiptId)) continue; // already counted
-          if (next === null) next = new Map(prev);
-          const nextInner = new Map(inner ?? []);
-          nextInner.set(receiptId, sats);
-          next.set(logId, nextInner);
+      const flush = (): void => {
+        // Cancelled check MUST run first, before touching the timer ref — the
+        // same stale-timer race flushLogs above guards against. pendingZapsRef
+        // / zapFlushTimerRef are shared across effect instances (reused on the
+        // next `logIdsKey` change), so a queued flush callback from a
+        // superseded instance could otherwise clear the *new* instance's
+        // already-scheduled timer, stalling its auto-flush until another zap
+        // happened to arrive.
+        if (cancelled) return;
+        if (zapFlushTimerRef.current) {
+          clearTimeout(zapFlushTimerRef.current);
+          zapFlushTimerRef.current = null;
         }
-        return next ?? prev;
+        if (pendingZapsRef.current.length === 0) return;
+        const batch = pendingZapsRef.current;
+        pendingZapsRef.current = [];
+        setZapsByLog((prev) => {
+          // Mirror the found-log flush: only allocate the cloned outer Map on
+          // the first genuinely new (logId, receiptId) pair — a batch of
+          // duplicate receipts echoed from multiple relays exits without the
+          // O(prev.size) clone entirely.
+          let next: Map<string, Map<string, number>> | null = null;
+          for (const { receiptId, logId, sats } of batch) {
+            const inner = (next ?? prev).get(logId);
+            if (inner && inner.has(receiptId)) continue; // already counted
+            if (next === null) next = new Map(prev);
+            const nextInner = new Map(inner ?? []);
+            nextInner.set(receiptId, sats);
+            next.set(logId, nextInner);
+          }
+          return next ?? prev;
+        });
+      };
+      const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
+        // Same reasoning as the found-logs callback above: never buffer into
+        // the shared ref once this effect instance is cancelled.
+        if (cancelled) return;
+        pendingZapsRef.current.push({ receiptId, logId, sats });
+        if (pendingZapsRef.current.length >= 25) {
+          flush();
+          return;
+        }
+        if (zapFlushTimerRef.current === null) zapFlushTimerRef.current = setTimeout(flush, 150);
       });
-    };
-    const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
-      // Same reasoning as the found-logs callback above: never buffer into
-      // the shared ref once this effect instance is cancelled.
-      if (cancelled) return;
-      pendingZapsRef.current.push({ receiptId, logId, sats });
-      if (pendingZapsRef.current.length >= 25) {
-        flush();
-        return;
-      }
-      if (zapFlushTimerRef.current === null) zapFlushTimerRef.current = setTimeout(flush, 150);
-    });
-    return () => {
-      cancelled = true;
-      // Drop any buffered zaps rather than calling flush() here — same
-      // reasoning as the found-logs cleanup: `logIdsKey` changing (e.g. a
-      // coord change resetting `logs`) opens a fresh subscription reusing
-      // these shared refs, so draining a torn-down instance's batch into
-      // state risks mixing zaps into the wrong cache's totals.
-      pendingZapsRef.current = [];
-      if (zapFlushTimerRef.current) {
-        clearTimeout(zapFlushTimerRef.current);
-        zapFlushTimerRef.current = null;
-      }
-      closer();
-    };
-    // Deliberately keyed on logIdsKey ONLY (not coord): on a coord change,
-    // logIdsKey still holds the previous cache's ids for one render (the logs
-    // reset lands in the other effect), so re-running here early would open a
-    // fresh subscription for the OLD ids. Waiting for logIdsKey to update
-    // means the old sub lingers one beat, which is harmless — receipts for
-    // absent logs are never rendered — while subscribing stale ids is not.
-  }, [logIdsKey]);
+      return () => {
+        cancelled = true;
+        // Drop any buffered zaps rather than calling flush() here — same
+        // reasoning as the found-logs cleanup: `logIdsKey` changing (e.g. a
+        // coord change resetting `logs`) opens a fresh subscription reusing
+        // these shared refs, so draining a torn-down instance's batch into
+        // state risks mixing zaps into the wrong cache's totals.
+        pendingZapsRef.current = [];
+        if (zapFlushTimerRef.current) {
+          clearTimeout(zapFlushTimerRef.current);
+          zapFlushTimerRef.current = null;
+        }
+        closer();
+      };
+      // Coord is represented by logIdsKey: on a coord change,
+      // logIdsKey still holds the previous cache's ids for one render (the logs
+      // reset lands in the other effect), so re-running here early would open a
+      // fresh subscription for the OLD ids. Waiting for logIdsKey to update
+      // means the old sub lingers one beat, which is harmless — receipts for
+      // absent logs are never rendered — while subscribing stale ids is not.
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- Zap defaults change independently of the log IDs.
+    }, [logIdsKey, relayScope]),
+  );
 
   // ----- derived views + optimistic insert --------------------------------
 

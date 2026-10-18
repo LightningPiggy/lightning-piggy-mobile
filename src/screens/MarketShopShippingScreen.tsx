@@ -175,7 +175,6 @@ const MarketShopShippingScreen: React.FC<Props> = ({ navigation }) => {
         title={t('market.sell.hub.shipping')}
         backLabel={t('market.sell.back')}
         onBack={() => navigation.goBack()}
-        styles={styles}
         testID="shop-shipping-back"
       />
       {!zones ? (

@@ -551,3 +551,47 @@ Deferred to follow-up PRs:
 
 * In-app per-channel mute UI (system Settings is the mute path for now)
 * Notification grouping (multiple from same sender → one stack)
+
+== Market comments, replies and reviews (#1582)
+
+`useSellerActivityChecks` runs bounded, abortable one-shot reads on Notifications
+screen focus and 3.5 seconds after app resume (mounted once in `HomeTabs`). It
+adds no always-on relay subscription and cancels pending resume work on background
+or account change. `sellerActivityService` shares a per-account flight between
+these triggers. Reads use at most eight configured relays.
+
+The seller's current kind-30402 coordinates come from the verified seller snapshot,
+reduced for deletions, locally hidden listings, status and expiration. Activity
+queries chunk 25 coordinates with `limit: 200` and `since`: the saved successful
+check time minus a two-minute overlap, capped at 30 days. Comments use uppercase
+`#A`; Gamma reviews use `#d` with the `a:` prefix. Replies anywhere use NIP-22
+`#p`/`#k`/`#K`, then resolve the actual parent by ID and author (25 at a time,
+`since: 0` because the parent may be old). A claimed recipient tag alone never
+establishes a reply. Capped queries continue with decreasing, inclusive `until`
+bounds (at most 25 pages per filter). Only completed relay snapshots contribute
+results; incomplete relays are excluded from subsequent pages of that filter,
+but keep the shared checkpoint unchanged so their original range is retried.
+Parent lookups also require every requested relay to complete.
+Events newer than the requested page are discarded before sorting and limiting.
+A saturated timestamp advances to the preceding second and logs the returned
+count; additional events within that second may be skipped. Failed/aborted checks
+or exhausted page budgets do not advance the checkpoint; consumed IDs and quotas
+are preserved for retry.
+
+Event IDs, checkpoints and stranger quotas persist per account. Stranger activity
+is limited to 20 entries per listing per delivery day. The existing Only friends
+policy suppresses stranger tray alerts while retaining their history; muted senders
+are marked seen without recording history or consuming the stranger quota. Rows use icons and never fetch activity authors' avatars
+or listing images. The default-on account setting “Comments & reviews on my
+listings” controls both history recording and local alerts. History still records
+without OS permission when the activity preferences allow it. Lock-screen details use the existing privacy setting.
+First-check catch-up older than two minutes, and subsequent catch-up older than a
+day, are history-only. History uses source event timestamps so its 200-row cap
+retains the newest activity even when catch-up pages arrive newest-first.
+History change signals are coalesced before React updates.
+
+An explicit notification tap resolves the current listing and opens root-stack
+`ProductDetail` with the Comments or Reviews tab selected. Account changes guard
+late resolution. Sellers can reply from any visible comment row; the existing
+publisher signs kind-1111 with uppercase listing root tags and lowercase parent
+comment tags. Replies render under their parent with bounded row pagination.

@@ -3,6 +3,7 @@ import type { NostrProfile } from '../types/nostr';
 import { fetchProfile } from '../services/nostrService';
 import { useAccountState } from './useAccountState';
 import { useOwnProfile } from './useOwnProfile';
+import { readCachedWithTtl } from './nostrCacheKeys';
 
 jest.mock('../services/nostrService', () => ({ fetchProfile: jest.fn() }));
 jest.mock('./nostrCacheKeys', () => ({
@@ -36,4 +37,31 @@ it('ignores an own-profile fetch that finishes after an account switch', async (
     await loading!;
   });
   expect(result.current.profile).toBeNull();
+});
+
+it('hydrates a stale saved own profile before a switched-account refresh that misses', async () => {
+  const cached = { name: 'Big Piggy', displayName: 'Big Piggy' } as NostrProfile;
+  jest.mocked(readCachedWithTtl).mockResolvedValueOnce({ value: cached, ageMs: Infinity });
+  let finish!: (profile: NostrProfile | null) => void;
+  jest.mocked(fetchProfile).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const { result } = renderHook(() => {
+    const [profile, , setterFor] = useAccountState<NostrProfile | null>('b', null);
+    return { profile, ...useOwnProfile(setterFor) };
+  });
+  let loading!: Promise<void>;
+  await act(async () => {
+    loading = result.current.loadProfile('b', []);
+    await Promise.resolve();
+  });
+  expect(result.current.profile).toEqual(cached);
+  await act(async () => {
+    finish(null);
+    await loading;
+  });
+  expect(result.current.profile).toEqual(cached);
 });

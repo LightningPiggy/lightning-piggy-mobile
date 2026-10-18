@@ -191,7 +191,6 @@ const MarketShopCollectionsScreen: React.FC<Props> = ({ navigation }) => {
         title={t('market.sell.hub.collections')}
         backLabel={t('market.sell.back')}
         onBack={() => navigation.goBack()}
-        styles={styles}
         testID="shop-collections-back"
       />
       <FlatList

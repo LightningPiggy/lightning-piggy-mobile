@@ -31,3 +31,14 @@ export function formatFiatApprox(
   const symbol = fiatSymbol(currency);
   return symbol ? `≈ ${symbol}${num}` : `≈ ${num} ${currency}`;
 }
+
+/** Spacing for a conversion nested after the primary sats text; no rate = no gap. */
+export function formatInlineFiatApprox(
+  sats: number,
+  btcPrice: number | null | undefined,
+  currency: string,
+  locale?: string,
+): string | null {
+  const label = formatFiatApprox(sats, btcPrice, currency, locale);
+  return label ? `  ${label}` : null;
+}

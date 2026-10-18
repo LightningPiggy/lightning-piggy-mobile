@@ -16,7 +16,11 @@ import { useThemeColors } from '../contexts/ThemeContext';
 // it avoids the 754 KB bitmap decode implicated in the cold-tab GPU stall
 // (issue #245) and stays crisp at every density.
 
-export type PatternVariant = 'messages-weave' | 'friends-rotated' | 'explore-compass';
+export type PatternVariant =
+  | 'messages-weave'
+  | 'friends-rotated'
+  | 'explore-compass'
+  | 'market-goods';
 
 // Directional fade veil over the monogram (#995). The pink→purple wash sits
 // OVER the monogram with a horizontal ALPHA ramp: heavy on the LEFT (monogram
@@ -28,7 +32,18 @@ const FADE_LEFT_HEX = 'DB';
 const FADE_MID_HEX = 'A6';
 const FADE_RIGHT_HEX = '80';
 
-type MotifName = 'messageSquare' | 'heart' | 'userRound' | 'compass' | 'map';
+type MotifName =
+  | 'messageSquare'
+  | 'heart'
+  | 'userRound'
+  | 'compass'
+  | 'map'
+  | 'shoppingBag'
+  | 'tag'
+  | 'package'
+  | 'store'
+  | 'piggyBank'
+  | 'truck';
 
 interface MotifInstance {
   name: MotifName;
@@ -52,6 +67,56 @@ const MOTIF_PATHS: Record<
   MotifName,
   { paths?: string[]; circles?: [number, number, number][]; polygon?: string }
 > = {
+  shoppingBag: {
+    paths: [
+      'M16 10a4 4 0 0 1-8 0',
+      'M3.103 6.034h17.794',
+      'M3.4 5.467a2 2 0 0 0-.4 1.2V20a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6.667a2 2 0 0 0-.4-1.2l-2-2.667A2 2 0 0 0 17 2H7a2 2 0 0 0-1.6.8z',
+    ],
+    circles: [],
+  },
+  tag: {
+    paths: [
+      'M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z',
+    ],
+    circles: [[7.5, 7.5, 0.5]],
+  },
+  package: {
+    paths: [
+      'M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z',
+      'M12 22V12',
+      'M3.29 7 12 12 20.71 7',
+      'm7.5 4.27 9 5.15',
+    ],
+    circles: [],
+  },
+  store: {
+    paths: [
+      'M15 21v-5a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v5',
+      'M17.774 10.31a1.12 1.12 0 0 0-1.549 0 2.5 2.5 0 0 1-3.451 0 1.12 1.12 0 0 0-1.548 0 2.5 2.5 0 0 1-3.452 0 1.12 1.12 0 0 0-1.549 0 2.5 2.5 0 0 1-3.77-3.248l2.889-4.184A2 2 0 0 1 7 2h10a2 2 0 0 1 1.653.873l2.895 4.192a2.5 2.5 0 0 1-3.774 3.244',
+      'M4 10.95V19a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8.05',
+    ],
+    circles: [],
+  },
+  piggyBank: {
+    paths: [
+      'M11 17h3v2a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a3.16 3.16 0 0 0 2-2h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-1a5 5 0 0 0-2-4V3a4 4 0 0 0-3.2 1.6l-.3.4H11a6 6 0 0 0-6 6v1a5 5 0 0 0 2 4v3a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1z',
+      'M16 10h.01',
+      'M2 8v1a2 2 0 0 0 2 2h1',
+    ],
+    circles: [],
+  },
+  truck: {
+    paths: [
+      'M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2',
+      'M15 18H9',
+      'M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14',
+    ],
+    circles: [
+      [17.0, 18.0, 2.0],
+      [7.0, 18.0, 2.0],
+    ],
+  },
   messageSquare: { paths: ['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'] },
   heart: {
     paths: [
@@ -72,6 +137,20 @@ const MOTIF_PATHS: Record<
 };
 
 const VARIANTS: Record<PatternVariant, VariantConfig> = {
+  'market-goods': {
+    tileW: 112,
+    tileH: 108,
+    transform: 'rotate(-12)',
+    opacity: 0.9,
+    motifs: [
+      { name: 'shoppingBag', x: 5, y: 5, size: 22 },
+      { name: 'tag', x: 42, y: 5, size: 20 },
+      { name: 'package', x: 79, y: 5, size: 22 },
+      { name: 'store', x: 5, y: 59, size: 22 },
+      { name: 'piggyBank', x: 42, y: 59, size: 22 },
+      { name: 'truck', x: 79, y: 59, size: 22 },
+    ],
+  },
   // Messages — square bubbles + sat-dot on a diagonal ("Diagonal Weave").
   'messages-weave': {
     tileW: 54,

@@ -27,6 +27,38 @@ const generations = new Map<string, number>();
 const generation = (account: string) => generations.get(account) ?? 0;
 const snapshotAccount = (key: string) => key.split('|')[0];
 const preferencesKey = (account: string) => perAccountKey('market_filters_v1', account);
+const checkoutCountryKey = (account: string) =>
+  perAccountKey('market_checkout_country_v1', account);
+
+/** Separate from catalogue filters: checkout remembers the buyer's destination. */
+export async function readCheckoutCountry(account: string): Promise<string | null> {
+  signedOut.delete(account);
+  const epoch = generation(account);
+  try {
+    await diskQueue;
+    const country = normalizeShipsToSelection(
+      await AsyncStorage.getItem(checkoutCountryKey(account)),
+    );
+    return generation(account) === epoch ? country : null;
+  } catch {
+    return null;
+  }
+}
+export async function writeCheckoutCountry(account: string, country: string) {
+  const normalized = normalizeShipsToSelection(country);
+  if (!normalized || signedOut.has(account)) return;
+  const epoch = generation(account);
+  diskQueue = diskQueue.then(async () => {
+    if (generation(account) !== epoch) return;
+    try {
+      await AsyncStorage.setItem(checkoutCountryKey(account), normalized);
+    } catch {
+      // Best effort: checkout stays usable if storage is unavailable.
+    }
+  });
+  await diskQueue;
+}
+
 export async function readMarketPreferences(account: string): Promise<MarketPreferences> {
   // A new preferences hydration is the account becoming active again.
   signedOut.delete(account);
@@ -36,7 +68,11 @@ export async function readMarketPreferences(account: string): Promise<MarketPref
     const value = JSON.parse((await AsyncStorage.getItem(preferencesKey(account))) ?? '{}');
     if (generation(account) !== epoch) return { ...DEFAULT_MARKET_PREFERENCES };
     return {
-      mode: value?.mode === 'wotFriends' ? 'wotFriends' : DEFAULT_MARKET_MODE,
+      // Experimental scopes persist as chosen; the screen clamps them back to
+      // the default while experimental features are off (effectiveMarketMode).
+      mode: ['wotFriends', 'wotFof', 'wotAll'].includes(value?.mode)
+        ? (value.mode as MarketMode)
+        : DEFAULT_MARKET_MODE,
       merchant: typeof value?.merchant === 'string' ? value.merchant : null,
       // The retired Country filter saved a vendor-directory name under
       // `country`; it is deliberately not carried over (→ Anywhere).
@@ -75,6 +111,14 @@ export interface MarketSnapshot {
   result: MarketListingsResult;
 }
 const memory = new Map<string, MarketSnapshot>();
+const snapshotListeners = new Set<() => void>();
+export function subscribeMarketSnapshots(listener: () => void) {
+  snapshotListeners.add(listener);
+  return () => {
+    snapshotListeners.delete(listener);
+  };
+}
+const notifySnapshots = () => snapshotListeners.forEach((listener) => listener());
 let diskQueue: Promise<void> = Promise.resolve();
 const valid = (snapshot: MarketSnapshot) =>
   snapshot &&
@@ -219,6 +263,7 @@ export function loadedMarketSnapshots(
 }
 export function clearMarketSnapshotMemory() {
   memory.clear();
+  notifySnapshots();
 }
 async function diskEntries(): Promise<MarketSnapshot[]> {
   try {
@@ -248,6 +293,7 @@ export async function readMarketSnapshot(key: string): Promise<MarketSnapshot | 
     const entries = bounded([snapshot, ...memory.values()]);
     memory.clear();
     for (const entry of entries) memory.set(entry.key, entry);
+    notifySnapshots();
   }
   return snapshot ? activeSnapshot(snapshot) : undefined;
 }
@@ -266,6 +312,7 @@ export function writeMarketSnapshot(key: string, result: MarketListingsResult): 
     ]);
     memory.clear();
     for (const entry of entries) memory.set(entry.key, entry);
+    notifySnapshots();
     const disk = await diskEntries();
     if (generation(account) !== epoch) return;
     const kept = bounded([snapshot, ...disk.filter((entry) => entry.key !== key)]);
@@ -286,8 +333,10 @@ export function wipeMarketAccount(account: string): Promise<void> {
   signedOut.add(account);
   generations.set(account, generation(account) + 1);
   for (const key of memory.keys()) if (snapshotAccount(key) === account) memory.delete(key);
+  notifySnapshots();
   const wipe = diskQueue.then(async () => {
     await AsyncStorage.removeItem(preferencesKey(account));
+    await AsyncStorage.removeItem(checkoutCountryKey(account));
     const kept = (await diskEntries()).filter((entry) => snapshotAccount(entry.key) !== account);
     if (kept.length) {
       await AsyncStorage.setItem(
@@ -300,4 +349,31 @@ export function wipeMarketAccount(account: string): Promise<void> {
   });
   diskQueue = wipe.catch(() => {}); // Keep later accounts usable if storage fails.
   return wipe;
+}
+
+const catalogueReads = new Map<string, Promise<ReturnType<typeof loadedMarketSnapshots>>>();
+
+/** Hydrate this account's existing catalogue before a shared listing relay lookup. */
+export function readLoadedMarketSnapshots(account: string) {
+  const running = catalogueReads.get(account);
+  if (running) return running;
+  const pending = hydrateMarketCatalogue(account).finally(() => catalogueReads.delete(account));
+  catalogueReads.set(account, pending);
+  return pending;
+}
+
+async function hydrateMarketCatalogue(account: string) {
+  const epoch = generation(account);
+  const entries = await diskEntries();
+  if (signedOut.has(account) || generation(account) !== epoch) return [];
+  for (const entry of entries) {
+    if (snapshotAccount(entry.key) !== account) continue;
+    const current = memory.get(entry.key);
+    if (!current || current.at < entry.at) memory.set(entry.key, entry);
+  }
+  const retained = bounded([...memory.values()]);
+  memory.clear();
+  for (const entry of retained) memory.set(entry.key, entry);
+  notifySnapshots();
+  return loadedMarketSnapshots([account]);
 }

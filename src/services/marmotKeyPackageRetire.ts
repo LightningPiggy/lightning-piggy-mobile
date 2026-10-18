@@ -1,3 +1,4 @@
+import { enabledAppRelays, loadAppRelayPrefs } from './appRelayPrefs';
 // Removing an account's Marmot invitation keys (kind-30443 key packages)
 // from relays when it signs out of this install (#1204).
 //
@@ -31,6 +32,8 @@ import { newestEvent } from './marmotKeyPackages';
 import { rememberKeyPackageTimestamp } from './marmotInstallationSlot';
 import { pool, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS } from './nostrService';
+import { keyPackageRelayHistory } from './marmotKeyPackageHistory';
+import { visitKeyPackageRelays } from './marmotKeyPackageRelays';
 
 const KEY_PACKAGE_KIND = 30443;
 const QUERY_MAX_WAIT_MS = 5_000;
@@ -89,8 +92,11 @@ export async function localKeyPackageFootprint(
 ): Promise<KeyPackageFootprint> {
   const slots = new Set<string>();
   const eventIds = new Set<string>();
-  const relays = new Set<string>();
-  let expiresAt: number | undefined;
+  const history = await keyPackageRelayHistory(backend);
+  const relays = new Set(Object.keys(history));
+  let expiresAt: number | undefined = Object.values(history).length
+    ? Math.max(...Object.values(history))
+    : undefined;
   const slot = await backend.get('meta', 'keyPackageSlot');
   if (slot) slots.add(slot);
   for (const key of await backend.keys('keyPackages')) {
@@ -101,8 +107,9 @@ export async function localKeyPackageFootprint(
       if (kp.identifier) slots.add(kp.identifier);
       for (const e of kp.published ?? []) {
         eventIds.add(e.id);
-        for (const url of safely(() => getKeyPackageRelays(e)) ?? []) relays.add(url);
         const notAfter = safely(() => getKeyPackageLifetime(e))?.notAfter;
+        if (notAfter !== undefined && Number(notAfter) + 3600 < Date.now() / 1000) continue;
+        for (const url of safely(() => getKeyPackageRelays(e)) ?? []) relays.add(url);
         if (notAfter !== undefined) expiresAt = Math.max(expiresAt ?? 0, Number(notAfter));
       }
     } catch {
@@ -175,7 +182,19 @@ const slotOf = (e: NostrEvent) => e.tags.find((t) => t[0] === 'd')?.[1];
  */
 export async function retireFootprint(opts: RetireFootprintOptions): Promise<RetireOutcome> {
   const { owner, footprint } = opts;
-  const transport = opts.transport ?? poolTransport;
+  const source = opts.transport ?? poolTransport;
+  const transport: RetireTransport = {
+    query: (relays, filter) =>
+      visitKeyPackageRelays(relays, (batch) => {
+        if (opts.cancelled?.()) throw new Error('retirement cancelled');
+        return source.query(batch, filter);
+      }),
+    publish: (relays, event) =>
+      visitKeyPackageRelays(relays, (batch) => {
+        if (opts.cancelled?.()) throw new Error('retirement cancelled');
+        return source.publish(batch, event);
+      }),
+  };
   const abandoned = () => {
     if (opts.cancelled?.()) throw new Error('retirement cancelled');
   };
@@ -202,10 +221,15 @@ export async function retireFootprint(opts: RetireFootprintOptions): Promise<Ret
   };
   if (footprint.slots.length === 0 && footprint.eventIds.length === 0) return 'nothing';
   try {
+    await loadAppRelayPrefs(owner);
     const hints = footprint.relays.filter(isRelayUrl);
-    const lookup = [...new Set([...(opts.relays ?? []), ...hints, ...DEFAULT_RELAYS])].filter(
-      isRelayUrl,
-    );
+    const lookup = [
+      ...new Set([
+        ...(opts.relays ?? []),
+        ...hints,
+        ...enabledAppRelays('default', DEFAULT_RELAYS, owner),
+      ]),
+    ].filter(isRelayUrl);
     // Our key packages live on our NIP-65 write relays — send the deletion there too.
     const relayList = newestEvent(
       await transport.query(lookup, { kinds: [10002], authors: [owner], limit: 5 }),

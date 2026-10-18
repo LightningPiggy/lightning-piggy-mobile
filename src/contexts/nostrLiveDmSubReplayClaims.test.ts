@@ -6,6 +6,7 @@ import {
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
 import { nip04PlaintextCache } from './nostrSecretKeyCache';
 import { upsertDmMessages } from '../services/dmDb';
+import type { DmInboxEntry } from '../utils/conversationSummaries';
 
 jest.mock('../services/marmotWelcomeRouter', () => ({ routeMarmotWelcome: jest.fn() }));
 
@@ -129,6 +130,59 @@ describe('review hydration and replay claim regressions', () => {
     jest.clearAllMocks();
     jest.mocked(upsertDmMessages).mockReset().mockResolvedValue(undefined);
   });
+
+  it.each([
+    ['document', 'https://files.example/report.pdf?token=private', '📎 File'],
+    ['text', 'hello Alice', 'hello Alice'],
+    ['web link', 'https://example.com/article', 'https://example.com/article'],
+  ])(
+    'formats kind-4 %s previews while preserving stored content',
+    async (_, plaintext, preview) => {
+      for (const deferred of [false, true]) {
+        jest.clearAllMocks();
+        jest.mocked(nip04PlaintextCache.get).mockReturnValue(plaintext);
+        const setDmInbox = jest.fn();
+        const params = makeParams({
+          followPubkeysRef: { current: new Set([ALICE]) },
+          followHydratedRef: { current: !deferred },
+          setDmInbox,
+        });
+        const stop = startLiveDmSubscription(params);
+        await flush();
+        const id = `kind4-preview-${_}-${deferred}`;
+        capturedOnEvent!({
+          id,
+          kind: 4,
+          pubkey: ALICE,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [['p', VIEWER]],
+          content: 'ciphertext',
+        });
+        await flush();
+        if (deferred) {
+          expect(setDmInbox).not.toHaveBeenCalled();
+          expect(mockFireNotification).not.toHaveBeenCalled();
+          params.followHydratedRef!.current = true;
+          params.followGateBuffer.reevaluate(
+            params.followPubkeysRef.current,
+            jest.mocked(params.setDeferredReplay).mock.calls[0][0]!,
+          );
+          await flush();
+        }
+        expect(setDmInbox).toHaveBeenCalledTimes(1);
+        const update = setDmInbox.mock.calls[0][0] as (prev: DmInboxEntry[]) => DmInboxEntry[];
+        expect(update([])).toEqual([expect.objectContaining({ id, text: preview, wireKind: 4 })]);
+        expect(mockFireNotification).toHaveBeenCalledTimes(1);
+        expect(mockFireNotification).toHaveBeenCalledWith(
+          expect.objectContaining({ body: preview }),
+        );
+        expect(upsertDmMessages).toHaveBeenCalledWith([
+          expect.objectContaining({ eventId: id, content: plaintext, wireKind: 4 }),
+        ]);
+        stop();
+      }
+    },
+  );
 
   it('silently preserves a fresh outgoing wrap to a cached friend until follows hydrate', async () => {
     const params = makeParams({

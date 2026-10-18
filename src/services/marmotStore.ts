@@ -35,6 +35,8 @@ export function decodeMarmotValue<T>(json: string): T {
 
 /** Minimal row store the KV adapter needs — op-sqlite in the app, a Map in tests. */
 export interface MarmotKvBackend {
+  /** Stable account identity across independently created SQL adapters. */
+  readonly owner?: string;
   get(namespace: string, key: string): Promise<string | null>;
   set(namespace: string, key: string, value: string): Promise<void>;
   remove(namespace: string, key: string): Promise<void>;
@@ -44,6 +46,7 @@ export interface MarmotKvBackend {
 
 export function createSqliteMarmotBackend(owner: string): MarmotKvBackend {
   return {
+    owner,
     async get(namespace, key) {
       const db = await getLocalDb();
       const res = await db.execute(

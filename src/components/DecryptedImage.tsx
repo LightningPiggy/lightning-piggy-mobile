@@ -46,6 +46,7 @@ interface Props {
    *  encrypted images), so a parent can wire a fullscreen tap to the decrypted
    *  image rather than the ciphertext blob URL. */
   onResolved?: (uri: string) => void;
+  onLoad?: React.ComponentProps<typeof Image>['onLoad'];
 }
 
 const DecryptedImage: React.FC<Props> = ({
@@ -60,6 +61,7 @@ const DecryptedImage: React.FC<Props> = ({
   style,
   accessibilityLabel,
   onResolved,
+  onLoad,
 }) => {
   const colors = useThemeColors();
   const { t } = useLocale();
@@ -75,7 +77,7 @@ const DecryptedImage: React.FC<Props> = ({
 
   if (blocked)
     return (
-      <View style={styles.center}>
+      <View style={[style, styles.center]}>
         <Text style={styles.blocked}>{t('messageBubble.blockedLink')}</Text>
       </View>
     );
@@ -101,8 +103,9 @@ const DecryptedImage: React.FC<Props> = ({
     <Image
       source={{ uri: localUri as string }}
       style={style}
-      contentFit="cover"
-      cachePolicy="memory-disk"
+      onLoad={onLoad}
+      contentFit="contain"
+      cachePolicy="memory"
       accessibilityLabel={accessibilityLabel}
     />
   );

@@ -1,4 +1,8 @@
-import { parseFileAttachment, type FileAttachment } from './fileAttachment';
+import {
+  parseFileAttachment,
+  parsePlainFileAttachment,
+  type FileAttachment,
+} from './fileAttachment';
 import { checkRemoteUrl } from './remoteUrlPolicy';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
 import { decodeProfileReference } from '../services/nostrService';
@@ -183,11 +187,14 @@ export function parseVoiceNote(text: string): ParsedVoiceNote | null {
  */
 export function deriveGroupWireKind(text: string): 14 | 15 {
   const isEncryptedFile =
-    parseVoiceNote(text)?.encrypted === true || parseImageMessage(text)?.encrypted === true;
+    parseVoiceNote(text)?.encrypted === true ||
+    parseImageMessage(text)?.encrypted === true ||
+    parseFileAttachment(text)?.encrypted === true;
   return isEncryptedFile ? 15 : 14;
 }
 
 export interface ParsedImageMessage {
+  dim?: string;
   /** Fetch URL with the fragment stripped. */
   url: string;
   mime: string;
@@ -244,6 +251,7 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
             nonceHex,
             marmot,
             ...(blocked ? { blocked } : {}),
+            dim: params.get('dim') ?? undefined,
             size,
           }
         );
@@ -262,6 +270,7 @@ export function parseImageMessage(text: string): ParsedImageMessage | null {
         keyHex,
         nonceHex,
         ...(blocked ? { blocked } : {}),
+        dim: params.get('dim') ?? undefined,
         size,
         ...(params.has('x') ? { sha256: params.get('x')! } : {}),
       };
@@ -306,7 +315,8 @@ export function extractInvoice(text: string): DecodedInvoice | null {
     let amountSats: number | null = null;
     let description: string | null = null;
     let timestamp: number | null = null;
-    let expirySeconds: number | null = null;
+    // BOLT11's default when no explicit expiry tag is present.
+    let expirySeconds = 3600;
     let paymentHash: string | null = null;
     for (const section of decoded.sections) {
       if (section.name === 'amount') {
@@ -321,8 +331,7 @@ export function extractInvoice(text: string): DecodedInvoice | null {
         paymentHash = section.value as string;
       }
     }
-    const expiresAt =
-      timestamp !== null && expirySeconds !== null ? timestamp + expirySeconds : null;
+    const expiresAt = timestamp !== null ? timestamp + expirySeconds : null;
     return { raw, amountSats, description, expiresAt, paymentHash };
   } catch {
     return { raw, amountSats: null, description: null, expiresAt: null, paymentHash: null };
@@ -457,6 +466,11 @@ export function classifyMessageContent(text: string): BubbleContent {
 
 /** Files are wire-kind bound and must precede caption/filename URL detection. */
 export function classifyStoredMessage(text: string, wireKind?: number): BubbleContent {
-  const file = wireKind === 15 ? parseFileAttachment(text) : null;
+  const file =
+    wireKind === 15
+      ? parseFileAttachment(text)
+      : wireKind === 4 || wireKind === 14 || wireKind === undefined
+        ? parsePlainFileAttachment(text)
+        : null;
   return file ? { kind: 'file', file } : classifyMessageContent(text);
 }

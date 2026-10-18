@@ -71,7 +71,7 @@ export function deriveShopOrders(
       lines.push({
         ref: item.ref,
         dTag,
-        title: titles.get(dTag) || dTag,
+        title: (titles.get(dTag) || dTag).slice(0, 500),
         quantity: item.quantity,
       });
     }

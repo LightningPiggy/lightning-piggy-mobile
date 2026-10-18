@@ -7,7 +7,11 @@ import { parseProfileContent } from '../utils/profileContent';
 
 /** One cached, bounded kind-0 pass for ALL loaded merchants. No per-author requests
  * or event-driven state updates; at most three 50-author chunks run at once. */
-export async function fetchMarketMerchantProfiles(pubkeys: string[], signal: AbortSignal) {
+export async function fetchMarketMerchantProfiles(
+  pubkeys: string[],
+  signal: AbortSignal,
+  onUnresolved?: (authors: ReadonlySet<string>) => void,
+) {
   const authors = [...new Set(pubkeys)].filter((pk) => /^[a-f0-9]{64}$/.test(pk));
   const profiles = await cache.getMany(authors);
   const missing = authors.filter((pk) => {
@@ -22,6 +26,7 @@ export async function fetchMarketMerchantProfiles(pubkeys: string[], signal: Abo
   const batches: string[][] = [];
   for (let i = 0; i < missing.length; i += 50) batches.push(missing.slice(i, i + 50));
   if (missing.length && !signal.aborted) trackRelays(PROFILE_RELAYS);
+  const unresolved = new Set<string>();
   const fetched = new Map<string, cache.CachedZapSenderProfile>();
   for (let i = 0; i < batches.length && !signal.aborted; i += 3) {
     const results = await Promise.allSettled(
@@ -30,7 +35,7 @@ export async function fetchMarketMerchantProfiles(pubkeys: string[], signal: Abo
           pool,
           PROFILE_RELAYS,
           { kinds: [0], authors: chunk, limit: chunk.length * 2 },
-          { signal, maxWait: 8000 },
+          { signal, maxWait: 8000, rejectOnAllRelaysFailure: true, rejectOnTimeout: true },
         );
         const wanted = new Set(chunk);
         const best = new Map<string, (typeof events)[number]>();
@@ -43,8 +48,11 @@ export async function fetchMarketMerchantProfiles(pubkeys: string[], signal: Abo
         return best;
       }),
     );
-    for (const result of results) {
-      if (result.status !== 'fulfilled') continue;
+    for (const [index, result] of results.entries()) {
+      if (result.status !== 'fulfilled') {
+        for (const author of batches[i + index]) unresolved.add(author);
+        continue;
+      }
       for (const [pubkey, event] of result.value) {
         const p = parseProfileContent(event.content);
         // Display-only metadata: never cache unverified payment fields.
@@ -59,5 +67,6 @@ export async function fetchMarketMerchantProfiles(pubkeys: string[], signal: Abo
     }
   }
   if (!signal.aborted) await cache.setMany(fetched);
+  onUnresolved?.(unresolved);
   return new Map([...profiles, ...fetched]);
 }

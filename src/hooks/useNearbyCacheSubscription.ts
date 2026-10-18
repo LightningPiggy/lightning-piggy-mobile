@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useRef } from 'react';
 import { subscribeNearbyCaches } from '../services/nostrPlacesPublisher';
@@ -32,6 +33,7 @@ export function useNearbyCacheSubscription(args: {
   flush: () => void;
 }): { resubscribeForPrefixes: (prefixes: string[]) => void } {
   const { enqueue, flush } = args;
+  const relayScope = useAppRelayPrefs();
   const closerRef = useRef<(() => void) | null>(null);
   const focusedRef = useRef(false);
   const prefixesRef = useRef<string[]>([]);
@@ -41,7 +43,7 @@ export function useNearbyCacheSubscription(args: {
     (prefixes: string[]) => {
       prefixesRef.current = prefixes;
       if (!focusedRef.current || prefixes.length === 0) return;
-      const key = [...prefixes].sort().join(',');
+      const key = `${relayScope}:${[...prefixes].sort().join(',')}`;
       if (key === keyRef.current) return;
       keyRef.current = key;
       closerRef.current?.();
@@ -58,7 +60,7 @@ export function useNearbyCacheSubscription(args: {
         { limit: VIEWPORT_CACHE_LIMIT },
       );
     },
-    [enqueue],
+    [enqueue, relayScope],
   );
 
   useFocusEffect(

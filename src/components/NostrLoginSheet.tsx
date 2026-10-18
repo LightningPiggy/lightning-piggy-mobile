@@ -1,3 +1,4 @@
+import { enabledAppRelays, loadAppRelayPrefs } from '../services/appRelayPrefs';
 import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import BrandedSpinner from './BrandedSpinner';
@@ -36,19 +37,7 @@ import * as nostrConnectService from '../services/nostrConnectService';
 // relay can't break sign-in: #1198, #1326).
 import { NIP46_PAIRING_RELAYS } from '../services/nostrRelayDefaults';
 
-/** NIP-46 perms we ask for at pair time. Covers everything the app
- *  needs to function as a Nostr client today: read profile / contacts,
- *  publish profile updates, send DMs (NIP-04) and group messages
- *  (NIP-44). The bunker may grant a subset; per-method permission
- *  errors are surfaced as `NIP-46 signer denied <method>` per the
- *  service. */
-const NIP46_PERMS = [
-  'sign_event',
-  'nip04_encrypt',
-  'nip04_decrypt',
-  'nip44_encrypt',
-  'nip44_decrypt',
-];
+import { NIP46_PERMS } from '../services/signerPermissions';
 
 interface Props {
   visible: boolean;
@@ -181,10 +170,11 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     // list, so later follows always have a kind-3 to build on (#1271).
     // Best-effort and never for imported / signed-in keys.
     const { pubkey: newPubkey, secretKey } = nostrService.decodeNsec(generatedNsec);
+    await loadAppRelayPrefs(newPubkey).catch(() => {});
     void setUpNewAccountContactList({
       pubkey: newPubkey,
       secretKey,
-      relays: nostrService.DEFAULT_RELAYS,
+      relays: enabledAppRelays('default', nostrService.DEFAULT_RELAYS, newPubkey),
     }).catch((e) => {
       if (__DEV__) console.warn('[ContactList] new-account setup failed:', e);
     });

@@ -219,6 +219,7 @@ export function useMarmotDeviceNotices(chatId: string | null): DeviceNoticeView[
         }
         let live = true;
         let latest = 0;
+        let resolvedEpoch: number | null | undefined;
         const load = () => {
           const request = ++latest;
           session.devices
@@ -227,12 +228,22 @@ export function useMarmotDeviceNotices(chatId: string | null): DeviceNoticeView[
               if (live && request === latest) setNotices({ chatId, list });
             })
             .catch(() => undefined);
+          // An incoming Add carries leaves, not the key packages whose client
+          // tags name the apps. This includes our account's OTHER installs.
+          // Resolve on open / a new epoch, just as the device sheet does. A
+          // learned-name notification must only re-read, never query again.
+          const epoch = session.devices.epochOf(chatId);
+          if (epoch !== resolvedEpoch) {
+            resolvedEpoch = epoch;
+            void session.devices.resolveClients(chatId).catch(() => false);
+          }
         };
-        load();
-        // Fires only when a commit adds devices or an app name is learnt.
+        // Subscribe before resolving: even an immediate result must re-render
+        // existing notices, whose labels are read from the key cache each time.
         const unsubscribe = session.devices.subscribe((id) => {
           if (id === chatId) load();
         });
+        load();
         cleanup = () => {
           live = false;
           unsubscribe();

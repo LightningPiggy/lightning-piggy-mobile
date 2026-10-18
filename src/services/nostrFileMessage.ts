@@ -22,6 +22,7 @@ export function createFileMessageRumor(input: {
   sha256Hex: string;
   size: number;
   algorithm?: string;
+  filename?: string;
 }): FileMessageRumor {
   return {
     pubkey: input.senderPubkey,
@@ -35,6 +36,7 @@ export function createFileMessageRumor(input: {
       ['decryption-nonce', input.nonceHex],
       ['x', input.sha256Hex],
       ['size', String(input.size)],
+      ...(input.filename ? [['filename', input.filename]] : []),
     ],
     content: input.url,
   };
@@ -52,6 +54,7 @@ export function createGroupFileRumor(input: {
   sha256Hex: string;
   size: number;
   algorithm?: string;
+  filename?: string;
 }): FileMessageRumor {
   const tags: string[][] = [['subject', input.subject]];
   for (const pk of input.memberPubkeys) {
@@ -64,6 +67,7 @@ export function createGroupFileRumor(input: {
     ['decryption-nonce', input.nonceHex],
     ['x', input.sha256Hex],
     ['size', String(input.size)],
+    ...(input.filename ? [['filename', input.filename]] : []),
   );
   return {
     pubkey: input.senderPubkey,

@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from '../hooks/useAppRelayPrefs';
 import BrandedSpinner from '../components/BrandedSpinner';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -58,6 +59,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
   const { t } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createEventsScreenStyles(colors), [colors]);
+  const relayScope = useAppRelayPrefs();
   // Coalesce per-event setState bursts during the nearby-event relay
   // backfill into one commit per ~100 ms window (audit MED 4) — the
   // naive `new Map(prev)` clone per event was O(N²) over a cold-start
@@ -239,7 +241,8 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
         setLoading(false);
       }
     },
-    [resetEvents, enqueueEvent, t],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- The subscription reads app relay preferences.
+    [resetEvents, enqueueEvent, t, relayScope],
   );
 
   // Open the relay subscription only while the screen is focused (audit

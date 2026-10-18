@@ -1,3 +1,10 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
+import { MarketShortcutsProvider } from '../contexts/MarketShortcutsContext';
+import { useSellerActivityChecks } from '../hooks/useSellerActivityChecks';
+import { resolveActivityListing } from '../services/sellerActivityService';
+import { getCurrentUserReadRelays } from '../services/nostrActiveAccount';
+import { DEFAULT_RELAYS } from '../services/nostrService';
+import { orderNavigationTarget } from '../utils/orderNavigation';
 import { resolveStoredNotificationTarget } from '../services/notificationStoredTarget';
 import { routeNotificationMessage } from '../services/notificationGroupNavigation';
 import { getMarmotSession } from '../services/marmotSession';
@@ -78,6 +85,7 @@ const PlaceDetailScreen = lazyScreen(() => import('../screens/PlaceDetailScreen'
 const MarketScreen = lazyScreen(() => import('../screens/MarketScreen'));
 const MarketProductDetailScreen = lazyScreen(() => import('../screens/MarketProductDetailScreen'));
 const MarketMyShopScreen = lazyScreen(() => import('../screens/MarketMyShopScreen'));
+const MarketMyOrdersScreen = lazyScreen(() => import('../screens/MarketMyOrdersScreen'));
 const MarketShopCurrenciesScreen = lazyScreen(
   () => import('../screens/MarketShopCurrenciesScreen'),
 );
@@ -268,6 +276,27 @@ export const navigateFromNotification = (
     navigationRef.navigate('Main', { screen: 'MainTabs', params: { screen: 'Messages' } });
     return true;
   }
+  if (data.myOrderId && data.orderSellerPubkey) {
+    navigationRef.navigate(
+      'Main',
+      orderNavigationTarget('MarketMyOrders', {
+        orderId: data.myOrderId,
+        sellerPubkey: data.orderSellerPubkey,
+      }),
+    );
+    return true;
+  }
+  if ((data.shopOrderId || data.shopEventId) && data.shopBuyerPubkey) {
+    navigationRef.navigate(
+      'Main',
+      orderNavigationTarget('MarketShopOrders', {
+        orderId: data.shopOrderId,
+        eventId: data.shopEventId,
+        buyerPubkey: data.shopBuyerPubkey,
+      }),
+    );
+    return true;
+  }
   if (data.conversationPubkey || data.groupId || data.marmotGroupId) {
     return routeNotificationMessage(data, {
       getActivePubkey,
@@ -288,6 +317,37 @@ export const navigateFromNotification = (
       subscribeState: (report) => navigationRef.addListener('state', report),
       shouldStop: () => generation !== notificationNavGeneration,
     });
+  }
+
+  if (data.kind === 'market' && data.listingCoord) {
+    if (!getActivePubkey()) return false;
+    if (data.owner && data.owner !== getActivePubkey()) {
+      navigationRef.navigate('Notifications');
+      return true;
+    }
+    const owner = getActivePubkey();
+    const urls = getCurrentUserReadRelays();
+    const controller = new AbortController();
+    void resolveActivityListing(
+      data.listingCoord,
+      urls.length ? urls : enabledAppRelays('default', DEFAULT_RELAYS),
+      controller.signal,
+    )
+      .then((product) => {
+        if (generation !== notificationNavGeneration || owner !== getActivePubkey()) return;
+        if (product)
+          navigationRef.navigate('ProductDetail', {
+            productId: product.id,
+            product,
+            feedbackTab: data.feedbackTab,
+          });
+        else navigationRef.navigate('Notifications');
+      })
+      .catch(() => {
+        if (generation === notificationNavGeneration && owner === getActivePubkey())
+          navigationRef.navigate('Notifications');
+      });
+    return true;
   }
 
   // Find-log on one of my caches (#740) → open that cache detail. The
@@ -328,11 +388,15 @@ export const navigateFromNotification = (
         getActivePubkey() !== owner ||
         generation !== notificationNavGeneration;
       const resolved = data.wrapId
-        ? resolveWrapConversation(owner, data.wrapId, { shouldStop: cancelled }).then((target) =>
+        ? resolveWrapConversation(owner, data.wrapId, {
+            shouldStop: cancelled,
+            fetchNow: () => catchUpNotifiedWrap(owner, data.wrapId!),
+          }).then((target) =>
             target
               ? {
-                  conversationPubkey: target.pubkey,
-                  protocol: target.protocol,
+                  ...(target.shopOrderId || target.myOrderId || target.conversationPubkey
+                    ? target
+                    : { conversationPubkey: target.pubkey, protocol: target.protocol }),
                   threadKind: 'dm' as const,
                   messageId: data.messageId ?? data.wrapId,
                   owner,
@@ -373,6 +437,15 @@ export const navigateFromNotification = (
  * onStateChange) rather than per-screen, to avoid growing the over-cap
  * Conversation / GroupConversation screen files (#703).
  */
+/** Fetch and store the message an alert was raised for (#1325). Loaded on
+ * demand so the inbox ingest stays out of the navigator's startup path. */
+function catchUpNotifiedWrap(owner: string, wrapId: string): Promise<void> {
+  const { catchUpWrapById } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep the inbox ingest out of startup.
+    require('../services/backgroundDmIngest') as typeof import('../services/backgroundDmIngest');
+  return catchUpWrapById(owner, wrapId);
+}
+
 function syncActiveThreadFromNav(): void {
   const route = navigationRef.getCurrentRoute();
   if (route?.name === 'Conversation') {
@@ -457,6 +530,7 @@ function ExploreStackNavigator() {
       <ExploreStack.Screen name="Market" component={MarketScreen} />
       <ExploreStack.Screen name="MarketProductDetail" component={MarketProductDetailScreen} />
       <ExploreStack.Screen name="MarketMyShop" component={MarketMyShopScreen} />
+      <ExploreStack.Screen name="MarketMyOrders" component={MarketMyOrdersScreen} />
       <ExploreStack.Screen name="MarketShopCurrencies" component={MarketShopCurrenciesScreen} />
       <ExploreStack.Screen name="MarketShopShipping" component={MarketShopShippingScreen} />
       <ExploreStack.Screen name="MarketShopCollections" component={MarketShopCollectionsScreen} />
@@ -477,6 +551,7 @@ function ExploreStackNavigator() {
 }
 
 function HomeTabs() {
+  useSellerActivityChecks('resume');
   const { colors } = useTheme();
   const t = useTranslation();
   // Reserve the real system-bar inset so the edge-to-edge tab bar clears gesture/3-button nav (see #862).
@@ -635,37 +710,42 @@ function MainDrawer() {
   const drawerWidth = Math.min(Math.max(280, width * 0.65), 360);
 
   return (
-    <AccountDrawer.Navigator
-      initialRouteName="MainTabs"
-      drawerContent={(props) => <AccountDrawerContent {...props} />}
-      screenOptions={{
-        headerShown: false,
-        drawerType: 'front',
-        drawerPosition: 'right',
-        drawerStyle: { width: drawerWidth, backgroundColor: colors.surface },
-        swipeEdgeWidth: 32,
-      }}
-    >
-      <AccountDrawer.Screen name="MainTabs" component={HomeTabs} />
-      <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
-      <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
-      <AccountDrawer.Screen name="AccountAdvanced" component={AdvancedScreen} />
-      <AccountDrawer.Screen name="AccountNotificationServer" component={NotificationServerScreen} />
-      <AccountDrawer.Screen name="AccountBubbleStyle" component={BubbleStyleScreen} />
-      <AccountDrawer.Screen name="AccountProfiler" component={ProfilerScreen} />
-      <AccountDrawer.Screen name="AccountMessages" component={MessageSettingsScreen} />
-      <AccountDrawer.Screen name="AccountNostr" component={RelaySettingsNavigator} />
-      <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
-      <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
-      <AccountDrawer.Screen name="AccountDisplayLanguage" component={DisplayLanguageScreen} />
-      <AccountDrawer.Screen name="AccountCurrency" component={DisplayScreen} />
-      <AccountDrawer.Screen name="AccountShopAlerts" component={ShopAlertsScreen} />
-      <AccountDrawer.Screen name="AccountMutedAccounts" component={MutedAccountsScreen} />
-      <AccountDrawer.Screen name="AccountNotifications" component={NotificationSettingsScreen} />
-      <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
-      <AccountDrawer.Screen name="AccountKeyBackup" component={KeyBackupScreen} />
-      <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
-    </AccountDrawer.Navigator>
+    <MarketShortcutsProvider>
+      <AccountDrawer.Navigator
+        initialRouteName="MainTabs"
+        drawerContent={(props) => <AccountDrawerContent {...props} />}
+        screenOptions={{
+          headerShown: false,
+          drawerType: 'front',
+          drawerPosition: 'right',
+          drawerStyle: { width: drawerWidth, backgroundColor: colors.surface },
+          swipeEdgeWidth: 32,
+        }}
+      >
+        <AccountDrawer.Screen name="MainTabs" component={HomeTabs} />
+        <AccountDrawer.Screen name="AccountProfile" component={ProfileScreen} />
+        <AccountDrawer.Screen name="AccountWallets" component={WalletsScreen} />
+        <AccountDrawer.Screen name="AccountAdvanced" component={AdvancedScreen} />
+        <AccountDrawer.Screen
+          name="AccountNotificationServer"
+          component={NotificationServerScreen}
+        />
+        <AccountDrawer.Screen name="AccountBubbleStyle" component={BubbleStyleScreen} />
+        <AccountDrawer.Screen name="AccountProfiler" component={ProfilerScreen} />
+        <AccountDrawer.Screen name="AccountMessages" component={MessageSettingsScreen} />
+        <AccountDrawer.Screen name="AccountNostr" component={RelaySettingsNavigator} />
+        <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
+        <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
+        <AccountDrawer.Screen name="AccountDisplayLanguage" component={DisplayLanguageScreen} />
+        <AccountDrawer.Screen name="AccountCurrency" component={DisplayScreen} />
+        <AccountDrawer.Screen name="AccountShopAlerts" component={ShopAlertsScreen} />
+        <AccountDrawer.Screen name="AccountMutedAccounts" component={MutedAccountsScreen} />
+        <AccountDrawer.Screen name="AccountNotifications" component={NotificationSettingsScreen} />
+        <AccountDrawer.Screen name="AccountSecurity" component={SecurityScreen} />
+        <AccountDrawer.Screen name="AccountKeyBackup" component={KeyBackupScreen} />
+        <AccountDrawer.Screen name="AccountAbout" component={AboutScreen} />
+      </AccountDrawer.Navigator>
+    </MarketShortcutsProvider>
   );
 }
 

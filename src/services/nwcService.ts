@@ -1,4 +1,10 @@
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
+import {
+  confirmListedInvoiceSettlement,
+  needsInvoiceHistoryConfirmation,
+  parseInvoiceSettlement,
+  type InvoiceSettlement,
+} from './nwcInvoiceSettlement';
 import { confirmNwcPayment } from './nwcPaymentCompletion';
 import { isSettledPayment, matchesPaymentHash } from '../utils/paymentCompletion';
 import { listTransactionsWithRetry } from './nwcTransactionRetry';
@@ -779,6 +785,25 @@ export async function getInfo(
   }
 }
 
+/**
+ * The NIP-47 methods this connection grants (e.g. `make_invoice`), read from
+ * the raw NWC client's `get_info`. Deliberately NOT the WebLN provider's
+ * getInfo: that maps names to WebLN (`makeInvoice`) and, on failure, returns
+ * a fake minimal `["sendPayment"]` that would read as "can't make invoices".
+ * Resolves null when the wallet can't be asked right now (unknown ≠ no).
+ */
+export async function getWalletMethods(walletId: string): Promise<string[] | null> {
+  const provider = await ensureConnected(walletId);
+  if (!provider) return null;
+  try {
+    const info = await withTimeout(provider.client.getInfo(), 10_000, `getInfo(${walletId})`);
+    return Array.isArray(info?.methods) ? info.methods.map(String) : null;
+  } catch (error) {
+    if (__DEV__) console.warn(`NWC get_info (methods) failed for ${walletId}:`, error);
+    return null;
+  }
+}
+
 export async function listTransactions(
   walletId: string,
   isActive: () => boolean = () => true,
@@ -872,12 +897,7 @@ function isTerminalLookupError(error: unknown): boolean {
   return false;
 }
 
-// LNbits (and some other NWC backends) omit preimage/invoice from
-// list_transactions; this fills them in. Returns null on failure.
-// `paid` reflects the WebLN-shape `paid` boolean returned by
-// `NostrWebLNProvider.lookupInvoice` — see the block comment inside
-// the function for why the NIP-47 `settled_at` / `state` fields aren't
-// what we read here.
+// Read raw NIP-47 fields so settlement evidence survives the SDK boundary.
 export interface LookupInvoiceOptions {
   /**
    * Per-call ceiling for the underlying NIP-47 round trip. When unset,
@@ -896,36 +916,37 @@ export async function lookupInvoice(
   walletId: string,
   paymentHash: string,
   options: LookupInvoiceOptions = {},
-): Promise<{ preimage?: string; invoice?: string; paid: boolean } | null> {
+): Promise<InvoiceSettlement | null> {
   if (!isValidPaymentHash(paymentHash)) return null;
   if (hasFailedLookup(walletId, paymentHash)) return null;
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    // We use `NostrWebLNProvider` from @getalby/sdk, whose `lookupInvoice`
-    // returns the **WebLN** `LookupInvoiceResponse` shape — *not* the raw
-    // NIP-47 `Nip47Transaction` shape. So the SDK translates LNbits'
-    // spec-compliant `{type, invoice, settled_at, ...}` into WebLN's
-    // `{preimage, paymentRequest, paid}` for us. Don't reach for `settled_at`
-    // or `state` here — they're never populated on this path. If we ever
-    // switch to the raw `NWCClient` we'd need to flip both the field names
-    // and the settlement predicate; see docs/TROUBLESHOOTING.adoc →
-    // "Receive sheet slow to mark invoice as paid" for context.
-    const call = provider.lookupInvoice({ paymentHash });
-    const result = (await (options.replyTimeoutMs !== undefined
+    const call = provider.client.lookupInvoice({ payment_hash: paymentHash });
+    const result = await (options.replyTimeoutMs !== undefined
       ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
-      : call)) as {
-      preimage?: string;
-      paymentRequest?: string;
-      paid?: boolean;
-    };
-    return {
-      preimage: result?.preimage,
-      // WebLN names the bolt11 field `paymentRequest`; our caller contract
-      // exposes it as `invoice` so consumers stay decoupled from the SDK.
-      invoice: result?.paymentRequest,
-      paid: result?.paid === true,
-    };
+      : call);
+    if (!needsInvoiceHistoryConfirmation(result))
+      return parseInvoiceSettlement(result, paymentHash);
+    if (!Number.isSafeInteger(result.created_at) || result.created_at <= 0) return null;
+    try {
+      const listing = provider.client.listTransactions({
+        from: Math.max(0, result.created_at - 60),
+        until: Math.floor(Date.now() / 1000),
+        type: result.type === 'outgoing' ? 'outgoing' : 'incoming',
+        unpaid: false,
+        limit: 50,
+      });
+      const history = await (options.replyTimeoutMs !== undefined
+        ? withTimeout(listing, options.replyTimeoutMs, `confirmInvoice(${walletId})`)
+        : listing);
+      return (
+        confirmListedInvoiceSettlement(result, history.transactions, paymentHash) ?? { paid: null }
+      );
+    } catch {
+      // An unavailable history cannot establish paid or unpaid.
+      return { paid: null };
+    }
   } catch (error) {
     if (isTerminalLookupError(error)) {
       recordFailedLookup(walletId, paymentHash);

@@ -1,8 +1,13 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
+import MarketShortcutBadge from './MarketShortcutBadge';
+import { useMarketShortcutCounts } from '../contexts/MarketShortcutsContext';
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import {
+  Package,
+  Store,
   User,
   UserRound,
   Wallet,
@@ -37,7 +42,8 @@ import { useSignOutConfirm } from '../hooks/useSignOutConfirm';
 import type { AccountDrawerParamList } from '../navigation/types';
 
 interface SectionRow {
-  name: keyof AccountDrawerParamList;
+  name: keyof AccountDrawerParamList | 'MarketMyOrders' | 'MarketMyShop';
+  badge?: 'buyer' | 'seller';
   label: string;
   icon: React.ReactNode;
   testID: string;
@@ -57,6 +63,20 @@ const buildSectionRows = (colors: Palette, t: ReturnType<typeof useTranslation>)
     label: t('accountDrawerContent.wallets'),
     icon: <Wallet size={22} color={colors.textBody} />,
     testID: 'drawer-row-wallets',
+  },
+  {
+    name: 'MarketMyOrders',
+    label: t('market.sell.hub.orders'),
+    icon: <Package size={22} color={colors.brandPink} />,
+    testID: 'account-menu-orders',
+    badge: 'buyer',
+  },
+  {
+    name: 'MarketMyShop',
+    label: t('market.sell.myShop'),
+    icon: <Store size={22} color={colors.brandPink} />,
+    testID: 'account-menu-shop',
+    badge: 'seller',
   },
   {
     name: 'AccountMessages',
@@ -107,6 +127,7 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
   const t = useTranslation();
   const styles = useMemo(() => createAccountDrawerContentStyles(colors), [colors]);
   const sectionRows = useMemo(() => buildSectionRows(colors, t), [colors, t]);
+  const counts = useMarketShortcutCounts();
   const insets = useSafeAreaInsets();
   const { isLoggedIn, profile, logout, identities, pubkey, signerType, switchIdentity, relays } =
     useNostr();
@@ -175,7 +196,10 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
 
       // Phase 2 — relay fan-out for identities still missing.
       const targetRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const fanOut = targetRelays.length > 0 ? targetRelays : nostrService.DEFAULT_RELAYS;
+      const fanOut =
+        targetRelays.length > 0
+          ? targetRelays
+          : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       for (const id of otherIdentities) {
         if (cancelled) return;
         if (seeded[id.pubkey] || profileById[id.pubkey]) continue;
@@ -372,13 +396,25 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
               style={styles.row}
               onPress={() => {
                 props.navigation.closeDrawer();
-                props.navigation.navigate(row.name);
+                if (row.name === 'MarketMyOrders' || row.name === 'MarketMyShop') {
+                  props.navigation.navigate('MainTabs', {
+                    screen: 'Explore',
+                    params: { screen: row.name, initial: false },
+                  });
+                } else props.navigation.navigate(row.name);
               }}
-              accessibilityLabel={row.label}
+              accessibilityLabel={
+                row.badge && counts[row.badge] > 0
+                  ? `${row.label}, ${counts[row.badge]}`
+                  : row.label
+              }
               testID={row.testID}
             >
               <View style={styles.rowIcon}>{row.icon}</View>
               <Text style={styles.rowLabel}>{row.label}</Text>
+              {row.badge ? (
+                <MarketShortcutBadge count={counts[row.badge]} testID={`${row.testID}-badge`} />
+              ) : null}
             </TouchableOpacity>
           </React.Fragment>
         ))}

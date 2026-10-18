@@ -49,9 +49,8 @@ test.each([1, 2, 3, 4])(
     expect(sub.filters).toEqual([
       expect.objectContaining({ kinds: [4], since: expect.any(Number), limit: 100 }),
       { kinds: [1059], '#p': ['me'], limit: 10 },
-      expect.objectContaining({ kinds: [16, 17], since: expect.any(Number), limit: 100 }),
     ]);
-    for (const kind of [4, 1059, 16]) {
+    for (const kind of [4, 1059]) {
       const event = {
         id: kind.toString(16).padStart(64, '0'),
         pubkey: 'a'.repeat(64),
@@ -63,7 +62,7 @@ test.each([1, 2, 3, 4])(
       };
       relay._onmessage({ data: JSON.stringify(['EVENT', sub.id, event]) } as MessageEvent);
     }
-    expect(onEvent.mock.calls.map(([event]) => event.kind)).toEqual([4, 1059, 16]);
+    expect(onEvent.mock.calls.map(([event]) => event.kind)).toEqual([4, 1059]);
     sub.oneose?.();
     sub.oneose?.();
     expect(onEose).toHaveBeenCalledTimes(1);
@@ -93,7 +92,7 @@ test('native-engine inbox omits wraps and retains EOSE and close signals', async
   });
   await tick();
   const sub = [...relay.openSubs.values()][0];
-  expect(sub.filters.map((filter) => filter.kinds)).toEqual([[4], [16, 17]]);
+  expect(sub.filters.map((filter) => filter.kinds)).toEqual([[4]]);
   sub.oneose?.();
   expect(onEose).toHaveBeenCalledTimes(1);
   cleanup();

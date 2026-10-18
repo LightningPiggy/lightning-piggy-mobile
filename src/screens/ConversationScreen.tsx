@@ -1,3 +1,4 @@
+import { useChatCardWidth } from '../styles/chatCardWidth';
 import { preferredConversationParams } from '../services/preferredDmProtocol';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import BrandedSpinner from '../components/BrandedSpinner';
@@ -28,7 +29,8 @@ import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useNostr, useNostrContacts, useNostrDmInbox } from '../contexts/NostrContext';
+import { useNostr, useNostrContacts } from '../contexts/NostrContext';
+import { useDmCatchUpOnOpen } from '../hooks/useDmCatchUpOnOpen';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -71,7 +73,7 @@ import type { ConversationMessageInput, Item } from '../utils/conversationItems'
 import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
 import { useStartLiveLocationShare } from '../hooks/useStartLiveLocationShare';
 import { useConversationReactions } from '../hooks/useConversationReactions';
-import { useReactionBackend } from '../hooks/useReactionBackend';
+import { useThreadReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
@@ -85,7 +87,11 @@ type ConversationNavigation = NativeStackNavigationProp<RootStackParamList, 'Con
 const ConversationScreen: React.FC = () => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createConversationScreenStyles(colors), [colors]);
+  const cardWidth = useChatCardWidth();
+  const styles = useMemo(
+    () => createConversationScreenStyles(colors, cardWidth),
+    [colors, cardWidth],
+  );
   const navigation = useNavigation<ConversationNavigation>();
   const route = useRoute<ConversationRoute>();
   const insets = useSafeAreaInsets();
@@ -105,20 +111,13 @@ const ConversationScreen: React.FC = () => {
     pubkey: myPubkey,
     relays,
     profile,
-    publishReaction,
-    deleteReaction,
-    fetchReactionsForMessages,
-    fetchReactionDeletionsForReactions,
   } = useNostr();
-  const { armLiveDmSub } = useNostrDmInbox();
   // Trust gate (#1338): the peer's media auto-loads only if I follow them.
   const followed = useFollowedPubkeys();
   const peerMediaTrusted = canAutoLoadMedia(false, pubkey, followed);
-  // Cover the deep-link path (notification → straight to ConversationScreen
-  // without passing the Messages tab). Idempotent — no-op if already armed.
-  useEffect(() => {
-    armLiveDmSub();
-  }, [armLiveDmSub]);
+  // A notification or cold start can open this chat without the Messages tab:
+  // arm the live sub and catch up on messages that arrived meanwhile (#1325).
+  useDmCatchUpOnOpen(isLoggedIn);
   const { wallets, addNwcWallet } = useWallet();
   const { stopShare } = useLiveLocation();
 
@@ -315,6 +314,7 @@ const ConversationScreen: React.FC = () => {
     handleSend,
     handleShareLocation,
     handlePickAndSendImage,
+    handlePickAndSendFile,
     handleTakeAndSendPhoto,
     handleShareContactPicked,
     handleSendGif,
@@ -460,21 +460,7 @@ const ConversationScreen: React.FC = () => {
       marmot: protocol === 'marmot',
     });
 
-  const relayReactionBackend = useMemo(
-    () => ({
-      fetchReactionsForMessages,
-      publishReaction,
-      deleteReaction,
-      fetchReactionDeletions: fetchReactionDeletionsForReactions,
-    }),
-    [
-      fetchReactionsForMessages,
-      publishReaction,
-      deleteReaction,
-      fetchReactionDeletionsForReactions,
-    ],
-  );
-  const reactionBackend = useReactionBackend(protocol, myPubkey, pubkey, relayReactionBackend);
+  const reactionBackend = useThreadReactionBackend(protocol, myPubkey, pubkey);
 
   // Per-message reactions + long-press action state (#205) — kind-7 fetch /
   // reduce, optimistic publish/retract toggle, and the actioned-message
@@ -551,6 +537,7 @@ const ConversationScreen: React.FC = () => {
           onToggleReaction={buildOnToggleReaction(item)}
           onAddNwc={addSharedWallet}
           peerName={name}
+          peerPubkey={pubkey}
           onAskForInvite={askForInvite}
           peerMediaTrusted={peerMediaTrusted}
         />
@@ -568,6 +555,7 @@ const ConversationScreen: React.FC = () => {
     },
     [
       read.dividerId,
+      pubkey,
       peerMediaTrusted,
       openLocation,
       isInvoicePaid,
@@ -785,6 +773,7 @@ const ConversationScreen: React.FC = () => {
               <AttachPanel
                 onShareLocation={openLocationChooser}
                 onSendImage={handlePickAndSendImage}
+                onSendFile={handlePickAndSendFile}
                 onTakePhoto={handleTakeAndSendPhoto}
                 onSendZap={() => {
                   closeAttachPanel();

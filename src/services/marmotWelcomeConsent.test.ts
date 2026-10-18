@@ -21,12 +21,21 @@ it('previews a real pending Welcome without consuming its key, then acceptance j
     const invitations = new MarmotPendingInvitations(bob.backend, () => {});
     const join = jest.spyOn(MarmotClient.prototype, 'joinGroupFromWelcome');
     try {
-      await invitations.receive(
-        'malformed-wrap',
-        { ...welcome, id: 'malformed', content: 'garbage' },
-        true,
+      await invitations.receive('malformed-wrap', {
+        ...welcome,
+        id: 'malformed',
+        content: 'garbage',
+      });
+      // Even an accepted (approved) malformed Welcome is skipped, never joined.
+      const malformed = JSON.parse(
+        (await bob.backend.get('welcomeInvitations', 'malformed-wrap'))!,
       );
-      await invitations.receive('real-wrap', welcome, false);
+      await bob.backend.set(
+        'welcomeInvitations',
+        'malformed-wrap',
+        JSON.stringify({ ...malformed, status: 'approved' }),
+      );
+      await invitations.receive('real-wrap', welcome);
       await invitations.resume(bob.session, () => true);
       expect(JSON.parse((await bob.backend.get('welcomeInvitations', 'malformed-wrap'))!)).toEqual({
         id: 'malformed-wrap',
@@ -39,7 +48,7 @@ it('previews a real pending Welcome without consuming its key, then acceptance j
       const joined = await invitations.accept('real-wrap', bob.session, () => true);
       expect(joined?.id).toBe(created.id);
       expect(join).toHaveBeenCalledTimes(1);
-      await invitations.receive('real-wrap', welcome, false);
+      await invitations.receive('real-wrap', welcome);
       await invitations.resume(bob.session, () => true);
       expect(join).toHaveBeenCalledTimes(1);
     } finally {
@@ -69,7 +78,7 @@ it('exposes only this install’s Welcome from a real multi-device invitation', 
     const notify = jest.fn();
     const invitations = new MarmotPendingInvitations(phone.backend, jest.fn(), notify);
     for (const [index, welcome] of welcomes.entries())
-      await invitations.receive(`wrap-${index}`, welcome, false, true);
+      await invitations.receive(`wrap-${index}`, welcome, true);
     expect(await invitations.list()).toEqual([]);
     await invitations.resume(phone.session, () => true);
     const rows = await invitations.list();

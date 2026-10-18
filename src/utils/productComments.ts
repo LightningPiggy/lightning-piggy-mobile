@@ -158,3 +158,69 @@ export function directReplies(events: NostrEvent[], parentId: string): NostrEven
     .filter((c) => getTagValue(c, 'e') === parentId)
     .sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0));
 }
+
+/** Flatten visible comments, retaining edit ancestry without changing signed tags. */
+export function threadedComments(
+  events: NostrEvent[],
+  root: CommentRoot,
+  ancestry: NostrEvent[] = events,
+): { comment: NostrEvent; depth: number }[] {
+  const byId = new Map(ancestry.map((event) => [event.id, event]));
+  const replacements = new Map<string, NostrEvent>();
+  for (const event of [...ancestry].sort(
+    (a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id),
+  )) {
+    const previous = getTagValue(event, 'edit');
+    if (
+      previous &&
+      belongsToRoot(event, root) &&
+      (!byId.has(previous) || byId.get(previous)?.pubkey === event.pubkey)
+    )
+      replacements.set(previous, event);
+  }
+  const visible = new Set(events.map((event) => event.id));
+  const children = new Map<string, NostrEvent[]>();
+  const roots: NostrEvent[] = [];
+  for (const event of events) {
+    if (!belongsToRoot(event, root)) continue;
+    let parent = getTagValue(event, 'e');
+    const visited = new Set<string>();
+    while (parent && replacements.has(parent) && !visited.has(parent)) {
+      visited.add(parent);
+      const replacement = replacements.get(parent)!;
+      // A missing original cannot authenticate the edit. The reply's signed
+      // parent-author tag must agree before attaching it to a replacement.
+      if (getTagValue(event, 'p') !== replacement.pubkey) break;
+      parent = replacement.id;
+    }
+    if (isTopLevelComment(event, root) || !parent || !visible.has(parent)) roots.push(event);
+    else children.set(parent, [...(children.get(parent) ?? []), event]);
+  }
+  const out: { comment: NostrEvent; depth: number }[] = [];
+  const seen = new Set<string>();
+  const pending = roots
+    .sort((a, b) => b.created_at - a.created_at)
+    .map((comment) => ({ comment, depth: 0 }))
+    .reverse();
+  const drain = () => {
+    while (pending.length) {
+      const row = pending.pop()!;
+      if (seen.has(row.comment.id)) continue;
+      seen.add(row.comment.id);
+      out.push(row);
+      const replies = (children.get(row.comment.id) ?? []).sort(
+        (a, b) => a.created_at - b.created_at,
+      );
+      for (const comment of [...replies].reverse()) pending.push({ comment, depth: row.depth + 1 });
+    }
+  };
+  drain();
+  // Malformed cycles must neither loop forever nor hide otherwise valid rows.
+  for (const comment of events) {
+    if (!seen.has(comment.id) && belongsToRoot(comment, root)) {
+      pending.push({ comment, depth: 0 });
+      drain();
+    }
+  }
+  return out;
+}

@@ -1,6 +1,9 @@
+import { enabledAppRelays } from './appRelayPrefs';
 // Relay I/O for the seller side of the Market (#1273): fetch the user's own
 // Gamma Markets events and publish newly signed ones. Thin shell over the
 // pure builders/reducer in utils/marketSeller*.
+import { lockRelays } from '../config/testRelayLockdown';
+import { MARKET_RELAYS } from '../utils/marketListingsQuery';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Event, Filter } from 'nostr-tools';
 import { trackRelays, DEFAULT_RELAYS, publishSignedEvent } from './nostrService';
@@ -30,10 +33,22 @@ const MAX_RELAYS = 8;
 const MAX_HIDDEN = 200;
 const SELLER_KINDS = [LISTING_KIND, COLLECTION_KIND, SHIPPING_OPTION_KIND, DELETION_KIND];
 
-/** The user's write relays (where their own events live), capped. */
+// Reads include every publication target and displaced write relay. Only
+// publishing caps the full set; reads query it in bounded batches instead.
+function sellerEventRelays(relays: readonly string[], pubkey?: string): string[] {
+  return lockRelays(
+    [...new Set([...enabledAppRelays('market', MARKET_RELAYS), ...relays])],
+    pubkey,
+  );
+}
+
+/** Keep the user's write relays distinct for pre-publish revision checks. */
 export function sellerRelays(relays: readonly { url: string; write: boolean; read: boolean }[]) {
   const write = relays.filter((r) => r.write && /^wss:\/\//.test(r.url)).map((r) => r.url);
-  return [...new Set(write.length > 0 ? write : DEFAULT_RELAYS)].slice(0, MAX_RELAYS);
+  return [...new Set(write.length > 0 ? write : enabledAppRelays('default', DEFAULT_RELAYS))].slice(
+    0,
+    MAX_RELAYS,
+  );
 }
 
 /**
@@ -90,12 +105,14 @@ export async function verifiedOwnEvents(
  * (min 1) completing with EOSE — before an answer counts. Fewer is "unknown"
  * and rejects: an empty answer from one fast relay must not read as "no
  * shop", while one dead relay in the user's list mustn't block everything.
- * Returns the union of the relays that completed.
+ * Returns the union of the relays that completed. When requiredRelays is
+ * supplied, only that subset determines the quorum and must answer.
  */
 export async function queryQuorum(
   relays: readonly string[],
   filter: Filter,
   signal?: AbortSignal,
+  requiredRelays?: readonly string[],
 ): Promise<Event[]> {
   // Relays parked as dead (#1326) neither burn a timeout nor count against
   // the quorum; selectHealthyRelays always keeps the healthiest two.
@@ -115,14 +132,50 @@ export async function queryQuorum(
     const answered = results.filter(
       (r): r is PromiseFulfilledResult<Event[]> => r.status === 'fulfilled',
     );
-    const quorum = Math.max(1, Math.ceil(unique.length / 2));
-    if (signal?.aborted || answered.length < quorum) {
+    const quorumRelays = requiredRelays
+      ? unique.filter((relay) => requiredRelays.includes(relay))
+      : unique;
+    const answeredForQuorum = requiredRelays
+      ? results.filter(
+          (result, index) =>
+            result.status === 'fulfilled' && requiredRelays.includes(unique[index]),
+        ).length
+      : answered.length;
+    const quorum = Math.max(1, Math.ceil(quorumRelays.length / 2));
+    if (signal?.aborted) {
       throw new Error(`Only ${answered.length} of ${unique.length} relays answered`);
+    }
+    if (requiredRelays && answeredForQuorum === 0) {
+      throw new Error('No seller write relay answered');
+    }
+    if (answeredForQuorum < quorum) {
+      throw new Error(`Only ${answeredForQuorum} of ${quorumRelays.length} relays answered`);
     }
     return answered.flatMap((r) => r.value);
   } finally {
     lease.release();
   }
+}
+
+/** Every bounded batch must complete before a seller read is authoritative. */
+async function querySellerBatches(
+  relays: readonly string[],
+  filter: Filter,
+  signal?: AbortSignal,
+  requiredRelays?: readonly string[],
+): Promise<Event[]> {
+  const events: Event[] = [];
+  for (let start = 0; start < relays.length; start += MAX_RELAYS) {
+    events.push(
+      ...(await queryQuorum(
+        relays.slice(start, start + MAX_RELAYS),
+        filter,
+        signal,
+        requiredRelays,
+      )),
+    );
+  }
+  return events;
 }
 
 /**
@@ -138,20 +191,27 @@ export async function fetchSellerEvents(input: {
   signal?: AbortSignal;
 }): Promise<Event[]> {
   const pubkey = input.pubkey.toLowerCase();
-  trackRelays(input.relays);
+  const writeRelays = lockRelays(
+    input.relays.length ? input.relays : enabledAppRelays('default', DEFAULT_RELAYS),
+    pubkey,
+  );
+  const relays = sellerEventRelays(writeRelays, pubkey);
+  trackRelays(relays);
   const batches = await Promise.all([
-    queryQuorum(
-      input.relays,
+    querySellerBatches(
+      relays,
       { kinds: [COLLECTION_KIND, SHIPPING_OPTION_KIND], authors: [pubkey], limit: 100 },
       input.signal,
+      writeRelays,
     ),
-    queryQuorum(
-      input.relays,
+    querySellerBatches(
+      relays,
       { kinds: [LISTING_KIND], authors: [pubkey], limit: 300 },
       input.signal,
+      writeRelays,
     ),
-    queryQuorum(
-      input.relays,
+    querySellerBatches(
+      relays,
       {
         kinds: [DELETION_KIND],
         authors: [pubkey],
@@ -159,6 +219,7 @@ export async function fetchSellerEvents(input: {
         limit: 200,
       },
       input.signal,
+      writeRelays,
     ),
   ]);
   return verifiedOwnEvents(batches.flat(), pubkey, SELLER_KINDS, input.signal);
@@ -169,7 +230,8 @@ export async function fetchSellerEvents(input: {
  * null when relays completed with none. Used right before publishing so an
  * edit never silently overwrites a newer revision made elsewhere (and a
  * first-time shop never replaces a shop a slow relay hadn't returned).
- * Fails closed on timeout.
+ * Fails closed unless a seller write-relay quorum completes every batch;
+ * marketplace replies supplement those results but cannot replace them.
  */
 export async function fetchLatestRevision(input: {
   pubkey: string;
@@ -179,18 +241,27 @@ export async function fetchLatestRevision(input: {
   relays: string[];
 }): Promise<RevisionResult> {
   const pubkey = input.pubkey.toLowerCase();
-  trackRelays(input.relays);
+  const writeRelays = lockRelays(
+    input.relays.length ? input.relays : enabledAppRelays('default', DEFAULT_RELAYS),
+    pubkey,
+  );
+  const relays = sellerEventRelays(writeRelays, pubkey);
+  trackRelays(relays);
+  // Marketplace replies supplement the write-relay quorum in every batch;
+  // they cannot replace it (even when health filtering parks write relays).
+  const queryRevision = (filter: Filter) =>
+    querySellerBatches(relays, filter, undefined, writeRelays);
   const coordinate = `${input.kind}:${pubkey}:${input.dTag}`;
   // The revisions plus any NIP-09 deletion of that address: a deleted shop
   // that some relays still serve is not "an existing shop".
   const [events, deletions] = await Promise.all([
-    queryQuorum(input.relays, {
+    queryRevision({
       kinds: [input.kind],
       authors: [pubkey],
       '#d': [input.dTag],
       limit: 5,
     }),
-    queryQuorum(input.relays, {
+    queryRevision({
       kinds: [DELETION_KIND],
       authors: [pubkey],
       '#a': [coordinate],
@@ -199,7 +270,7 @@ export async function fetchLatestRevision(input: {
   ]);
   const ids = [...new Set([...events.map((e) => e.id), ...(input.baseId ? [input.baseId] : [])])];
   const idDeletions = ids.length
-    ? await queryQuorum(input.relays, {
+    ? await queryRevision({
         kinds: [DELETION_KIND],
         authors: [pubkey],
         '#e': ids,
@@ -232,15 +303,18 @@ export async function fetchLatestRevision(input: {
   return { event: newest, deletedAt, deletedIds: [...deletedIds] };
 }
 
-/** Publish to the seller's relays; resolves once ONE relay accepts, rejects
+/** Publish to marketplace and seller relays; resolves once ONE relay accepts, rejects
  * if none do within the deadline. */
 export async function publishSellerEvent(signed: Event, relays: string[]): Promise<void> {
+  // Reserve room for every marketplace relay before capping user write relays.
+  // Lock by the signed author, even if the active account changed while signing.
+  const targets = sellerEventRelays(relays, signed.pubkey).slice(0, MAX_RELAYS);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('Publishing timed out')), PUBLISH_TIMEOUT_MS);
   });
   try {
-    await Promise.race([publishSignedEvent(signed, relays.slice(0, MAX_RELAYS)), deadline]);
+    await Promise.race([publishSignedEvent(signed, targets), deadline]);
   } finally {
     if (timer) clearTimeout(timer);
   }

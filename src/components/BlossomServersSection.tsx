@@ -1,17 +1,16 @@
 import BrandedSpinner from './BrandedSpinner';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Trash2 } from 'lucide-react-native';
-import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import { createPublishedRelayListsSectionStyles } from '../styles/PublishedRelayListsSection.styles';
 import { createBlossomServersSectionStyles } from '../styles/BlossomServersSection.styles';
 import NetworkSectionHeading from './NetworkSectionHeading';
-import PublishResult from './PublishResult';
+import RelayPublishSheet from './RelayPublishSheet';
+import { useRelayPublishSheet } from '../hooks/useRelayPublishSheet';
 import { useNostr } from '../contexts/NostrContext';
-import type { RelayPublishResult } from '../services/nostrRelayLists';
 import RelayStatusDot from './RelayStatusDot';
 import { relayRowHost } from '../utils/relayDetails';
 import { useRelayReachability } from '../hooks/useRelayReachability';
@@ -30,14 +29,8 @@ export default function BlossomServersSection() {
   const { servers, dirty, publishing, editable, addServer, removeServer, makePrimary, publish } =
     useBlossomServerList();
   const reachability = useRelayReachability(servers, 'blossom');
-  const { pubkey, nip65Relays, userRelays } = useNostr();
-  const [reportState, setReportState] = useState<{
-    results: RelayPublishResult[];
-    ownRelays: string[];
-  } | null>(null);
-  const activePubkey = useRef(pubkey);
-  activePubkey.current = pubkey;
-  useEffect(() => setReportState(null), [pubkey]);
+  const { pubkey } = useNostr();
+  const publishSheet = useRelayPublishSheet(pubkey);
   const [input, setInput] = useState('');
   const [error, setError] = useState(false);
 
@@ -49,18 +42,12 @@ export default function BlossomServersSection() {
     } else setError(true);
   };
 
-  const onPublish = async () => {
-    const ownAtPublish = [...nip65Relays, ...userRelays].map((r) => r.url);
-    const publishingPubkey = pubkey;
-    const outcome = await publish();
-    if (publishingPubkey !== activePubkey.current) return;
-    if (outcome.results) {
-      setReportState({ results: outcome.results, ownRelays: ownAtPublish });
-      return;
-    }
-    if (outcome.ok) return;
-    Alert.alert(t('blossomServers.notPublishedTitle'), t(`blossomServers.error.${outcome.error}`));
-  };
+  const onPublish = () =>
+    publishSheet.run(
+      t('relayPublishSheet.title', { title: t('blossomServers.title') }),
+      publish,
+      'blossomServers',
+    );
 
   return (
     <View testID="blossom-servers">
@@ -70,7 +57,7 @@ export default function BlossomServersSection() {
         testID="blossom"
         spec="https://github.com/hzrd149/blossom/blob/master/buds/03.md"
       />
-      {reportState && <PublishResult {...reportState} />}
+      <RelayPublishSheet state={publishSheet} />
       <View style={list.list} testID="blossom-server-list">
         {servers.map((url, i) => (
           <View key={url} style={list.row}>

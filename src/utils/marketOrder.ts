@@ -69,7 +69,16 @@ export interface BuildOrderInput {
    * `amount` (all-in total per Gamma), and itemises the content summary.
    */
   shipping?: OrderShippingInput;
+  /**
+   * Shipping address for a physical order — the Gamma `["address", …]` tag.
+   * Rides only inside the NIP-17 gift wrap (never a public event). Omitted
+   * when blank (digital goods).
+   */
+  address?: string;
 }
+
+/** Longest address we put on an order (a postal address, not a document). */
+export const MAX_ORDER_ADDRESS_LENGTH = 500;
 
 /** An unsigned NIP-17 rumor ready to gift-wrap: no `id`/`sig` (that's the seal/wrap's job). */
 export interface OrderRumor {
@@ -145,6 +154,11 @@ export function shortOrderId(orderId: string): string {
  *   ["amount", <totalSats>]        – ALL-IN total in sats (subtotal + shipping)
  *   ["item", "30402:<merchant>:<dTag>", <qty>]  – one per product line
  *   ["shipping", "30406:<merchant>:<dTag>"]     – chosen shipping option, when any
+ *   ["address", <postal address>]               – physical orders only
+ *
+ * Spec: GammaMarkets/market-spec §4 "Order Creation" — `p`, `subject`, `type`,
+ * `order`, `amount` (sats) and one `item` per line are required; `shipping`,
+ * `address` (and `email` / `phone`, which LP doesn't collect) are optional.
  *
  * The merchant's order-service replies with a kind-16 `["type","2"]` payment
  * request carrying the BOLT11 invoice, which LP renders as a payable order card.
@@ -174,6 +188,8 @@ export function buildMarketOrder(input: BuildOrderInput): BuiltMarketOrder {
     ]);
   }
   if (input.shipping) tags.push(['shipping', input.shipping.coordinate]);
+  const address = normalizeOrderAddress(input.address);
+  if (address) tags.push(['address', address]);
 
   // Human-readable itemisation so the merchant's (and the buyer's own echo)
   // DM summary shows exactly how the all-in amount breaks down.
@@ -200,4 +216,15 @@ export function buildMarketOrder(input: BuildOrderInput): BuiltMarketOrder {
       content: contentParts.join('\n\n'),
     },
   };
+}
+
+/** Trim an address, collapse blank lines, cap its length; '' when empty. */
+export function normalizeOrderAddress(address: string | undefined): string {
+  if (!address) return '';
+  return address
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, MAX_ORDER_ADDRESS_LENGTH);
 }

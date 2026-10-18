@@ -5,11 +5,15 @@ import type { Event } from 'nostr-tools';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { ListingDraft } from '../utils/marketSellerEvents';
 import type { MarketSellerStyles } from '../styles/MarketSeller.styles';
+import { titleInitial } from '../utils/titleInitial';
 
 interface Props {
   event: Event;
   draft: ListingDraft;
   styles: MarketSellerStyles;
+  coverage?: { count: number; total: number; warning: boolean; missing: boolean };
+  onRepublish: (event: Event) => void;
+  republishBusy: boolean;
   onEdit: (dTag: string) => void;
   onPreview: (event: Event) => void;
   onDelete: (event: Event) => void;
@@ -20,6 +24,9 @@ const SellerListingRow: React.FC<Props> = ({
   event,
   draft,
   styles,
+  coverage,
+  onRepublish,
+  republishBusy,
   onEdit,
   onPreview,
   onDelete,
@@ -42,7 +49,7 @@ const SellerListingRow: React.FC<Props> = ({
         />
       ) : (
         <View style={[styles.listingImage, styles.listingImageFallback]}>
-          <Text style={styles.listingImageInitial}>{title.charAt(0).toUpperCase()}</Text>
+          <Text style={styles.listingImageInitial}>{titleInitial(title)}</Text>
         </View>
       )}
       <View style={styles.listingBody}>
@@ -57,6 +64,28 @@ const SellerListingRow: React.FC<Props> = ({
             ? t('market.sell.stock', { count: Number(draft.quantity) })
             : t('market.sell.stockUntracked')}
         </Text>
+        <Text
+          testID={`listing-coverage-${id}`}
+          style={coverage?.warning ? styles.errorText : styles.muted}
+        >
+          {coverage
+            ? coverage.missing
+              ? t('market.republish.missing')
+              : t('market.republish.coverage', { count: coverage.count, total: coverage.total })
+            : t('market.republish.checking')}
+        </Text>
+        <TouchableOpacity
+          onPress={() => onRepublish(event)}
+          disabled={republishBusy}
+          testID={`listing-republish-${id}`}
+          accessibilityLabel={t(
+            coverage?.missing ? 'market.republish.resign' : 'market.republish.action',
+          )}
+        >
+          <Text style={styles.listingAction}>
+            {t(coverage?.missing ? 'market.republish.resign' : 'market.republish.action')}
+          </Text>
+        </TouchableOpacity>
         <View style={styles.listingActions}>
           <TouchableOpacity
             onPress={() => onEdit(draft.dTag)}

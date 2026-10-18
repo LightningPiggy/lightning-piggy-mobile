@@ -44,6 +44,7 @@ export const createProductCommentsStyles = (colors: Palette) =>
       marginBottom: 16,
     },
     signInText: { color: colors.brandPink, fontWeight: '700', fontSize: 14 },
+    reply: { marginLeft: 20, borderLeftWidth: 2, borderLeftColor: colors.divider, paddingLeft: 8 },
     item: {
       backgroundColor: colors.surface,
       borderRadius: 12,

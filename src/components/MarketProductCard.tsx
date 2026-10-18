@@ -11,6 +11,7 @@ import MarketPrice from './MarketPrice';
 import { formatPrimaryPrice, marketPriceOf } from '../utils/marketPrice';
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketVendor } from '../data/marketVendors';
+import { titleInitial } from '../utils/titleInitial';
 
 interface Props {
   product: MarketProduct;
@@ -110,7 +111,7 @@ const MarketProductCard: React.FC<Props> = ({
         />
       ) : (
         <View style={styles.imageFallback}>
-          <Text style={styles.imageFallbackText}>{product.title.charAt(0).toUpperCase()}</Text>
+          <Text style={styles.imageFallbackText}>{titleInitial(product.title)}</Text>
         </View>
       )}
       {product.featured ? (

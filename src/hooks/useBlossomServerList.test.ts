@@ -1,3 +1,10 @@
+import {
+  loadAppRelayPrefs,
+  setAppRelayEnabled,
+  forgetAppRelayPrefs,
+} from '../services/appRelayPrefs';
+import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
+import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useBlossomServerList } from './useBlossomServerList';
@@ -276,4 +283,25 @@ it('signs after a previously published list even when a later lookup fails (new 
     await second.result.current.publish();
   });
   expect(mockSign.mock.calls.at(-1)[0].created_at).toBeGreaterThan(future);
+});
+
+it('retries published-list discovery after hydration and indexer edits', async () => {
+  await forgetAppRelayPrefs(PK);
+  setCurrentUserPubkey(PK);
+  const h = renderHook(() => useBlossomServerList());
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  expect(fetchLatest.mock.lastCall[2]).not.toContain(RELAY_LIST_INDEXERS[0]);
+  await act(async () => loadAppRelayPrefs(PK));
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  expect(fetchLatest.mock.lastCall[2]).toContain(RELAY_LIST_INDEXERS[0]);
+  await act(async () => setAppRelayEnabled(PK, 'indexers', RELAY_LIST_INDEXERS[0], false));
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  expect(fetchLatest.mock.lastCall[2]).not.toContain(RELAY_LIST_INDEXERS[0]);
+  act(() => h.result.current.addServer('https://draft.example'));
+  await act(async () => setAppRelayEnabled(PK, 'indexers', RELAY_LIST_INDEXERS[0], true));
+  await waitFor(() => expect(h.result.current.loading).toBe(false));
+  expect(h.result.current.servers).toContain('https://draft.example');
+  h.unmount();
+  setCurrentUserPubkey(null);
+  await forgetAppRelayPrefs(PK);
 });

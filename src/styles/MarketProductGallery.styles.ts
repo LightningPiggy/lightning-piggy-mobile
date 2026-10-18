@@ -34,16 +34,19 @@ export const createMarketProductGalleryStyles = (colors: Palette) =>
     },
     counterText: { color: colors.white, fontSize: 12, fontWeight: '700' },
 
-    // Position dots under the gallery (it sits on the page background, so
-    // brand pink / divider grey rather than the wallet carousel's white).
-    dots: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
+    thumbnails: {
       gap: 8,
+      paddingHorizontal: 16,
       paddingTop: 10,
     },
-    dot: { width: 8, height: 8, borderRadius: 4 },
+    thumbnail: {
+      width: 56,
+      height: 56,
+      borderRadius: 8,
+      overflow: 'hidden',
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    thumbnailFallbackText: { fontSize: 20, fontWeight: '800', color: colors.brandPink },
   });
 
 export type MarketProductGalleryStyles = ReturnType<typeof createMarketProductGalleryStyles>;

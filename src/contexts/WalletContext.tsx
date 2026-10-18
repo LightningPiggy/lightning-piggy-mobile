@@ -1,3 +1,6 @@
+import { perfLog } from '../utils/perfLog';
+import { useNwcConnectionWatchdog } from './useNwcConnectionWatchdog';
+import { appReadRelays } from '../services/appReadRelays';
 import { useWalletMetadataActions } from './useWalletMetadataActions';
 import { hydrateWalletStates } from './hydrateWalletStates';
 import { useLegacyOnchainMigration } from './useLegacyOnchainMigration';
@@ -51,8 +54,6 @@ import { upsertPendingWalletTransaction } from '../utils/pendingWalletTransactio
 // Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
 const WALLET_MODULE_LOAD_T0 = Date.now();
 let firstWalletConnectLogged = false;
-import { perfLog } from '../utils/perfLog';
-import { useNwcConnectionWatchdog } from './useNwcConnectionWatchdog';
 perfLog('WalletContext module-eval');
 let __walletProviderFirstRenderLogged = false;
 let __walletProviderHydratedLogged = false;
@@ -861,11 +862,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // Capture each resolved transaction, never its moving array index.
       const resultsByTransaction = new Map<WalletTransaction, ZapCounterpartyInfo | null>();
 
-      // Combine app defaults with the user's configured NIP-65 read
-      // relays so we hit the relays their contacts actually publish to.
-      const queryRelays = [
-        ...new Set([...nostrService.DEFAULT_RELAYS, ...nostrService.getCurrentUserReadRelays()]),
-      ];
+      const queryRelays = appReadRelays();
 
       // ─── Outgoing ──────────────────────────────────────────────────────
       // Primary: local storage populated by SendSheet at pay-time (fast,

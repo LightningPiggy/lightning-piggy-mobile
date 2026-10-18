@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { cacheMessageDisplayProfiles } from '../services/cachedDisplayProfiles';
 import type { ContactInfo } from '../components/GroupAvatar';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -31,16 +32,21 @@ function mergeOwnedProfiles(
   return { owner, profiles: next };
 }
 
+const NO_EXTRA: readonly string[] = [];
+
 interface UseNonFollowProfilesOptions {
   pubkey: string | null;
   dmInbox: DmInboxEntry[];
   contacts: NostrContact[];
   fetchProfilesForPubkeys: (pubkeys: string[]) => Promise<Map<string, NostrProfile>>;
+  /** More people to name (group senders, people mentioned in previews). */
+  extraPubkeys?: readonly string[];
 }
 
 /**
  * Names + avatars for the Messages list (#664): follows come from `contacts`;
- * DM partners the viewer doesn't follow get their kind-0 fetched on demand,
+ * DM partners (and `extraPubkeys`) the viewer doesn't follow get their kind-0
+ * fetched on demand,
  * cached per account on disk, and layered in (never overriding a contact).
  *
  * Everything is scoped to the active account: the map is tagged with its
@@ -55,6 +61,7 @@ export function useNonFollowProfiles({
   dmInbox,
   contacts,
   fetchProfilesForPubkeys,
+  extraPubkeys = NO_EXTRA,
 }: UseNonFollowProfilesOptions): {
   nonFollowProfiles: Map<string, NostrProfile>;
   contactInfoMap: Map<string, ContactInfo>;
@@ -111,9 +118,11 @@ export function useNonFollowProfiles({
   useEffect(() => {
     if (!pubkey) return;
     const missingSet = new Set<string>();
-    for (const entry of dmInbox) {
-      const pk = entry.partnerPubkey?.toLowerCase();
-      if (!pk || contactInfoMap.has(pk) || attempted.current.has(pk)) continue;
+    const candidates = [...dmInbox.map((entry) => entry.partnerPubkey), ...extraPubkeys];
+    for (const raw of candidates) {
+      const pk = raw?.toLowerCase();
+      if (!pk || pk === pubkey.toLowerCase()) continue;
+      if (contactInfoMap.has(pk) || attempted.current.has(pk)) continue;
       missingSet.add(pk);
     }
     if (missingSet.size === 0) return;
@@ -130,13 +139,16 @@ export function useNonFollowProfiles({
         // Transient failure — let the next inbox change retry these.
         missing.forEach((pk) => attemptedForOwner.delete(pk));
       });
-  }, [dmInbox, contactInfoMap, pubkey, fetchProfilesForPubkeys]);
+  }, [dmInbox, extraPubkeys, contactInfoMap, pubkey, fetchProfilesForPubkeys]);
 
   // Persist under the map's OWN owner (never the newly-active pubkey), kept
   // out of the state updater so Strict Mode's double-invocation can't
   // duplicate the write.
   useEffect(() => {
     if (!owned.owner || owned.profiles.size === 0) return;
+    // Mirror the merged result, so a delayed disk read cannot replace a
+    // fresher fetched name for already-subscribed mention/sender consumers.
+    void cacheMessageDisplayProfiles(owned.profiles).catch(() => {});
     AsyncStorage.setItem(
       nonFollowProfilesKey(owned.owner),
       JSON.stringify(Object.fromEntries(owned.profiles)),

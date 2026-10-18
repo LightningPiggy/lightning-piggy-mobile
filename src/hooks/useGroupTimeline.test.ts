@@ -1,3 +1,4 @@
+import { encodeEncryptedFileUrl } from '../utils/encryptedFileUrl';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import type { GroupMessage } from '../services/groupMessagesStorageService';
@@ -195,4 +196,28 @@ it.each(['You', 'Tú'])('labels own unsupported group messages with localized %s
   expect(groupSenderLabel(true, 'unsupported', 'Peer', you)).toBe(you);
   expect(groupSenderLabel(false, 'unsupported', 'Peer', you)).toBe('Peer');
   expect(groupSenderLabel(true, 'text', 'Peer', you)).toBeNull();
+});
+
+it('uses the derived kind for legacy encrypted document rows without wireKind', () => {
+  const text = encodeEncryptedFileUrl({
+    url: 'https://example.com/cipher',
+    mime: 'application/pdf',
+    filename: 'invoice.pdf',
+    keyHex: '11'.repeat(32),
+    nonceHex: '22'.repeat(12),
+    sha256: '33'.repeat(32),
+  });
+  const { result } = renderHook(() =>
+    useGroupTimeline({
+      messages: [{ id: 'legacy', senderPubkey: 'b', createdAt: 1, text }],
+      myPubkey: 'a',
+      memberNameByPubkey: new Map(),
+      formatLocale: 'en',
+      deviceNotices: [],
+    }),
+  );
+  expect(result.current.rows[0]).toMatchObject({
+    wireKind: 15,
+    content: { kind: 'file', file: { name: 'invoice.pdf' } },
+  });
 });

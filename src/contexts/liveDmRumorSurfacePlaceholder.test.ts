@@ -2,6 +2,9 @@
 // is a placeholder: once the live sub decrypts the wrap, the real alert
 // replaces it — or, when the wrap shows nothing new (our own sent copy), it
 // is retracted from the tray and the history.
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { resetSellerStore } from '../services/sellerEventStore';
+import { upsertDmMessages } from '../services/dmDb';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import {
   claimWrapNotification,
@@ -42,7 +45,12 @@ const now = () => Math.floor(Date.now() / 1000);
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function surfacer({ fresh = true, follows = new Set([PEER]), hydrated = true } = {}) {
+function surfacer({
+  fresh = true,
+  follows = new Set([PEER]),
+  hydrated = true,
+  overrides = {} as Partial<Parameters<typeof createLiveRumorSurfacer>[0]>,
+} = {}) {
   return createLiveRumorSurfacer({
     viewerPubkey: ME,
     isCancelled: () => false,
@@ -55,10 +63,13 @@ function surfacer({ fresh = true, follows = new Set([PEER]), hydrated = true } =
     knownWrapIds: new Set(),
     seen: new Set(),
     chainWrite: (task) => void task(),
+    ...overrides,
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await AsyncStorage.clear();
+  resetSellerStore();
   jest.clearAllMocks();
   __resetForTests();
 });
@@ -173,3 +184,50 @@ it('keeps the placeholder when the real alert could not be written', async () =>
   expect(mockDismiss).not.toHaveBeenCalled();
   expect(mockRemove).not.toHaveBeenCalled();
 });
+
+it.each(['failure', 'cancelled'])(
+  'releases live order claims after %s and suppresses pending copies',
+  async (reason) => {
+    const tasks: (() => Promise<void>)[] = [];
+    let cancelled = false;
+    const queueInboxEntry = jest.fn();
+    const surface = surfacer({
+      overrides: {
+        chainWrite: (task) => {
+          tasks.push(task);
+        },
+        isCancelled: () => cancelled,
+        queueInboxEntry,
+      },
+    });
+    const order = {
+      pubkey: PEER,
+      created_at: now(),
+      kind: 16,
+      tags: [
+        ['p', ME],
+        ['order', 'live-order'],
+        ['type', '1'],
+      ],
+      content: '',
+    };
+    await surface(order, 'first-order-wrap');
+    await surface(order, 'duplicate-order-wrap');
+    expect(tasks).toHaveLength(1);
+    expect(queueInboxEntry).not.toHaveBeenCalled();
+    if (reason === 'failure') {
+      (upsertDmMessages as jest.Mock).mockRejectedValueOnce(new Error('disk'));
+      await expect(tasks.shift()!()).rejects.toThrow('disk');
+    } else {
+      cancelled = true;
+      await tasks.shift()!();
+      cancelled = false;
+    }
+    await surface(order, 'retry-order-wrap');
+    expect(tasks).toHaveLength(1);
+    await tasks.shift()!();
+    expect(queueInboxEntry).toHaveBeenCalledTimes(1);
+    await surface(order, 'committed-duplicate-wrap');
+    expect(tasks).toHaveLength(0);
+  },
+);

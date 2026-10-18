@@ -263,17 +263,26 @@ type PublishingNetwork = {
   publish(relays: string[], event: NostrEvent): Promise<Record<string, { ok: boolean }>>;
 };
 
-/** Record, in `accepted`, every kind-30443 event at least one relay accepted. */
+/** Record accepted kind-30443 events; a Map also retains destination acknowledgements. */
 export function trackKeyPackageAcceptance<N extends PublishingNetwork>(
   network: N,
-  accepted: Set<string>,
+  accepted: Set<string> | Map<string, string[]>,
 ): N {
   return {
     ...network,
     async publish(relays: string[], event: NostrEvent) {
       const result = await network.publish(relays, event);
       const ok = Object.values(result).some((r) => r.ok);
-      if (event.kind === 30443 && ok) accepted.add(event.id);
+      if (event.kind === 30443 && ok) {
+        if (accepted instanceof Map)
+          accepted.set(
+            event.id,
+            Object.entries(result)
+              .filter(([, r]) => r.ok)
+              .map(([url]) => url),
+          );
+        else accepted.add(event.id);
+      }
       // purge() otherwise ignores relay rejection and drops the only local
       // ownership records. Keep legacy rows so the next maintenance retries.
       if (event.kind === 5 && !ok) throw new Error('marmot: key retirement not accepted');

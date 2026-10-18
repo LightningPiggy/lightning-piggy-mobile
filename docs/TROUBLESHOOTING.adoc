@@ -4,17 +4,49 @@
 |===
 | Problem | Solution
 
+| Found logs, map Piglets or app-relay reads stay empty after account hydration, or keep using a switched-off relay
+| A context relay array can change while its URL key stays identical (for example, when personal relays are configured and a geo-cache or marketplace switch changes). Effects that capture app relay groups must also depend on `useAppRelayPrefs()`, which observes active-account changes, hydration and persisted edits. Close old subscriptions and cancel pending reads before re-arming; keep current cache logs and unsaved settings drafts across preference edits. Nearby viewport subscriptions include the preference scope in their identity. Marmot refreshes group connections without rebuilding MLS state, and invalidates cached fallback inbox targets. Regressions: `appRelaySubscriptionLifecycle.test.ts`, `appRelayReadLifecycle.test.ts`, settings/feed tests and `MarmotBridge.relayPrefs.test.ts`.
+
+| App relays stay empty after a temporary preference-storage failure, or background account work uses another account's switches
+| Preference hydration errors keep app defaults closed. Ordinary relay reads retry failed loads after a one-second cooldown, sharing an in-flight load and notifying consumers only after success. The active-account hook also retries every three seconds until success, cancelling queued retries on switch or unmount. New-account contact-list setup awaits hydration before selecting defaults. Account-owned Marmot, NIP-17 and marketplace operations pass their owning identity to preference lookups across account changes. Regression coverage: `appRelayPrefs.test.ts`, `appRelayConsumers.test.ts`, `marmotNetwork.test.ts` and the invitation-key discovery/retirement tests.
+
+| Marmot says "You added 2 devices (Unknown app ×2)" while the other participant sees their app names
+| The inviter caches kind-30443 `client` tags against MLS leaf signature keys. A receiving install sees only the Add commit's leaves, and only its own current leaf has a built-in app name; its account's other installs need the same key-package lookup as anyone else's. The notices hook now starts the existing bounded, cooldown-protected read-only lookup on focus and a newly observed epoch, without requiring the device-details sheet. Learned names trigger a reread, not another lookup. Notices persist signature keys, not labels, so existing notices update when a matching published package is found. An absent/replaced or untagged package stays unknown; the account pubkey never implies an app. This notice path uses key-package client tags, not MIP-06 device metadata. Regressions: `useMarmotDevices.test.ts`, `marmotDeviceTracker.test.ts` and the real MLS `marmotSessionDevices.test.ts`.
+
+| A successful seller save disappears on a fresh device, or revision checks miss marketplace-only edits and deletions
+| A marketplace relay can accept a publication even when every configured write relay rejects it. Seller snapshots and revision/deletion checks query marketplace publication targets plus all configured write relays in batches of at most eight, with test-account lockdown applied by author. In every batch, only the healthy seller write-relay subset determines quorum and successful responses; marketplace replies supplement the results. Marketplace timeouts cannot reject a successful seller quorum, and marketplace replies cannot replace a missing seller quorum. Regression: `src/services/marketSellerService.test.ts` covers each marketplace relay as the sole accepting relay, newer revisions, address/id deletions and locked reads.
+
+| Signed-out shared events fail to load, or Android DMs keep using a disabled app relay
+| Public network plans must retain app defaults when there is no active account. For a signed-in account, persist default-relay preference changes before syncing the Android background DM watch from its persisted enabled preference; React preference notifications alone do not replace its captured subscription. A re-arm alone cannot restart a host stopped after all relays were disabled, so re-enabling a relay must also start the preference-enabled host. Regression coverage: `useAppNetworkRelays.test.ts`, `appRelayPrefs.test.ts` and `appRelayPrefsBackgroundWatch.test.ts`. Seller snapshot and revision reads also filter app-provided fallback and marketplace relays while preserving explicitly chosen write relays; regressions: `marketSellerService.test.ts` and the source-consumer audit.
+
+| A document attachment shows only “📎 File” or “📎 Attachment” on the first DM thread load, then becomes a card after reopening
+| With an empty DM store, `fetchConversationFor` renders freshly ingested wrap entries before a stored-row read can supply the original content. Keep recognized kind-14 document URLs and kind-15 encoded attachment content in the entry's `renderText` while `text` retains the redacted inbox/notification label. Do not broaden this to wallet-share bearer secrets. Regression: `src/contexts/nostrFetchConversationAttachments.test.ts` exercises the real ingest and thread projection from an empty store, plus attachment classification and inbox redaction.
+
+| Seller activity skips events across relays, or a busy listing blocks reviews and replies
+| Relay query limits apply per relay. Select the globally newest limited page before deriving the inclusive timestamp boundary; an older event from a sparse relay must not move that boundary past unprocessed activity on a busy relay. Isolate failures per activity filter, finish the other coordinate/review/reply filters, and retain the checkpoint for retry when any filter remains incomplete. `sellerActivityService.test.ts` covers mixed relay histories and a saturated timestamp alongside independent activity.
+
+| My shop → Orders or View order shows "No orders yet" despite a stored incoming Gamma order
+| Seller screens must use `getShopOrderRows`, not buyer-scoped `getOrderRows` (which requires an outgoing placed order). Bound seller history by incoming placed orders and fetch all kind-16/17 lifecycle rows for each selected buyer/order pair. Verify the owner, buyer and direction against the encrypted DM rows; `useShopOrders.test.tsx`, `dmDbOrders.test.ts` and `MarketShopOrdersScreen.test.tsx` cover list loading, update bursts and detail routing.
+
 | Android Marmot push alerts disappear after NIP-46 login, or background work replaces foreground relay routing
 | DEV background routing must prefer a live foreground mirror, then the foreground legacy signer keys (NIP-46 uses the validated connection's `userPubkey`, not `identities_v1` or the legacy pubkey slot). Unknown/unreadable identities must not suppress generic push alerts; only known locked test accounts disable push alerts. Release builds skip routing hydration and push/location guards entirely; background sync retains its original registry lookup. Regressions cover all three release signers and missing/corrupt/locked DEV storage.
 
 | DEV Nostr Connect QR pairing fails with "subscription closed before connection was established" after approval
 | `nostr-tools` 2.23.3 closes the pairing subscription before setting its handshake success flag. The shared health-aware pool must retire the REQ immediately but defer the caller-initiated aggregate `onclose` callback to a Promise microtask, matching the SDK pool timing. A synchronous callback rejects even a valid encrypted acknowledgement. `healthAwarePool.test.ts` exercises the real `BunkerSigner.fromURI` with both health and resumable pool mixins, and checks that closing before an acknowledgement still rejects. DM subscription tests must likewise assert immediate REQ retirement, then await the Promise microtask before asserting the close callback; a synchronous callback assertion is stale after this fix.
+| A Gamma order or payment update disappears after an interrupted encrypted-store write
+| Admission counters reserve each rumor before ingest, but mark it stored only after the encrypted payload write succeeds. Live write failures and subscription teardown release delivery claims; batch write failures leave reservations retryable. Replayed reservations reuse their budget slot instead of blocking the rumor for 24 hours. Regression coverage: `orderAdmission.test.ts` and `sellerOrderGate.test.ts`.
+
+| A seller cannot replace an expired Gamma invoice, or the buyer cannot pay a changed total
+| Seller order detail offers Send invoice again once the locally recorded invoice expires. Confirmation checks settlement on the original receive wallet and blocks replacement when paid or unknown; an unpaid replacement retains the approved amount. Current shop prices must equal the placed order amount before any invoice is sent. Price/rate differences require a new agreed order until an amendment approval flow exists.
 
 | "Unread messages" appears below the newest DM, or remains after everything is read
 | React Native's inverted list cells use `column-reverse`, so a Fragment containing the divider and message reverses their visual order. Keep them inside a normal-column `View` (`ConversationScreen.tsx`). `utils/unreadDivider.ts` selects real incoming messages in reading order, excluding local device notices, failed invites and date headers. The shared `useChatReadPosition` hook keeps the opening boundary while unread messages remain and retires it when the live count reaches zero, for both DMs and groups. Do not recompute the boundary from the advancing live marker on every viewability report.
 
 | Live DM logs `dropped by follow-gate` for someone in the newest Nostr follow list (#1458)
 | The old contact loader skipped kind-3 reads for 24 hours on a fresh cache; its stale-cache refresh also kept the first relay response and ignored newer responses. Contact hydration now reconciles bounded kind-3 reads across user read relays and metadata indexers, selects by created_at (lowest event id on ties), and stores the follows and event version together. The dev log `[Nostr] follow set: N follows (kind-3 <created_at>)` identifies the adopted list. The live kind-4 and kind-1059 paths share an explicit hydration gate: cache paint does not mark follows ready. Incoming events (including old kind-4 backlog, silently) defer until reconciliation finishes; only fresh inbound arrivals carry notifications. After 15 seconds offline, buffered cached friends replay; unmatched entries remain in the capped recovery buffer so a slower reconciliation can still surface them. Reconciliation replays matches once and clears genuine strangers. Dev gate logs include partner prefix, follow count and hydration state for drops, or wire-envelope kind for deferrals. Comparisons use canonical hex keys. Round 2 logged disk adoption before `finish` scheduled the React contacts/readiness transition; live refs and replay depended on its later passive effect, so adoption could leave the gate stale. Adoption now synchronously publishes the account-owned set to both live paths, marks their shared hydration ref ready and drains the buffer directly (including already-known ids). Delayed UI renders cannot overwrite that set. The same adoption logs `[Nostr] follow-gate replay: N released, M dropped`; deferrals log `partner`, envelope `kind`, `follows`, `hydrated` and `inSet`. Round 3 lost pending entries because `nostrLiveDmSub` cleared the buffer on every subscription teardown, including startup relay-list re-opens. The module-level canonical follow-gate store now owns both refs and deferrals per viewer; only account switch/sign-out resets it. Adoption updates the canonical set, logs `follow set`, then replays. Every deferral includes `buffered=N`, and replay logs `start buffered=N` before released/dropped totals. A newly registered replay callback also drains entries if hydration finished while the sub was closed. Regressions: `src/contexts/useLiveFollowGate.test.ts` and `src/contexts/nostrLiveDmSubFollowGate.test.ts`. Regression: `src/services/contactFollowFreshness.test.ts` uses simulated relay responses, with no live relay access.
+
+| Replies from someone you don't follow vanish from an open thread after you reply (#1623)
+| Opening a thread fetches with the follow gate bypassed, so the first message shows and you can reply, but live arrivals went through `gateLiveDm`, which dropped a non-followed partner once follows had loaded. Their later messages and reactions never appeared (the dev log showed `dropped by follow-gate`). Sending a text or file message to someone now counts as accepting them: `src/services/dmRepliedPartners.ts` loads who you've messaged from the store (`selectRepliedConversations`, kinds 4 / 14 / 15, from you) and tracks new sends, and the live kind-4 / kind-1059 gates, the inbox refresh's store step and the background watch all pass those partners. The Messages list keeps its own trust tiers, so the thread still doesn't appear there for a non-followed partner. Regressions: `src/services/dmRepliedPartners.test.ts`, `src/contexts/liveDmRumorSurfaceReplied.test.ts`.
 
 | Boltz reverse swap claim broadcast fails with "mandatory-script-verify-flag-failed (Witness program hash mismatch)"
 | The Taproot internal key for Boltz v2 swaps is a MuSig2 aggregate of Boltz's key and the user's key — in a specific order. Per Boltz docs, **"Boltz's public key always coming first"**: for reverse swaps that means `keyAggregate([refundPubKey, claimPubKey])` (Boltz's refund key first, user's claim key second; **not sorted, not the other way round, not just refundPubKey alone**). Keys must be 33-byte compressed, aggregated via `@scure/btc-signer`'s `keyAggregate` + `keyAggExport`, then used as the x-only internal key when computing the Taproot tweak. See `boltzService.ts` `claimSwap()` and the Boltz docs at https://api.docs.boltz.exchange/claiming-swaps.html. Confirmed against the chain by computing `p2tr(internalKey, [claimLeaf, refundLeaf], undefined, true)` from `@scure/btc-signer` and matching its `.script` to the on-chain lockup scriptPubKey.
@@ -714,39 +746,27 @@ done &
 *Symptom in our app:* `ExploreHomeScreen` mini-map shows "Locating you…" indefinitely, the "Places near you" rail shows "Grant location to discover Bitcoin-accepting shops near you" even after the OS-level permission was granted, and `MapScreen` opens but stays at the world view (no recentre). +
 *History note:* during the Explore-tab PR's screenshot pass we hit this on a Medium_Phone API 36.1 AVD with `emu geo fix` returning OK but no fix ever reaching the app. The Maestro screenshot tour (`.maestro/ui/flow-104-explore-tour.yaml`) reproduces it. The seed coords `0.04039, 52.28897` (Ladywalk, Longstanton, Cambridge CB24 3ED) were chosen to match the live test event published earlier in the PR (kind 37516, geohash u1212vz).
 
-| Receive sheet slow to mark invoice as paid — fast `lookupInvoice` poll
-never fires settlement, only the slow balance-diff fallback eventually
-catches it (~30 s – 3 min lag, see #553)
-| The `expectPayment` poll calls `nwcService.lookupInvoice` every 1 s and
-checks the returned `paid` flag. Two non-obvious gotchas around the result
-shape: +
-**(1) WebLN vs NIP-47.** We use `NostrWebLNProvider` from `@getalby/sdk`,
-whose `lookupInvoice` translates the underlying NIP-47 `Nip47Transaction`
-response into the **WebLN** `LookupInvoiceResponse` shape. So *even though
-LNbits' nwcprovider correctly emits the spec-compliant
-`{type, invoice, settled_at, payment_hash, …}`*, what we receive is
-`{preimage, paymentRequest, paid}`. A predicate that only checks
-`result.settled_at` or `result.state` is dead code on this path and will
-never fire — every tick returns `false`, and settlement only catches via
-the slow balance-diff fallback. Fix: check `result.paid === true`. +
-**(2) Field rename.** WebLN names the bolt11 field `paymentRequest`, not
-`invoice`. Returning `result.invoice` to consumers gives them `undefined`
-forever. `nwcService.lookupInvoice` maps `paymentRequest → invoice` once
-inside the function, so callers can keep using `.invoice`. +
-**Where the layer-confusion bites:** the Alby SDK's *type declaration*
-for `NWCClient.lookupInvoice` returns `Nip47Transaction` (with
-`settled_at`/`state`), but we don't call that — we call
-`NostrWebLNProvider.lookupInvoice`, which returns the WebLN shape. The
-type cast on the result must reflect the WebLN shape, not the NIP-47
-spec. If you ever refactor to the raw `NWCClient`, flip both the field
-names AND the settlement predicate. +
-**Diagnostic recipe** if this regresses: temporarily add
-`console.warn('keys:', Object.keys(result), 'raw:', JSON.stringify(result));`
-inside `nwcService.lookupInvoice` after the call resolves, then issue a
-small test invoice and watch `adb logcat | grep '\[NWC lookupInvoice\]'`
-— the wire shape will tell you immediately whether you're on the WebLN
-or NIP-47 path. Cross-reference: PR #555 (`fix(nwc): cap lookupInvoice
-reply timeout`).
+| Seller order shows Paid for an expired unpaid invoice, or receive settlement is misclassified
+| `NostrWebLNProvider.lookupInvoice` reduces the wallet's raw NIP-47 response to
+`paid: !!settled_at`, dropping state and payment-hash evidence. A truthy field
+alone cannot prove payment. `nwcService.lookupInvoice` now calls the raw
+`provider.client.lookupInvoice` and validates a positive integer `settled_at`,
+`state === 'settled'` when supplied, the requested payment hash, and a preimage
+whose SHA-256 matches that hash. For responses without `state`, LNbits can
+return both the real incoming preimage and `settled_at = created_at` for an
+expired failed invoice. Confirm these responses through bounded raw
+`list_transactions` with `type: incoming` and `unpaid: false`; require the
+same payment hash and a settlement timestamp in that successful history.
+An unsupported, failed or missing list match stays unknown and cannot
+permit replacement. The settlement cache uses a new version and local seller
+paid records require verification version 2, discarding earlier false positives.
+Any returned BOLT11 must match too. Errors,
+contradictory states and missing proof never report paid. Seller records retain
+`settledAt` and the verified preimage; loading repairs old unproven `paidAt` and
+`confirmedAt` markers while retaining invoice and wallet bindings. Regression
+coverage: `nwcInvoiceSettlement.test.ts`, `nwcService.test.ts`,
+`sellerInvoiceStore.test.ts` and `useSellerInvoice.test.tsx`.
+
 
 | `[Perf]` / `[PerfTab]` / `[PerfBlock]` log lines missing on a real device
 | Production release builds strip every `console.log` via `babel.config.js`'s `transform-remove-console` plugin. `src/utils/perfLog.ts` is gated by the same `__DEV__ \|\| EXPO_PUBLIC_KEEP_PERF_LOGS === '1'` flag, so the whole module dead-code-eliminates in plain release builds. **The preview profile (`eas.json`) sets `EXPO_PUBLIC_KEEP_PERF_LOGS=1`** — so install the preview APK (`com.lightningpiggy.app.preview`), not the production one, when you need logcat-based perf attribution on a real device. `adb -s <serial> logcat -v time '*:S' ReactNativeJS:V` filters down to just JS console output.
@@ -944,6 +964,17 @@ ln -s <main-checkout>/node_modules <worktree>/node_modules
 A symlink is fine for Jest. For a worktree that serves Metro to an emulator,
 install dependencies locally instead (see "Dynamic imports fail in an emulator
 worktree with shared dependencies" above).
+
+=== Plain-image Jest test downloads but never resolves an image URI
+
+If `remoteMediaRendering.test.tsx` fetches once but never calls `onResolved`,
+check its account setup. `useImageMediaUri` checks the captured account session
+after the download, including for plain images. Setting only
+`setRemoteMediaOwner` leaves that session invalid. Initialise the active pubkey,
+decrypted-media owner and remote-media owner to the same account, matching
+`useActiveNostrAccount` and `useIdentityMemoryReset` in the app. Keep the session
+guard intact; the rendering test should assert both the callback and the local
+URI passed to the image.
 
 === A blocked Jest storage mock exhausts the Node heap
 
@@ -1724,3 +1755,102 @@ Marmot networks capture the session owner's lockdown at construction; inbox
 lookups, anonymous kind-445 messages, Welcomes and key packages all use it
 through asynchronous waits and account switches. The Nostr network settings
 show the effective LAN destinations for every relay list during lockdown.
+
+=== Auth-only relay reads finish empty or report an unhandled AUTH send rejection
+
+In nostr-tools 2.23.3, CLOSED leaves a subscription's EOSE timer running.
+A slow NIP-42 signer can let that timer finish a one-shot read empty or close
+its authenticated replacement. `relayReqTransport` invalidates callbacks from
+each retired physical request before awaiting AUTH.
+
+The SDK also ignores the promise returned by AUTH `send()`. A disconnect
+while signing retains the challenge, so checking only the challenge can send
+on a closed connection and expose the signed event in an unhandled rejection.
+`relayAuth` captures the originating socket/connection, cancels signing on its
+close event, and guards the AUTH send through the SDK's existing OK waiter.
+Send failures clear that waiter and reject with a sanitized error; late signer
+completion and reconnects cannot authenticate the retired socket.
+
+
+=== strfry auth-only reads never authenticate
+
+strfry can close a restricted REQ with
+`ERROR: auth-required: this event may only be read by its recipients`.
+Checking only the start of the reason misses its `ERROR:` wrapper.
+`relayReqTransport` recognises `auth-required:` at colon-separated token
+boundaries, case-insensitively; `relayQuery` does the same for authentication
+and `restricted:` refusals so failed reads cannot appear to succeed empty.
+
+nostr-tools retains AUTH challenges received on connect, before any CLOSED.
+The transport uses that challenge when the first auth-required CLOSED arrives,
+signs once, and re-arms once after successful AUTH. A second auth-required or
+restricted CLOSED ends the read without another authentication attempt.
+
+=== Rebasing seller order ingest onto buyer lifecycle admission
+
+The buyer and seller branches both change the shared NIP-17 live/backfill
+paths. Keep lifecycle admission scoped to the buyer's placed order and its
+seller; incoming type-1 seller orders bypass the Messages follow gate for
+storage but still consume the persistent admission budget. A buyer's receipt
+or cancellation must match an incoming placed order from that buyer with the
+same order ID (`hasIncomingOrder`); no local invoice is required. Keep order history
+paged by placed orders, and signal an open conversation after persistence,
+even when Only friends hides the order preview. Contact fields belong only
+to type-1 orders and must stay out of inbox entries and notifications.
+
+In Jest, decoded order fixtures need the author's `pubkey` and recipient
+`p` tag for persistent admission. Clear AsyncStorage between cases so a
+completed reservation in one test does not suppress another test's rumor.
+
+Conversation order navigation seeds Explore home, the order list and the
+selected detail so Back returns through the list. Tests of View order must
+expect the nested `state.routes` target from `orderNavigationTarget`, including
+the buyer/seller counterparty, rather than a direct `screen` target.
+
+=== Buyer orders show Awaiting invoice after the seller sent a payment request
+
+Check the payment request in the app's encrypted order history and inspect only
+its parsed amount and BOLT11 expiry in development diagnostics. Seller
+`Awaiting payment` records can outlive the invoice: the buyer correctly returns
+to `Awaiting invoice` once its BOLT11 expires. Do not bypass expiry or change the
+device clock to obtain a `Pay now` screenshot. A replacement requires an
+explicit seller action.
+
+There is also a distinct cold-ingest failure: lifecycle admission checks the
+stored placed order before the batch has persisted it. Retry rejected lifecycle
+updates once after persisting the batch, reusing decoded rumors and retaining
+the account, counterparty and order-ID checks. Cover both arrival orders in
+regression tests; a live-ingest test with an already stored order misses this
+failure.
+
+=== Seller replacement warning shows a missing Cancel translation
+
+If the wallet-check warning renders a missing `common.cancel` translation,
+use the existing `market.sell.cancel` key, which is translated in every
+supported locale. Key-only translation mocks can hide this error; verify
+alert button keys against the locale files when reviewing the warning.
+
+== Shared Market listing appears as a raw naddr in chat (#1598)
+
+A listing share contains a title followed by a `nostr:naddr` for kind 30402.
+The share helper, NIP-17 rumor and local sent row preserve the newline;
+delivery acknowledgement only changes the footer, not rich-card selection.
+A title and reference on the same line previously missed the standalone-line
+parser. The parser now also accepts a listing as the final whitespace token,
+while references embedded inside prose remain text. Existing standalone
+references and surrounding warnings retain their original order.
+
+A chat listing always paints a titled product placeholder until resolution,
+including offline and pending sends. Resolution checks the active account's
+loaded and persisted Market snapshots before the bounded, verified embed
+batch and its relay hints. Focus cleanup removes the reader; when the last
+reader of a batch leaves, both the initial lookup and seller reconciliation
+are aborted. Missing results keep the placeholder instead of a web-link-only
+unavailable state.
+
+== Market shortcut shows My shop with only expired cached listings (#1617)
+
+`loadedMarketSnapshots` can retain signed listings after their expiration.
+Apply `unexpiredMarketProducts` before checking cached listing ownership in
+`useKnownOwnListings`, as other cache consumers do. Regression coverage in
+`useKnownOwnListings.test.tsx` checks expired, active and non-expiring listings.

@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback } from 'react';
 import * as nostrService from '../services/nostrService';
 import { fetchReactions, fetchReactionDeletions } from '../services/nostrReactions';
@@ -78,7 +79,13 @@ export function useReactionActions({
   const getReactionPublishRelays = useCallback(
     (extraRelays: readonly string[] = []): string[] => {
       const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      return [...new Set([...writeRelays, ...nostrService.DEFAULT_RELAYS, ...extraRelays])];
+      return [
+        ...new Set([
+          ...writeRelays,
+          ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS),
+          ...extraRelays,
+        ]),
+      ];
     },
     [relays],
   );

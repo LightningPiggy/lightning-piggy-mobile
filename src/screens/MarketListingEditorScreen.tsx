@@ -339,7 +339,6 @@ const MarketListingEditorScreen: React.FC<Props> = ({ navigation, route }) => {
         title={editDTag ? t('market.sell.editor.editTitle') : t('market.sell.editor.newTitle')}
         backLabel={t('market.sell.back')}
         onBack={() => navigation.goBack()}
-        styles={styles}
         testID="listing-editor-back"
       />
       {!draft ? (

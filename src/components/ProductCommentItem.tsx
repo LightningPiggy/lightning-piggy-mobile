@@ -10,6 +10,8 @@ import { FeedbackActionsButton, FeedbackActionsRow } from './FeedbackActions';
 import ProductCommentEditor from './ProductCommentEditor';
 
 interface Props {
+  canReply: boolean;
+  onReply: (comment: NostrEvent) => void;
   comment: NostrEvent;
   styles: Styles;
   /** The signed-in user wrote it — only then are Edit / Delete offered. */
@@ -35,6 +37,8 @@ interface Props {
  */
 const ProductCommentItem: React.FC<Props> = ({
   comment,
+  canReply,
+  onReply,
   styles,
   isMine,
   menuOpen,
@@ -86,6 +90,15 @@ const ProductCommentItem: React.FC<Props> = ({
       ) : (
         <Text style={styles.itemText}>{comment.content}</Text>
       )}
+      {canReply && !editing ? (
+        <Pressable
+          onPress={() => onReply(comment)}
+          accessibilityRole="button"
+          testID={`comment-reply-${comment.id}`}
+        >
+          <Text style={styles.showMoreText}>{t('sellerActivity.replyAction')}</Text>
+        </Pressable>
+      ) : null}
       {isMine && menuOpen && !editing ? (
         <FeedbackActionsRow
           kind="comment"

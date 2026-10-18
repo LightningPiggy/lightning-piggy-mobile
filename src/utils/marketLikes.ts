@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 // Market listing likes (#1541) — pure helpers, no I/O.
 //
 // A "like" is a public NIP-25 reaction (kind 7) on a kind-30402 listing,
@@ -53,7 +54,7 @@ export function listingCoordinate(event: Pick<Event, 'kind' | 'pubkey' | 'tags'>
 }
 
 /** Relay hint for a listing reference: where marketplace listings are read from. */
-export const LISTING_RELAY_HINT = MARKET_RELAYS[0];
+export const listingRelayHint = () => enabledAppRelays('market', MARKET_RELAYS)[0];
 
 const tagValues = (event: Pick<Event, 'tags'>, name: string) =>
   event.tags.filter((t) => t[0] === name && typeof t[1] === 'string').map((t) => t[1]);

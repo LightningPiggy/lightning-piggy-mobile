@@ -1,3 +1,4 @@
+import { useSellerActivityChecks } from '../hooks/useSellerActivityChecks';
 import { useAccountState } from '../contexts/useAccountState';
 import { useLocale } from '../contexts/LocaleContext';
 import React, { useCallback, useMemo } from 'react';
@@ -34,6 +35,7 @@ import { createNotificationsScreenStyles } from '../styles/NotificationsScreen.s
 const EMPTY_WRAP_TARGETS = new Map<string, { pubkey: string; protocol: DmProtocol }>();
 
 export default function NotificationsScreen() {
+  useSellerActivityChecks('focus');
   const { formatLocale } = useLocale();
   const colors = useThemeColors();
   const t = useTranslation();

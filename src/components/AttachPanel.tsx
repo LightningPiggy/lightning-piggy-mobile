@@ -10,8 +10,10 @@ import {
   Smile,
   BarChart3,
   Mic,
+  FileText,
   Wallet,
 } from 'lucide-react-native';
+import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createAttachPanelStyles } from '../styles/AttachPanel.styles';
 
@@ -34,6 +36,7 @@ interface Props {
   onSendInvoice?: () => void;
   onShareContact?: () => void;
   onSendImage?: () => void;
+  onSendFile?: () => void;
   onTakePhoto?: () => void;
   onSendGif?: () => void;
   // Optional: opens the PollComposerSheet. Omitted (= tile hidden) when
@@ -86,6 +89,7 @@ const AttachPanel: React.FC<Props> = ({
   onSendInvoice,
   onShareContact,
   onSendImage,
+  onSendFile,
   onTakePhoto,
   onSendGif,
   onSharePoll,
@@ -94,6 +98,7 @@ const AttachPanel: React.FC<Props> = ({
   walletDisabled,
   walletAccessibilityLabel,
 }) => {
+  const { t } = useLocale();
   const colors = useThemeColors();
   const styles = useMemo(() => createAttachPanelStyles(colors), [colors]);
 
@@ -120,6 +125,14 @@ const AttachPanel: React.FC<Props> = ({
         onPress: onSendImage,
         testID: 'attach-send-image',
         accessibilityLabel: 'Send an image from the gallery',
+      },
+      onSendFile && {
+        key: 'file',
+        label: t('messageBubble.file'),
+        icon: <FileText size={26} color={colors.white} />,
+        onPress: onSendFile,
+        testID: 'attach-send-file',
+        accessibilityLabel: t('messageBubble.file'),
       },
       onSendGif && {
         key: 'gif',

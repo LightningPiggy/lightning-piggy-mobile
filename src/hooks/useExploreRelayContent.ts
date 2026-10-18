@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { joinExploreByAuthorFetch } from '../utils/exploreFetchGuard';
 import {
+  type NearbyCachesCompletion,
   fetchCachesByAuthor,
   subscribeNearbyCaches,
   subscribeNearbyEvents,
@@ -14,7 +15,8 @@ import {
   peekCachedEventsSync,
 } from '../services/nostrPlacesStorage';
 import { type ParsedCache, type ParsedEvent } from '../services/nostrPlacesService';
-import { encodeGeohash, geohashNeighbours } from '../utils/geohash';
+import { decodeGeohash, encodeGeohash, geohashNeighbours, haversineMetres } from '../utils/geohash';
+import { deriveGeocacheRailState } from '../utils/geocacheRailState';
 import { isFutureEvent } from '../utils/futureEvent';
 import { isHiddenInProd, visibleCaches, visibleEvents } from '../utils/exploreContentFilter';
 import { usePersistCaches, usePersistEvents } from './useExplorePlacesPersist';
@@ -22,8 +24,14 @@ import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { useFocusEffect } from '@react-navigation/native';
 import type { LiveUserLocation } from './useLiveUserLocation';
 
+export const CACHE_BACKFILL_TARGET = 10;
+
 /** Owns Explore's coalesced relay data and disk hydration. */
-export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey: number) {
+export function useExploreRelayContent(
+  pos: LiveUserLocation | null,
+  refreshKey: number,
+  maxDistanceMetres: number | null = null,
+) {
   // ----- NIP-GC caches + NIP-52 events (live subs) ------------------------
 
   // Web-of-trust filter — kept in a ref so the subscription callbacks
@@ -201,6 +209,11 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
     },
     [],
   );
+  const cachesRef = useRef(caches);
+  useLayoutEffect(() => {
+    cachesRef.current = caches;
+  }, [caches]);
+  const [cacheCompletion, setCacheCompletion] = useState<NearbyCachesCompletion | null>(null);
   const subsCloserRef = useRef<(() => void)[]>([]);
   // Gate re-subscription on coarse movement (~500 m via 0.005° quantisation)
   // via the posBucketKey in the effect's deps below — NOT a body-level skip:
@@ -230,8 +243,9 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
       // timer that fires after the cleanup. Mirrors NostrContext.tsx's
       // DM inbox precedent.
       let cancelled = false;
-      // Caches sit at precision 5 (~5 km) — geocaching is inherently
-      // hyper-local. Events broaden to precision 3 (~150 km) so a rural
+      setCacheCompletion(null);
+      // Caches start at precision 5 and widen to 3 when sparse.
+      // Events use precision 3 (~150 km) so a rural
       // user catches the nearest city's Bitcoin meetup; most NIP-52
       // publishers emit g tags at every precision 3..9.
       //
@@ -241,30 +255,90 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
       // which returned only the user's own truncation chain — caches
       // hidden in an adjacent precision-5 tile (e.g. 500 m across a
       // tile boundary) never matched the `#g` filter.
-      const cachePrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 5));
       const eventPrefixes = geohashNeighbours(encodeGeohash(posLat, posLon, 3));
 
-      subsCloserRef.current.push(
-        subscribeNearbyCaches(
-          cachePrefixes,
+      // Each query completes within eight seconds. Allow all three stages
+      // to run even when the initial query completes at its deadline.
+      const received = new Map<string, ParsedCache>();
+      let searchDone = false;
+      let allFailed = true;
+      let closeWidening: (() => void) | undefined;
+      const finish = () => {
+        if (cancelled || searchDone) return;
+        searchDone = true;
+        clearTimeout(deadline);
+        closeWidening?.();
+        flushPendingCaches();
+        flushCounts();
+        setCacheCompletion({ allRelaysFailed: allFailed });
+      };
+      const deadline = setTimeout(() => {
+        // A deadline alone is inconclusive, just like the nearby query.
+        allFailed = false;
+        finish();
+      }, 3 * 8000);
+      subsCloserRef.current.push(() => clearTimeout(deadline));
+      const query = (precision: number) => {
+        if (cancelled || searchDone) return;
+        const startedAt = performance.now();
+        let completed = false;
+        let close: (() => void) | undefined;
+        const prefixes = geohashNeighbours(encodeGeohash(posLat, posLon, precision));
+        close = subscribeNearbyCaches(
+          prefixes,
           (c) => {
-            if (cancelled) return;
-            // Hide test-account ("Piggy") Piglets in prod (kept in dev/preview).
+            if (cancelled || (precision < 5 && (completed || searchDone))) return;
             if (isHiddenInProd(c.hiderPubkey)) return;
-            // WoT filter: silently drop caches from pubkeys outside the
-            // trust graph (an unverified cache could be a phishing LNURL
-            // or, worse, a physical lure). Surfaced as a count instead so
-            // users know they exist without being lured into inspecting them.
             if (!isTrustedRef.current(c.hiderPubkey)) {
               countUntrusted('caches');
               return;
             }
+            const previous = received.get(c.coord);
+            if (!previous || previous.createdAt < c.createdAt) received.set(c.coord, c);
             enqueueCache(c.coord, c);
           },
           undefined,
-          { limit: 200 },
-        ),
-      );
+          { limit: precision === 5 ? 200 : 100 },
+          (result) => {
+            if (cancelled || searchDone || completed) return;
+            completed = true;
+            allFailed = allFailed && result.allRelaysFailed;
+            if (precision < 5) {
+              closeWidening = undefined;
+              close?.();
+            }
+            flushPendingCaches();
+            flushCounts();
+            // Include pending relay items before React commits the coalesced
+            // flush, retaining the same newest-wins rule as the caches Map.
+            const known = new Map(cachesRef.current);
+            for (const [coord, cache] of received) {
+              const previous = known.get(coord);
+              if (!previous || previous.createdAt < cache.createdAt) known.set(coord, cache);
+            }
+            // Only candidates in the searched cells stop widening: cached or
+            // by-author listings on another continent must not hide closer ones.
+            const candidateCount = [...known.values()].filter(
+              (cache) =>
+                !isHiddenInProd(cache.hiderPubkey) &&
+                cache.geohash &&
+                prefixes.some((prefix) => cache.geohash!.startsWith(prefix)),
+            ).length;
+            console.log(
+              `[PerfBlock] Explore cache search: precision=${precision} candidates=${candidateCount} elapsed=${Math.round(performance.now() - startedAt)}ms`,
+            );
+            if (candidateCount < CACHE_BACKFILL_TARGET && precision > 3) query(precision - 1);
+            else finish();
+          },
+        );
+        // Also handles a synchronous completion from a relay adapter.
+        if (precision < 5) {
+          if (completed || searchDone) close();
+          else closeWidening = close;
+        }
+        subsCloserRef.current.push(close);
+      };
+      query(5);
       subsCloserRef.current.push(
         subscribeNearbyEvents(eventPrefixes, (e) => {
           if (cancelled) return;
@@ -296,6 +370,7 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
     }, [
       posBucketKey,
       refreshKey,
+      signedInPubkey,
       flushPendingCaches,
       flushPendingEvents,
       enqueueCache,
@@ -305,10 +380,39 @@ export function useExploreRelayContent(pos: LiveUserLocation | null, refreshKey:
     ]),
   );
 
+  const sortedCaches = useMemo(() => {
+    const lowerPubkey = signedInPubkey?.toLowerCase() ?? null;
+    const haveFix = typeof posLat === 'number' && typeof posLon === 'number';
+    // With a fix, every known cache competes on distance, including own caches.
+    // Keep the existing radius/own-first behaviour only when location is absent.
+    const items = [...caches.values()]
+      .filter((cache) => !isHiddenInProd(cache.hiderPubkey))
+      .map((cache) => {
+        const center = cache.geohash ? decodeGeohash(cache.geohash) : null;
+        const distance =
+          haveFix && center
+            ? haversineMetres({ lat: posLat, lon: posLon }, { lat: center.lat, lon: center.lng })
+            : Number.POSITIVE_INFINITY;
+        const isOwn = lowerPubkey !== null && cache.hiderPubkey.toLowerCase() === lowerPubkey;
+        return { cache, distance, isOwn };
+      })
+      .filter(
+        (item) => haveFix || maxDistanceMetres === null || item.distance <= maxDistanceMetres,
+      );
+    items.sort((a, b) => {
+      if (!haveFix && a.isOwn !== b.isOwn) return a.isOwn ? -1 : 1;
+      return a.distance - b.distance;
+    });
+    // The horizontal teaser retains its existing cap; See all opens the full list.
+    return items.slice(0, 50);
+  }, [caches, posLat, posLon, maxDistanceMetres, signedInPubkey]);
+
   return {
     caches,
+    sortedCaches,
     events,
     cachesArr,
+    cacheRailState: deriveGeocacheRailState(sortedCaches.length, pos !== null, cacheCompletion),
     eventsArr,
     signedInPubkey,
     untrustedCacheCount,

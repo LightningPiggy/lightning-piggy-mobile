@@ -1,12 +1,12 @@
 appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
-name: Marmot invite received — Middle Piggy starts an MLS DM, Big auto-joins
+name: Marmot invite received — Middle Piggy starts an MLS DM, Big accepts it
 ---
 # The inbound half: the peer bot, as Middle Piggy (`4b2fcb4e…`), creates a
 # White Noise-shaped Marmot DM to Big Piggy, gift-wraps the kind-444 Welcome
 # to Big's inbox and sends a message. Big (who follows Middle, so the
-# follow gate passes) must auto-join from the Welcome and show the message in
-# a Marmot thread — with an invite record in the NIP-17 thread — and can
-# reply over MLS.
+# follow gate passes) sees an "Invitation pending" row — every invite waits for
+# consent, as in White Noise — accepts it, and gets the message in a Marmot
+# thread, then replies over MLS.
 #
 # Prereqs: Big follows Middle; the bot is started with BOT_INITIATE_TO=<Big>.
 # Run: bash scripts/marmot-e2e.sh 129
@@ -18,13 +18,20 @@ name: Marmot invite received — Middle Piggy starts an MLS DM, Big auto-joins
     stopApp: false
 - tapOn:
     id: 'tab-messages'
+# Not joined until accepted: the invite waits above the inbox.
 - scrollUntilVisible:
     element:
-      id: 'conversation-row-4b2fcb4e.*:marmot'
+      text: 'Invitation pending'
     direction: UP
     timeout: 120000
+# Middle's invitation only: an earlier run's invite may still be pending.
 - tapOn:
-    id: 'conversation-row-4b2fcb4e.*:marmot'
+    id: 'marmot-invite-accept-.*'
+    childOf:
+      id: 'marmot-invite-row-.*'
+      containsDescendants:
+        - text: 'Middle Piggy'
+# Accepting a DM invite opens its Marmot thread.
 - extendedWaitUntil:
     visible:
       text: 'hello Big from Middle over MLS.*'

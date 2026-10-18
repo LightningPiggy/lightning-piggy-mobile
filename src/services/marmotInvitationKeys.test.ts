@@ -1,3 +1,7 @@
+import { forgetAppRelayPrefs, setAppRelayEnabled } from './appRelayPrefs';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { DEFAULT_RELAYS } from './nostrRelayDefaults';
+import { MARMOT_KEY_PACKAGE_RELAYS } from './marmotKeyPackageRelays';
 import {
   finalizeEvent,
   generateSecretKey,
@@ -211,4 +215,59 @@ describe('queryInvitationKeys', () => {
     expect(jest.getTimerCount()).toBe(0);
     jest.useRealTimers();
   });
+});
+
+test('inventory discovers 10051 destinations and exposes local publication failure', async () => {
+  await backend.set('keyPackageDiscovery', 'failed', 'true');
+  const fetch = jest.fn(async (_relays: string[], filter) => {
+    if (filter.kinds.includes(10051))
+      return [{ ...event('list'), kind: 10051, tags: [['relay', 'wss://key-package.example']] }];
+    return [];
+  });
+  const result = await loadInvitationKeys(owner, [], fetch);
+  expect(result.publicationFailed).toBe(true);
+  expect(fetch.mock.calls.some(([rs]) => rs.includes('wss://key-package.example'))).toBe(true);
+  expect(fetch.mock.calls.some(([rs]) => rs.includes('wss://relay.eu.whitenoise.chat'))).toBe(true);
+});
+
+test('reserves inventory slots for well-known relays with an oversized 10051', async () => {
+  const fetch = jest.fn(async (_relays: string[], filter) =>
+    filter.kinds.includes(10051)
+      ? [
+          {
+            ...event('list'),
+            kind: 10051,
+            tags: Array.from({ length: 20 }, (_, i) => ['relay', `wss://owner${i}.example`]),
+          },
+        ]
+      : [],
+  );
+  const result = await loadInvitationKeys(owner, [], fetch);
+  const targets = fetch.mock.calls.filter(([, f]) => f.kinds[0] === 30443).flatMap(([rs]) => rs);
+  expect(targets).toHaveLength(12);
+  expect(targets).toEqual(
+    expect.arrayContaining([
+      'wss://relay.eu.whitenoise.chat',
+      'wss://relay.us.whitenoise.chat',
+      'wss://relay.primal.net',
+    ]),
+  );
+  expect(result.partial).toBe(true);
+});
+
+test('hydrates invitation discovery and scan preferences for the owner after a switch', async () => {
+  for (const url of MARMOT_KEY_PACKAGE_RELAYS)
+    await setAppRelayEnabled(owner, 'marmot', url, false);
+  for (const url of DEFAULT_RELAYS) await setAppRelayEnabled(owner, 'default', url, false);
+  await forgetAppRelayPrefs(owner);
+  setCurrentUserPubkey(null);
+  const fetch = jest.fn(async (_relays: string[], _filter: unknown) => [] as NostrEvent[]);
+  await loadInvitationKeys(owner, ['wss://personal.example'], fetch);
+  for (const [targets] of fetch.mock.calls) {
+    expect(targets).toEqual(['wss://personal.example']);
+  }
+  expect(fetch).toHaveBeenCalledTimes(2);
+  for (const url of MARMOT_KEY_PACKAGE_RELAYS) await setAppRelayEnabled(owner, 'marmot', url, true);
+  for (const url of DEFAULT_RELAYS) await setAppRelayEnabled(owner, 'default', url, true);
+  await forgetAppRelayPrefs(owner);
 });

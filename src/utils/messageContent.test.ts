@@ -8,6 +8,20 @@
 // resolve under jest-expo. Mock the single helper we depend on with a
 // regex stand-in for valid mainnet addresses (bc1q… bech32 / 1… P2PKH
 // / 3… P2SH). Real interop coverage lives in the on-device path.
+import {
+  extractBitcoinUri,
+  extractInvoice,
+  isSecretModeTrigger,
+  extractAudioUrl,
+  parseVoiceNote,
+  parseImageMessage,
+  encodeEncryptedFileUrl,
+  deriveGroupWireKind,
+  extractSharedContact,
+} from './messageContent';
+import * as nip19ForContacts from 'nostr-tools/nip19';
+import { encodeMarmotMediaUrl } from './encryptedFileUrl';
+
 jest.mock('../services/boltzService', () => ({
   isBitcoinAddress: (input: string): boolean => {
     const trimmed = input.trim();
@@ -28,20 +42,6 @@ const mockBolt11Decode = jest.fn((..._a: unknown[]) => ({
   sections: [] as { name: string; value: unknown }[],
 }));
 jest.mock('light-bolt11-decoder', () => ({ decode: (...a: unknown[]) => mockBolt11Decode(...a) }));
-
-import {
-  extractBitcoinUri,
-  extractInvoice,
-  isSecretModeTrigger,
-  extractAudioUrl,
-  parseVoiceNote,
-  parseImageMessage,
-  encodeEncryptedFileUrl,
-  deriveGroupWireKind,
-  extractSharedContact,
-} from './messageContent';
-import * as nip19ForContacts from 'nostr-tools/nip19';
-import { encodeMarmotMediaUrl } from './encryptedFileUrl';
 
 // A syntactically-shaped bolt11 (the BOLT11 spec's 2500u example). Long enough
 // to satisfy the {50,} floor; its real bech32 validity is irrelevant here
@@ -401,6 +401,11 @@ describe('extractInvoice (bolt11 detection → in-chat invoice card, #948)', () 
     expect(inv.description).toBe('Order #abc123');
     expect(inv.expiresAt).toBe(timestamp + 3600);
     expect(inv.paymentHash).toBe('deadbeef');
+  });
+
+  it('uses the BOLT11 one-hour default when the expiry tag is absent', () => {
+    mockBolt11Decode.mockReturnValue({ sections: [{ name: 'timestamp', value: 1_700_000_000 }] });
+    expect(extractInvoice(SAMPLE_BOLT11)?.expiresAt).toBe(1_700_003_600);
   });
 
   it('degrades to raw-only (still detected/payable) when the decoder throws', () => {

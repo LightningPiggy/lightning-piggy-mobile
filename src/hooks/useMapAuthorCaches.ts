@@ -1,3 +1,4 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
 import { useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
@@ -13,6 +14,7 @@ export function useMapAuthorCaches(args: {
   flush: () => void;
 }): void {
   const { pubkey, relays, enqueue, flush } = args;
+  const relayScope = useAppRelayPrefs();
   const relayKey = JSON.stringify(
     [...new Set(relays.filter((r) => r.read).map((r) => r.url))].sort(),
   );
@@ -34,6 +36,7 @@ export function useMapAuthorCaches(args: {
       return () => {
         cancelled = true;
       };
-    }, [pubkey, relayKey, enqueue, flush]),
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- App relay defaults are read inside the service.
+    }, [pubkey, relayKey, relayScope, enqueue, flush]),
   );
 }

@@ -19,12 +19,14 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createMarketFilterBarStyles } from '../styles/MarketFilterBar.styles';
 import { perfLog } from '../utils/perfLog';
-import { MARKET_MODE_OPTIONS, type MarketMode } from '../utils/marketMode';
+import { marketModeRows, type MarketMode } from '../utils/marketMode';
 import { SATS_CURRENCY_CODE } from '../utils/currencyCode';
 
 interface Props {
   mode: MarketMode;
   onSelectMode: (mode: MarketMode) => void;
+  /** "Show experimental features" — unlocks friends-of-friends and All. */
+  experimental: boolean;
   /** Whether the filter panel is open. */
   visible: boolean;
   /** Close the panel (backdrop tap, Done, or Android back). */
@@ -92,9 +94,18 @@ const Chip: React.FC<{
  * selections up. The panel slides in from the right over a tap-to-dismiss
  * backdrop.
  */
+/** Per-mode label key and testID for the Sellers rows. */
+const SELLER_ROW: Record<MarketMode, { labelKey: string; testID: string }> = {
+  preferred: { labelKey: 'market.modes.preferred', testID: 'market-filter-sellers-preferred' },
+  wotFriends: { labelKey: 'market.filters.friends', testID: 'market-filter-sellers-friends' },
+  wotFof: { labelKey: 'market.filters.friendsOfFriends', testID: 'market-scope-fof' },
+  wotAll: { labelKey: 'market.filters.allSellers', testID: 'market-scope-all' },
+};
+
 const MarketFilterBar: React.FC<Props> = ({
   mode,
   onSelectMode,
+  experimental,
   visible,
   onClose,
   merchants,
@@ -209,47 +220,42 @@ const MarketFilterBar: React.FC<Props> = ({
             >
               <View style={styles.section} testID="market-filter-sellers">
                 <Text style={styles.sectionLabel}>{t('market.filters.sellers')}</Text>
-                {MARKET_MODE_OPTIONS.filter((option) => option.mode !== 'wotAll').map((option) => {
+                {marketModeRows(experimental).map(({ option, enabled }) => {
                   const selected = mode === option.mode;
-                  const label = t(
-                    option.mode === 'preferred'
-                      ? option.labelKey
-                      : option.mode === 'wotFriends'
-                        ? 'market.filters.friends'
-                        : 'market.filters.friendsOfFriends',
-                  );
-                  const id =
-                    option.mode === 'preferred'
-                      ? 'preferred'
-                      : option.mode === 'wotFriends'
-                        ? 'friends'
-                        : 'friends-of-friends';
+                  const { labelKey, testID } = SELLER_ROW[option.mode];
+                  const label = t(labelKey);
+                  // Locked: "Coming soon". Unlocked experimental scopes say so.
+                  const hint = !enabled
+                    ? t('market.filters.comingSoon')
+                    : option.experimental
+                      ? t('market.filters.experimental')
+                      : null;
                   return (
                     <TouchableOpacity
                       key={option.mode}
                       style={[
                         styles.sellerOption,
                         selected && styles.chipSelected,
-                        !option.enabled && styles.sellerOptionDisabled,
+                        !enabled && styles.sellerOptionDisabled,
                       ]}
                       onPress={() => {
-                        if (option.enabled) onSelectMode(option.mode);
+                        if (enabled) onSelectMode(option.mode);
                       }}
-                      disabled={!option.enabled}
+                      disabled={!enabled}
                       accessibilityRole="radio"
-                      accessibilityState={{ selected, disabled: !option.enabled }}
-                      accessibilityLabel={
-                        option.enabled ? label : t('market.modes.comingSoon', { label })
-                      }
-                      testID={`market-filter-sellers-${id}`}
+                      accessibilityState={{ selected, disabled: !enabled }}
+                      accessibilityLabel={enabled ? label : t('market.modes.comingSoon', { label })}
+                      testID={testID}
                       activeOpacity={0.7}
                     >
                       <View style={styles.sellerCopy}>
                         <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
                           {label}
                         </Text>
-                        {!option.enabled ? (
-                          <Text style={styles.sellerHint}>{t('market.filters.comingSoon')}</Text>
+                        {hint ? (
+                          <Text style={[styles.sellerHint, selected && styles.sellerHintSelected]}>
+                            {hint}
+                          </Text>
                         ) : null}
                       </View>
                       {selected ? <Check size={18} color={colors.white} strokeWidth={2.5} /> : null}

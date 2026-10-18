@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { Image } from 'expo-image';
+import { StyleSheet } from 'react-native';
 import MessageImageBubble from './MessageImageBubble';
 import { createMessageBubbleStyles } from '../styles/MessageBubble.styles';
 import { lightPalette } from '../styles/palettes';
@@ -15,6 +16,7 @@ jest.mock('expo-image', () => ({
 }));
 jest.mock('../services/remoteMediaCache', () => ({ resolveRemoteMedia: jest.fn() }));
 jest.mock('../services/decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
   peekDecryptedMedia: jest.fn(() => null),
   resolveDecryptedMedia: jest.fn(),
   DecryptedMediaCancelledError: class extends Error {},
@@ -96,4 +98,51 @@ it('forgets the resolved URI when the account changes with unchanged props', asy
   act(() => setActivePubkeyForWalletStorage('bob'));
   fireEvent.press(view.getByTestId('bubble'));
   expect(onOpen).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['1200x800', 1.5],
+  ['1x1000000', 0.6],
+  ['1000000x1', 1.8],
+  [undefined, 1],
+  ['0x100', 1],
+] as const)(
+  'keeps the full image footprint before and after reveal (dim=%s)',
+  async (dim, aspect) => {
+    const pending = deferred();
+    jest.mocked(resolveRemoteMedia).mockReturnValueOnce(pending.promise);
+    const ui = render(
+      <MessageImageBubble
+        {...bubble('https://example.com/landscape.png', jest.fn()).props}
+        image={{ ...image('https://example.com/landscape.png'), dim }}
+        autoLoad={false}
+      />,
+    );
+    const footprint = { width: '100%' as const, aspectRatio: aspect };
+    expect(ui.getByTestId('conversation-image-placeholder-m1')).toHaveStyle(footprint);
+    expect(resolveRemoteMedia).not.toHaveBeenCalled();
+    fireEvent.press(ui.getByTestId('bubble'));
+    expect(ui.getByTestId('bubble')).toHaveStyle({ width: 320 });
+    await act(async () => pending.resolve('file:///alice/landscape'));
+    expect(StyleSheet.flatten(ui.UNSAFE_getByType(Image).props.style)).toEqual(
+      expect.objectContaining(footprint),
+    );
+  },
+);
+
+it('keeps blocked images at the same full-width bounded footprint', () => {
+  const ui = render(
+    <MessageImageBubble
+      {...bubble('file:///blocked.png', jest.fn()).props}
+      image={{ ...image('file:///blocked.png'), dim: '1200x800' }}
+      autoLoad={false}
+    />,
+  );
+  expect(ui.getByTestId('conversation-image-placeholder-m1')).toHaveStyle({
+    width: '100%',
+    aspectRatio: 1.5,
+  });
+  expect(ui.getByText('messageBubble.blockedLink')).toBeTruthy();
+  fireEvent.press(ui.getByTestId('bubble'));
+  expect(resolveRemoteMedia).not.toHaveBeenCalled();
 });

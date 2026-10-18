@@ -1,7 +1,6 @@
 import BrandedSpinner from './BrandedSpinner';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
@@ -9,7 +8,6 @@ import {
   createPublishedRelayListsSectionStyles,
   type PublishedRelayListsSectionStyles,
 } from '../styles/PublishedRelayListsSection.styles';
-import type { RelayListPublishOutcome } from '../hooks/useRelayListEditor';
 import { useRelayListDraft } from '../contexts/RelayListEditorContext';
 import { useRelayReachability } from '../hooks/useRelayReachability';
 import RelaySettingsRow from './RelaySettingsRow';
@@ -19,8 +17,8 @@ import type { RelaySettingsParamList } from '../navigation/types';
 
 import { useNostr } from '../contexts/NostrContext';
 import NetworkSectionHeading from './NetworkSectionHeading';
-import PublishResult from './PublishResult';
-import type { RelayPublishResult } from '../services/nostrRelayLists';
+import RelayPublishSheet from './RelayPublishSheet';
+import { useRelayPublishSheet } from '../hooks/useRelayPublishSheet';
 
 type T = ReturnType<typeof useTranslation>;
 
@@ -146,24 +144,8 @@ export default function PublishedRelayListsSection({
     ...editor.nip65Draft.map((r) => r.url),
     ...editor.inboxDraft,
   ]);
-  const { pubkey, nip65Relays, userRelays, dmInboxRelays } = useNostr();
-  const [reportState, setReportState] = useState<{
-    results: RelayPublishResult[];
-    ownRelays: string[];
-  } | null>(null);
-  const activePubkey = useRef(pubkey);
-  activePubkey.current = pubkey;
-  useEffect(() => setReportState(null), [pubkey]);
-  const ownRelays = useMemo(
-    () => [
-      ...nip65Relays.map((r) => r.url),
-      ...userRelays.map((r) => r.url),
-      ...dmInboxRelays,
-      ...editor.nip65Draft.map((r) => r.url),
-      ...editor.inboxDraft,
-    ],
-    [nip65Relays, userRelays, dmInboxRelays, editor.nip65Draft, editor.inboxDraft],
-  );
+  const { pubkey } = useNostr();
+  const publishSheet = useRelayPublishSheet(pubkey);
   const navigation = useNavigation<NativeStackNavigationProp<RelaySettingsParamList>>();
   const openRelay = useCallback(
     (url: string, kind: 'nip65' | 'inbox') => {
@@ -172,46 +154,15 @@ export default function PublishedRelayListsSection({
     [navigation],
   );
 
-  const report = useCallback(
-    (outcome: RelayListPublishOutcome, ownAtPublish: string[], publishingPubkey: string | null) => {
-      if (publishingPubkey !== activePubkey.current) return;
-      if (!outcome.ok && (!outcome.results || outcome.error === 'superseded')) {
-        Alert.alert(
-          t('publishedRelays.notPublishedTitle'),
-          t(`publishedRelays.error.${outcome.error}`),
-        );
-        return;
-      }
-      setReportState({ results: outcome.results ?? [], ownRelays: ownAtPublish });
-    },
-    [t],
-  );
-
-  const confirmPublish = useCallback(
-    (which: 'nip65' | 'inbox') => {
-      Alert.alert(
-        t(
-          which === 'nip65'
-            ? 'publishedRelays.confirmNip65Title'
-            : 'publishedRelays.confirmInboxTitle',
-        ),
-        t('publishedRelays.confirmBody'),
-        [
-          { text: t('publishedRelays.cancel'), style: 'cancel' },
-          {
-            text: t('publishedRelays.publish'),
-            onPress: async () =>
-              report(
-                await (which === 'nip65' ? editor.publishNip65() : editor.publishInbox()),
-                ownRelays,
-                pubkey,
-              ),
-          },
-        ],
-      );
-    },
-    [editor, report, t, ownRelays, pubkey],
-  );
+  const publish = (which: 'nip65' | 'inbox') => {
+    void publishSheet.run(
+      t('relayPublishSheet.title', {
+        title: t(which === 'nip65' ? 'publishedRelays.nip65Title' : 'publishedRelays.inboxTitle'),
+      }),
+      which === 'nip65' ? editor.publishNip65 : editor.publishInbox,
+      'publishedRelays',
+    );
+  };
 
   return (
     <View testID="published-relay-lists">
@@ -221,7 +172,7 @@ export default function PublishedRelayListsSection({
         testID="nip65"
         spec="https://github.com/nostr-protocol/nips/blob/master/65.md"
       />
-      {reportState && <PublishResult {...reportState} />}
+      <RelayPublishSheet state={publishSheet} />
       <View style={styles.list} testID="nip65-relay-list">
         {editor.nip65Loading ? (
           <BrandedSpinner style={{ paddingVertical: 10 }} testID="nip65-loading" />
@@ -255,8 +206,8 @@ export default function PublishedRelayListsSection({
       />
 
       <PublishButton
-        onPress={() => confirmPublish('nip65')}
-        disabled={!editor.nip65Dirty || editor.nip65Loading}
+        onPress={() => publish('nip65')}
+        disabled={editor.nip65Loading || editor.nip65Draft.length === 0}
         busy={editor.publishing === 'nip65'}
         testID="nip65-publish"
         styles={styles}
@@ -301,8 +252,8 @@ export default function PublishedRelayListsSection({
       />
 
       <PublishButton
-        onPress={() => confirmPublish('inbox')}
-        disabled={!editor.inboxDirty || editor.inboxLoading}
+        onPress={() => publish('inbox')}
+        disabled={editor.inboxLoading || editor.inboxDraft.length === 0}
         busy={editor.publishing === 'inbox'}
         testID="inbox-publish"
         styles={styles}

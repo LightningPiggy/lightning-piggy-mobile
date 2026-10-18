@@ -40,7 +40,7 @@ it('encrypts and signs kind 4, announces its identity before publishing, and for
       expect(meta).toEqual({ eventId: event.id, kind: 4 });
       const delivery = pendingDelivery({ eventId: event.id, kind: 4, relays });
       finalize?.(delivery);
-      return { wrapsPublished: 1, errors: [], delivery };
+      return { wrapOutcomes: [], wrapsPublished: 1, errors: [], delivery };
     });
   const result = await sendNip04Message({
     senderPubkey: sender,

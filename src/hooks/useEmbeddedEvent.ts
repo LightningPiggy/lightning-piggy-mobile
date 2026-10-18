@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useAppRelayPrefs } from './useAppRelayPrefs';
+import { enabledAppRelays } from '../services/appRelayPrefs';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNostr } from '../contexts/NostrContext';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import {
@@ -20,6 +22,7 @@ export function useEmbeddedEvent(ref: EmbedRef): {
   loading: boolean;
 } {
   const { relays } = useNostr();
+  const relayScope = useAppRelayPrefs();
   const key = embedKey(ref);
   const readRelaysKey = useMemo(
     () =>
@@ -34,9 +37,13 @@ export function useEmbeddedEvent(ref: EmbedRef): {
     result: peekEmbed(key),
   }));
 
+  const relayPlan = `${relayScope}:${readRelaysKey}`;
+  const previousPlan = useRef(relayPlan);
   useEffect(() => {
+    const retryMissing = previousPlan.current !== relayPlan;
+    previousPlan.current = relayPlan;
     const cached = peekEmbed(key);
-    if (cached) {
+    if (cached && (cached.event || !retryMissing)) {
       setState((prev) =>
         prev.key === key && prev.result === cached ? prev : { key, result: cached },
       );
@@ -44,16 +51,20 @@ export function useEmbeddedEvent(ref: EmbedRef): {
     }
     setState({ key, result: undefined });
     let cancelled = false;
-    const readRelays = readRelaysKey ? readRelaysKey.split('|') : DEFAULT_RELAYS;
-    void resolveEmbed(ref, readRelays).then((result) => {
+    const controller = new AbortController();
+    const readRelays = readRelaysKey
+      ? readRelaysKey.split('|')
+      : enabledAppRelays('default', DEFAULT_RELAYS);
+    void resolveEmbed(ref, readRelays, controller.signal, retryMissing).then((result) => {
       if (!cancelled) setState({ key, result });
     });
     return () => {
       cancelled = true;
+      controller.abort();
     };
     // `ref` is identified by `key`; a new object for the same ref is a no-op.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, readRelaysKey]);
+  }, [key, readRelaysKey, relayPlan]);
 
   const result = state.key === key ? state.result : undefined;
   return { result, loading: result === undefined };

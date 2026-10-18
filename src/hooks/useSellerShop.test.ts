@@ -1,3 +1,9 @@
+import {
+  loadAppRelayPrefs,
+  setAppRelayEnabled,
+  forgetAppRelayPrefs,
+} from '../services/appRelayPrefs';
+import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
 import { act, renderHook } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { finalizeEvent, getPublicKey, type Event } from 'nostr-tools';
@@ -58,4 +64,20 @@ it('waits for GBP migration before offering ready seller forms', async () => {
   expect(readyCurrencies.length).toBeGreaterThan(0);
   expect(readyCurrencies.every((currency) => currency === 'GBP')).toBe(true);
   expect(await AsyncStorage.getItem(`market-seller-currency:${mockPubkey}`)).toBe('GBP');
+});
+
+it('rechecks a fresh shop snapshot when app preferences change but personal URLs do not', async () => {
+  await forgetAppRelayPrefs(mockPubkey);
+  setCurrentUserPubkey(mockPubkey);
+  jest.mocked(fetchSellerEvents).mockResolvedValue([]);
+  const h = renderHook(() => useSellerShop());
+  await act(async () => {});
+  expect(fetchSellerEvents).toHaveBeenCalledTimes(1);
+  await act(async () => loadAppRelayPrefs(mockPubkey));
+  expect(fetchSellerEvents).toHaveBeenCalledTimes(2);
+  await act(async () => setAppRelayEnabled(mockPubkey, 'market', 'wss://market.example', false));
+  expect(fetchSellerEvents).toHaveBeenCalledTimes(3);
+  h.unmount();
+  setCurrentUserPubkey(null);
+  await forgetAppRelayPrefs(mockPubkey);
 });

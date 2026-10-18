@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useMemo, useState } from 'react';
 import type { Event as NostrEvent } from 'nostr-tools';
 import { useNostr } from '../contexts/NostrContext';
@@ -55,7 +56,7 @@ export function usePublishProductFeedback(): UsePublishProductFeedback {
 
   const writeRelays = useMemo(() => {
     const r = relays.filter((x) => x.write).map((x) => x.url);
-    return r.length > 0 ? r : DEFAULT_RELAYS;
+    return r.length > 0 ? r : enabledAppRelays('default', DEFAULT_RELAYS);
   }, [relays]);
 
   const publish = useCallback(

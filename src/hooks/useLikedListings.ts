@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
@@ -24,7 +25,7 @@ export function useLikedListings() {
   const { pubkey, relays } = useNostr();
   const readRelays = useMemo(() => {
     const r = relays.filter((x) => x.read).map((x) => x.url);
-    return r.length > 0 ? r : DEFAULT_RELAYS;
+    return r.length > 0 ? r : enabledAppRelays('default', DEFAULT_RELAYS);
   }, [relays]);
   const [state, setState] = useState<State>({
     owner: null,

@@ -148,3 +148,15 @@ it('aborts a stalled stream at the deadline', async () => {
   await expect(fetchBounded('https://example.com/', options)).rejects.toThrow('timed out');
   expect(mockFetch.mock.calls[0][1].signal.aborted).toBe(true);
 });
+
+it('bounds optional HEAD metadata using the same URL/redirect policy without reading a body', async () => {
+  const res = response([], '3');
+  mockFetch.mockResolvedValue(res);
+  const result = await fetchBounded('https://example.com/a.pdf', { ...options, method: 'HEAD' });
+  expect(result.headers.get('content-length')).toBe('3');
+  expect(res.reader.read).not.toHaveBeenCalled();
+  expect(mockFetch).toHaveBeenCalledWith(
+    'https://example.com/a.pdf',
+    expect.objectContaining({ method: 'HEAD' }),
+  );
+});

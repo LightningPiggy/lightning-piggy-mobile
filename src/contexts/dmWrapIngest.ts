@@ -1,3 +1,6 @@
+import { isChatReactionKind } from '../utils/nip17Reactions';
+import { placeOwnChatReaction } from './chatReactionPartner';
+import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import {
@@ -7,14 +10,20 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
+import { parsePlainFileAttachment } from '../utils/fileAttachment';
 import { liveMarkerPhaseOf } from '../services/liveLocationService';
-import { parseStoredOrder } from '../utils/orderEvents';
+import {
+  acceptOrderRumor,
+  completeOrderRumors,
+  releaseOrderRumors,
+} from '../services/orderAdmission';
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { loadNip17SkipSet, writeNip17SkipSet } from './nostrDmCache';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
+import { routeNip171Rumor } from './nip171InboxRouting';
 
 // The one NIP-17 inbox-wrap ingest engine (#848). Both refreshDmInbox signer
 // branches (nsec + Amber) and the cold thread-open path in
@@ -47,6 +56,8 @@ export interface InboxWrapIngestParams<W extends IngestableWrap> {
    * (#788) inside the pacing scheduler. */
   isColdStart?: boolean;
   signal?: AbortSignal;
+  /** Checked right before rows are saved (see dmIngest `persistIf`). */
+  persistIf?: () => boolean;
   /** Amber inbox refresh: a PERMISSION_NOT_GRANTED from the silent decrypt
    * path stops further decrypt attempts (one flag, no per-wrap dialog flood)
    * instead of being treated as an ordinary skip. */
@@ -89,7 +100,8 @@ const isPermissionNotGranted = (error: unknown): boolean => {
 /**
  * Decrypt-once ingest of kind-1059 inbox wraps into the encrypted DM store.
  * Order of gates per wrap: DB known-id (inside ingestWraps) → skip-set →
- * decrypt → Welcome-route → group-route → follow-gate. Group-routed and non-followed rumors
+ * decrypt → Welcome-route → group-route → order-store exception → follow-gate.
+ * Group-routed and non-followed free-text rumors
  * are added to the skip-set exactly as before (#743). An aborted run PERSISTS
  * the DM rows it already decrypted (idempotent + owner-keyed, so a cut-short
  * post-login rebuild isn't wasted — F1/#849), but suppresses skip-set growth
@@ -98,13 +110,30 @@ const isPermissionNotGranted = (error: unknown): boolean => {
 export async function ingestInboxWraps<W extends IngestableWrap>(
   params: InboxWrapIngestParams<W>,
 ): Promise<InboxWrapIngestResult> {
+  return ingestInboxWrapsRun(params, true);
+}
+
+async function ingestInboxWrapsRun<W extends IngestableWrap>(
+  params: InboxWrapIngestParams<W>,
+  retryLifecycle: boolean,
+): Promise<InboxWrapIngestResult> {
+  const deferred: { wrap: W; rumor: DecodedRumor }[] = [];
   const { owner, wraps, unwrap, passesFollowGate, skipKey, signal } = params;
   const entries: DmInboxEntry[] = [];
+  const admittedOrders: DecodedRumor[] = [];
+  const claimedOrders = new Set<DecodedRumor>();
   let skipHits = 0;
   let misses = 0;
   let permissionDenied = false;
   let skipSetDirty = false;
   const skipSet = skipKey ? await loadNip17SkipSet(skipKey) : new Set<string>();
+  const skipOrderWrap = (id: string): null => {
+    if (skipKey) {
+      skipSet.add(id);
+      skipSetDirty = true;
+    }
+    return null;
+  };
   // Frame-budget pacing (#532) + cold-start macro-task yields (#788). Runs
   // inside the decryptor so only fresh decrypts pay for yields — DB-known
   // wraps are a Set lookup in ingestWraps and need no pacing.
@@ -167,14 +196,34 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           }
           return null;
         }
+        // NIP-171 tickets and group rumors: not 1:1 DMs (nip171InboxRouting).
+        let nip171: boolean;
+        try {
+          nip171 = await routeNip171Rumor(rumor, owner);
+        } catch (e) {
+          // Storing a ticket failed: leave the wrap for the next refresh
+          // rather than stop this run or file it as a 1:1 DM.
+          if (__DEV__) console.warn('[NIP-171] inbox routing failed:', e);
+          return null;
+        }
+        if (nip171) {
+          if (skipKey) {
+            skipSet.add(wrap.id);
+            skipSetDirty = true;
+          }
+          return null;
+        }
         // Multi-recipient group rumors also bypass the DM follow gate.
-        const routeResult = await tryRouteGroupRumor(
-          rumor,
-          owner,
-          wrap.id,
-          () => signal?.aborted === true,
-          passesFollowGate,
-        );
+        const routeResult =
+          rumor.kind === 16 || rumor.kind === 17
+            ? { kind: 'not-group' as const }
+            : await tryRouteGroupRumor(
+                rumor,
+                owner,
+                wrap.id,
+                () => signal?.aborted === true,
+                passesFollowGate,
+              );
         if (routeResult.kind !== 'not-group') {
           if (skipKey) {
             skipSet.add(wrap.id);
@@ -182,19 +231,46 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           }
           return null;
         }
-        const partnership = partnerFromRumor(rumor, owner);
+        const partnership = await placeOwnChatReaction(
+          rumor,
+          owner,
+          partnerFromRumor(rumor, owner),
+        );
         if (!partnership) return null;
-        // B1 — drop non-follows at the data layer (parental control). A
+        // B1 — free-text non-follows stay gated. Valid bounded orders
+        // persist independently for Orders, but Messages keeps the gate. A
         // successful decrypt with no stored row goes to the skip-set so the
         // next refresh doesn't re-pay it; pull-to-refresh (force) bypasses
         // the CHECK above so a newly-followed sender's wraps re-evaluate (#745).
-        if (!passesFollowGate(partnership.partnerPubkey)) {
+        const showInMessages = passesFollowGate(partnership.partnerPubkey);
+        const orderRumor = isBoundedOrderRumor(rumor);
+        if ((rumor.kind === 16 || rumor.kind === 17) && !orderRumor) return skipOrderWrap(wrap.id);
+        if (
+          orderRumor &&
+          !(await admitOrderLifecycle(owner, partnership.partnerPubkey, partnership.fromMe, rumor))
+        ) {
+          if (retryLifecycle) deferred.push({ wrap, rumor });
+          return null;
+        }
+        if (!showInMessages && !orderRumor) {
           if (skipKey) {
             skipSet.add(wrap.id);
             skipSetDirty = true;
           }
           return null;
         }
+        const followed = params.isFollowed?.(partnership.partnerPubkey) ?? showInMessages;
+        if (!followed && (rumor.kind === 16 || rumor.kind === 17)) {
+          // A transient rate-limit rejection must remain retryable; sent copies use no budget.
+          if (!partnership.fromMe && !admitUnfollowedOrder(owner)) return null;
+        }
+        if (
+          !(await acceptOrderRumor(owner, rumor, partnership.fromMe, () => {
+            skipOrderWrap(wrap.id);
+          }))
+        )
+          return null;
+        if (orderRumor && !partnership.fromMe) claimedOrders.add(rumor);
         const text = textForRumor(rumor);
         // For a structured rumor (order kind 16/17, or an NWC wallet share) the
         // stored `text` is non-human JSON — the in-memory inbox preview must show
@@ -219,37 +295,26 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
         } catch {
           rumorId = undefined;
         }
-        entries.push({
-          id: wrap.id,
-          partnerPubkey: partnership.partnerPubkey,
-          fromMe: partnership.fromMe,
-          createdAt: rumor.created_at,
-          text: preview,
-          // Raw render content (order JSON for kind 16/17, else plaintext) so the
-          // conversation thread renders a freshly-decrypted order as its card on
-          // the FIRST open — `text` above is the inbox-list preview, which the
-          // card renderer can't parse (#market). ONLY for order kinds: an NWC
-          // wallet-share rumor's raw text is a bearer connection string that
-          // `preview` deliberately redacts, and DmInboxEntry reaches every
-          // inbox consumer — that secret stays in the encrypted store only
-          // (the thread re-derives it from the stored row). Gated on the
-          // content actually being canonical order JSON: `textForRumor` falls
-          // back to the raw `rumor.content` for a kind-16/17 that is NOT a
-          // parseable order (a repost, a malformed payload), and that raw text
-          // must stay redacted here too. A plain DM's preview IS its render
-          // text, so `renderText ?? text` covers it.
-          ...(((rumor.kind === 16 || rumor.kind === 17) &&
-            text !== preview &&
-            parseStoredOrder(text) !== null) ||
-          // A live-location marker (#1300): its preview is a label, and the
-          // thread / Full Map need the marker (its update key is meant for
-          // this recipient — it's no bearer secret like a wallet share's).
-          liveMarkerPhaseOf(text)
-            ? { renderText: text }
-            : {}),
-          wireKind: rumor.kind,
-          rumorId,
-        });
+        // A reaction / retraction is stored for its target's thread but is
+        // never an inbox entry or a bubble (#1321).
+        if (showInMessages && !isChatReactionKind(rumor.kind))
+          entries.push({
+            id: wrap.id,
+            partnerPubkey: partnership.partnerPubkey,
+            fromMe: partnership.fromMe,
+            createdAt: rumor.created_at,
+            text: preview,
+            // Order payloads stay in the encrypted store (#1550). Document
+            // links and kind-15 attachments need their content on the first thread load.
+            ...(rumor.kind === 15 ||
+            (rumor.kind === 14 && parsePlainFileAttachment(text) !== null) ||
+            liveMarkerPhaseOf(text)
+              ? { renderText: text }
+              : {}),
+            wireKind: rumor.kind,
+            rumorId,
+          });
+        if (orderRumor && !partnership.fromMe) admittedOrders.push(rumor);
         return {
           owner,
           eventId: wrap.id,
@@ -259,12 +324,20 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
           content: text,
           fromMe: partnership.fromMe,
           wireKind: rumor.kind,
+          // Both directions (#1320): a received message needs it to be reacted
+          // to, and a stored reaction needs it so a kind 5 can retract it.
+          ...(rumorId ? { rumorId } : {}),
         };
       },
       // Pacing is the scheduler above; disable ingestWraps' count-based yield.
-      { yieldEvery: 0, signal },
+      { yieldEvery: 0, signal, persistIf: params.persistIf },
     );
+
+    // Completion releases these claims itself; do not release a later retry claim.
+    for (const rumor of admittedOrders) claimedOrders.delete(rumor);
+    await completeOrderRumors(owner, admittedOrders);
   } finally {
+    releaseOrderRumors(owner, [...claimedOrders]);
     sched.dispose();
   }
 
@@ -278,13 +351,27 @@ export async function ingestInboxWraps<W extends IngestableWrap>(
     await writeNip17SkipSet(skipKey, skipSet);
   }
 
+  // The first pass persists placed orders before resolving their updates.
+  // Reuse decoded rumors: relay ordering is arbitrary and crypto is expensive.
+  const retried =
+    deferred.length > 0 && !signal?.aborted
+      ? await ingestInboxWrapsRun(
+          {
+            ...params,
+            wraps: deferred.map(({ wrap, rumor }) => ({ ...wrap, decoded: rumor })),
+            unwrap: (wrap) => wrap.decoded,
+          },
+          false,
+        )
+      : undefined;
+
   return {
-    entries: signal?.aborted ? [] : entries,
+    entries: signal?.aborted ? [] : [...entries, ...(retried?.entries ?? [])],
     alreadyKnown: ingestResult.alreadyKnown,
     skipHits,
     misses,
-    stored: ingestResult.ingested,
-    yields: sched.yieldCount,
+    stored: ingestResult.ingested + (retried?.stored ?? 0),
+    yields: sched.yieldCount + (retried?.yields ?? 0),
     permissionDenied,
   };
 }

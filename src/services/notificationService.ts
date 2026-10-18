@@ -116,7 +116,7 @@ const PERMISSION_REQUESTED_KEY = 'notif_pref_permission_asked_v1';
  * Add a new kind here BEFORE adding a new caller — keeps the routing
  * logic exhaustive.
  */
-export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 'swap';
+export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 'swap' | 'market';
 
 /** Tap-routing data shipped with every notification. The deep-link
  * router (TODO — follow-up) reads these on tap to navigate to the
@@ -129,7 +129,14 @@ export type NotificationKind = 'dm' | 'group' | 'payment' | 'zap' | 'cache' | 's
  *  - cache     → cacheCoord (open the cache detail; #740)
  */
 export interface NotificationData extends Partial<MessageNotificationTarget> {
+  listingCoord?: string;
+  feedbackTab?: 'comments' | 'reviews';
   groupInvitation?: boolean;
+  shopOrderId?: string;
+  myOrderId?: string;
+  orderSellerPubkey?: string;
+  shopEventId?: string;
+  shopBuyerPubkey?: string;
   conversationPubkey?: string;
   conversationProtocol?: DmProtocol;
   groupId?: string;
@@ -175,6 +182,12 @@ export interface NotificationPayload {
   /** Stable source id (e.g. a payment hash) so a retried notification
    * doesn't add a second history row. */
   historyKey?: string;
+  /** Source event time in epoch ms, preserving catch-up history order. */
+  historyCreatedAt?: number;
+  /** Preference/account gate checked before recording any history. */
+  mayRecord?: () => Promise<boolean>;
+  /** Called after the history write completes, even when no OS alert is sent. */
+  onHistoryRecorded?: () => void;
   /** Rechecked immediately before scheduling, including durable deletion state. */
   shouldSuppress?: () => Promise<boolean>;
 }
@@ -363,6 +376,7 @@ function channelForKind(kind: NotificationKind): string {
     case 'dm':
     case 'group':
     case 'cache':
+    case 'market':
       return CHANNEL_MESSAGES;
     case 'payment':
     case 'zap':
@@ -400,17 +414,24 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
     // Record history even without OS permission; muted senders never alert.
     const owner = payload.owner ?? getActivePubkey() ?? undefined;
     if (await shouldMuteNotification(owner, payload.data, payload.kind)) return null;
+    if (payload.mayRecord && !(await payload.mayRecord())) return null;
     const collapseKey = threadCollapseKey(payload.kind, payload.data);
     // Awaited (best-effort, never throws): a headless background task can be
     // torn down as soon as delivery resolves, losing a detached write.
-    const { duplicateDelivered, id: historyId } = await recordNotification(owner ?? null, {
-      ...payload,
-      id: payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-      collapseKey,
-    });
+    const { duplicateDelivered, id: historyId } = await recordNotification(
+      owner ?? null,
+      {
+        ...payload,
+        id: payload.historyKey ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        collapseKey,
+      },
+      payload.historyCreatedAt,
+    );
+    payload.onHistoryRecorded?.();
     // Same source already shown in the tray: report it as delivered (so the
     // caller doesn't keep retrying) without posting a second entry.
     if (duplicateDelivered) return historyId;
+    if (await payload.shouldSuppress?.()) return null;
     const granted = await hasNotificationPermission();
     if (!granted) return null;
 

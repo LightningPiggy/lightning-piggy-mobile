@@ -14,6 +14,12 @@
 //      contributing, drop the exclusion and let everyone contribute (with
 //      heuristic #2 still applied). Users with few friends would otherwise
 //      get a FoF dominated by 1-2 outliers.
+//   4. Optional ranked cap (`maxSize`): keep only the N pubkeys followed by
+//      the most contributing friends. A consumer that queries relays BY
+//      author (the Market's friends-of-friends scope) can't ask for tens of
+//      thousands of authors, and the most-shared follows are the strongest
+//      trust signal. It also keeps the cached blob far below Android's
+//      CursorWindow ceiling (#565).
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -25,8 +31,9 @@ export const FANOUT_CAP = 500;
 // drop the exclusion. Stops a 3-friends-over-cap user from getting an
 // FoF dominated by their remaining 2 friends.
 export const SOFT_CAP_MIN_RATIO = 0.5;
-const FOF_CACHE_KEY = '@lp:wot-fof:v1';
-const FOF_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
+// Invalidate discovery-ordered capped entries from before ranking was fixed.
+const FOF_CACHE_KEY = '@lp:wot-fof:v2';
+export const FOF_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 
 export interface FofResult {
   set: Set<string>;
@@ -36,6 +43,10 @@ export interface FofResult {
 
 interface CacheEntry extends FofResult {
   userPubkey: string;
+  // The ranked cap the set was built with (absent = uncapped). A capped and
+  // an uncapped set are different results, so a reader with another cap
+  // must not reuse it.
+  maxSize?: number;
   // Stable hash of the input friend set; if the user follows/unfollows we
   // want the cache to invalidate even within the TTL window.
   friendsHash: string;
@@ -64,17 +75,21 @@ export interface ComputeFofOptions {
   // Optional progress callback so the bottom sheet can render "Fetching N / M".
   onProgress?: (done: number, total: number) => void;
   signal?: AbortSignal;
+  // Ranked cap (heuristic 4) — keep the `maxSize` most-shared pubkeys.
+  maxSize?: number;
 }
 
 // Pure core — no relay or storage I/O. Takes the already-fetched kind-3
 // data and applies the heuristics. Exported so tests can target the logic
-// directly without stubbing fetchKind3.
+// directly without stubbing fetchKind3. With `maxSize`, the returned Set
+// iterates most-shared first (heuristic 4); without it, in discovery order.
 export const buildFofSet = (
   userPubkey: string | null,
   myFollows: readonly string[],
   followListsByFriend: Record<string, readonly string[]>,
+  maxSize?: number,
 ): { set: Set<string>; excludedFriends: number } => {
-  const friendsLower = myFollows.map((p) => p.toLowerCase());
+  const friendsLower = [...new Set(myFollows.map((p) => p.toLowerCase()))];
   const friendSet = new Set(friendsLower);
   const userLower = userPubkey ? userPubkey.toLowerCase() : null;
 
@@ -93,7 +108,9 @@ export const buildFofSet = (
   const applyHighFanoutExclusion =
     friendsLower.length === 0 || contributing / friendsLower.length >= SOFT_CAP_MIN_RATIO;
 
-  const fof = new Set<string>();
+  // pubkey → how many contributing friends follow it (Map keeps discovery
+  // order, the tie-break for the ranked cap).
+  const fof = new Map<string, number>();
   let excludedFriends = 0;
   for (const friend of friendsLower) {
     if (applyHighFanoutExclusion && overCap.has(friend)) {
@@ -106,7 +123,7 @@ export const buildFofSet = (
     // Kind-3 `p` tags have no timestamps so "first N" is roughly add-order
     // and client-dependent — acknowledged in #535.
     const slice = list.slice(0, FANOUT_CAP);
-    for (const pk of slice) {
+    for (const pk of new Set(slice.map((p) => p.toLowerCase()))) {
       const lower = pk.toLowerCase();
       // FoF tier explicitly excludes the user + their direct friends —
       // those already pass under the Friends tier, so including them
@@ -114,11 +131,16 @@ export const buildFofSet = (
       // dead weight to the set.
       if (lower === userLower) continue;
       if (friendSet.has(lower)) continue;
-      fof.add(lower);
+      fof.set(lower, (fof.get(lower) ?? 0) + 1);
     }
   }
 
-  return { set: fof, excludedFriends };
+  if (maxSize === undefined) {
+    return { set: new Set(fof.keys()), excludedFriends };
+  }
+  // Stable sort: equal counts keep discovery order.
+  const ranked = [...fof].sort((a, b) => b[1] - a[1]).slice(0, Math.max(0, maxSize));
+  return { set: new Set(ranked.map(([pk]) => pk)), excludedFriends };
 };
 
 // Full pipeline: fetch kind-3 lists, apply heuristics, persist with TTL.
@@ -128,7 +150,7 @@ export const computeFofSet = async (
   myFollows: readonly string[],
   opts: ComputeFofOptions,
 ): Promise<FofResult> => {
-  const friendsLower = myFollows.map((p) => p.toLowerCase());
+  const friendsLower = [...new Set(myFollows.map((p) => p.toLowerCase()))];
   if (friendsLower.length === 0) {
     return { set: new Set(), excludedFriends: 0, computedAt: Date.now() };
   }
@@ -150,9 +172,9 @@ export const computeFofSet = async (
     done += 1;
     opts.onProgress?.(done, batches.length);
   }
-  const { set, excludedFriends } = buildFofSet(userPubkey, friendsLower, followLists);
+  const { set, excludedFriends } = buildFofSet(userPubkey, friendsLower, followLists, opts.maxSize);
   const result: FofResult = { set, excludedFriends, computedAt: Date.now() };
-  await persistFofCache(userPubkey, friendsLower, result);
+  await persistFofCache(userPubkey, friendsLower, result, opts.maxSize);
   return result;
 };
 
@@ -161,6 +183,7 @@ export const computeFofSet = async (
 export const loadFofCache = async (
   userPubkey: string | null,
   currentFriends: readonly string[],
+  maxSize?: number,
 ): Promise<FofResult | null> => {
   if (!userPubkey) return null;
   try {
@@ -170,6 +193,7 @@ export const loadFofCache = async (
     if (parsed.userPubkey !== userPubkey.toLowerCase()) return null;
     if (Date.now() - parsed.computedAt > FOF_CACHE_TTL_MS) return null;
     if (parsed.friendsHash !== hashFriends(currentFriends)) return null;
+    if (parsed.maxSize !== maxSize) return null;
     return {
       set: new Set(parsed.setArr),
       excludedFriends: parsed.excludedFriends,
@@ -184,11 +208,13 @@ export const persistFofCache = async (
   userPubkey: string | null,
   friends: readonly string[],
   result: FofResult,
+  maxSize?: number,
 ): Promise<void> => {
   if (!userPubkey) return;
   try {
     const entry: CacheEntry = {
       userPubkey: userPubkey.toLowerCase(),
+      maxSize,
       friendsHash: hashFriends(friends),
       set: result.set,
       setArr: [...result.set],

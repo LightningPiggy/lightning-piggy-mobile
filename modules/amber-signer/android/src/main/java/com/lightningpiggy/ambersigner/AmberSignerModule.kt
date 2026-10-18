@@ -189,11 +189,15 @@ class AmberSignerModule : Module() {
             }
         }
 
-        AsyncFunction("getPublicKey") { promise: Promise ->
+        AsyncFunction("getPublicKey") { permissionsJson: String?, promise: Promise ->
             launchIntent(op = OP_GET_PUBLIC_KEY, promise = promise) { activity, requestCode ->
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse("nostrsigner:"))
                 intent.`package` = AMBER_PACKAGE
                 intent.putExtra("type", "get_public_key")
+                // Nullable trailing argument keeps callers without permissions compatible.
+                if (permissionsJson != null) {
+                    intent.putExtra("permissions", permissionsJson)
+                }
                 activity.startActivityForResult(intent, requestCode)
             }
         }

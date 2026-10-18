@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import { GC_LISTING_KIND, buildCacheListing } from './nostrPlacesService';
 import { GC_RELAYS } from './geocacheRelays';
 import { publishCacheEvent, type SignedEventLike } from './nostrPlacesPublisher';
@@ -124,7 +125,8 @@ export const deletePiggy = async ({
   // GC_RELAYS is the geo-cache backbone; publishCacheEvent unions it in
   // regardless, but passing it explicitly keeps the no-user-relays path
   // off the generic defaults that silently drop kind-37516. See #907.
-  const relays = writeRelays && writeRelays.length > 0 ? writeRelays : GC_RELAYS;
+  const relays =
+    writeRelays && writeRelays.length > 0 ? writeRelays : enabledAppRelays('geocache', GC_RELAYS);
 
   // Step 1 (belt) — expire-now republish. Only possible when we hold the
   // local record (buildCacheListing needs the piggy's lat/lon etc).

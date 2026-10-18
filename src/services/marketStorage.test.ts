@@ -2,8 +2,10 @@ import * as pacing from '../contexts/nostrDecryptPacing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   clearMarketSnapshotMemory,
+  subscribeMarketSnapshots,
   getMarketSnapshot,
   loadedMarketSnapshots,
+  readLoadedMarketSnapshots,
   readMarketPreferences,
   writeMarketPreferences,
   wipeMarketAccount,
@@ -18,11 +20,11 @@ beforeEach(() => {
   jest.clearAllMocks();
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
 });
-it('rejects corrupt preferences and disabled scopes', async () => {
+it('rejects corrupt preferences and unknown scopes', async () => {
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue('{broken');
   expect((await readMarketPreferences('alice')).mode).toBe('preferred');
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
-    JSON.stringify({ mode: 'wotAll', merchant: 42 }),
+    JSON.stringify({ mode: 'wotEverything', merchant: 42 }),
   );
   expect(await readMarketPreferences('bob')).toEqual({
     mode: 'preferred',
@@ -31,6 +33,12 @@ it('rejects corrupt preferences and disabled scopes', async () => {
     includeUnknownShipping: true,
     currency: null,
   });
+});
+it('keeps saved experimental scopes (the screen clamps them while experimental is off)', async () => {
+  for (const mode of ['wotFof', 'wotAll']) {
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(JSON.stringify({ mode }));
+    expect((await readMarketPreferences(`exp-${mode}`)).mode).toBe(mode);
+  }
 });
 it('migrates the retired Country filter value to Anywhere and keeps a saved Ships-to', async () => {
   (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
@@ -340,4 +348,41 @@ it('fails closed for overlapping snapshots with equal timestamps, regardless of 
   await readMarketSnapshot(`tie-new|${seller}|r`);
   await readMarketSnapshot(`tie-old|${seller}|r`);
   expect(loadedMarketSnapshots(['tie-new', 'tie-old']).flatMap((s) => s.products)).toEqual([]);
+});
+
+it('hydrates only the requested account and shares concurrent catalogue disk reads', async () => {
+  const entries = ['catalogue-alice', 'catalogue-bob'].map((account) => ({
+    key: `${account}|scope`,
+    at: Date.now(),
+    result: { products: [{ id: account, sellerName: 'shop' }], incomplete: false },
+  }));
+  jest.mocked(AsyncStorage.getItem).mockResolvedValue(JSON.stringify(entries));
+  const first = readLoadedMarketSnapshots('catalogue-alice');
+  const second = readLoadedMarketSnapshots('catalogue-alice');
+  expect(second).toBe(first);
+  expect((await first).flatMap((snapshot) => snapshot.products).map((p) => p.id)).toEqual([
+    'catalogue-alice',
+  ]);
+  expect(loadedMarketSnapshots(['catalogue-bob'])).toEqual([]);
+  expect(AsyncStorage.getItem).toHaveBeenCalledTimes(1);
+});
+
+it('notifies local consumers after catalogue writes, hydration and account wipes', async () => {
+  const listener = jest.fn();
+  const unsubscribe = subscribeMarketSnapshots(listener);
+  try {
+    await writeMarketSnapshot('shortcut-account|scope', { products: [], incomplete: false });
+    expect(listener).toHaveBeenCalledTimes(1);
+    clearMarketSnapshotMemory();
+    expect(listener).toHaveBeenCalledTimes(2);
+    await readLoadedMarketSnapshots('shortcut-account');
+    expect(listener).toHaveBeenCalledTimes(3);
+    await wipeMarketAccount('shortcut-account');
+    expect(listener).toHaveBeenCalledTimes(4);
+    unsubscribe();
+    clearMarketSnapshotMemory();
+    expect(listener).toHaveBeenCalledTimes(4);
+  } finally {
+    unsubscribe();
+  }
 });

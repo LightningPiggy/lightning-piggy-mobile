@@ -11,27 +11,6 @@ export const createMarketSellerStyles = (colors: Palette) =>
     collectionCard: { width: 240 },
     selectedReference: { borderWidth: 2, borderColor: colors.brandPink },
     container: { flex: 1, backgroundColor: colors.background },
-    header: {
-      paddingHorizontal: 16,
-      paddingTop: 48,
-      paddingBottom: 16,
-      backgroundColor: colors.brandPink,
-      overflow: 'hidden',
-    },
-    headerImage: { ...StyleSheet.absoluteFillObject },
-    headerOverlay: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(236, 0, 140, 0.65)',
-    },
-    headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    headerTitle: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.white,
-    },
-    headerSpacer: { width: 24 },
     content: { padding: 16, paddingBottom: 48, gap: 12 },
     // My shop's list header: no form-style bottom padding, so the first
     // listing sits right under the "Your listings" heading.

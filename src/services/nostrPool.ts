@@ -11,6 +11,7 @@ import { normalizeURL } from 'nostr-tools/utils';
 import { withRelayHealth } from './healthAwarePool';
 import { hydrateRelayHealth } from './relayHealth';
 import { withResumableSubscriptions } from './resumablePool';
+import { assertNotWrapOnlyKind } from '../utils/wrapOnlyKinds';
 
 /** `SimplePool` that skips relays known to be dead (#1326, see ./healthAwarePool). */
 class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimplePool)) {
@@ -38,6 +39,9 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
   }
 
   publish(...args: Parameters<SimplePool['publish']>): Promise<string>[] {
+    // Gamma order kinds 16/17 never go out bare (NIP-18 repost / NIP-25
+    // website reaction when public) — only inside a kind-1059 gift wrap.
+    assertNotWrapOnlyKind(args[1].kind, 'publish');
     args[0] = eventAuthorRelays(args[0], args[1]);
     const urls = args[0].map((url) => {
       try {

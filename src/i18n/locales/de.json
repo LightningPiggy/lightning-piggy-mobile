@@ -280,6 +280,14 @@
     "shareTitle": "{{name}} teilen",
     "shareSubtitle": "Die Person erhält eine verschlüsselte Nostr-DM mit einer Personenkarte."
   },
+  "geocacheRail": {
+    "nearest": "Nächstgelegene Piglets",
+    "empty": "Noch keine Piglets in der Nähe",
+    "hide": "Ein Piglet verstecken",
+    "error": "Piglets in der Nähe konnten nicht geladen werden.",
+    "retry": "Erneut versuchen",
+    "hidden": "Einige Caches in der Nähe werden durch deinen Vertrauensfilter ausgeblendet."
+  },
   "contentRail": {
     "seeAllAccessibility": "{{title}} – alle ansehen",
     "seeAll": "Alle ansehen"
@@ -627,6 +635,7 @@
   "imageGallery": {
     "open": "Bild öffnen",
     "position": "Bild {{current}} von {{total}}",
+    "showImage": "Bild {{current}} von {{total}} anzeigen",
     "openHint": "Öffnet das Bild im Vollbild"
   },
   "gifPickerSheet": {
@@ -1304,10 +1313,12 @@
     "unknownSender": "Jemand",
     "file": "Datei",
     "fileBytes": "{{size}} Bytes",
-    "fileShare": "Speichern / Teilen",
+    "fileShare": "Teilen",
     "filePreparing": "Datei wird vorbereitet…",
     "fileUnavailable": "Datei nicht verfügbar",
     "fileShareFailed": "Diese Datei konnte nicht vorbereitet oder geteilt werden. Versuche es erneut.",
+    "filePlainUrl": "Nicht Ende-zu-Ende-verschlüsselt · Ungeprüft",
+    "fileUploadLimit": "Wähle Dateien bis zu 16 MB.",
     "devFiles": "Testdateien",
     "devFilesA11y": "Eine Testunterhaltung mit Dateien erstellen",
     "fileSave": "Speichern",
@@ -1317,7 +1328,13 @@
     "fileTypeMismatch": "Dateiname passt nicht zum angegebenen Typ: {{type}}",
     "blockedLink": "Blockierter Link",
     "invalidUpload": "Der Speicherserver hat eine ungültige Medien-URL zurückgegeben. Bitte versuche einen anderen Server.",
-    "uploadFailedAllServers": "Hochladen auf einen Speicherserver ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut oder füge in den Einstellungen einen weiteren Speicherserver hinzu."
+    "uploadFailedAllServers": "Hochladen auf einen Speicherserver ist fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut oder füge in den Einstellungen einen weiteren Speicherserver hinzu.",
+    "fileLabelText": "Text",
+    "fileLabelAudio": "Audio",
+    "fileLabelVideo": "Video",
+    "fileSaveLabel": "%{filename} speichern",
+    "fileShareLabel": "%{filename} teilen",
+    "fileSaved": "In %{folder} gespeichert"
   },
   "messageBubbleFooter": {
     "edited": "Bearbeitet",
@@ -1560,6 +1577,10 @@
     "failedToRemoveRelay": "Das Relay konnte nicht entfernt werden.",
     "geoCacheRelays": "Geocache-Relays",
     "geoCacheRelaysHint": "Eigene Relays für Piglets und andere Geocaches (NIP-GC). Sie spiegeln, was die Web-App treasures.to liest und durchsucht, damit deine Piglets im Web auffindbar bleiben. Sie werden zusätzlich zu allen oben hinzugefügten Relays immer zum Veröffentlichen und Lesen von Geocaches verwendet.",
+    "marmotRelays": "Relays für Gruppenchats (Marmot)",
+    "marmotRelaysHint": "Bekannte Relays für Marmot-Gruppenchats, gemeinsam mit White Noise genutzt. Deine Einladungsschlüssel (Schlüsselpakete) werden hier und auf deinen eigenen Relays veröffentlicht. So können andere einen verschlüsselten Gruppenchat mit dir starten, auch wenn deine Relays offline sind. Sie werden in deiner Relay-Liste für Schlüsselpakete (Kind 10051) bekannt gegeben.",
+    "marketRelays": "Marktplatz-Relays (Gamma)",
+    "marketRelaysHint": "Relays, von denen Lightning Piggy Marktangebote liest und auf denen deine Shop-Angebote veröffentlicht werden, gemeinsam genutzt mit anderen Gamma Markets-Apps (Plebeian, Conduit, Shopstr).",
     "encryptedMessages": "Verschlüsselte Nachrichten (NIP-17)",
     "amberPermissionHint": "Amber hat dieser App noch keine NIP-44-Entschlüsselungsberechtigung erteilt – tippe unten, um sie zu erteilen. Ein Dialog, danach werden weitere verschlüsselte Nachrichten still entschlüsselt. Nachrichten von Personen, denen du nicht folgst, bleiben in jedem Fall verborgen.",
     "amberPermissionTitle": "Amber-Berechtigung",
@@ -1575,7 +1596,7 @@
     "nativeCryptoActiveYes": "In dieser Sitzung aktiv: ja",
     "nativeCryptoActiveNo": "In dieser Sitzung aktiv: nein",
     "notInUse": "Gerade nicht im Einsatz",
-    "advancedRelays": "Erweitert",
+    "advancedRelays": "App-Relays",
     "defaultRelaysTitle": "Standard-Relays der App",
     "defaultRelaysHint": "In die App eingebaut und immer als Ausweichlösung zusätzlich zu deinen Relays genutzt.",
     "deviceRelaysTitle": "Nur auf diesem Gerät",
@@ -2309,7 +2330,14 @@
       "emptyNoMatch": "Keine Produkte passen zu deiner Suche oder deinen Filtern.",
       "emptyMerchantMissing": "Gerade keine Angebote von {{name}} – zum Aktualisieren nach unten ziehen.",
       "emptyNoFriends": "Keiner deiner Nostr-Freunde verkauft bisher Lightning-Piggy-Produkte.",
-      "emptyNone": "Derzeit sind keine Produkte verfügbar."
+      "emptyNoFof": "In deinem Freunde-von-Freunden-Netzwerk verkauft noch niemand etwas.",
+      "emptyNoAll": "Auf deinen Relays wurden gerade keine Angebote gefunden.",
+      "allScopeNote": "Experimentell: Angebote von allen, ungeprüft",
+      "fofBuilding": "Dein Netzwerk wird aufgebaut… {{done}}/{{total}}",
+      "fofBuildingStart": "Dein Netzwerk wird aufgebaut…",
+      "fofFailed": "Dein Netzwerk konnte nicht aufgebaut werden – die Angebote deiner Freunde werden angezeigt.",
+      "emptyNone": "Derzeit sind keine Produkte verfügbar.",
+      "myOrders": "Meine Bestellungen"
     },
     "card": {
       "featured": "Empfohlen",
@@ -2323,7 +2351,10 @@
       "buyFrom": "Bei {{seller}} kaufen",
       "buyAccessibility": "{{title}} bei {{seller}} kaufen",
       "noFeedback": "Bewertungen und Kommentare sind für diesen Verkäufer noch nicht verfügbar – dafür braucht er eine Nostr-Identität.",
-      "refreshFailed": "Dieses Produkt konnte nicht aktualisiert werden – prüfe deine Verbindung und versuche es erneut."
+      "refreshFailed": "Dieses Produkt konnte nicht aktualisiert werden – prüfe deine Verbindung und versuche es erneut.",
+      "buy": "Kaufen",
+      "outOfStock": "Ausverkauft",
+      "invoiceNote": "Der Verkäufer schickt dir eine Rechnung für deine Bestellung"
     },
     "modes": {
       "comingSoon": "{{label}} – demnächst",
@@ -2350,7 +2381,11 @@
       "sellers": "Verkäufer",
       "friends": "Freunde (Personen, denen du folgst)",
       "friendsOfFriends": "Freunde von Freunden",
+      "allSellers": "Alle (jeder)",
+      "experimental": "Experimentell",
       "friendsChip": "Freunde",
+      "friendsOfFriendsChip": "Freunde von Freunden",
+      "allChip": "Alle",
       "comingSoon": "Demnächst verfügbar",
       "clearScope": "Verkäufer auf bevorzugte Verkäufer von Lightning Piggy zurücksetzen",
       "changeScope": "{{label}}. Öffnet die Filter, um die Verkäufer zu ändern",
@@ -2443,7 +2478,25 @@
         "relayUnreachable": "Es war kein Relay erreichbar, um deine Bestellung aufzugeben. Bitte versuche es erneut.",
         "generic": "Beim Aufgeben deiner Bestellung ist etwas schiefgelaufen. Bitte versuche es erneut."
       },
-      "rateUpdated": "Die Versandkosten wurden aktualisiert. Prüfe die neue Summe und tippe erneut auf „Bestellen“."
+      "rateUpdated": "Der Wechselkurs hat sich geändert, daher auch die Summe. Prüfe die neue Summe und tippe erneut auf „Bestellen“.",
+      "unitPriceSats": "{{amount}} sats pro Stück",
+      "addressLabel": "Lieferadresse",
+      "addressPlaceholder": "Name, Straße, Ort, Postleitzahl, Land",
+      "addressHint": "Wird privat (verschlüsselt verpackt) mit deiner Bestellung gesendet, nur an {{seller}}.",
+      "outOfStock": "Ausverkauft",
+      "inStock": "Auf Lager: {{stock}}",
+      "delivery": {
+        "name": "Name",
+        "line1": "Adresszeile 1",
+        "line2": "Adresszeile 2 (optional)",
+        "town": "Ort / Stadt",
+        "postcode": "Postleitzahl",
+        "country": "Land",
+        "nameHint": "Ein Name, an den der Zusteller liefern kann — ein Spitzname ist in Ordnung, wenn er am Briefkasten steht",
+        "remember": "Auf diesem Telefon speichern",
+        "postcodeInvalid": "Gib eine gültige Postleitzahl für das gewählte Land ein",
+        "tooLong": "Die vollständige Lieferadresse darf höchstens 500 Zeichen enthalten"
+      }
     },
     "shipping": {
       "label": "Versand",
@@ -2470,6 +2523,8 @@
     },
     "live": {
       "loading": "Angebote deiner Freunde werden geladen…",
+      "loadingNetwork": "Angebote aus deinem Netzwerk werden geladen…",
+      "loadingAll": "Angebote von allen werden geladen…",
       "partialToast": "Einige Verkäufer haben nicht geantwortet. Zum Aktualisieren nach unten ziehen.",
       "contactSeller": "Dem Verkäufer schreiben"
     },
@@ -2678,7 +2733,7 @@
       "orders": {
         "line": "{{title}} × {{quantity}}",
         "amount": "{{amount}} sats",
-        "hint": "Bestellungen von Käufern für deine Angebote. Tippe eine an, um den Chat zu öffnen.",
+        "hint": "Bestellungen von Käufern für deine Angebote. Tippe auf eine, um die Bestellung anzusehen.",
         "emptyBody": "Wenn jemand eines deiner Angebote kauft, erscheint die Bestellung hier.",
         "rowAccessibility": "Bestellung von {{name}}: {{items}}, {{time}}"
       },
@@ -2731,7 +2786,8 @@
       "pickerSubtitle": "Er bekommt ihn als private Nachricht.",
       "sentTo": "An {{name}} gesendet",
       "sendFailed": "Konnte diesen Artikel nicht senden",
-      "sharedItem": "Geteilter Artikel"
+      "sharedItem": "Geteilter Artikel",
+      "marketListing": "Marktplatzangebot"
     },
     "liked": {
       "title": "Gelikte Artikel",
@@ -2742,6 +2798,26 @@
       "loadFailed": "Deine gelikten Artikel konnten nicht geladen werden – zum Aktualisieren nach unten ziehen.",
       "signedOut": "Melde dich mit Nostr an, um deine gelikten Artikel zu sehen.",
       "signIn": "Anmelden"
+    },
+    "republish": {
+      "coverage": "Auf %{count} von %{total} Relays",
+      "checking": "Relays werden geprüft…",
+      "action": "Erneut veröffentlichen",
+      "all": "Alle erneut veröffentlichen",
+      "missing": "Fehlt auf Relays",
+      "resign": "Neu signieren und veröffentlichen",
+      "confirm": "Keine signierte Kopie verfügbar. Dieses Angebot neu erstellen und einmalig zum Veröffentlichen signieren?",
+      "results": "Ergebnisse der Veröffentlichung",
+      "accepted": "Akzeptiert",
+      "rejected": "Abgelehnt",
+      "noResponse": "Keine Antwort",
+      "alreadyPresent": "Bereits vorhanden",
+      "close": "Schließen",
+      "failed": "Erneute Veröffentlichung fehlgeschlagen"
+    },
+    "shortcuts": {
+      "liked": "Gefällt mir",
+      "startSelling": "Verkaufen starten"
     }
   },
   "dmProtocol": {
@@ -2842,7 +2918,8 @@
       "payment": "Zahlung",
       "zap": "Zap",
       "cache": "Piglet-Fund",
-      "swap": "Swap"
+      "swap": "Swap",
+      "market": "Angebotsaktivität"
     }
   },
   "blossomServers": {
@@ -3259,6 +3336,7 @@
     "security": "Protokoll und Sicherheit",
     "mlsSecurity": "Ende-zu-Ende-Verschlüsselung mit MLS. Geräte teilen die Gruppenschlüssel.",
     "nip17Security": "Ende-zu-Ende-verschlüsselte Nachrichten mit verborgener Absenderidentität.",
+    "nip171Security": "Ende-zu-Ende-verschlüsselte Gruppe. Alle Mitglieder teilen sich einen Gruppenschlüssel. Der Gruppeninhaber ändert ihn, wenn jemand die Gruppe verlässt.",
     "nip04Security": "Veraltete Verschlüsselung. Wechsle für mehr Privatsphäre zu NIP-17.",
     "devices": "Geräte in diesem Chat",
     "relays": "Gruppen-Relays",
@@ -3318,6 +3396,8 @@
     "milliseconds": "%{count} ms",
     "operator": "Betreiber und Richtlinien",
     "runBy": "Betrieben von",
+    "tipOperator": "Dem Betreiber Trinkgeld geben",
+    "tipOperatorLabel": "Sende einen Zap an {{name}}, der dieses Relay betreibt",
     "copyUrl": "Relay-URL kopieren",
     "terms_of_service": "Nutzungsbedingungen",
     "privacy_policy": "Datenschutzrichtlinie",
@@ -3414,6 +3494,10 @@
     "licenceType": "MIT",
     "lightningAddress": "Lightning-Adresse (LUD-16)"
   },
+  "nip171Invitation": {
+    "group": "NIP-171-Gruppe",
+    "full": "Du hast die maximale Anzahl an NIP-171-Gruppen erreicht. Verlasse eine, um diese Einladung anzunehmen."
+  },
   "marmotInvitation": {
     "pending": "Einladung ausstehend",
     "accept": "Annehmen",
@@ -3489,5 +3573,119 @@
   "profileSafety": {
     "unavailable": "Profil nicht verfügbar",
     "unverified": "nicht verifiziert"
+  },
+  "orderCard": {
+    "waitingForInvoice": "Warte auf die Rechnung des Verkäufers",
+    "viewOrder": "Bestellung ansehen"
+  },
+  "myOrders": {
+    "moreItems": "+{{count}} weitere",
+    "title": "Meine Bestellungen",
+    "empty": "Noch keine Bestellungen – tippe bei einem Angebot auf „Kaufen“.",
+    "open": "Meine Bestellungen",
+    "openWithPayNow": "Meine Bestellungen – {{invoices}} zu bezahlen",
+    "viewAll": "Meine Bestellungen ansehen",
+    "rowA11y": "Bestellung bei {{seller}}: {{items}}. {{status}}",
+    "askForNewInvoice": "Bitte den Verkäufer um eine neue Rechnung"
+  },
+  "orderStatus": {
+    "awaitingInvoice": "Warte auf Rechnung",
+    "payNow": "Jetzt bezahlen",
+    "paid": "Bezahlt",
+    "shipped": "Versendet",
+    "completed": "Abgeschlossen",
+    "cancelled": "Storniert",
+    "needsInvoice": "Rechnung fällig",
+    "invoiceSent": "Warte auf Zahlung",
+    "all": "Alle",
+    "empty": "Keine Bestellungen mit diesem Status.",
+    "invoiceExpired": "Rechnung abgelaufen"
+  },
+  "sellerActivity": {
+    "settings": "Kommentare & Bewertungen zu meinen Angeboten",
+    "generic": "Neue Angebotsaktivität",
+    "listing": "dein Angebot",
+    "sellerReplied": "Verkäufer hat geantwortet",
+    "reply": "%{name} hat auf deinen Kommentar geantwortet",
+    "comment": "Neuer Kommentar zu %{title}",
+    "review": "Neue Bewertung für %{title} ★%{stars}",
+    "replyAction": "Antworten"
+  },
+  "sellerOrders": {
+    "buyerNote": "Nachricht vom Käufer",
+    "newOrderNotification": "Neue Bestellung: {{items}}",
+    "yourShopOrder": "Bestellung für deinen Shop",
+    "loadingShop": "Dein Shop wird geladen, um diese Bestellung zu berechnen …",
+    "lineTitle": "{{title}} × {{qty}}",
+    "unitPrice": "{{amount}} {{currency}} pro Stück",
+    "overStock": "Mehr als dein Bestand ({{stock}} übrig)",
+    "shippingLine": "Versand: {{title}}",
+    "shippingNotOffered": "Diese Versandoption bietet dein Angebot nicht an.",
+    "shippingMissing": "Der Käufer hat für einen physischen Artikel keinen Versand gewählt.",
+    "total": "Summe",
+    "waitingForRate": "Warte auf Wechselkurs …",
+    "fiatAtRate": "{{amount}} {{currency}}, zum heutigen Kurs umgerechnet",
+    "amountDiffers": "Die Bestellung des Käufers enthielt {{buyer}} sats und stimmt nicht mit deinen aktuellen Preisen überein. Du kannst erst eine Rechnung senden, wenn der Käufer eine neue Bestellung zum aktuellen Gesamtbetrag aufgibt.",
+    "shipTo": "Lieferung an:",
+    "contact": "Kontakt:",
+    "receiptUnverified": "Der Käufer hat einen Zahlungsbeleg geschickt, der aber die Zahlung deiner Rechnung nicht belegt.",
+    "sendInvoice": "Rechnung senden",
+    "confirmSend": "Rechnung erstellen und senden",
+    "checkPayment": "Zahlung prüfen",
+    "waitingForPayment": "Rechnung gesendet – warte auf Zahlung",
+    "markPaid": "Als bezahlt markieren",
+    "buyerNotified": "Bezahlt – Käufer benachrichtigt",
+    "invoiceSent": "Rechnung gesendet",
+    "notPaidYet": "Noch nicht bezahlt",
+    "couldNotConfirmPayment": "Zahlung konnte nicht bestätigt werden",
+    "orderNumber": "Bestellung #{{id}}",
+    "rowA11y": "Bestellung von {{buyer}}: {{items}}. {{status}}",
+    "problems": {
+      "notMine": "Diese Bestellung betrifft Angebote, die nicht dir gehören.",
+      "missingListing": "Einer dieser Artikel ist nicht mehr in deinem Shop.",
+      "badPrice": "Eines dieser Angebote hat keinen festen Preis für eine Rechnung.",
+      "unknownShipping": "Die gewählte Versandoption wird von dir nicht angeboten.",
+      "noRate": "Warte auf Wechselkurs …"
+    },
+    "errors": {
+      "noWallet": "Wähle eine Wallet für den Zahlungseingang.",
+      "invoiceFailed": "Diese Wallet konnte keine Rechnung erstellen. Prüfe, ob sie verbunden ist und empfangen darf.",
+      "amountMismatch": "Die Wallet hat eine Rechnung über einen anderen Betrag erstellt, daher wurde sie nicht gesendet.",
+      "shopChanged": "Die Preise oder Versandoptionen deines Shops haben sich geändert. Prüfe die Bestellung, bevor du eine Rechnung sendest.",
+      "sendFailed": "Senden an den Käufer fehlgeschlagen. Prüfe deine Verbindung und versuche es erneut.",
+      "notSignedIn": "Melde dich an, um Bestellungen zu verwalten."
+    },
+    "wallet": {
+      "none": "Keine deiner Wallets kann Rechnungen erstellen. Füge eine Lightning-Wallet (NWC) mit Empfangsberechtigung hinzu.",
+      "checking": "Prüfe, ob sie empfangen kann …",
+      "offline": "Nicht verbunden",
+      "receiveTo": "Zahlungen empfangen auf",
+      "receiveToHint": "Rechnungen für Bestellungen werden mit dieser Wallet erstellt. Auf diesem Gerät gespeichert.",
+      "remember": "Für meinen Shop merken",
+      "choose": "Wallet wählen",
+      "saveFailed": "Die Wallet-Auswahl konnte nicht gespeichert werden."
+    },
+    "sendNewInvoice": "Neue Rechnung senden",
+    "checkWalletFirst": "Prüfe zuerst deine Wallet",
+    "unknownInvoiceWarning": "Wir konnten nicht bestätigen, ob die vorherige Rechnung bezahlt wurde. Falls ja, sende keine neue."
+  },
+  "relayPublishSheet": {
+    "waiting": "Warten auf Signatur…",
+    "title": "Veröffentliche: %{title}",
+    "accepted": "Akzeptiert",
+    "rejected": "Abgelehnt",
+    "noResponse": "Keine Antwort",
+    "pending": "Wird veröffentlicht…"
+  },
+  "appRelays": {
+    "toggle": "%{host} verwenden",
+    "saveFailed": "Relay-Einstellung konnte nicht gespeichert werden",
+    "warning": {
+      "default": "App-Ersatzverbindungen sind aus",
+      "indexers": "Relay-Listen-Suche ist aus",
+      "geocache": "Geo-Caches werden möglicherweise nicht geladen",
+      "marmot": "Gruppenschlüssel werden möglicherweise nicht gefunden",
+      "market": "Marktangebote werden nicht geladen"
+    }
   }
 }

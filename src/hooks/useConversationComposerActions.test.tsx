@@ -10,6 +10,7 @@ import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 // Mock the Nostr provider so the hook can run without a full context tree.
 // `mockSendDirectMessage` is overridden per-test to drive the send outcome.
 // `mock`-prefixed so jest's mock-hoisting allows referencing them in the factory.
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (key: string) => key }));
 const mockSendDirectMessage = jest.fn();
 const mockAppendLocalDmMessage = jest.fn().mockResolvedValue(undefined);
 jest.mock('../contexts/NostrContext', () => ({

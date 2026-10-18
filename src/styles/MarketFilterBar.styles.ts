@@ -75,6 +75,7 @@ export const createMarketFilterBarStyles = (colors: Palette) =>
     sellerCopy: { flex: 1, gap: 4 },
     sellerOptionDisabled: { opacity: 0.5 },
     sellerHint: { fontSize: 12, color: colors.textSupplementary },
+    sellerHintSelected: { color: colors.white },
     // ----- chips -----------------------------------------------------------
     chip: {
       maxWidth: '100%',

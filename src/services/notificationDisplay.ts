@@ -1,3 +1,4 @@
+import i18n from '../i18n';
 import type { NotificationKind } from './notificationService';
 
 /** Generic title / body to use when the user has lock-screen content
@@ -6,6 +7,8 @@ import type { NotificationKind } from './notificationService';
  * leaking specifics. */
 export function genericFor(kind: NotificationKind): { title: string; body: string } {
   switch (kind) {
+    case 'market':
+      return { title: i18n.t('sellerActivity.generic'), body: '' };
     case 'dm':
       return { title: 'New message', body: 'Open Lightning Piggy to read' };
     case 'group':

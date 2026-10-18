@@ -171,3 +171,143 @@ describe('Explore nearby backfill budgets', () => {
     expect(mockClose).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('nearby cache completion', () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  function subscribe() {
+    const onEose = jest.fn();
+    const onEvent = jest.fn();
+    const close = subscribeNearbyCaches(['gcpvj'], onEvent, undefined, {}, onEose);
+    const handlers = mockSubscribeMany.mock.calls[0][2] as {
+      oneose: () => void;
+      onclose: (reasons: string[]) => void;
+      onevent: (e: unknown) => void;
+    };
+    return { onEose, onEvent, close, handlers };
+  }
+
+  it('waits for the pool aggregate EOSE (including partial relay closure)', async () => {
+    const { onEose, handlers, close } = subscribe();
+    expect(onEose).not.toHaveBeenCalled();
+    handlers.oneose();
+    await Promise.resolve();
+    expect(onEose).toHaveBeenCalledWith({ allRelaysFailed: false });
+    jest.advanceTimersByTime(8000);
+    handlers.oneose();
+    await Promise.resolve();
+    expect(onEose).toHaveBeenCalledTimes(1);
+    close();
+  });
+
+  it('reports total failure despite the pool calling EOSE before close', async () => {
+    const { onEose, handlers, close } = subscribe();
+    handlers.oneose();
+    handlers.onclose(['connection failed']);
+    await Promise.resolve();
+    expect(onEose).toHaveBeenCalledTimes(1);
+    expect(onEose).toHaveBeenCalledWith({ allRelaysFailed: true });
+    close();
+  });
+
+  it('completes at eight seconds even if the pool never responds', () => {
+    const { onEose, close } = subscribe();
+    jest.advanceTimersByTime(7999);
+    expect(onEose).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(onEose).toHaveBeenCalledWith({ allRelaysFailed: false });
+    close();
+  });
+
+  it('keeps delivering late events after timeout without completing twice', async () => {
+    const { onEose, onEvent, handlers, close } = subscribe();
+    jest.advanceTimersByTime(8000);
+    const event = { id: 'late', pubkey: 'hider' };
+    handlers.onevent(event);
+    expect(onEvent).toHaveBeenCalledWith(event);
+    handlers.oneose();
+    handlers.onclose(['closed']);
+    await Promise.resolve();
+    expect(onEose).toHaveBeenCalledTimes(1);
+    close();
+  });
+
+  it('does not report total failure if data arrived before closure', () => {
+    const { onEose, handlers, close } = subscribe();
+    handlers.onevent({ id: 'cache', pubkey: 'hider' });
+    handlers.onclose(['closed']);
+    expect(onEose).toHaveBeenCalledWith({ allRelaysFailed: false });
+    close();
+  });
+
+  it('cancels both pending EOSE and timeout on teardown and ignores late events', async () => {
+    const { onEose, onEvent, handlers, close } = subscribe();
+    handlers.oneose();
+    close();
+    handlers.onclose(['closed']);
+    handlers.onevent({ pubkey: 'hider' });
+    await Promise.resolve();
+    jest.advanceTimersByTime(8000);
+    expect(onEose).not.toHaveBeenCalled();
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(mockClose).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('completes an empty prefix query without opening relays', () => {
+    const onEose = jest.fn();
+    subscribeNearbyCaches([], jest.fn(), undefined, {}, onEose)();
+    expect(onEose).toHaveBeenCalledWith({ allRelaysFailed: false });
+    expect(mockSubscribeMany).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+});
+
+// Exercise the real SDK's relay aggregation too: a pool-level EOSE is not
+// allowed to hide a still-pending relay, and total close precedes its microtask.
+describe('nearby completion with real relay aggregation', () => {
+  const relays = ['wss://first.example', 'wss://second.example'];
+  let children: { oneose: () => void; onclose: (reason: string) => void }[];
+
+  beforeEach(() => {
+    const { SimplePool } = jest.requireActual('nostr-tools/pool');
+    const realPool = new SimplePool();
+    children = [];
+    realPool.ensureRelay = async () => ({
+      subscribe: (_filters: unknown, handlers: (typeof children)[number]) => {
+        children.push(handlers);
+        return { close: () => handlers.onclose('closed by caller') };
+      },
+    });
+    mockSubscribeMany.mockImplementation((...args) => realPool.subscribeMany(...args));
+  });
+  afterEach(() => mockSubscribeMany.mockReset());
+
+  it('waits for every queried relay, treating partial closure as settled', async () => {
+    const onEose = jest.fn();
+    const close = subscribeNearbyCaches(['gcpvj'], jest.fn(), relays, {}, onEose);
+    await Promise.resolve();
+    // Caller relays plus the geo-cache backbone from withGcRelays.
+    expect(children).toHaveLength(3);
+    children[0].oneose();
+    children[1].onclose('connection failed');
+    await Promise.resolve();
+    expect(onEose).not.toHaveBeenCalled();
+    children[2].oneose();
+    await Promise.resolve();
+    expect(onEose).toHaveBeenCalledWith({ allRelaysFailed: false });
+    close();
+  });
+
+  it('detects every relay closing before EOSE with the SDK callback ordering', async () => {
+    const onEose = jest.fn();
+    const close = subscribeNearbyCaches(['gcpvj'], jest.fn(), relays, {}, onEose);
+    await Promise.resolve();
+    children.forEach((child) => child.onclose('connection failed'));
+    await Promise.resolve();
+    expect(onEose).toHaveBeenCalledTimes(1);
+    expect(onEose).toHaveBeenCalledWith({ allRelaysFailed: true });
+    close();
+  });
+});

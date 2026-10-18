@@ -15,6 +15,7 @@ export async function reconcileEmbedProducts(
   current: Event[],
   relays: string[],
   maxWait: number,
+  signal?: AbortSignal,
 ): Promise<Map<string, MarketProduct | null>> {
   const result = new Map<string, MarketProduct | null>();
   if (!current.length) return result;
@@ -36,6 +37,7 @@ export async function reconcileEmbedProducts(
         const query = (filter: Parameters<typeof querySyncAbortable>[2]) =>
           querySyncAbortable(lease.pool, relays, filter, {
             maxWait,
+            signal,
             rejectOnAllRelaysFailure: filter.kinds?.[0] !== 5,
           });
         const revisions = await query({
@@ -74,7 +76,7 @@ export async function reconcileEmbedProducts(
     let next = 0;
     await Promise.all(
       Array.from({ length: Math.min(MAX_CONCURRENT_SELLERS, remaining.length) }, async () => {
-        while (next < remaining.length) {
+        while (!signal?.aborted && next < remaining.length) {
           const group = remaining[next++];
           await reconcileGroup(group);
         }

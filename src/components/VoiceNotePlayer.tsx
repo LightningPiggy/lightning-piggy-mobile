@@ -6,12 +6,17 @@ import { Play, Pause, AlertCircle } from 'lucide-react-native';
 import { useAudioPlayer, useAudioPlayerStatus, setAudioModeAsync } from 'expo-audio';
 import { useTapToReveal } from '../hooks/useTapToReveal';
 import { checkRemoteUrl, MEDIA_MAX_BYTES } from '../utils/remoteUrlPolicy';
+import { useActivePubkey } from '../hooks/useActivePubkey';
 import { useRemoteMedia } from '../hooks/useRemoteMediaUri';
 import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createVoiceNotePlayerStyles } from '../styles/VoiceNotePlayer.styles';
 import { formatTime } from '../utils/messageContent';
-import { resolveDecryptedMedia } from '../services/decryptedMediaCache';
+import {
+  captureDecryptedMediaSession,
+  DecryptedMediaCancelledError,
+  resolveDecryptedMedia,
+} from '../services/decryptedMediaCache';
 import type { MarmotImageParams } from '../utils/messageContent';
 
 const BARS = 40;
@@ -96,6 +101,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
   header,
   onLongPress,
 }) => {
+  const owner = useActivePubkey();
   const colors = useThemeColors();
   const styles = useMemo(() => createVoiceNotePlayerStyles(colors), [colors]);
   const bars = useMemo(() => pseudoWave(url, BARS), [url]);
@@ -106,10 +112,17 @@ const VoiceNotePlayer: React.FC<Props> = ({
   // so a hit isn't proof the file still exists —
   // resolveDecryptedMedia verifies existence (and re-decrypts on a miss)
   // before ensureLocal sets localUri (#732 review).
-  const [localUri, setLocalUri] = useState<string | null>(null);
+  const [local, setLocal] = useState<{ owner: string | null; uri: string } | null>(null);
+  const localUri = local?.owner === owner ? local.uri : null;
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const wantPlayRef = useRef(false);
+  useEffect(() => {
+    wantPlayRef.current = false;
+    setLocal(null);
+    setBusy(false);
+    setFailed(false);
+  }, [owner, url]);
   // The parsed `marmot` object is rebuilt every render; read it via a ref so
   // it doesn't churn ensureLocal's identity.
   const marmotRef = useRef(marmot);
@@ -142,36 +155,45 @@ const VoiceNotePlayer: React.FC<Props> = ({
   // per-account cache (decrypt once across remounts, #730; scoped to the
   // account and wiped on sign-out, #1241). Returns the local uri (or null on
   // failure). Plain notes resolve through useRemoteMediaUri.
-  const ensureLocal = useCallback(async (): Promise<string | null> => {
-    if (!encrypted) return plainUri;
-    if (localUri) return localUri;
-    const marmotParams = marmotRef.current;
-    if ((!keyHex && !marmotParams) || !nonceHex) {
-      setFailed(true);
-      return null;
-    }
-    setBusy(true);
-    try {
-      const uri = await resolveDecryptedMedia({
-        url,
-        kind: 'voice',
-        mime,
-        size,
-        sha256,
-        keyHex,
-        nonceHex,
-        marmot: marmotParams,
-      });
-      setLocalUri(uri);
-      return uri;
-    } catch (e) {
-      console.warn('[VoiceNotePlayer] decrypt/playback prep failed:', e);
-      setFailed(true);
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }, [encrypted, url, localUri, sha256, keyHex, nonceHex, mime, size, plainUri]);
+  const ensureLocal = useCallback(
+    async (session: ReturnType<typeof captureDecryptedMediaSession>): Promise<string | null> => {
+      session.assertCurrent();
+      if (!encrypted) return plainUri;
+      if (localUri) return localUri;
+      const marmotParams = marmotRef.current;
+      if ((!keyHex && !marmotParams) || !nonceHex) {
+        setFailed(true);
+        return null;
+      }
+      setBusy(true);
+      try {
+        const uri = await resolveDecryptedMedia(
+          {
+            url,
+            kind: 'voice',
+            mime,
+            size,
+            sha256,
+            keyHex,
+            nonceHex,
+            marmot: marmotParams,
+          },
+          session.owner,
+        );
+        session.assertCurrent();
+        setLocal({ owner, uri });
+        return uri;
+      } catch (e) {
+        if (e instanceof DecryptedMediaCancelledError) return null;
+        console.warn('[VoiceNotePlayer] decrypt/playback prep failed:', e);
+        setFailed(true);
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [owner, encrypted, url, localUri, sha256, keyHex, nonceHex, mime, size, plainUri],
+  );
 
   // Once the decrypted file lands and the user had asked to play, start it
   // (the player's source only switches on the next render). Covers both a
@@ -185,15 +207,18 @@ const VoiceNotePlayer: React.FC<Props> = ({
 
   const onToggle = useCallback(async () => {
     if (!safe) return;
+    const session = captureDecryptedMediaSession(owner);
     try {
+      session.assertCurrent();
       await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      session.assertCurrent();
       if (isPlaying) {
         player.pause();
         return;
       }
       if (encrypted && !localUri) {
         wantPlayRef.current = true;
-        await ensureLocal(); // playback fires from the effect once decrypted
+        await ensureLocal(session); // playback fires from the effect once decrypted
         return;
       }
       if (!source) {
@@ -209,6 +234,7 @@ const VoiceNotePlayer: React.FC<Props> = ({
       // Playback is best-effort; a failed load just leaves the button idle.
     }
   }, [
+    owner,
     safe,
     isPlaying,
     player,

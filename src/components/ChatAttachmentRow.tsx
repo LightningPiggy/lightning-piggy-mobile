@@ -63,7 +63,7 @@ function ChatAttachmentRow({
         <Image
           source={{ uri }}
           style={styles.thumbnail}
-          cachePolicy="memory-disk"
+          cachePolicy="memory"
           recyclingKey={item.id}
           contentFit="cover"
           autoplay={false}

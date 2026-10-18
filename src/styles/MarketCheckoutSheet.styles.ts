@@ -4,6 +4,7 @@ import type { Palette } from './palettes';
 /** Styles for the in-app Market checkout bottom sheet (#market). */
 export const createMarketCheckoutSheetStyles = (colors: Palette) =>
   StyleSheet.create({
+    amountColumn: { flexShrink: 1, textAlign: 'right', marginLeft: 8 },
     sheetBackground: {
       backgroundColor: colors.background,
     },
@@ -16,12 +17,7 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       paddingTop: 4,
       paddingBottom: 28,
     },
-    title: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.textHeader,
-      marginBottom: 16,
-    },
+    header: { marginHorizontal: -20, marginTop: -4, marginBottom: 16 },
     productRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -62,6 +58,7 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
     },
     unitPrice: {
       fontSize: 13,
+      fontWeight: '600',
       color: colors.textBody,
       marginTop: 4,
     },
@@ -130,11 +127,14 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       color: colors.textHeader,
     },
     totalValue: {
+      flexShrink: 1,
+      marginLeft: 8,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
     },
     totalSats: {
+      flexShrink: 1,
       fontSize: 18,
       fontWeight: '800',
       color: colors.textHeader,
@@ -215,6 +215,52 @@ export const createMarketCheckoutSheetStyles = (colors: Palette) =>
       fontSize: 14,
       fontWeight: '600',
       color: colors.brandPink,
+    },
+    rememberAddress: { minHeight: 24, justifyContent: 'center' },
+    rememberAddressLabel: { marginBottom: 0 },
+    addressField: {
+      marginBottom: 16,
+    },
+    addressLabel: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.textHeader,
+      marginBottom: 6,
+    },
+    addressInput: {
+      minHeight: 48,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      backgroundColor: colors.surface,
+      color: colors.textBody,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      fontSize: 15,
+      textAlignVertical: 'center',
+    },
+    addressCountry: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    addressCountryText: {
+      flex: 1,
+      color: colors.textBody,
+      fontSize: 15,
+    },
+    addressHint: {
+      fontSize: 12,
+      color: colors.textSupplementary,
+      marginTop: 4,
+    },
+    stockNote: {
+      fontSize: 13,
+      color: colors.textSupplementary,
+      textAlign: 'right',
+      marginTop: -8,
+      marginBottom: 12,
     },
   });
 

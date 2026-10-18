@@ -4,8 +4,11 @@
 // (localDb / #700).
 import {
   subscribeDmStorage,
+  subscribeDmDeletions,
+  deleteDmMessagesByIds,
   selectKnownEventIds,
   upsertDmMessages,
+  upsertDmMessagesIf,
   importDmMessages,
   updateDmDeliveryStatuses,
   getConversationMessages,
@@ -21,6 +24,7 @@ import {
   type DmMessageRow,
   getConversationForEvent,
 } from './dmDb';
+import { dmOwnerEpoch, isDmOwnerRetired, reviveDmOwner } from './dmOwnerGuard';
 
 const mockExecute = jest.fn();
 const mockTransaction = jest.fn(
@@ -84,6 +88,12 @@ describe('dmDb', () => {
     it('no-ops on empty input', async () => {
       await upsertDmMessages([]);
       expect(mockTransaction).not.toHaveBeenCalled();
+    });
+
+    it('writes nothing when persistIf fails inside the transaction', async () => {
+      expect(await upsertDmMessagesIf([row({ eventId: 'e1' })], () => false)).toBe(false);
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockExecute).not.toHaveBeenCalled();
     });
 
     it('upserts received rows in one transaction, keeping any existing tick (COALESCE)', async () => {
@@ -200,7 +210,10 @@ describe('dmDb', () => {
       mockExecute.mockResolvedValueOnce(rowsResult([{ present: 1 }]));
       expect(await hasConversationWith(OWNER, 'convA')).toBe(true);
       const [sql, params] = mockExecute.mock.calls[0];
-      expect(sql).toContain('WHERE owner = ? AND conversation = ? LIMIT 1');
+      // Reaction rows (#1321) alone don't make a conversation.
+      expect(sql).toContain(
+        'WHERE owner = ? AND conversation = ? AND wire_kind NOT IN (7, 5) LIMIT 1',
+      );
       expect(params).toEqual([OWNER, 'convA']);
     });
 
@@ -363,7 +376,7 @@ describe('dmDb', () => {
   });
 
   describe('getShopOrderRows', () => {
-    it('reads the owner’s newest kind-16 rows in both directions, bounded', async () => {
+    it('bounds incoming placed orders and reads their lifecycle rows in both directions', async () => {
       mockExecute.mockResolvedValueOnce(
         rowsResult([
           { owner: OWNER, event_id: 'o1', conversation: 'buyer', created_at: 9, sender: 'buyer', content: '{}', from_me: 0, wire_kind: 16 }, // prettier-ignore
@@ -372,10 +385,13 @@ describe('dmDb', () => {
       const rows = await getShopOrderRows(OWNER, 50);
       expect(rows.map((r) => [r.eventId, r.fromMe])).toEqual([['o1', false]]);
       const [sql, params] = mockExecute.mock.calls[0];
-      expect(sql).toContain('owner = ? AND wire_kind = 16');
+      expect(sql).toContain(
+        'owner = ? AND sender = conversation AND from_me = 0 AND wire_kind = 16',
+      );
+      expect(sql).toContain('owner = ? AND wire_kind IN (16, 17)');
       expect(sql).toContain('ORDER BY created_at DESC');
       expect(sql).toContain('LIMIT ?');
-      expect(params).toEqual([OWNER, 50]);
+      expect(params).toEqual([OWNER, 50, OWNER]);
     });
   });
 
@@ -403,8 +419,9 @@ describe('dmDb', () => {
       );
       expect(sql).toContain('WHERE m.owner = ?');
       // Marmot invite gift wraps never become a thread's latest (#1269).
-      expect(sql).toContain('WHERE owner = ? AND wire_kind != 444');
-      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind != 444');
+      // …and neither do wrapped reactions / retractions (#1321).
+      expect(sql).toContain('WHERE owner = ? AND wire_kind NOT IN (444, 7, 5)');
+      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind NOT IN (444, 7, 5)');
       expect(params).toEqual([OWNER, OWNER]);
     });
   });
@@ -471,11 +488,29 @@ describe('dmDb', () => {
   });
 
   describe('deleteDmMessagesForOwner', () => {
-    it("deletes only the owner's rows", async () => {
+    it("deletes only the owner's rows, in a transaction (ordered against upserts)", async () => {
       await deleteDmMessagesForOwner(OWNER);
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
       const [sql, params] = mockExecute.mock.calls[0];
       expect(sql).toContain('DELETE FROM dm_messages WHERE owner = ?');
       expect(params).toEqual([OWNER]);
+    });
+
+    it('changes the owner epoch at once, so an in-flight write can tell', async () => {
+      const before = dmOwnerEpoch(OWNER);
+      const wipe = deleteDmMessagesForOwner(OWNER);
+      expect(dmOwnerEpoch(OWNER)).toBe(before + 1); // before the DELETE resolves
+      await wipe;
+      expect(dmOwnerEpoch(OWNER.toUpperCase())).toBe(before + 1);
+    });
+
+    it('retires the owner until it signs in again', async () => {
+      reviveDmOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER)).toBe(false);
+      await deleteDmMessagesForOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER.toUpperCase())).toBe(true);
+      reviveDmOwner(OWNER);
+      expect(isDmOwnerRetired(OWNER)).toBe(false);
     });
   });
 });
@@ -516,7 +551,11 @@ it('signals each owner once after a committed upsert and unsubscribes', async ()
     return rowsResult([]);
   });
   await upsertDmMessages([row(), row({ eventId: 'e2' }), row({ owner: 'owner2' })]);
-  expect(listener.mock.calls).toEqual([[OWNER], ['owner2']]);
+  // Each owner gets its own committed rows (#1623 tracks our sends from them).
+  expect(listener.mock.calls).toEqual([
+    [OWNER, [row(), row({ eventId: 'e2' })]],
+    ['owner2', [row({ owner: 'owner2' })]],
+  ]);
   unsubscribe();
   await upsertDmMessages([row()]);
   expect(listener).toHaveBeenCalledTimes(2);
@@ -540,8 +579,49 @@ it('signals imported rows after commit so placeholders can resolve', async () =>
   const unsubscribe = subscribeDmStorage(listener);
   try {
     await importDmMessages([row()]);
-    expect(listener).toHaveBeenCalledWith(OWNER);
+    expect(listener).toHaveBeenCalledWith(OWNER, [row()]);
   } finally {
     unsubscribe();
   }
+});
+
+describe('subscribeDmDeletions', () => {
+  it('fires once with owner + ids after the deletes land, then unsubscribes', async () => {
+    const listener = jest.fn();
+    const unsubscribe = subscribeDmDeletions(listener);
+    mockExecute.mockImplementationOnce(async () => {
+      expect(listener).not.toHaveBeenCalled();
+      return rowsResult([]);
+    });
+    await deleteDmMessagesByIds(OWNER, ['w1', 'w2']);
+    expect(listener.mock.calls).toEqual([[OWNER, ['w1', 'w2']]]);
+    unsubscribe();
+    await deleteDmMessagesByIds(OWNER, ['w3']);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire on upserts, imports or an empty delete', async () => {
+    const listener = jest.fn();
+    const unsubscribe = subscribeDmDeletions(listener);
+    try {
+      await upsertDmMessages([row()]);
+      await importDmMessages([row({ eventId: 'e2' })]);
+      await deleteDmMessagesByIds(OWNER, []);
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('does not fire when the delete fails', async () => {
+    const listener = jest.fn();
+    const unsubscribe = subscribeDmDeletions(listener);
+    try {
+      mockExecute.mockRejectedValueOnce(new Error('db'));
+      await expect(deleteDmMessagesByIds(OWNER, ['w1'])).rejects.toThrow('db');
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
 });

@@ -75,7 +75,7 @@ Bunker-side batching is filed as a follow-up. See `src/services/nostrConnectServ
 The `nostrconnect://` URI we generate matches the format defined in the NIP-46 spec, section "Nostr Connect URIs":
 
 ----
-nostrconnect://<client-pub>?relay=wss://relay.primal.net&relay=wss://relay.ditto.pub&relay=wss://nos.lol&secret=<32hex>&perms=sign_event,nip04_encrypt,nip04_decrypt,nip44_encrypt,nip44_decrypt&name=Lightning%20Piggy
+nostrconnect://<client-pub>?relay=wss://relay.primal.net&relay=wss://relay.ditto.pub&relay=wss://nos.lol&secret=<32hex>&perms=sign_event%2Csign_event%3A22242%2Cnip04_encrypt%2Cnip04_decrypt%2Cnip44_encrypt%2Cnip44_decrypt&name=Lightning%20Piggy
 ----
 
 Bunkers known to consume this format (no app-side testing, just spec compliance):
@@ -87,6 +87,22 @@ Bunkers known to consume this format (no app-side testing, just spec compliance)
 * **Nostrum**
 
 The URI names every relay in `NIP46_PAIRING_RELAYS` (`src/services/nostrRelayDefaults.ts`: relay.primal.net, relay.ditto.pub, nos.lol), and the app listens for the bunker's reply on all of them, so one dead relay can't break pairing. It used to name only `wss://relay.nsec.app`, which is dead (#1198, #1326). Bunkers connect to whichever relays the URI names.
+
+== Relay-login pre-approval
+
+On the next connect/re-pair, the requested permissions include `sign_event:22242`
+for NIP-42 relay login, alongside the existing bare `sign_event` and encryption
+permissions. The `nostrconnect://` URI carries these permissions, and subsequent
+bunker `connect` requests carry the saved permission list. Amber requests the
+same kind via the NIP-55 `get_public_key` Intent's `permissions` JSON extra
+(`[{"type":"sign_event","kind":22242}]`).
+Both are derived from `SIGNER_PREAPPROVED_EVENT_KINDS` in
+`src/services/signerPermissions.ts`.
+
+The signer/user decides whether to grant pre-approval; denying it can still
+produce relay-login prompts. Existing pairings are untouched and retain their
+saved permissions until the user next connects/re-pairs. There is no forced
+re-pair or permission migration on session restore.
 
 == Storage
 

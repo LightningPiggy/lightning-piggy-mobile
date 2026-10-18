@@ -22,6 +22,9 @@ export async function sendNip17ToManyWithNsec(input: {
   recipientPubkeys: string[];
   relays: string[];
   onDeliveryFinalized?: OnDeliveryFinalized;
+  /** Also wrap to the sender (default). A NIP-171 group message goes to its
+   * epoch key only: the sender reads it from there. */
+  includeSelf?: boolean;
 }): Promise<DmSendResult> {
   const senderPublicKey = getPublicKey(input.senderSecretKey);
   // Bind the destination policy to the sender before any yield or signer await.
@@ -30,7 +33,10 @@ export async function sendNip17ToManyWithNsec(input: {
   const eventId = nostrGetEventHash({ ...input.rumor, pubkey: senderPublicKey });
   // Self-wrap first (matching wrapManyEvents); sender deduped out if also in recipients.
   const recipients = Array.from(
-    new Set([senderPublicKey.toLowerCase(), ...input.recipientPubkeys.map((p) => p.toLowerCase())]),
+    new Set([
+      ...(input.includeSelf === false ? [] : [senderPublicKey.toLowerCase()]),
+      ...input.recipientPubkeys.map((p) => p.toLowerCase()),
+    ]),
   );
   const signedWraps: VerifiedEvent[] = [];
   for (let i = 0; i < recipients.length; i++) {
@@ -85,6 +91,8 @@ export async function sendNip17ToManyWithSigner(input: {
     content: string;
   }>;
   onDeliveryFinalized?: OnDeliveryFinalized; // Background settle for the tick (#857).
+  /** Also wrap to the sender (default); see sendNip17ToManyWithNsec. */
+  includeSelf?: boolean;
 }): Promise<DmSendResult> {
   const relays = [...lockRelays(input.relays, input.senderPubkey)];
   trackRelays(relays);
@@ -94,7 +102,11 @@ export async function sendNip17ToManyWithSigner(input: {
   // combined list so a sender who is also explicitly p-tagged isn't
   // wrapped twice.
   const recipients = Array.from(
-    new Set([input.senderPubkey, ...input.recipientPubkeys].map((p) => p.toLowerCase())),
+    new Set(
+      [...(input.includeSelf === false ? [] : [input.senderPubkey]), ...input.recipientPubkeys].map(
+        (p) => p.toLowerCase(),
+      ),
+    ),
   );
 
   // Compute the rumor id once. The rumor is never signed (nostr-tools
@@ -161,8 +173,7 @@ export async function sendNip17ToManyWithSigner(input: {
     input.onDeliveryFinalized,
   );
   return {
-    wrapsPublished: publishResult.wrapsPublished,
+    ...publishResult,
     errors: [...errors, ...publishResult.errors],
-    delivery: publishResult.delivery,
   };
 }

@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 import type { Event as NostrEvent, Filter, VerifiedEvent } from 'nostr-tools';
 import { DEFAULT_RELAYS, pool, publishSignedEvent } from './nostrService';
 import { GC_RELAYS } from './geocacheRelays';
@@ -48,13 +49,13 @@ export interface SignedEventLike {
  * Ditto search relays). Without GC_RELAYS the set degrades to whatever the
  * caller passed; with it the backbone is guaranteed. See #907.
  */
-const withGcRelays = (relays: string[] = GC_RELAYS): string[] => [
-  ...new Set([...relays, ...GC_RELAYS]),
-];
+export const withGcRelays = (
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
+): string[] => [...new Set([...relays, ...enabledAppRelays('geocache', GC_RELAYS)])];
 
 export const publishCacheEvent = async (
   signed: SignedEventLike,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
 ): Promise<void> => {
   await publishSignedEvent(signed, withGcRelays(relays));
   // Every own-cache mutation (create / edit / expire / NIP-09 delete)
@@ -63,6 +64,10 @@ export const publishCacheEvent = async (
   notifyOwnCachesChanged();
 };
 
+export interface NearbyCachesCompletion {
+  allRelaysFailed: boolean;
+}
+
 /**
  * Subscribe to nearby caches by geohash prefix. `prefixes` should
  * come from `geohashPrefixes(currentGh, 5)` — yields a single filter
@@ -70,15 +75,22 @@ export const publishCacheEvent = async (
  * LP Piggies AND treasures.to / TapTheSatsMap caches; caller branches
  * on `parsed.isLpPiggy` to render the 🐷 vs 📍 pin distinction).
  *
- * Returns a closer; call it to terminate the subscription.
+ * `onEose` fires once after all queried relays reach EOSE/close, or after
+ * eight seconds. Total closure without any event is a failure; a timeout
+ * alone is inconclusive. Completion does not stop live event delivery.
+ * Returns a closer that cancels pending completion and event delivery.
  */
 export const subscribeNearbyCaches = (
   prefixes: string[],
   onEvent: (cache: ParsedCache) => void,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
   filterExtras: Partial<Filter> = {},
+  onEose?: (result: NearbyCachesCompletion) => void,
 ): (() => void) => {
-  if (prefixes.length === 0) return () => {};
+  if (prefixes.length === 0) {
+    onEose?.({ allRelaysFailed: false });
+    return () => {};
+  }
   relays = withGcRelays(relays);
   const filter: Filter = {
     kinds: [GC_LISTING_KIND],
@@ -106,8 +118,29 @@ export const subscribeNearbyCaches = (
     __burstMs = 0;
     __burstFlushTimer = null;
   };
+  let cancelled = false;
+  let completed = false;
+  let receivedEvent = false;
+  const complete = (allRelaysFailed: boolean): void => {
+    if (cancelled || completed) return;
+    completed = true;
+    clearTimeout(completionTimer);
+    onEose?.({ allRelaysFailed });
+  };
+  // Independent of the SDK's connection/EOSE timers: even a stalled relay
+  // must not leave the rail loading forever. Keep the live sub for late data.
+  const completionTimer = setTimeout(() => complete(false), 8000);
   const sub = pool.subscribeMany(relays, filter, {
+    // SimplePool counts both EOSE and close towards this aggregate signal.
+    // On total connection failure it calls oneose immediately BEFORE onclose.
+    // Defer success one microtask so onclose can report failure first.
+    oneose: () => {
+      void Promise.resolve().then(() => complete(false));
+    },
+    onclose: () => complete(!receivedEvent),
     onevent: (e: NostrEvent) => {
+      if (cancelled) return;
+      receivedEvent = true;
       // Filter out orphaned dev-leftover signers (see devEventDenylist.ts)
       // before parsing — these are kind-37516 events from disposable nsecs
       // we no longer hold a key for, so they sit on relays forever.
@@ -137,6 +170,8 @@ export const subscribeNearbyCaches = (
     },
   });
   return () => {
+    cancelled = true;
+    clearTimeout(completionTimer);
     if (__burstFlushTimer) clearTimeout(__burstFlushTimer);
     sub.close();
   };
@@ -164,7 +199,7 @@ const RECENT_SINCE_SECS = (): number => Math.floor(Date.now() / 1000) - 30 * 24 
  */
 export const subscribeRecentCaches = (
   onEvent: (cache: ParsedCache) => void,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
   limit = 200,
 ): (() => void) => {
   const filter: Filter = { kinds: [GC_LISTING_KIND], limit, since: RECENT_SINCE_SECS() };
@@ -192,7 +227,7 @@ export const subscribeRecentCaches = (
  */
 export const subscribeRecentFoundLogs = (
   onEvent: (log: ParsedFoundLog) => void,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
   limit = 200,
 ): (() => void) => {
   const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], limit, since: RECENT_SINCE_SECS() };
@@ -209,7 +244,7 @@ export const subscribeRecentFoundLogs = (
 export const subscribeFoundLogs = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
 ): (() => void) => {
   const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], '#a': [cacheCoord] };
   const sub = pool.subscribeMany(withGcRelays(relays), filter, {
@@ -226,7 +261,7 @@ export const subscribeFoundLogs = (
 export const subscribeFoundLogsByAuthors = (
   authors: string[],
   onEvent: (event: VerifiedEvent) => void,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
 ): (() => void) => {
   if (authors.length === 0) return () => {};
   const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], authors };
@@ -239,7 +274,7 @@ export const subscribeFoundLogsByAuthors = (
 export const subscribeComments = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
 ): (() => void) => {
   const filter: Filter = { kinds: [GC_COMMENT_KIND], '#A': [cacheCoord] };
   const sub = pool.subscribeMany(withGcRelays(relays), filter, {
@@ -270,7 +305,7 @@ export const subscribeComments = (
 export const subscribeNearbyEvents = (
   prefixes: string[],
   onEvent: (parsed: ParsedEvent) => void,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = enabledAppRelays('default', DEFAULT_RELAYS),
   topicTags: string[] = ['bitcoin', 'lightning', 'meetup'],
 ): (() => void) => {
   const closers: (() => void)[] = [];
@@ -339,7 +374,7 @@ export const subscribeNearbyEvents = (
  */
 export const fetchCachesByAuthor = async (
   hiderPubkey: string,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
 ): Promise<ParsedCache[]> => {
   relays = withGcRelays(relays);
   // Cap the relay query at 5 s via nostr-tools' built-in `maxWait` so a
@@ -379,7 +414,7 @@ export const fetchCachesByAuthor = async (
 export const fetchCache = async (
   hiderPubkey: string,
   d: string,
-  relays: string[] = GC_RELAYS,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
 ): Promise<ParsedCache | null> => {
   // 5 s maxWait — same Hermes timer-starvation rationale as
   // fetchCachesByAuthor above. Without it a slow relay leaves
@@ -412,7 +447,7 @@ export const fetchCache = async (
 export const fetchEvent = async (
   organiserPubkey: string,
   d: string,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = enabledAppRelays('default', DEFAULT_RELAYS),
 ): Promise<ParsedEvent | null> => {
   // 5 s maxWait — same rationale as fetchCache above.
   const events = await pool.querySync(

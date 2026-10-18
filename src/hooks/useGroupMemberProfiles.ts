@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as profileCache from '../services/zapSenderProfileStorage';
 import type { NostrContact, NostrProfile } from '../types/nostr';
+import type { GroupMessage } from '../services/groupMessagesStorageService';
 import { membersNeedingProfiles, type MemberProfile } from '../utils/groupMemberRows';
 
 const EMPTY_PROFILES: ReadonlyMap<string, MemberProfile> = new Map();
+const EMPTY_MESSAGES: readonly Pick<GroupMessage, 'senderPubkey'>[] = [];
 
 /** Upper bound on authors in the one kind-0 request a sheet open makes. */
 export const MAX_MEMBER_PROFILE_FETCH = 100;
@@ -43,6 +45,8 @@ function mergeProfiles(
 
 interface Options {
   memberPubkeys: readonly string[];
+  /** History may contain senders who are no longer in the current member list. */
+  messages?: readonly Pick<GroupMessage, 'senderPubkey'>[];
   selfPubkey: string | null | undefined;
   contacts: readonly NostrContact[];
   /** Allow the relay fetch (the members sheet is open). Cache reads always run. */
@@ -69,14 +73,22 @@ interface Options {
  */
 export function useGroupMemberProfiles({
   memberPubkeys,
+  messages = EMPTY_MESSAGES,
   selfPubkey,
   contacts,
   enabled,
   fetchProfilesForPubkeys,
 }: Options): ReadonlyMap<string, MemberProfile> {
   const candidates = useMemo(
-    () => membersNeedingProfiles(memberPubkeys, selfPubkey, contacts),
-    [memberPubkeys, selfPubkey, contacts],
+    () =>
+      // Use stored messages before timeline classification, which itself needs
+      // the resolved member names. The helper normalizes and deduplicates keys.
+      membersNeedingProfiles(
+        [...memberPubkeys, ...messages.map((message) => message.senderPubkey)],
+        selfPubkey,
+        contacts,
+      ),
+    [memberPubkeys, messages, selfPubkey, contacts],
   );
   // Contacts / group objects re-emit with fresh identities on unrelated
   // updates; key the effect on the candidate set's content instead.

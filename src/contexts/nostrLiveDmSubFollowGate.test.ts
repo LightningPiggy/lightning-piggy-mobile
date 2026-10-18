@@ -502,17 +502,13 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     expect(buffer.size).toBe(0);
   });
 
-  it('an order wrap from a not-yet-followed partner buffers a friendly preview, not raw JSON (#market)', async () => {
-    // Regression for the follow-gate deferred path leaking order JSON into the
-    // conversation-list preview: the deferred entry must run the order content
-    // through `orderPreviewFromContent` (as the non-deferred path does), not
-    // surface the raw `textForRumor` blob. A market the user transacted with
-    // (a kind-16 order) is virtually never in their follow set, so this path
-    // is the common case for marketplace previews.
+  it('persists a bounded incoming order while the unhydrated Messages gate hides its preview', async () => {
+    // Order persistence bypasses follow hydration; Messages keeps its gate.
     const followPubkeysRef = { current: new Set<string>() };
     const buffer = createLiveSubFollowGateBuffer();
 
-    startLiveDmSubscription(makeParams({ followPubkeysRef, followGateBuffer: buffer }));
+    const params = makeParams({ followPubkeysRef, followGateBuffer: buffer });
+    startLiveDmSubscription(params);
     await flush();
 
     const now = Math.floor(Date.now() / 1000);
@@ -532,24 +528,26 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
       tags: [],
       content: 'x',
       rumor: {
+        pubkey: ALICE,
         kind: 16,
+        tags: [
+          ['p', VIEWER],
+          ['type', '1'],
+          ['order', 'abc-12345678'],
+          ['amount', '21'],
+        ],
         created_at: now,
         content: orderJson,
         partnership: { partnerPubkey: ALICE, fromMe: false },
       },
     });
     await flush();
-    expect(buffer.size).toBe(1);
-
-    // Capture the buffered entry on replay and assert its preview is the
-    // human-readable summary, never the raw order-JSON blob.
-    let surfaced: { text?: string } | null = null;
-    buffer.reevaluate(new Set([ALICE]), (item: unknown) => {
-      surfaced = (item as { entry: { text?: string } }).entry;
-    });
-    expect(surfaced).toBeTruthy();
-    expect(surfaced!.text).toMatch(/^🛒 Order Placed/);
-    expect(surfaced!.text).not.toContain('{');
+    expect(buffer.size).toBe(0);
+    expect(upsertDmMessages).toHaveBeenCalledWith([
+      expect.objectContaining({ eventId: 'order-wrap', content: orderJson, wireKind: 16 }),
+    ]);
+    expect(params.setDmInbox).not.toHaveBeenCalled();
+    expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
   });
 
   it('un-claims a wrap id from knownWrapIds when teardown lands while parked on the yield (Copilot #1039 review)', async () => {
@@ -626,82 +624,6 @@ describe('startLiveDmSubscription — follow-gate race + teardown (#851 F2)', ()
     await flush();
     expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
     expect(knownWrapIdsRef.current.set.has('parked-wrap')).toBe(true);
-  });
-});
-
-describe('live plaintext marketplace order persistence', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    jest.mocked(upsertDmMessages).mockReset().mockResolvedValue(undefined);
-  });
-
-  const orderEvent = () => ({
-    id: 'market-order',
-    kind: 16,
-    pubkey: ALICE,
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [
-      ['p', VIEWER],
-      ['type', '2'],
-      ['order', 'order-1'],
-      ['amount', '1000'],
-      ['payment', 'bolt11', 'lnbc10u1invoice'],
-    ],
-    content: '',
-  });
-
-  it('reloads the conversation only after the live order is stored', async () => {
-    let finish!: () => void;
-    jest.mocked(upsertDmMessages).mockImplementationOnce(
-      () =>
-        new Promise<void>((r) => {
-          finish = r;
-        }),
-    );
-    const teardown = startLiveDmSubscription(makeParams());
-    await flush();
-    capturedOnEvent!(orderEvent());
-    await flush();
-    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
-    expect(mockNotifyDm).not.toHaveBeenCalled();
-    expect(mockFireNotification).not.toHaveBeenCalled();
-    finish();
-    await flush();
-    expect(mockNotifyDm).toHaveBeenCalledWith(ALICE);
-    expect(mockNotifyDm).toHaveBeenCalledTimes(1);
-    teardown();
-  });
-
-  it('does not announce delivery when persistence fails', async () => {
-    jest.mocked(upsertDmMessages).mockRejectedValueOnce(new Error('disk unavailable'));
-    const teardown = startLiveDmSubscription(makeParams());
-    await flush();
-    capturedOnEvent!(orderEvent());
-    await flush();
-    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
-    expect(mockNotifyDm).not.toHaveBeenCalled();
-    expect(mockFireNotification).not.toHaveBeenCalled();
-    teardown();
-  });
-
-  it('does not notify an old identity when persistence completes after teardown', async () => {
-    let finish!: () => void;
-    jest.mocked(upsertDmMessages).mockImplementationOnce(
-      () =>
-        new Promise<void>((r) => {
-          finish = r;
-        }),
-    );
-    const teardown = startLiveDmSubscription(makeParams());
-    await flush();
-    capturedOnEvent!(orderEvent());
-    await flush();
-    expect(upsertDmMessages).toHaveBeenCalledTimes(1);
-    teardown();
-    finish();
-    await flush();
-    expect(mockNotifyDm).not.toHaveBeenCalled();
-    expect(mockFireNotification).not.toHaveBeenCalled();
   });
 });
 

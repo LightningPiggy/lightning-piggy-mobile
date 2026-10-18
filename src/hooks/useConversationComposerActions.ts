@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+import { useNip17FileComposer } from './useNip17FileComposer';
 import React, { useCallback, useMemo, useRef } from 'react';
 import { DEFAULT_DM_PROTOCOL, type DmProtocol } from '../utils/dmProtocol';
 import { Alert } from '../components/BrandedAlert';
@@ -284,15 +286,19 @@ export function useConversationComposerActions(params: {
   const sendFile = useCallback(
     async (
       file: EncryptedUpload,
-      kind: 'voice' | 'image',
+      kind: 'voice' | 'image' | 'file',
       sendProtocol: DmProtocol = protocol,
     ): Promise<boolean> => {
       const result = await sendFileMessage(pubkey, file, sendProtocol);
       const reason = nip17FallbackReason(result, sendProtocol);
       if (reason) return offerNip17(reason, () => sendFile(file, kind, 'nip17'));
       if (!result.success) {
-        const what = kind === 'image' ? 'image' : 'voice note';
-        Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
+        if (kind === 'file') {
+          Alert.alert(t('messageBubble.file'), t('messageBubble.fileShareFailed'));
+        } else {
+          const what = kind === 'image' ? 'image' : 'voice note';
+          Alert.alert('Send failed', result.error ?? `Could not send ${what}.`);
+        }
         return false;
       }
       // Optimistic bubble stores the same encoded URL so it renders right away.
@@ -304,9 +310,13 @@ export function useConversationComposerActions(params: {
           mime: file.mime,
           keyHex: file.keyHex,
           nonceHex: file.nonceHex,
+          sha256: file.sha256Hex,
+          size: file.size,
+          filename: file.filename,
         }),
         createdAt: Math.floor(Date.now() / 1000),
         deliveryStatus: result.delivery,
+        wireKind: 15,
         ...(sendProtocol === 'marmot' ? { protocol: 'marmot' as const } : {}),
       };
       setMessages((prev) => [...prev, optimistic]);
@@ -416,8 +426,18 @@ export function useConversationComposerActions(params: {
     [offerNip17, sendText],
   );
 
+  const fileComposer = useNip17FileComposer(
+    protocol,
+    sendFile,
+    setAttachPanelOpen,
+    undefined,
+    pubkey,
+  );
+
   return {
     ...actions,
+    handlePickAndSendFile: fileComposer.pickFile,
+    uploadingImage: actions.uploadingImage || fileComposer.uploading,
     appendOptimisticLocal,
     resendText: sendText,
     shareNwcWallet,

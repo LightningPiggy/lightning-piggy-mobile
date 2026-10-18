@@ -1,8 +1,12 @@
-import { classifyRumor, subjectFromRumor, type DecodedRumor } from '../utils/nip17Unwrap';
+import {
+  classifyRumor,
+  subjectFromRumor,
+  textForRumor,
+  type DecodedRumor,
+} from '../utils/nip17Unwrap';
 import {
   findGroupForParticipants,
   reconcileSyntheticGroup,
-  waitForPendingGroupReconciliation,
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
@@ -44,37 +48,29 @@ export async function tryRouteGroupRumor(
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
   if (!cls || cls.type === 'order') return { kind: 'not-group' };
-  // Two-party specialized rumors must reach the DM handlers even when
-  // a subject classifies them as a group (wallet-share redaction, Marmot
-  // Welcome joins, and encrypted-file metadata conversion).
+  // Two-party specialized rumors stay on their DM handlers, except files
+  // explicitly addressed to a named room via subject. Subjectless files
+  // remain DMs even when a room has the same participants.
   const isTwoParty = cls.type === 'dm' || cls.otherParticipants.size === 1;
-  if (isTwoParty && rumor.kind !== 14) return { kind: 'not-group' };
-  // NIP-17 does not require a subject on every message. A two-party
-  // rumor can therefore belong to an already-known named room.
-  const otherParticipants =
-    cls.type === 'group' ? cls.otherParticipants : new Set([cls.partnerPubkey]);
+  const isGroupFile = rumor.kind === 15 && cls.type === 'group';
+  if (isTwoParty && rumor.kind !== 14 && !isGroupFile) return { kind: 'not-group' };
+  // An unmarked two-party rumor is a direct message even if a named
+  // group has the same members. Our group sends include subject on EVERY
+  // text/file rumor; membership alone cannot disambiguate these two UIs.
+  if (cls.type === 'dm') return { kind: 'not-group', deferredGroupRumor: rumor };
+  const otherParticipants = cls.otherParticipants;
   let group = findGroupForParticipants(otherParticipants, viewerPubkey);
-  if (!group && cls.type === 'dm') {
-    // Ordinary live callbacks run concurrently. A preceding subject-tagged
-    // message may still be creating this room; don't split its follow-up
-    // into the DM inbox while the registry is awaiting reconciliation.
-    await waitForPendingGroupReconciliation(otherParticipants, viewerPubkey);
-    if (shouldAbort()) return { kind: 'group-no-match' };
-    group = findGroupForParticipants(otherParticipants, viewerPubkey);
-  }
   // A subject names a room; it does not authenticate an unknown peer.
   // Before promoting a two-party DM, preserve the receive caller's follow
   // policy. Known rooms retain membership as their trust signal. Returning
   // not-group lets the caller apply its usual drop/defer/skip-set behavior.
-  // Preserve every two-party chat rumor so follow hydration can retry routing.
-  // A preceding deferred subject may establish a room for a subjectless follow-up.
+  // Preserve marked rumors so follow hydration can retry group routing.
   if (!group && isTwoParty && !passesFollowGate(Array.from(otherParticipants)[0])) {
     return {
       kind: 'not-group',
       deferredGroupRumor: rumor,
     };
   }
-  if (cls.type === 'dm' && !group) return { kind: 'not-group' };
   if (shouldAbort()) return { kind: 'group-no-match' };
   // Always run the synthetic-reconcile path when the matched group is
   // synthetic (no kind-30200 backing it) — that's the only way later
@@ -149,7 +145,8 @@ export async function tryRouteGroupRumor(
   const message: GroupMessage = {
     id: wrapId,
     senderPubkey: rumor.pubkey.toLowerCase(),
-    text: rumor.content,
+    text: textForRumor(rumor),
+    wireKind: rumor.kind,
     createdAt: rumor.created_at,
   };
   try {

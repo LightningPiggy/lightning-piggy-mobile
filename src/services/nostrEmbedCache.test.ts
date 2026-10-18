@@ -93,8 +93,8 @@ it('serves repeats from the cache and de-dupes in-flight requests', async () => 
   mockQuery.mockResolvedValue([ev({ id: id('1') })]);
   const first = resolveEmbed(eventRef(id('1')), ['wss://read']);
   const again = resolveEmbed(eventRef(id('1')), ['wss://read']);
-  expect(again).toBe(first);
-  await settle(first);
+  const [a, b] = await settle(Promise.all([first, again]));
+  expect(a).toBe(b);
   expect(peekEmbed(`e:${id('1')}`)?.event?.id).toBe(id('1'));
   await settle(resolveEmbed(eventRef(id('1')), ['wss://read']));
   expect(mockQuery).toHaveBeenCalledTimes(1);
@@ -146,7 +146,7 @@ it('applies the seller deletions to an embedded product', async () => {
   mockQuery.mockResolvedValue([listing]);
   mockRevision.mockResolvedValue(new Map([[listing.id, null]])); // withdrawn
   const r = await settle(resolveEmbed(addrRef(30402, 'mug'), ['wss://read']));
-  expect(mockRevision).toHaveBeenCalledWith([listing], ['wss://read'], 5000);
+  expect(mockRevision).toHaveBeenCalledWith([listing], ['wss://read'], 5000, expect.anything());
   expect(r.product).toBeNull();
 });
 
@@ -160,7 +160,7 @@ it('reconciles twenty products in one batch instead of twenty independent revisi
   );
   expect(mockQuery).toHaveBeenCalledTimes(1);
   expect(mockRevision).toHaveBeenCalledTimes(1);
-  expect(mockRevision).toHaveBeenCalledWith(listings, ['wss://read'], 5000);
+  expect(mockRevision).toHaveBeenCalledWith(listings, ['wss://read'], 5000, expect.anything());
 });
 
 it('prunes idle connections after every hinted batch, including failed queries', async () => {
@@ -205,4 +205,97 @@ it('delivers ordinary embeds while a product query and seller reconciliation are
   await Promise.all([ordinary, product]);
   expect(receiveProduct).toHaveBeenCalledWith({ event: listing, product: null });
   expect(mockPrune).toHaveBeenCalledTimes(1);
+});
+
+it('cancels a queued reader without querying or caching a miss', async () => {
+  const controller = new AbortController();
+  const result = resolveEmbed(eventRef(id('1')), ['wss://read'], controller.signal);
+  controller.abort();
+  await settle(result);
+  expect(mockQuery).not.toHaveBeenCalled();
+  expect(peekEmbed(`e:${id('1')}`)).toBeUndefined();
+});
+
+it('keeps a shared query until its last focused reader leaves, then aborts', async () => {
+  mockQuery.mockImplementation(
+    (_pool, _relays, _filter, { signal }) =>
+      new Promise((resolve) => {
+        signal.addEventListener('abort', () => resolve([]));
+      }),
+  );
+  const a = new AbortController();
+  const b = new AbortController();
+  const first = resolveEmbed(eventRef(id('1')), ['wss://read'], a.signal);
+  const second = resolveEmbed(eventRef(id('1')), ['wss://read'], b.signal);
+  await jest.advanceTimersByTimeAsync(60);
+  const signal = mockQuery.mock.calls[0][3].signal;
+  a.abort();
+  expect(signal.aborted).toBe(false);
+  b.abort();
+  expect(signal.aborted).toBe(true);
+  await settle(Promise.all([first, second]));
+  expect(peekEmbed(`e:${id('1')}`)).toBeUndefined();
+});
+
+it('retries a cached miss after relay plan changes while retaining positive cache entries', async () => {
+  mockQuery.mockResolvedValue([]);
+  await settle(resolveEmbed(eventRef(id('3')), []));
+  mockQuery.mockResolvedValue([ev({ id: id('3') })]);
+  expect((await resolveEmbed(eventRef(id('3')), ['wss://read'])).event).toBeNull();
+  const recovered = await settle(resolveEmbed(eventRef(id('3')), ['wss://read'], undefined, true));
+  expect(recovered.event?.id).toBe(id('3'));
+  const count = mockQuery.mock.calls.length;
+  await settle(resolveEmbed(eventRef(id('3')), ['wss://other'], undefined, true));
+  expect(mockQuery).toHaveBeenCalledTimes(count);
+});
+
+it('drops previous read relays for uncached and retried embeds when the plan becomes empty', async () => {
+  mockQuery.mockResolvedValue([]);
+  await settle(resolveEmbed(eventRef(id('1')), ['wss://disabled']));
+  mockQuery.mockClear();
+
+  expect(await settle(resolveEmbed(eventRef(id('2')), []))).toEqual({ event: null });
+  expect(await settle(resolveEmbed(eventRef(id('1')), [], undefined, true))).toEqual({
+    event: null,
+  });
+  expect(mockQuery).not.toHaveBeenCalled();
+
+  await settle(resolveEmbed(eventRef(id('3'), ['wss://hint']), []));
+  expect(mockQuery).toHaveBeenCalledTimes(1);
+  expect(mockQuery.mock.calls[0][1]).toEqual(['wss://hint']);
+});
+
+it('routes simultaneous refs by their own relay plans, including an empty plan and hints', async () => {
+  mockQuery.mockImplementation(async (_pool, relays, filter) =>
+    relays.includes('wss://first') ? [ev({ id: filter.ids[0] })] : [],
+  );
+  const first = resolveEmbed(eventRef(id('1')), ['wss://first']);
+  const second = resolveEmbed(eventRef(id('2')), ['wss://second']);
+  const empty = resolveEmbed(eventRef(id('3')), []);
+  const hinted = resolveEmbed(eventRef(id('4'), ['wss://hint']), []);
+  const results = await settle(Promise.all([first, second, empty, hinted]));
+  expect(results.map((r) => r.event?.id ?? null)).toEqual([id('1'), null, null, null]);
+  expect(mockQuery.mock.calls.map((c) => [c[1], c[2].ids])).toEqual([
+    [['wss://first'], [id('1')]],
+    [['wss://second'], [id('2')]],
+    [['wss://hint'], [id('3'), id('4')]],
+  ]);
+});
+
+it('does not deduplicate the same ref across different in-flight relay plans', async () => {
+  let finishFirst!: (events: Event[]) => void;
+  mockQuery.mockImplementation((_pool, relays) =>
+    relays.includes('wss://first')
+      ? new Promise((resolve) => (finishFirst = resolve))
+      : Promise.resolve([ev({ id: id('1') })]),
+  );
+  const first = resolveEmbed(eventRef(id('1')), ['wss://first']);
+  await jest.advanceTimersByTimeAsync(60);
+  const second = resolveEmbed(eventRef(id('1')), ['wss://second']);
+  await jest.advanceTimersByTimeAsync(100);
+  expect(mockQuery).toHaveBeenCalledTimes(2);
+  expect((await second).event?.id).toBe(id('1'));
+  finishFirst([]);
+  await settle(first);
+  expect(peekEmbed(`e:${id('1')}`)?.event?.id).toBe(id('1'));
 });

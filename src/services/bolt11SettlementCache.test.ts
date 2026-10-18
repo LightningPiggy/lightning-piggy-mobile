@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as cache from './bolt11SettlementCache';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Jest factory loads the native storage mock lazily.
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
@@ -118,4 +119,15 @@ describe('bolt11SettlementCache — persistence', () => {
     const e = await cache.get('hash-A');
     expect(e?.settled).toBe(true);
   });
+});
+
+it('discards legacy positives that could have come from stateless expired lookups', async () => {
+  await AsyncStorage.setItem(
+    'bolt11_settlement_v1',
+    JSON.stringify({
+      legacy: { settled: true, checkedAt: Date.now() },
+    }),
+  );
+  expect(await cache.get('legacy')).toBeNull();
+  expect((await cache.getMany(['legacy'])).size).toBe(0);
 });

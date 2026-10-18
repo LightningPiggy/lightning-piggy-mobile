@@ -1,3 +1,10 @@
+import {
+  loadSellerInvoices,
+  subscribeSellerInvoices,
+  type SellerInvoiceRecord,
+} from '../services/sellerInvoiceStore';
+import { groupRowsByConversation } from '../utils/orderThreads';
+import { sellerOrderThreads, type SellerOrderThread } from '../utils/shopOrderStatus';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr } from '../contexts/NostrContext';
@@ -19,11 +26,19 @@ const RELOAD_DEBOUNCE_MS = 400;
  */
 export function useShopOrders(titles: ReadonlyMap<string, string>): {
   orders: ShopOrder[] | null;
+  threads: ReadonlyMap<string, SellerOrderThread>;
+  paidKeys: ReadonlySet<string>;
+  invoices: Readonly<Record<string, SellerInvoiceRecord>>;
 } {
   const { pubkey } = useNostr();
-  const [state, setState] = useState<{ owner: string | null; rows: DmMessageRow[] | null }>({
+  const [state, setState] = useState<{
+    owner: string | null;
+    rows: DmMessageRow[] | null;
+    invoices: Record<string, SellerInvoiceRecord>;
+  }>({
     owner: null,
     rows: null,
+    invoices: {},
   });
   const generation = useRef(0);
 
@@ -34,26 +49,32 @@ export function useShopOrders(titles: ReadonlyMap<string, string>): {
       let timer: ReturnType<typeof setTimeout> | null = null;
       const load = () => {
         const run = ++generation.current;
-        getShopOrderRows(pubkey)
-          .then((rows) => {
-            if (active && run === generation.current) setState({ owner: pubkey, rows });
+        Promise.all([getShopOrderRows(pubkey), loadSellerInvoices(pubkey)])
+          .then(([rows, invoices]) => {
+            if (active && run === generation.current) setState({ owner: pubkey, rows, invoices });
           })
           .catch(() => {
             // Store unavailable: show what we had (or the empty state).
             if (active && run === generation.current)
-              setState((prev) => (prev.owner === pubkey ? prev : { owner: pubkey, rows: [] }));
+              setState((prev) =>
+                prev.owner === pubkey ? prev : { owner: pubkey, rows: [], invoices: {} },
+              );
           });
       };
       load();
-      const unsubscribe = subscribeDmStorage((owner) => {
-        if (owner !== pubkey) return;
+      const reload = () => {
         if (timer) clearTimeout(timer);
         timer = setTimeout(load, RELOAD_DEBOUNCE_MS);
+      };
+      const unsubscribe = subscribeDmStorage((owner) => {
+        if (owner === pubkey) reload();
       });
+      const unsubscribeInvoices = subscribeSellerInvoices(reload);
       return () => {
         active = false;
         if (timer) clearTimeout(timer);
         unsubscribe();
+        unsubscribeInvoices();
       };
     }, [pubkey]),
   );
@@ -63,5 +84,29 @@ export function useShopOrders(titles: ReadonlyMap<string, string>): {
     () => (rows && pubkey ? deriveShopOrders(rows, pubkey, titles) : null),
     [rows, pubkey, titles],
   );
-  return { orders };
+  const threads = useMemo(() => {
+    const grouped = groupRowsByConversation(
+      (rows ?? []).map((row) => ({
+        ...row,
+        text: row.content,
+        id: row.eventId,
+      })),
+    );
+    const result = new Map<string, SellerOrderThread>();
+    for (const [buyer, messages] of grouped)
+      for (const [id, thread] of sellerOrderThreads(messages)) result.set(`${buyer}:${id}`, thread);
+    return result;
+  }, [rows]);
+  const paidKeys = useMemo(
+    () =>
+      new Set(
+        state.owner === pubkey
+          ? Object.entries(state.invoices)
+              .filter(([, record]) => record.paidAt)
+              .map(([key]) => key)
+          : [],
+      ),
+    [state.owner, state.invoices, pubkey],
+  );
+  return { orders, threads, paidKeys, invoices: state.owner === pubkey ? state.invoices : {} };
 }

@@ -69,7 +69,7 @@ describe('nsec', () => {
     mockGetMemoisedSecretKey.mockResolvedValue(new Uint8Array([1]));
     const out = await ingestInboxNip17ForSigner({ ...baseArgs, signerType: 'nsec' });
     expect(mockIngestInboxWraps).toHaveBeenCalledWith(
-      expect.objectContaining({ skipKey: 'nsec_nip17_skip_v2_owner' }),
+      expect.objectContaining({ skipKey: 'nsec_nip17_skip_v3_owner' }),
     );
     expect(out).toMatchObject({ alreadyKnown: 2, stored: 5, yields: 6 });
     expect(out?.amberPermission).toBeUndefined();
@@ -81,7 +81,7 @@ describe('amber', () => {
     const out = await ingestInboxNip17ForSigner({ ...baseArgs, signerType: 'amber' });
     expect(mockIngestInboxWraps).toHaveBeenCalledWith(
       expect.objectContaining({
-        skipKey: 'amber_nip17_skip_v2_owner',
+        skipKey: 'amber_nip17_skip_v3_owner',
         stopOnPermissionDenied: true,
       }),
     );
@@ -99,7 +99,7 @@ describe('nip46', () => {
     expect(mockNip46Unwrap).toHaveBeenCalledWith('owner', baseArgs.onSkip);
     expect(mockIngestInboxWraps).toHaveBeenCalledWith(
       expect.objectContaining({
-        skipKey: 'nip46_nip17_skip_v2_owner',
+        skipKey: 'nip46_nip17_skip_v3_owner',
         unwrap: 'nip46-unwrap-fn',
       }),
     );

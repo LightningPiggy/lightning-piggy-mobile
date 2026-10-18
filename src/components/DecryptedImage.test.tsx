@@ -12,6 +12,7 @@ jest.mock('expo-image', () => ({
 }));
 jest.mock('../services/remoteMediaCache', () => ({ resolveRemoteMedia: jest.fn() }));
 jest.mock('../services/decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
   peekDecryptedMedia: jest.fn(() => null),
   resolveDecryptedMedia: jest.fn(),
   DecryptedMediaCancelledError: class extends Error {},

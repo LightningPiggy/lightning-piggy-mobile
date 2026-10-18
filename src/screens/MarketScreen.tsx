@@ -1,25 +1,20 @@
+import MarketHeader from '../components/MarketHeader';
+import MarketHeaderActions from '../components/MarketHeaderActions';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import { marketMerchants, resolveMerchantSelection } from '../utils/marketMerchants';
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  FlatList,
-  useWindowDimensions,
-} from 'react-native';
-import { Image } from 'expo-image';
-import { ChevronLeft, Heart, Search, SlidersHorizontal, Store, X } from 'lucide-react-native';
+import { View, Text, FlatList, useWindowDimensions } from 'react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
+import MarketScopePill from '../components/MarketScopePill';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
-import { usePreferredMarketListings } from '../hooks/usePreferredMarketListings';
-import { useMarketListings } from '../hooks/useMarketListings';
+import { useGroups } from '../contexts/GroupsContext';
+import { useMarketScopeListings } from '../hooks/useMarketScopeListings';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import MarketShortcuts from '../components/MarketShortcuts';
 import { createMarketScreenStyles } from '../styles/MarketScreen.styles';
 import { sellerOf, type MarketProduct } from '../data/marketProducts';
 import { featuredFirst } from '../utils/marketVendors';
@@ -28,7 +23,7 @@ import { useMarketShipsTo } from '../hooks/useMarketShipsTo';
 import { localizedCountryName } from '../data/countries';
 import { SHIPS_TO_UNKNOWN, shipsToOptions } from '../utils/marketShipsTo';
 import { useMarketSelectionGuard } from '../hooks/useMarketSelectionGuard';
-import { DEFAULT_MARKET_MODE, type MarketMode } from '../utils/marketMode';
+import { DEFAULT_MARKET_MODE, effectiveMarketMode, type MarketMode } from '../utils/marketMode';
 import {
   canClearMarketFilters,
   countActiveMarketFilters,
@@ -46,7 +41,8 @@ interface Props {
   route?: MarketRoute;
 }
 
-/** Preferred catalogue or foreground relay listings from the viewer's direct follows. */
+/** Preferred catalogue, or foreground relay listings for the chosen seller scope
+ * (follows; experimental: friends of friends / anyone). */
 const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const colors = useThemeColors();
   const { t, locale, formatLocale } = useLocale();
@@ -59,10 +55,13 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
   const tileWidth = useMemo(() => marketGridTileWidth(windowWidth), [windowWidth]);
 
   const { ready, preferences, update } = useMarketPreferences();
-  const { mode, merchant: savedMerchant, shipsTo, includeUnknownShipping, currency } = preferences;
-  const friends = useMarketListings(ready && mode === 'wotFriends');
-  const preferred = usePreferredMarketListings(ready && mode === 'preferred');
-  const live = mode === 'wotFriends' ? friends : preferred;
+  const { merchant: savedMerchant, shipsTo, includeUnknownShipping, currency } = preferences;
+  // "Show experimental features" unlocks the friends-of-friends and All
+  // scopes. With it off, a saved experimental scope reads as Preferred (it
+  // isn't overwritten: the setting hydrates after the Market may mount).
+  const { secretMode: experimental } = useGroups();
+  const mode = effectiveMarketMode(preferences.mode, experimental);
+  const { live, fofProgress, fofFailed } = useMarketScopeListings(mode, ready);
   const setMerchant = useCallback((merchant: string | null) => update({ merchant }), [update]);
   const setShipsTo = useCallback((shipsTo: string | null) => update({ shipsTo }), [update]);
   const setIncludeUnknownShipping = useCallback(
@@ -185,6 +184,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     selectCollection(null);
   }, [ready, request, update, selectCollection]);
 
+  const resetScope = useCallback(() => selectMode(DEFAULT_MARKET_MODE), [selectMode]);
   const clearFilters = useCallback(() => {
     update({ merchant: null, shipsTo: null, includeUnknownShipping: true, currency: null });
     selectMode(DEFAULT_MARKET_MODE);
@@ -225,139 +225,54 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const emptyCopy =
     live.loading && baseProducts.length === 0
-      ? t('market.live.loading')
+      ? mode === 'wotFof'
+        ? t('market.live.loadingNetwork')
+        : mode === 'wotAll'
+          ? t('market.live.loadingAll')
+          : t('market.live.loading')
       : merchantMissing
         ? t('market.screen.emptyMerchantMissing', { name: merchantName ?? merchant ?? '' })
         : filterActive
           ? t('market.screen.emptyNoMatch')
           : mode === 'wotFriends'
             ? t('market.screen.emptyNoFriends')
-            : t('market.screen.emptyNone');
+            : mode === 'wotFof'
+              ? t('market.screen.emptyNoFof')
+              : mode === 'wotAll'
+                ? t('market.screen.emptyNoAll')
+                : t('market.screen.emptyNone');
 
   if (!ready) return <View style={styles.container} testID="market-screen" />;
 
   return (
     <View style={styles.container} testID="market-screen">
-      <View style={styles.header}>
-        <Image
-          source={require('../../assets/images/learn-header-bg.png')}
-          style={styles.headerImage}
-          contentFit="cover"
-          cachePolicy="memory-disk"
+      <MarketHeader
+        showProfile
+        title={t('market.screen.title')}
+        backLabel={t('market.screen.back')}
+        onBack={() => navigation.goBack()}
+        testID="market-back-button"
+      >
+        <MarketHeaderActions
+          query={query}
+          onChangeQuery={setQuery}
+          filtersActive={filtersActive}
+          activeFilterCount={activeFilterCount}
+          onOpenFilters={openFilters}
         />
-        <View style={styles.headerOverlay} />
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => navigation.goBack()}
-            accessibilityLabel={t('market.screen.back')}
-            testID="market-back-button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{t('market.screen.title')}</Text>
-          <TouchableOpacity
-            onPress={() => navigation.navigate('MarketLikedItems')}
-            accessibilityLabel={t('market.liked.openAccessibility')}
-            testID="market-liked-items-button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Heart size={24} color={colors.white} strokeWidth={2.25} />
-          </TouchableOpacity>
-          {/* Seller side (#1273): set up a shop and list your own items. */}
-          <TouchableOpacity
-            onPress={() => navigation.navigate('MarketMyShop')}
-            accessibilityLabel={t('market.sell.myShopAccessibility')}
-            testID="market-my-shop-button"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Store size={24} color={colors.white} strokeWidth={2.25} />
-          </TouchableOpacity>
-        </View>
-        <Text style={styles.headerTagline}>{t('market.screen.tagline')}</Text>
-      </View>
+      </MarketHeader>
 
-      <View style={styles.searchBar}>
-        <View style={styles.searchRow}>
-          <Search size={16} color={colors.textSupplementary} strokeWidth={2.25} />
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={setQuery}
-            placeholder={t('market.screen.searchPlaceholder')}
-            placeholderTextColor={colors.textSupplementary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            testID="market-search-input"
-          />
-          {query.length > 0 ? (
-            <TouchableOpacity
-              onPress={() => setQuery('')}
-              accessibilityLabel={t('market.screen.clearSearch')}
-              testID="market-search-clear"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <X size={16} color={colors.textSupplementary} strokeWidth={2.25} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        <TouchableOpacity
-          style={[styles.filterButton, filtersActive && styles.filterButtonActive]}
-          onPress={openFilters}
-          accessibilityLabel={
-            filtersActive
-              ? t('market.screen.filtersApplied', { count: activeFilterCount })
-              : t('market.screen.filters')
-          }
-          accessibilityState={{ selected: filtersActive }}
-          testID="market-filter-button"
-          activeOpacity={0.7}
-        >
-          <SlidersHorizontal
-            size={18}
-            color={filtersActive ? colors.white : colors.textBody}
-            strokeWidth={2.25}
-          />
-          {filtersActive ? (
-            <View style={styles.filterBadge} testID="market-filter-badge">
-              <Text style={styles.filterBadgeText} testID="market-filter-active-count">
-                {activeFilterCount}
-              </Text>
-            </View>
-          ) : null}
-        </TouchableOpacity>
-      </View>
+      <MarketShortcuts navigation={navigation} />
 
-      {/* The seller scope is always shown as a pill. Preferred is the default
-          with no wider option yet, so it has no × — tapping it opens Filters
-          (Sellers leads the sheet); Friends' × returns to Preferred. */}
-      <View style={styles.scopeRow}>
-        {mode === DEFAULT_MARKET_MODE ? (
-          <TouchableOpacity
-            style={styles.scopeChip}
-            onPress={openFilters}
-            accessibilityLabel={t('market.filters.changeScope', {
-              label: t('market.modes.preferred'),
-            })}
-            testID="market-scope-pill-preferred"
-            activeOpacity={0.7}
-          >
-            <Text style={styles.scopeChipText}>{t('market.modes.preferred')}</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={styles.scopeChip}
-            onPress={() => selectMode(DEFAULT_MARKET_MODE)}
-            accessibilityLabel={t('market.filters.clearScope')}
-            testID="market-scope-pill-friends"
-            activeOpacity={0.7}
-          >
-            <Text style={styles.scopeChipText}>{t('market.filters.friendsChip')}</Text>
-            <X size={14} color={colors.brandPink} strokeWidth={2.25} />
-          </TouchableOpacity>
-        )}
-      </View>
+      {/* The seller scope is always shown as a pill: Preferred's opens
+          Filters; every other scope's × returns to Preferred. */}
+      <MarketScopePill
+        mode={mode}
+        onOpenFilters={openFilters}
+        onReset={resetScope}
+        fofProgress={fofProgress}
+        fofFailed={fofFailed}
+      />
 
       {/* Pull-to-refresh replaces the old status row; only a load that missed
           some sellers says so, inline. */}
@@ -376,6 +291,7 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
       <MarketFilterBar
         mode={mode}
         onSelectMode={selectMode}
+        experimental={experimental}
         visible={filtersOpen}
         onClose={() => setFiltersOpen(false)}
         merchants={merchantOptions}

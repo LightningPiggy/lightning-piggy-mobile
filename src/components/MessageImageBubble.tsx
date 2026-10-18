@@ -1,3 +1,5 @@
+import { chatImageAspectRatio } from '../styles/chatCardWidth';
+import { attachmentAspectStyle } from '../styles/attachmentGeometry';
 import OutgoingBubbleBackground from './OutgoingBubbleBackground';
 import React, { useCallback, useState } from 'react';
 import { View, TouchableOpacity } from 'react-native';
@@ -56,6 +58,14 @@ const MessageImageBubble: React.FC<Props> = ({
   testID,
   footer,
 }) => {
+  const [sourceSize, setSourceSize] = useState({ width: 1, height: 1 });
+  const dim = image.dim?.match(/^(\d+)x(\d+)$/);
+  const aspect = dim
+    ? chatImageAspectRatio(Number(dim[1]), Number(dim[2]))
+    : chatImageAspectRatio(sourceSize.width, sourceSize.height);
+  const onImageLoad = useCallback((event: { source: { width: number; height: number } }) => {
+    setSourceSize({ width: event.source.width, height: event.source.height });
+  }, []);
   const { t } = useLocale();
   const owner = useActivePubkey();
   const safe = checkRemoteUrl(image.url, { kind: 'media' }).ok;
@@ -108,13 +118,15 @@ const MessageImageBubble: React.FC<Props> = ({
             nonceHex={image.nonceHex}
             mime={image.mime}
             marmot={image.marmot}
-            style={styles.imageBubbleImage}
+            style={[styles.imageBubbleImage, attachmentAspectStyle(aspect)]}
+            onLoad={onImageLoad}
             accessibilityLabel={t('messageBubble.sharedImage')}
             onResolved={onResolved}
             size={image.size}
           />
         ) : (
           <TapToLoadMedia
+            style={[styles.imageBubbleImage, attachmentAspectStyle(aspect)]}
             variant="image"
             url={image.url}
             fromMe={fromMe}
@@ -127,4 +139,4 @@ const MessageImageBubble: React.FC<Props> = ({
   );
 };
 
-export default MessageImageBubble;
+export default React.memo(MessageImageBubble);

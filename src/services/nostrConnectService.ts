@@ -159,7 +159,17 @@ async function getSigner(): Promise<BunkerSigner> {
     // before we start firing signEvent / nip44_encrypt at it. Subsequent
     // requests reuse the subscription opened here.
     try {
-      await signer.connect();
+      // nostr-tools connect() omits the optional permissions parameter.
+      // Reuse only the saved grants: existing pairings are never broadened.
+      if (connection.perms) {
+        await signer.sendRequest('connect', [
+          pointer.pubkey,
+          pointer.secret ?? '',
+          connection.perms,
+        ]);
+      } else {
+        await signer.connect();
+      }
     } catch (e) {
       // If the bunker can't be reached (relay down, bunker app closed,
       // user revoked the connection) surface a clear error rather than

@@ -1,3 +1,17 @@
+import {
+  APP_RELAY_PREFS_KEY,
+  enabledAppRelays,
+  loadAppRelayPrefs,
+  setAppRelayEnabled,
+} from '../services/appRelayPrefs';
+import * as SecureStore from 'expo-secure-store';
+import { checkoutAddressKey } from '../services/checkoutAddressStorage';
+import {
+  loadBuyerOrderTitles,
+  recordBuyerOrderTitles,
+  reviveBuyerOrderTitles,
+} from '../services/buyerOrderTitles';
+import { resetSellerStore } from '../services/sellerEventStore';
 import { initialiseNotificationDefaults } from '../services/notificationDefaults';
 import * as marmotPush from '../services/marmotPushRegistration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
@@ -7,6 +21,7 @@ import * as dmWipe from './dmAccountWipe';
 import { deleteAsync, readDirectoryAsync } from 'expo-file-system/legacy';
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import {
+  writeCheckoutCountry,
   readMarketPreferences,
   writeMarketPreferences,
   writeMarketSnapshot,
@@ -57,6 +72,11 @@ jest.mock('../services/decryptedMediaCache', () => ({
 
 const PK = 'a'.repeat(64);
 const OTHER_PK = 'b'.repeat(64);
+
+beforeEach(() => {
+  reviveBuyerOrderTitles(PK);
+  reviveBuyerOrderTitles(OTHER_PK);
+});
 
 it("removes the signed-out account's relay-list caches and baselines", async () => {
   const keys = [
@@ -133,7 +153,7 @@ it("wipes only the signed-out account's group history, migrating legacy blobs fi
   expect((await loadGroupMessages(OTHER_PK, 'g_kids')).map((m) => m.text)).toEqual(['parent']);
 });
 
-it('wipes market filters and every follow scope only for the signed-out account', async () => {
+it('wipes market filters, checkout country and every follow scope only for the signed-out account', async () => {
   await readMarketPreferences(PK); // Account signs back in after earlier wipe tests.
   const preferences = {
     mode: 'wotFriends' as const,
@@ -144,10 +164,16 @@ it('wipes market filters and every follow scope only for the signed-out account'
   };
   await writeMarketPreferences(PK, preferences);
   await writeMarketPreferences(OTHER_PK, preferences);
+  await writeCheckoutCountry(PK, 'DE');
+  await writeCheckoutCountry(OTHER_PK, 'FR');
   await writeMarketSnapshot(`${PK}|follows-one`, { products: [], incomplete: false });
   await writeMarketSnapshot(`${PK}|follows-two`, { products: [], incomplete: false });
   await writeMarketSnapshot(`${OTHER_PK}|follows`, { products: [], incomplete: false });
   await wipeAccountCaches(PK);
+  expect(await AsyncStorage.getItem(perAccountKey('market_checkout_country_v1', PK))).toBeNull();
+  expect(await AsyncStorage.getItem(perAccountKey('market_checkout_country_v1', OTHER_PK))).toBe(
+    'FR',
+  );
   expect(await AsyncStorage.getItem(perAccountKey('market_filters_v1', PK))).toBeNull();
   expect(await AsyncStorage.getItem(perAccountKey('market_filters_v1', OTHER_PK))).not.toBeNull();
   expect(getMarketSnapshot(`${PK}|follows-one`)).toBeUndefined();
@@ -292,3 +318,105 @@ it.each(['delete', 'list'])(
     }
   },
 );
+
+it("wipes the signed-out account's buyer order titles while preserving other accounts'", async () => {
+  const titles = { [`30402:${OTHER_PK}:mug`]: 'Private purchase' };
+  await recordBuyerOrderTitles(PK, 'order-1', titles);
+  await recordBuyerOrderTitles(OTHER_PK, 'order-2', titles);
+
+  await wipeAccountCaches(PK);
+
+  expect(await AsyncStorage.getItem(`market-buyer-order-titles:${PK}`)).toBeNull();
+  expect(await loadBuyerOrderTitles(PK)).toEqual({});
+  expect(await loadBuyerOrderTitles(OTHER_PK)).toEqual({ 'order-2': titles });
+});
+
+it.each(['read', 'write'])('drains buyer-title %s before wiping the account', async (stage) => {
+  const titleKey = `market-buyer-order-titles:${PK}`;
+  const titles = { [`30402:${OTHER_PK}:mug`]: 'Private purchase' };
+  await recordBuyerOrderTitles(OTHER_PK, 'other-order', titles);
+  let started!: () => void;
+  let release!: () => void;
+  const paused = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const resume = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const method = (stage === 'read' ? AsyncStorage.getItem : AsyncStorage.setItem) as jest.Mock;
+  const original = method.getMockImplementation()!;
+  method.mockImplementation(async (key: string, value?: string) => {
+    if (key === titleKey) {
+      started();
+      await resume;
+    }
+    return original(key, value);
+  });
+  try {
+    const write = recordBuyerOrderTitles(PK, 'pending-order', titles);
+    await paused;
+    let wiped = false;
+    const wipe = wipeAccountCaches(PK).then(() => {
+      wiped = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const wipedBeforeWrite = wiped;
+    release();
+    await Promise.all([write, wipe]);
+    expect(wipedBeforeWrite).toBe(false);
+    expect(await AsyncStorage.getItem(titleKey)).toBeNull();
+    expect(await loadBuyerOrderTitles(OTHER_PK)).toEqual(
+      expect.objectContaining({ 'other-order': titles }),
+    );
+  } finally {
+    release();
+    method.mockImplementation(original);
+  }
+});
+
+it('deletes the saved delivery address from SecureStore on sign-out', async () => {
+  const remove = jest.spyOn(SecureStore, 'deleteItemAsync');
+  remove.mockClear();
+  await wipeAccountCaches(PK);
+  expect(remove).toHaveBeenCalledWith(checkoutAddressKey(PK));
+  expect(remove).not.toHaveBeenCalledWith(checkoutAddressKey(OTHER_PK));
+  remove.mockRestore();
+});
+
+it('rejects title writes from checkout resuming after the account wipe', async () => {
+  await wipeAccountCaches(PK);
+  await recordBuyerOrderTitles(PK, 'late-order', { item: 'Private purchase' });
+  expect(await AsyncStorage.getItem(`market-buyer-order-titles:${PK}`)).toBeNull();
+});
+it('wipes seller invoices, receive wallet, buyer titles and order counters only for the removed account', async () => {
+  const stores = [
+    'market-seller-invoices',
+    'market-seller-receive-wallet',
+    'market-buyer-order-titles',
+    'market-order-budget',
+  ];
+  for (const store of stores) {
+    await AsyncStorage.setItem(`${store}:${PK}`, 'private');
+    await AsyncStorage.setItem(`${store}:${OTHER_PK}`, 'other');
+  }
+  await wipeAccountCaches(PK);
+  for (const store of stores) {
+    expect(await AsyncStorage.getItem(`${store}:${PK}`)).toBeNull();
+    expect(await AsyncStorage.getItem(`${store}:${OTHER_PK}`)).toBe('other');
+  }
+});
+
+beforeEach(() => resetSellerStore());
+
+it('wipes app relay preferences from storage and memory for only the removed account', async () => {
+  const removed = 'a'.repeat(64);
+  const retained = 'b'.repeat(64);
+  const url = 'wss://relay.example';
+  await setAppRelayEnabled(removed, 'market', url, false);
+  await setAppRelayEnabled(retained, 'market', url, false);
+  await wipeAccountCaches(removed);
+  expect(await AsyncStorage.getItem(perAccountKey(APP_RELAY_PREFS_KEY, removed))).toBeNull();
+  await loadAppRelayPrefs(removed);
+  expect(enabledAppRelays('market', [url], removed)).toEqual([url]);
+  expect(enabledAppRelays('market', [url], retained)).toEqual([]);
+});

@@ -7,8 +7,12 @@ import {
   sanitizeAttachmentText,
   classifyAttachment,
   parseFileAttachment,
+  parsePlainFileAttachment,
 } from './fileAttachment';
-import { encodeMarmotMediaUrl } from './encryptedFileUrl';
+import { encodeMarmotMediaUrl, encodeEncryptedFileUrl } from './encryptedFileUrl';
+import { textForRumor } from './nip17Unwrap';
+import { createFileMessageRumor } from '../services/nostrFileMessage';
+import { classifyStoredMessage } from './messageContent';
 
 const encoded = (mime: string) =>
   encodeMarmotMediaUrl({
@@ -317,4 +321,91 @@ it('checks percent-decoded dangerous URL extensions with a safe declared filenam
         }),
     ),
   ).toMatchObject({ name: 'invoice.pdf', dangerous: true });
+});
+
+it('carries NIP-17 ciphertext hash, encrypted size and sanitized filename into the file bubble', () => {
+  const text = textForRumor(
+    createFileMessageRumor({
+      senderPubkey: '11'.repeat(32),
+      recipientPubkey: '22'.repeat(32),
+      url: 'https://example.com/hash.bin',
+      mime: 'application/pdf',
+      keyHex: '33'.repeat(32),
+      nonceHex: '44'.repeat(12),
+      sha256Hex: '55'.repeat(32),
+      size: 123,
+      filename: '../invoice\u202e.pdf',
+    }),
+  );
+  expect(parseFileAttachment(text)).toMatchObject({
+    available: true,
+    name: 'invoice.pdf',
+    mime: 'application/pdf',
+    size: 123,
+    sha256: '55'.repeat(32),
+    encrypted: true,
+  });
+});
+
+it.each(['', 'bad', 'AA', undefined])(
+  'disables kind-15 files with invalid ciphertext hash %s',
+  (hash) => {
+    expect(
+      parseFileAttachment(
+        encodeEncryptedFileUrl({
+          url: 'https://example.com/f',
+          mime: 'application/pdf',
+          keyHex: '11'.repeat(32),
+          nonceHex: '22'.repeat(12),
+          sha256: hash,
+        }),
+      ),
+    ).toMatchObject({ available: false });
+  },
+);
+
+it.each([4, 14])(
+  'routes whole document URLs in kind %s through file safety without fetching',
+  (wireKind) => {
+    expect(
+      classifyStoredMessage('https://example.com/invoice%20one.pdf?token=secret#page=1', wireKind),
+    ).toMatchObject({
+      kind: 'file',
+      file: { name: 'invoice one.pdf', plainUrl: true, available: true },
+    });
+    expect(classifyStoredMessage('https://example.com/', wireKind).kind).toBe('text');
+    expect(classifyStoredMessage('Read https://example.com/a.pdf', wireKind).kind).toBe('text');
+    for (const url of [
+      'http://example.com/a.pdf',
+      'https://127.0.0.1/a.pdf',
+      'https://user@example.com/a.pdf',
+      'https://example.com:123/a.pdf',
+    ]) {
+      expect(parsePlainFileAttachment(url)).toMatchObject({ available: false });
+    }
+    expect(parsePlainFileAttachment('https://example.com/a%2Eapk')).toMatchObject({
+      dangerous: true,
+    });
+    expect(parsePlainFileAttachment('https://example.com/a.svg')).toMatchObject({
+      dangerous: true,
+    });
+    expect(parsePlainFileAttachment('https://example.com/a.jpg')).toBeNull();
+  },
+);
+
+it('keeps named NIP-17 image files saveable while gallery images retain image bubbles', () => {
+  const params = {
+    url: 'https://blossom.example/photo.jpg',
+    mime: 'image/jpeg',
+    keyHex: '11'.repeat(32),
+    nonceHex: '22'.repeat(12),
+    sha256: '33'.repeat(32),
+    size: 4220,
+  };
+  const named = encodeEncryptedFileUrl({ ...params, filename: 'photo.jpg' });
+  expect(classifyStoredMessage(named, 15)).toMatchObject({
+    kind: 'file',
+    file: { name: 'photo.jpg', mime: 'image/jpeg', available: true },
+  });
+  expect(classifyAttachment(encodeEncryptedFileUrl(params), 15)).toBe('image');
 });

@@ -1,12 +1,17 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useImageMediaUri } from './useImageMediaUri';
 import { resolveRemoteMedia } from '../services/remoteMediaCache';
-import { peekDecryptedMedia, resolveDecryptedMedia } from '../services/decryptedMediaCache';
+import {
+  captureDecryptedMediaSession,
+  peekDecryptedMedia,
+  resolveDecryptedMedia,
+} from '../services/decryptedMediaCache';
 
 let mockOwner = 'alice';
 jest.mock('./useActivePubkey', () => ({ useActivePubkey: () => mockOwner }));
 jest.mock('../services/remoteMediaCache', () => ({ resolveRemoteMedia: jest.fn() }));
 jest.mock('../services/decryptedMediaCache', () => ({
+  captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
   peekDecryptedMedia: jest.fn(() => null),
   resolveDecryptedMedia: jest.fn(),
   DecryptedMediaCancelledError: class extends Error {},
@@ -82,5 +87,25 @@ it('hides a previously resolved attachment when consent is withdrawn', async () 
   );
   await waitFor(() => expect(result.current.uri).not.toBeNull());
   rerender({ enabled: false });
+  expect(result.current.uri).toBeNull();
+});
+
+it('binds image resolution to the initiating owner and ignores a retired session', async () => {
+  let current = true;
+  jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
+    owner: 'alice',
+    assertCurrent: () => {
+      if (!current) throw new Error('cancelled');
+    },
+  });
+  jest.mocked(resolveDecryptedMedia).mockImplementationOnce(async () => {
+    current = false;
+    return 'file:///old-image';
+  });
+  const onResolved = jest.fn();
+  const { result } = renderHook(() => useImageMediaUri(ref, true, true, onResolved));
+  await act(async () => {});
+  expect(resolveDecryptedMedia).toHaveBeenCalledWith(ref, 'alice');
+  expect(onResolved).not.toHaveBeenCalled();
   expect(result.current.uri).toBeNull();
 });

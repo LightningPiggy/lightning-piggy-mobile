@@ -38,7 +38,6 @@ import { loadMutedSenders } from './mutedSenders';
 import { messageNotificationTarget } from '../utils/messageNotificationTarget';
 import { fetchCachesByAuthor } from './nostrPlacesPublisher';
 import { GC_COMMENT_KIND } from './nostrPlacesService';
-import { isOrderEvent } from '../utils/orderEvents';
 import { isLiveDmSubArmed, wasWrapHandled } from './dmWrapNotificationDedupe';
 
 // Persisted ids we've already accounted for, so repeated wakes never
@@ -143,8 +142,7 @@ export async function runBackgroundSync(): Promise<BackgroundSyncResult> {
 }
 
 /**
- * DM detect-and-ping pass — kind-1059 + kind-4 + kind-16/17 (marketplace
- * order/receipt) addressed to the viewer.
+ * DM detect-and-ping pass — kind-1059 + kind-4 addressed to the viewer.
  */
 async function runDmDetectAndPing(
   activePubkey: string,
@@ -154,12 +152,12 @@ async function runDmDetectAndPing(
   const since = Math.floor(Date.now() / 1000) - LOOKBACK_SEC;
 
   try {
-    // kind-1059 = NIP-17 gift wraps, kind-4 = legacy NIP-04 DMs, kind-16/17 =
-    // plaintext marketplace order/receipt — all addressed to us via a `#p` tag.
+    // NIP-17 gift wraps and legacy NIP-04 DMs, addressed via a `#p` tag.
+    // Gamma orders exist only inside gift wraps, never as public events.
     const events = await pool.querySync(
       readRelays,
       {
-        kinds: [1059, 4, 16, 17],
+        kinds: [1059, 4],
         '#p': [activePubkey],
         since,
         limit: SEEN_CAP,
@@ -171,18 +169,14 @@ async function runDmDetectAndPing(
     // kind-4 echoes (real author === us). kind-1059 wrap authors are
     // ephemeral throwaway keys, so we can't distinguish a received wrap from
     // our own sent-copy without decrypting — we accept the rare false ping
-    // (the app reconciles exactly on open). kind-16 also carries NIP-18
-    // reposts, so we only ping for events that actually parse as a market
-    // order (and aren't our own authored event).
+    // (the app reconciles exactly on open).
     const muted = await loadMutedSenders(activePubkey);
     const fresh = events.filter((e) => {
       // A gift-wrap author is ephemeral; its sender cannot be learned here.
       if (e.kind !== 1059 && muted.has(e.pubkey.toLowerCase())) return false;
       if (seen.has(e.id)) return false;
       if (e.kind === 4 && e.pubkey === activePubkey) return false;
-      if (e.kind === 16 || e.kind === 17) {
-        return e.pubkey !== activePubkey && isOrderEvent(e);
-      }
+      if (e.kind === 16 || e.kind === 17) return false;
       return true;
     });
 

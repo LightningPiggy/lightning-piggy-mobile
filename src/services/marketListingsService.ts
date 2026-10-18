@@ -1,4 +1,4 @@
-import type { Event } from 'nostr-tools';
+import type { Event, Filter } from 'nostr-tools';
 import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import { pool, trackRelays } from './nostrPool';
 import { querySyncAbortable } from './relayQuery';
@@ -12,13 +12,17 @@ import {
   marketListingProductId,
   reduceMarketListings,
   selectVerifiedListings,
+  type AuthorScope,
 } from '../utils/marketListings';
 import {
   deletionFilters as listingDeletionFilters,
   listingFilters,
   MARKET_LISTING_KINDS,
   marketSnapshotRelays,
+  openListingFilters,
+  openListingSince,
 } from '../utils/marketListingsQuery';
+import { curateOpenListingEvents, curateOpenListingProducts } from '../utils/marketOpenScope';
 import { addressRefs, deletionFilters, idRefs } from '../utils/nip09';
 import { hasValidSignature } from '../utils/eventSignature';
 import { isNewerRevision } from '../utils/marketSellerRevision';
@@ -121,21 +125,12 @@ export async function fetchMarketListings(
   const keys = [...new Set(authors.filter((a) => /^[a-f0-9]{64}$/.test(a)))].sort();
   const scope = new Set(keys.slice(0, MAX_AUTHORS));
   if (signal.aborted || scope.size === 0) return { products: [], incomplete: false };
-  const planned = marketSnapshotRelays(relays);
-  // Leave out relays parked as dead (#1326): they'd only burn a connect
-  // timeout each. The healthiest 2 are always kept.
-  const urls = selectHealthyRelays(planned.urls);
-  const dropped = planned.dropped;
-  if (urls.length === 0) return { products: [], incomplete: true, answeredRelays: [] };
-  // A dedicated structure-only pool: every event is verified here before use
-  // (see marketListingsPool). Its sockets close when the last snapshot ends.
-  const lease = acquireMarketListingsPool(urls);
-  try {
-    return await runSnapshot(
+  return withSnapshotRelays(relays, keys.length > MAX_AUTHORS, (urls, relayPool, limited) =>
+    runSnapshot(
       scope,
-      keys.length > MAX_AUTHORS || dropped,
+      limited,
       urls,
-      lease.pool,
+      relayPool,
       signal,
       onFirstPage,
       // Already-verified listings from a previous snapshot, in scope only.
@@ -143,14 +138,93 @@ export async function fetchMarketListings(
         (event) => scope.has(event.pubkey) && MARKET_LISTING_KINDS.includes(event.kind),
       ),
       options.previousProducts ?? [],
-    );
+      { filters: listingFilters([...scope]) },
+    ),
+  );
+}
+
+/** Every author is in scope — the All seller scope has no author filter. */
+const ANY_AUTHOR: AuthorScope = { has: () => true };
+
+/**
+ * Experimental "All" scope: the newest listings from ANYONE on the market
+ * relays + the user's read relays. Same two passes, verification, deletion
+ * handling and budgets as the author-scoped snapshot; pass 1 is a bounded
+ * newest-N sample (`limit` + a 90-day `since`, see `openListingFilters`), and
+ * the spam rules in `utils/marketOpenScope` run after authenticating revision winners
+ * and again on the final products.
+ */
+export async function fetchOpenMarketListings(
+  relays: readonly string[],
+  signal: AbortSignal,
+  onFirstPage?: (products: MarketProduct[]) => void,
+  options: MarketListingsOptions = {},
+): Promise<MarketListingsResult> {
+  if (signal.aborted) return { products: [], incomplete: false };
+  return withSnapshotRelays(relays, false, (urls, relayPool, limited) =>
+    runSnapshot(
+      ANY_AUTHOR,
+      limited,
+      urls,
+      relayPool,
+      signal,
+      onFirstPage,
+      (options.carried ?? []).filter((event) => MARKET_LISTING_KINDS.includes(event.kind)),
+      options.previousProducts ?? [],
+      {
+        filters: openListingFilters(openListingSince()),
+        sampled: true,
+        prefilter: (events, maybeYield, verify) =>
+          curateOpenListingEvents(events, { verify, maybeYield, carried: options.carried }),
+        curate: curateOpenListingProducts,
+      },
+    ),
+  );
+}
+
+/** Plan the snapshot relays and lend the structure-only pool for one run. */
+async function withSnapshotRelays(
+  relays: readonly string[],
+  initiallyLimited: boolean,
+  run: (
+    urls: string[],
+    relayPool: Pick<AbstractSimplePool, 'ensureRelay'>,
+    limited: boolean,
+  ) => Promise<MarketListingsResult>,
+): Promise<MarketListingsResult> {
+  const planned = marketSnapshotRelays(relays);
+  // Leave out relays parked as dead (#1326): they'd only burn a connect
+  // timeout each. The healthiest 2 are always kept.
+  const urls = selectHealthyRelays(planned.urls);
+  if (urls.length === 0) return { products: [], incomplete: true, answeredRelays: [] };
+  // A dedicated structure-only pool: every event is verified here before use
+  // (see marketListingsPool). Its sockets close when the last snapshot ends.
+  const lease = acquireMarketListingsPool(urls);
+  try {
+    return await run(urls, lease.pool, initiallyLimited || planned.dropped);
   } finally {
     lease.release();
   }
 }
 
+/** What pass 1 asks for, and how its results are judged. */
+interface SnapshotPlan {
+  filters: Filter[];
+  /** Pass 1 is a deliberate newest-N sample: a reply that hits its `limit`
+   * is the sample's edge, not a cut-off load. */
+  sampled?: boolean;
+  /** Authenticates revision winners before narrowing the candidates. */
+  prefilter?: (
+    events: Event[],
+    maybeYield: () => Promise<void>,
+    verify: (event: Event) => boolean,
+  ) => Promise<Event[]>;
+  /** Final say on the reduced products, before the display cap. */
+  curate?: (products: MarketProduct[]) => MarketProduct[];
+}
+
 async function runSnapshot(
-  scope: ReadonlySet<string>,
+  scope: AuthorScope,
   initiallyLimited: boolean,
   urls: string[],
   relayPool: Pick<AbstractSimplePool, 'ensureRelay'>,
@@ -158,7 +232,9 @@ async function runSnapshot(
   onFirstPage: ((products: MarketProduct[]) => void) | undefined,
   carried: readonly Event[],
   previousProducts: readonly MarketProduct[],
+  plan: SnapshotPlan,
 ): Promise<MarketListingsResult> {
+  const curate = plan.curate ?? ((products: MarketProduct[]) => products);
   const startedAt = Date.now();
   const probe = PERF_LOGS_ENABLED ? startJsStallProbe() : null;
   const deadline = startedAt + TIMEOUT_MS;
@@ -393,7 +469,7 @@ async function runSnapshot(
 
   const listings = await collectRelaySnapshot({
     urls,
-    filters: listingFilters([...scope]),
+    filters: plan.filters,
     maxConcurrentFilters: 2,
     signal,
     deadline,
@@ -451,18 +527,24 @@ async function runSnapshot(
     const deletionChecksGaveUp = failedDeletionChecks >= MAX_FAILED_DELETION_CHECKS;
     let failedListingChecks = 0;
     const verifyListing = (event: Event) => {
-      if (signal.aborted) return false;
+      if (signal.aborted || failedListingChecks >= MAX_FAILED_CHECKS) return false;
       const valid = trusted.has(event) || verified(event);
-      if (valid) noteAuthenticatedListing(event);
-      else failedListingChecks++;
+      if (valid) {
+        trusted.add(event);
+        noteAuthenticatedListing(event);
+      } else failedListingChecks++;
       return valid;
     };
-    const selection = await selectVerifiedListings(
+    const eligible =
       signal.aborted || deletionChecksGaveUp || deletionUnavailable
         ? []
         : [...events.values(), ...suppressions.values()].filter(
             (event) => !withheldAuthors.has(event.pubkey),
-          ),
+          );
+    const selection = await selectVerifiedListings(
+      plan.prefilter && eligible.length > 0
+        ? await plan.prefilter(eligible, scheduler.maybeYield, verifyListing)
+        : eligible,
       scope,
       {
         // Once aborted, fail fast instead of verifying the rest for nothing.
@@ -475,7 +557,7 @@ async function runSnapshot(
           ready: (picked) => {
             if (signal.aborted) return;
             firstPageAt = Date.now();
-            onFirstPage(reduceMarketListings(picked, scope));
+            onFirstPage(curate(reduceMarketListings(picked, scope)));
           },
         },
       },
@@ -498,8 +580,11 @@ async function runSnapshot(
       cap: 1,
       maxFailures: Math.max(0, MAX_FAILED_CHECKS - failedListingChecks),
     });
-    const products = signal.aborted ? [] : reduceMarketListings(selection.events, scope);
-    const [robot] = signal.aborted ? [] : reduceMarketListings(reserved.events, scope);
+    const products = signal.aborted ? [] : curate(reduceMarketListings(selection.events, scope));
+    // A sampled pass is cut at its limit by design (see SnapshotPlan.sampled).
+    const cutMattered =
+      !plan.sampled && listingsCutMattered(listings.truncatedSince, products, selection.overflow);
+    const [robot] = signal.aborted ? [] : curate(reduceMarketListings(reserved.events, scope));
     const cappedProducts = products.slice(0, MAX_PRODUCTS);
     if (robot && !cappedProducts.some((product) => product.id === robot.id)) {
       if (cappedProducts.length === MAX_PRODUCTS) cappedProducts.pop();
@@ -515,7 +600,7 @@ async function runSnapshot(
           seenOn: [...(seenOn.get(product.id) ?? [])],
         },
       })),
-      answeredRelays: withheld ? [] : [...listings.answered],
+      answeredRelays: withheld || plan.sampled ? [] : [...listings.answered],
       withdrawn: withheld
         ? []
         : [
@@ -539,36 +624,39 @@ async function runSnapshot(
         deletionChecksGaveUp ||
         deletionUnavailable ||
         withheldAuthors.size > 0 ||
+        failedListingChecks >= MAX_FAILED_CHECKS ||
         selection.gaveUp ||
         reserved.gaveUp ||
-        listingsCutMattered(listings.truncatedSince, products, selection.overflow) ||
+        cutMattered ||
         deletions.truncated ||
         listings.answered.length === 0 ||
         deletions.answered.length === 0,
     };
-    result.unreachableSellers = signal.aborted
-      ? []
-      : unreachableMarketSellers(
-          scope,
-          urls,
-          listings.answered,
-          // Unchecked candidates withheld by internal work/display limits
-          // cannot establish a missing seller. Otherwise only authenticated
-          // listings count: a forged payload must not hide a transport failure.
-          withheld || limited || selection.gaveUp || reserved.gaveUp || selection.overflow
-            ? new Set([...receivedAuthors, ...observedAuthors])
-            : new Set([...receivedAuthors, ...withheldAuthors]),
-          previousProducts,
-          mergeMarketSnapshot(previousProducts, result),
-        );
+    result.unreachableSellers =
+      signal.aborted || !(scope instanceof Set)
+        ? []
+        : unreachableMarketSellers(
+            scope,
+            urls,
+            listings.answered,
+            // Unchecked candidates withheld by internal work/display limits
+            // cannot establish a missing seller. Otherwise only authenticated
+            // listings count: a forged payload must not hide a transport failure.
+            withheld || limited || selection.gaveUp || reserved.gaveUp || selection.overflow
+              ? new Set([...receivedAuthors, ...observedAuthors])
+              : new Set([...receivedAuthors, ...withheldAuthors]),
+            previousProducts,
+            mergeMarketSnapshot(previousProducts, result),
+          );
     // Diagnostics are optional so old cached envelopes remain valid.
     if (
       initiallyLimited ||
       limited ||
       deletionChecksGaveUp ||
+      failedListingChecks >= MAX_FAILED_CHECKS ||
       selection.gaveUp ||
       deletions.truncated ||
-      listingsCutMattered(listings.truncatedSince, products, selection.overflow)
+      cutMattered
     )
       result.budgetLimited = true;
     if (listings.answered.length === 0 || deletions.answered.length === 0)
@@ -578,9 +666,9 @@ async function runSnapshot(
       console.log(
         `[PerfBlock] marketListings total=${Date.now() - startedAt}ms listings=${listingsDoneAt - startedAt}ms ` +
           `firstPage=${firstPageAt ? `${firstPageAt - startedAt}ms` : '-'} capped=${selection.overflow} ` +
-          `truncated=${listings.truncated || deletions.truncated} cutMattered=${listingsCutMattered(listings.truncatedSince, products, selection.overflow)} limited=${limited} ` +
+          `truncated=${listings.truncated || deletions.truncated} cutMattered=${cutMattered} limited=${limited} ` +
           `received=${received} kept=${events.size} verified=${selection.checked} products=${result.products.length} incomplete=${result.incomplete} ` +
-          `authors=${scope.size} relays=${listings.answered.length}/${urls.length} ` +
+          `authors=${scope instanceof Set ? scope.size : 'any'} relays=${listings.answered.length}/${urls.length} ` +
           `jsMaxStall=${stall.maxMs}ms jsBlocked=${stall.blockedMs}ms`,
       );
     }
@@ -597,7 +685,7 @@ async function runSnapshot(
 function carriedWithdrawals(
   carried: readonly Event[],
   events: readonly Event[],
-  scope: ReadonlySet<string>,
+  scope: AuthorScope,
 ): string[] {
   if (carried.length === 0) return [];
   const deletions = events.filter((event) => event.kind === 5);

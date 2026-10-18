@@ -1,3 +1,4 @@
+import { parsePlainFileAttachment } from './fileAttachment';
 import { orderPreviewFromContent } from './orderEvents';
 import { pollPreviewFromContent } from './nip88Poll';
 import { NWC_SHARE_KIND, nwcSharePreviewFromContent } from './nwcShareMessage';
@@ -38,6 +39,8 @@ export function dmRowPreview(content: string, wireKind: number, locale?: string)
   )
     return t('messageBubble.unsupportedText', { kind: wireKind });
   if (wireKind === NWC_SHARE_KIND) return nwcSharePreviewFromContent(content);
+  if ([4, 14].includes(wireKind) && parsePlainFileAttachment(content))
+    return `📎 ${t('messageBubble.file')}`;
   if (wireKind === 15 && content.startsWith('[FILE]')) return `📎 ${t('messageBubble.file')}`;
   // `#lpe=1` is the encrypted-file fragment marker (see encryptedFileUrl.ts);
   // its `&k=…&n=…` params are the decryption secret, so never let it through.

@@ -99,7 +99,7 @@ const gbpToSats = (gbp: number): number => Math.round(gbp * PRICE_SNAPSHOT_SATS_
 // build. Titles are clearly marked [TEST] so they can't be mistaken for real
 // listings. These are the ONLY entries opted in to in-app checkout; the real
 // sellers below keep the website link until they confirm order support.
-const PIG_TEST_PRODUCTS: MarketProduct[] = __DEV__
+export const PIG_TEST_PRODUCTS: MarketProduct[] = __DEV__
   ? [
       {
         id: 'test-big-piggy-21sat',

@@ -12,11 +12,11 @@ interface SignEventResult {
 
 const AmberSigner = Platform.OS === 'android' ? requireNativeModule('AmberSigner') : null;
 
-export async function getPublicKey(): Promise<GetPublicKeyResult> {
+export async function getPublicKey(permissionsJson?: string): Promise<GetPublicKeyResult> {
   if (!AmberSigner) {
     throw new Error('Amber is only supported on Android');
   }
-  return AmberSigner.getPublicKey();
+  return AmberSigner.getPublicKey(permissionsJson ?? null);
 }
 
 export async function signEvent(

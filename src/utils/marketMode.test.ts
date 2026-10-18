@@ -1,8 +1,10 @@
 import {
   DEFAULT_MARKET_MODE,
   MARKET_MODE_OPTIONS,
+  effectiveMarketMode,
   isMarketModeEnabled,
   marketModeOption,
+  marketModeRows,
   productsForMode,
   hasKnownSeller,
   type MarketMode,
@@ -51,6 +53,42 @@ describe('market mode options', () => {
   });
 });
 
+describe('experimental gating', () => {
+  it('unlocks friends-of-friends and all only with experimental features on', () => {
+    expect(isMarketModeEnabled('wotFof', true)).toBe(true);
+    expect(isMarketModeEnabled('wotAll', true)).toBe(true);
+    expect(isMarketModeEnabled('wotFof', false)).toBe(false);
+    expect(isMarketModeEnabled('wotAll', false)).toBe(false);
+    expect(isMarketModeEnabled('preferred', false)).toBe(true);
+    expect(isMarketModeEnabled('wotFriends', false)).toBe(true);
+  });
+
+  it('off: friends-of-friends shows as a locked row and all is hidden', () => {
+    expect(marketModeRows(false).map((r) => [r.option.mode, r.enabled])).toEqual([
+      ['preferred', true],
+      ['wotFriends', true],
+      ['wotFof', false],
+    ]);
+  });
+
+  it('on: all four rows, all selectable', () => {
+    expect(marketModeRows(true).map((r) => [r.option.mode, r.enabled])).toEqual([
+      ['preferred', true],
+      ['wotFriends', true],
+      ['wotFof', true],
+      ['wotAll', true],
+    ]);
+  });
+
+  it('falls back to Preferred when experimental is turned off on an experimental scope', () => {
+    expect(effectiveMarketMode('wotFof', false)).toBe('preferred');
+    expect(effectiveMarketMode('wotAll', false)).toBe('preferred');
+    expect(effectiveMarketMode('wotFof', true)).toBe('wotFof');
+    expect(effectiveMarketMode('wotAll', true)).toBe('wotAll');
+    expect(effectiveMarketMode('wotFriends', false)).toBe('wotFriends');
+  });
+});
+
 describe('productsForMode', () => {
   const seller = (p: MarketProduct): string | null =>
     p.sellerName === 'Robotechy' ? 'aaaa' : p.sellerName === 'Friendly' ? 'bbbb' : null;
@@ -76,7 +114,7 @@ describe('productsForMode', () => {
     expect(out.map((p) => p.id)).toEqual(['1', '2']);
   });
 
-  it('disabled tiers fall through to the full catalogue (UI blocks selecting them)', () => {
+  it('relay-sourced tiers pass the input through unchanged', () => {
     const fof = productsForMode('wotFof' as MarketMode, items, new Set(), seller);
     const all = productsForMode('wotAll' as MarketMode, items, new Set(), seller);
     expect(fof.map((p) => p.id)).toEqual(['1', '2', '3']);

@@ -105,17 +105,19 @@ export function useGroupTimeline({
     // Sanitise before classify so a tofu placeholder (#764) never reaches
     // the bubble's text branch.
     return messages
-      .map((m) => ({
-        ...m,
-        quote: quoteFor(m),
-        content:
-          m.wireKind !== undefined && ![4, 14, 15, 16, 17, 1068, 1018].includes(m.wireKind)
-            ? { kind: 'unsupported' as const, rawKind: m.wireKind }
-            : classifyStoredMessage(sanitizeDisplayText(m.text), m.wireKind),
-        // The real stored kind (14 chat / 15 encrypted file), so the info
-        // sheet reports kind 15 for voice / image bubbles.
-        wireKind: m.wireKind ?? deriveGroupWireKind(m.text),
-      }))
+      .map((m) => {
+        const wireKind = m.wireKind ?? deriveGroupWireKind(m.text);
+        return {
+          ...m,
+          quote: quoteFor(m),
+          content: ![4, 14, 15, 16, 17, 1068, 1018].includes(wireKind)
+            ? { kind: 'unsupported' as const, rawKind: wireKind }
+            : classifyStoredMessage(sanitizeDisplayText(m.text), wireKind),
+          // The real stored kind (14 chat / 15 encrypted file), so the info
+          // sheet reports kind 15 for voice / image bubbles.
+          wireKind,
+        };
+      })
       .filter((m) => m.content.kind !== 'pollVote');
   }, [messages, myPubkey, memberNameByPubkey, formatLocale]);
 

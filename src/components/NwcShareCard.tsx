@@ -1,3 +1,4 @@
+import { useChatCardWidth } from '../styles/chatCardWidth';
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
@@ -28,7 +29,8 @@ interface Props {
  */
 const NwcShareCard: React.FC<Props> = ({ card, fromMe, createdAt, colors, onAdd }) => {
   const t = useTranslation();
-  const styles = useMemo(() => createNwcShareCardStyles(colors), [colors]);
+  const cardWidth = useChatCardWidth();
+  const styles = useMemo(() => createNwcShareCardStyles(colors, cardWidth), [colors, cardWidth]);
 
   return (
     <View style={[styles.row, fromMe ? styles.rowRight : styles.rowLeft]}>

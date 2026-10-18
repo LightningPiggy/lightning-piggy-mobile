@@ -62,6 +62,7 @@ export interface EncryptedMediaRef {
   mime?: string;
   size?: number;
   plaintextSha256?: string;
+  plainUrl?: boolean;
   /** Explicitly unencrypted imeta files are still cached per account. */
   encrypted?: boolean;
   /** Declared NIP-17 ciphertext hash, checked before decryption. */
@@ -81,6 +82,7 @@ export class DecryptedMediaCancelledError extends Error {
   }
 }
 
+export const PDF_PREVIEW_WIDTH = 480;
 const ROOT_DIR = 'decrypted';
 export const LEGACY_CLEANUP_FLAG_KEY = 'decrypted_media_legacy_cleanup_v1';
 const LEGACY_FILE_RE = /^lp-(voice|img)-/;
@@ -97,16 +99,28 @@ export const verifiedFileMetadata = (uri: string) => verifiedFiles.get(uri);
 // Keep a bounded number of shares through the chooser and for ten minutes after.
 export const FILE_SHARE_RETENTION_MS = 10 * 60 * 1000;
 const MAX_RETAINED_FILES = 16;
-const retainedFiles = new Map<string, { users: number; timer?: ReturnType<typeof setTimeout> }>();
+const retainedFiles = new Map<
+  string,
+  { users: number; shared: boolean; timer?: ReturnType<typeof setTimeout> }
+>();
 
 /** Release schedules cleanup; repeated/concurrent shares extend the same lease. */
 export function retainDecryptedFile(uri: string): () => void {
+  return retainFile(uri, true);
+}
+
+/** Preview-only leases protect rendering from eviction without reserving share slots. */
+function retainFile(uri: string, forShare: boolean): () => void {
   let lease = retainedFiles.get(uri);
+  if (forShare && !lease?.shared) {
+    const shares = [...retainedFiles.values()].filter((entry) => entry.shared).length;
+    if (shares >= MAX_RETAINED_FILES) throw new Error('Too many retained file shares');
+  }
   if (!lease) {
-    if (retainedFiles.size >= MAX_RETAINED_FILES) throw new Error('Too many retained file shares');
-    lease = { users: 0 };
+    lease = { users: 0, shared: false };
     retainedFiles.set(uri, lease);
   }
+  if (forShare) lease.shared = true;
   if (lease.timer) clearTimeout(lease.timer);
   lease.users++;
   const current = lease;
@@ -115,6 +129,10 @@ export function retainDecryptedFile(uri: string): () => void {
     if (released || retainedFiles.get(uri) !== current) return;
     released = true;
     if (--current.users > 0) return;
+    if (!current.shared) {
+      retainedFiles.delete(uri);
+      return;
+    }
     current.timer = setTimeout(() => {
       void deleteDecryptedFile(uri).catch(() => {});
     }, FILE_SHARE_RETENTION_MS);
@@ -128,13 +146,48 @@ export async function deleteDecryptedFile(uri: string): Promise<void> {
   retainedFiles.delete(uri);
   verifiedFiles.delete(uri);
   for (const [key, value] of memory) if (value === uri) memory.delete(key);
+  await deleteAsync(`${uri}.preview-${PDF_PREVIEW_WIDTH}.png`, { idempotent: true });
   await deleteAsync(`${uri}.share/`, { idempotent: true });
   await deleteAsync(uri, { idempotent: true });
 }
 
+/** Derived previews join the account's publish barrier so logout cannot leave plaintext behind. */
+export async function publishDecryptedPreview(
+  uri: string,
+  render: () => Promise<string | null>,
+): Promise<string | null> {
+  const session = captureDecryptedMediaSession();
+  session.assertCurrent();
+  const { owner, epoch } = await requestOwner();
+  session.assertCurrent();
+  const dir = ownerDirUri(owner);
+  if (!dir || !uri.startsWith(dir)) throw new DecryptedMediaCancelledError();
+  const ownerDir = ownerDirName(owner);
+  const gen = generationOf(ownerDir);
+  const release = retainFile(uri, false);
+  try {
+    let result: string | null = null;
+    await trackPublish(
+      ownerDir,
+      (async () => {
+        result = await render();
+      })(),
+    );
+    if (epoch !== sessionEpoch || generationOf(ownerDir) !== gen)
+      throw new DecryptedMediaCancelledError();
+    session.assertCurrent();
+    return result;
+  } finally {
+    release();
+  }
+}
+
 /** Named exports share the source lease, account directory, and wipe generation. */
 export async function namedFileExport(uri: string, name: string): Promise<string> {
+  const session = captureDecryptedMediaSession();
+  session.assertCurrent();
   const { owner } = await requestOwner();
+  session.assertCurrent();
   const dir = ownerDirUri(owner);
   if (!dir || !uri.startsWith(dir) || !retainedFiles.has(uri))
     throw new DecryptedMediaCancelledError();
@@ -152,6 +205,7 @@ export async function namedFileExport(uri: string, name: string): Promise<string
     })(),
   );
   if (generationOf(ownerDir) !== gen) throw new DecryptedMediaCancelledError();
+  session.assertCurrent();
   return target;
 }
 
@@ -159,7 +213,10 @@ export async function namedFileExport(uri: string, name: string): Promise<string
 async function evictDiskFiles(dir: string): Promise<void> {
   const names = (await readDirectoryAsync(dir)).filter(
     (name) =>
-      name.startsWith('file-') && !name.endsWith('.share') && !retainedFiles.has(`${dir}${name}`),
+      name.startsWith('file-') &&
+      !name.endsWith('.share') &&
+      !name.includes('.preview-') &&
+      !retainedFiles.has(`${dir}${name}`),
   );
   const entries = await Promise.all(
     names.map(async (name) => ({
@@ -232,7 +289,7 @@ export function mediaCacheKey(ref: EncryptedMediaRef): string {
     JSON.stringify([
       ref.url,
       ...(ref.kind === 'file'
-        ? [['safe-file-v2', ref.encrypted, ref.plaintextSha256, ref.size]]
+        ? [['safe-file-v2', ref.encrypted, ref.plaintextSha256, ref.size, ref.plainUrl]]
         : []),
       ref.keyHex ?? '',
       ref.nonceHex ?? '',
@@ -335,6 +392,25 @@ export function peekDecryptedMedia(ref: EncryptedMediaRef): string | null {
   return memory.get(`${ownerDirName(activeOwner)}/${mediaCacheKey(ref)}`) ?? null;
 }
 
+/** Capture synchronously before any await; an account round trip also retires this token. */
+export function captureDecryptedMediaSession(expectedOwner = activeOwner) {
+  const owner = expectedOwner;
+  const epoch = sessionEpoch;
+  const gen = owner ? generationOf(ownerDirName(owner)) : 0;
+  return {
+    owner,
+    assertCurrent() {
+      if (
+        !owner ||
+        owner !== activeOwner ||
+        epoch !== sessionEpoch ||
+        generationOf(ownerDirName(owner)) !== gen
+      )
+        throw new DecryptedMediaCancelledError();
+    },
+  };
+}
+
 /** Cold start only: wait up to OWNER_WAIT_MS for the first owner. */
 function waitForOwner(): Promise<{ owner: string; epoch: number }> {
   return new Promise((resolve, reject) => {
@@ -370,15 +446,25 @@ async function requestOwner(): Promise<{ owner: string; epoch: number }> {
  * Rejects on fetch / decrypt failure (wrong keys, bad hashes) and with
  * `DecryptedMediaCancelledError` if the account's session ended meanwhile.
  */
-export async function resolveDecryptedMedia(ref: EncryptedMediaRef): Promise<string> {
+export async function resolveDecryptedMedia(
+  ref: EncryptedMediaRef,
+  expectedOwner?: string | null,
+): Promise<string> {
   if (!checkRemoteUrl(ref.url, { kind: 'media' }).ok) throw new Error('Blocked remote URL');
   if (
     ref.size !== undefined &&
     (!Number.isSafeInteger(ref.size) || ref.size <= 0 || ref.size > MEDIA_MAX_BYTES)
   )
     throw new Error('Invalid media size');
-  if (!hasValidDeclaredHash(ref)) throw new Error('Media ciphertext hash mismatch');
+  if (!hasValidDeclaredHash(ref))
+    throw ref.kind === 'file'
+      ? new FileVerificationError()
+      : new Error('Media ciphertext hash mismatch');
+  if (expectedOwner !== undefined && (!expectedOwner || activeOwner !== expectedOwner))
+    throw new DecryptedMediaCancelledError();
   const { owner, epoch } = await requestOwner();
+  if (expectedOwner !== undefined && owner !== expectedOwner)
+    throw new DecryptedMediaCancelledError();
   const ownerDir = ownerDirName(owner);
   await wiping.get(ownerDir);
   if (epoch !== sessionEpoch || activeOwner !== owner) throw new DecryptedMediaCancelledError();
@@ -449,7 +535,9 @@ async function resolveUncached(
     // A kind-15 that declares its ciphertext hash (`x` tag) must match it —
     // and a declared-but-malformed hash is a mismatch, never "no hash".
     if (ref.sha256 !== undefined && bytesToHex(sha256(cipher)) !== ref.sha256.toLowerCase()) {
-      throw new Error('Media ciphertext hash mismatch');
+      throw ref.kind === 'file'
+        ? new FileVerificationError()
+        : new Error('Media ciphertext hash mismatch');
     }
     let plain: Uint8Array;
     try {
@@ -469,6 +557,7 @@ async function resolveUncached(
     }
     if (
       unencrypted &&
+      (!ref.plainUrl || ref.plaintextSha256 !== undefined) &&
       (!ref.plaintextSha256 || bytesToHex(sha256(plain)) !== ref.plaintextSha256.toLowerCase())
     ) {
       await deleteDecryptedFile(uri);

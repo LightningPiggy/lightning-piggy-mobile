@@ -114,7 +114,6 @@ const MarketMyShopScreen: React.FC<Props> = ({ navigation }) => {
       title={t('market.sell.myShop')}
       backLabel={t('market.sell.back')}
       onBack={() => navigation.goBack()}
-      styles={styles}
       testID="my-shop-back"
     />
   );

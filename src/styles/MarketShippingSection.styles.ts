@@ -69,6 +69,8 @@ export const createMarketShippingSectionStyles = (colors: Palette) =>
       marginTop: 2,
     },
     optionCost: {
+      flexShrink: 1,
+      textAlign: 'right',
       fontSize: 14,
       fontWeight: '700',
       color: colors.brandPink,

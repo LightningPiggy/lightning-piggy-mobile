@@ -1,3 +1,5 @@
+import { useAppRelayPrefs } from './useAppRelayPrefs';
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { decodeLivePingPayload, type LiveUpdateKey } from '../services/liveLocationService';
 import { decryptIncomingLivePing } from '../services/liveLocationPingReceive';
@@ -72,6 +74,7 @@ export function useLiveUpdateRelaySubscriptions(params: {
   relays: RelayConfig[];
 }): void {
   const { shares, enabled, myPubkey, signerType, relays } = params;
+  const relayScope = useAppRelayPrefs();
   const key = sharesKey(shares);
   const relayKey = relays
     .filter((r) => r.read)
@@ -81,8 +84,12 @@ export function useLiveUpdateRelaySubscriptions(params: {
   useEffect(() => {
     const relayShares = shares.filter((s) => !s.marmot);
     if (!enabled || !myPubkey || relayShares.length === 0) return;
+    let cancelled = false;
     const targetRelays = Array.from(
-      new Set([...relays.filter((r) => r.read).map((r) => r.url), ...DEFAULT_NOSTR_RELAYS]),
+      new Set([
+        ...relays.filter((r) => r.read).map((r) => r.url),
+        ...enabledAppRelays('default', DEFAULT_NOSTR_RELAYS),
+      ]),
     );
     const sinceFor = (list: WatchedShare[]) =>
       Math.floor(Math.min(...list.map((s) => s.startedAt)) / 1000) - 60;
@@ -97,6 +104,7 @@ export function useLiveUpdateRelaySubscriptions(params: {
           since: sinceFor(keyed),
           relays: targetRelays,
           onEvent: (ev) => {
+            if (cancelled) return;
             const share = byPubkey.get(ev.pubkey);
             if (!share?.updateKey) return;
             const plain = decryptSessionLiveUpdate(share.updateKey.secret, ev.content);
@@ -128,14 +136,17 @@ export function useLiveUpdateRelaySubscriptions(params: {
               viewerPubkey: myPubkey,
             });
             // Route by sessionId, and only from the session's own author.
-            if (payload && sessionOwners.get(payload.sessionId) === ev.pubkey) {
+            if (!cancelled && payload && sessionOwners.get(payload.sessionId) === ev.pubkey) {
               ingestLiveUpdate(ev.pubkey, payload);
             }
           },
         }),
       );
     }
-    return () => unsubs.forEach((u) => u());
+    return () => {
+      cancelled = true;
+      unsubs.forEach((u) => u());
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key / relayKey are stable surrogates for shares / relays
-  }, [key, enabled, myPubkey, signerType, relayKey]);
+  }, [key, enabled, myPubkey, signerType, relayKey, relayScope]);
 }

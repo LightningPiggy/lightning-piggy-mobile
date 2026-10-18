@@ -4,6 +4,8 @@ import MarketShopCurrenciesScreen from './MarketShopCurrenciesScreen';
 import { saveSellerCurrency } from '../services/sellerPreferences';
 import { Toast } from '../components/BrandedToast';
 
+jest.mock('../components/ShopReceiveWalletSetting', () => () => null);
+
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => new Proxy({}, { get: () => '#000' }),
 }));

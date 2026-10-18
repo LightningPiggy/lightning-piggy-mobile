@@ -1,3 +1,4 @@
+import { enabledAppRelays } from './appRelayPrefs';
 /**
  * Runtime side of the trust-graph service — fetches the L2 set
  * (friends-of-follows) from relays + persists it to AsyncStorage.
@@ -52,7 +53,7 @@ const hashL1 = (l1: ReadonlySet<string>): string => {
  */
 export const fetchL2Follows = async (
   l1Pubkeys: ReadonlySet<string>,
-  relays: string[] = DEFAULT_RELAYS,
+  relays: string[] = enabledAppRelays('default', DEFAULT_RELAYS),
 ): Promise<Set<string>> => {
   const authors = [...l1Pubkeys].map((p) => p.toLowerCase());
   if (authors.length === 0) return new Set();

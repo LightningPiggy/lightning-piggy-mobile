@@ -20,7 +20,7 @@ name: Marmot file and unsupported message bubbles
 - assertVisible:
     text: 'kind 1234'
 - tapOn:
-    id: 'chat-file-share-file0001'
+    id: 'file-share-dm-file000100000000000000000000000000000000000000000000000000000000'
 - extendedWaitUntil:
     visible:
       text: '.*(Nearby Share|Quick Share|Bluetooth).*'
@@ -28,5 +28,5 @@ name: Marmot file and unsupported message bubbles
 - back
 - extendedWaitUntil:
     visible:
-      id: 'chat-file-share-file0001'
+      id: 'file-share-dm-file000100000000000000000000000000000000000000000000000000000000'
     timeout: 15000

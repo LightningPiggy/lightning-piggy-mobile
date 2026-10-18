@@ -1,3 +1,5 @@
+import FiatAmount from './FiatAmount';
+import MarketHeader from './MarketHeader';
 import BrandedSpinner from './BrandedSpinner';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Linking } from 'react-native';
@@ -15,26 +17,32 @@ import { createMarketCheckoutSheetStyles } from '../styles/MarketCheckoutSheet.s
 import { useMarketCheckout } from '../hooks/useMarketCheckout';
 import type { OrderShippingInput } from '../utils/marketOrder';
 import { useShippingOptions } from '../hooks/useShippingOptions';
-import { getBtcPrice } from '../services/fiatService';
+import { useBtcRates } from '../hooks/useBtcRates';
+import { filterShippingOptions, orderTotalWithShippingSats } from '../utils/marketShipping';
 import {
-  filterShippingOptions,
-  shippingCostFor,
-  shippingCostSats,
-  orderTotalWithShippingSats,
-} from '../utils/marketShipping';
-import { deviceCountryCode } from '../data/countries';
+  checkoutRateCurrencies,
+  checkoutShippingCostSats,
+  checkoutShippingOptions,
+  checkoutUnitPriceSats,
+  isSatsDenominated,
+} from '../utils/marketCheckoutPricing';
+import { composeDeliveryAddress } from '../utils/deliveryAddress';
+import { useCheckoutAddress } from '../hooks/useCheckoutAddress';
+import MarketDeliveryAddress from './MarketDeliveryAddress';
+import { useCheckoutCountry } from '../hooks/useCheckoutCountry';
 import MarketShippingSection from './MarketShippingSection';
 import CountryPickerSheet from './CountryPickerSheet';
 import Toast from './BrandedToast';
 import type { MarketProduct } from '../data/marketProducts';
-import type { MarketCheckoutTarget } from '../utils/marketCheckout';
+import { maxOrderQuantity, type MarketCheckoutTarget } from '../utils/marketCheckout';
+import { titleInitial } from '../utils/titleInitial';
 
 interface Props {
   visible: boolean;
   onClose: () => void;
   product: MarketProduct;
-  /** The product's explicit checkout opt-in, resolved by `marketCheckoutTarget`:
-   * order recipient, the seller's real listing `d` tag, and fulfilment. */
+  /** Resolved by `marketCheckoutTarget`: order recipient, the listing `d`
+   * tag, fulfilment and — for relay listings — price, stock and shipping refs. */
   checkout: MarketCheckoutTarget;
   sellerName: string;
   /** Seller logo, threaded into the conversation the buyer lands in. */
@@ -43,11 +51,9 @@ interface Props {
   onRequestSignIn: () => void;
   /** Fired after a successful order so the parent can navigate to the vendor conversation. */
   onPlaced: (info: { vendorPubkey: string; vendorName: string; vendorLogo?: string }) => void;
+  /** Open My orders from the order-placed state. */
+  onViewOrders?: () => void;
 }
-
-const MAX_QTY = 99;
-const MAX_RATE_RETRIES = 2;
-const RATE_RETRY_MS = 3000;
 
 /**
  * In-app Market checkout (#market). Replaces the old "open the seller's website"
@@ -59,8 +65,9 @@ const RATE_RETRY_MS = 3000;
  * they can pay it with their Lightning Piggy wallet.
  *
  * Sign-in is gated: a logged-out buyer is prompted to sign in first (the order
- * must be signed by their key). The seller's external `url` is kept as a
- * fallback link for buyers who'd rather use the website.
+ * must be signed by their key). Curated products keep the seller's website as
+ * a fallback link; relay listings (Gamma Markets kind 30402) have none — their
+ * physical orders carry the buyer's address in the gift-wrapped order instead.
  */
 const MarketCheckoutSheet: React.FC<Props> = ({
   visible,
@@ -71,8 +78,14 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   vendorLogo,
   onRequestSignIn,
   onPlaced,
+  onViewOrders,
 }) => {
   const { vendorPubkey, listingDTag, fulfilment } = checkout;
+  const isListing = checkout.source === 'listing';
+  const maxQty = maxOrderQuantity(checkout);
+  const outOfStock = maxQty === 0;
+  // Relay listings put the address on the order; curated sellers ask in chat.
+  const needsAddress = isListing && fulfilment === 'physical';
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketCheckoutSheetStyles(colors), [colors]);
@@ -80,6 +93,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   const { status, error, isPlacing, canOrder, placeOrder, reset } = useMarketCheckout();
 
   const [quantity, setQuantity] = useState(1);
+  const delivery = useCheckoutAddress(visible);
   const [imageFailed, setImageFailed] = useState(false);
   // In-flight guard for the WHOLE submit path (rate revalidation + publish):
   // `isPlacing` only covers the hook's publish, so the ref (synchronous) stops
@@ -89,31 +103,36 @@ const MarketCheckoutSheet: React.FC<Props> = ({
 
   // --- Country-first shipping (#948 Option A) ---
   const shipping = useShippingOptions(visible ? vendorPubkey : null, visible, fulfilment);
-  const [countryCode, setCountryCode] = useState<string | null>(null);
+  const {
+    countryCode,
+    selectCountry: setCountryCode,
+    rememberCountry,
+  } = useCheckoutCountry(visible);
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
-  const [selectedCoordinate, setSelectedCoordinate] = useState<string | null>(null);
-  // BTC spot price per fiat currency the options quote in (null = fetch
-  // failed → the option can't be priced in sats and submit stays blocked).
-  // Plain Record, not a Map: it holds 1-3 currencies fetched once per
-  // sheet open, and all results commit as a single state write below.
-  const [btcPriceByCurrency, setBtcPriceByCurrency] = useState<
-    Record<string, number | null | undefined>
-  >({});
-  // A failed quote (null) is retried a bounded number of times, ~3 s apart, so
-  // a transient rate outage recovers without closing and reopening the sheet.
-  const [rateAttempt, setRateAttempt] = useState(0);
+  const [chosenCoordinate, setSelectedCoordinate] = useState<string | null>(null);
+  // The seller's options this product can ship with: a listing's own
+  // `shipping_option` refs, or every option the seller publishes.
+  const sellerOptions = useMemo(
+    () => checkoutShippingOptions(checkout, shipping.options),
+    [checkout, shipping.options],
+  );
+  // BTC spot rates for every fiat price involved (listing + options). A
+  // missing / failed rate (null) leaves that figure unpriced and blocks submit.
+  const rateCurrencies = useMemo(
+    () => checkoutRateCurrencies(checkout, shipping.status === 'ready' ? sellerOptions : []),
+    [checkout, sellerOptions, shipping.status],
+  );
+  const {
+    rates: btcPriceByCurrency,
+    refreshRates,
+    retry: retryRates,
+  } = useBtcRates(rateCurrencies, visible);
 
   useEffect(() => {
     if (visible) {
       setQuantity(1);
       setImageFailed(false);
-      // Pre-select the device-locale country (spec: user can change it).
-      setCountryCode(deviceCountryCode());
       setSelectedCoordinate(null);
-      // Fresh spot rates per open: a failed quote (null) must retry, and a
-      // rate older than fiatService's cache window must not price shipping.
-      setBtcPriceByCurrency({});
-      setRateAttempt(0);
       reset();
       sheetRef.current?.present();
     } else {
@@ -127,77 +146,41 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   // empty fetch is an error — see useShippingOptions), so this is the
   // country-first flow. A seller-confirmed `none` product is `ready` with no
   // options and skips the section.
-  const hasShipping = shipping.status === 'ready' && shipping.options.length > 0;
+  const hasShipping = shipping.status === 'ready' && sellerOptions.length > 0;
   // Belt and braces for the hook's contract: a physical order must never be
   // signed without a shipping selection.
   const shippingMissing = fulfilment === 'physical' && !hasShipping;
 
-  // Fetch a BTC spot price once per distinct fiat currency the options use.
-  // All fetches settle together and commit as ONE state write — no
-  // per-result re-render (and no per-event clone for the perf gate).
-  useEffect(() => {
-    if (!hasShipping) return;
-    const fiat = [
-      ...new Set(
-        shipping.options
-          .map((o) => o.currency)
-          .filter((c) => c && c !== 'SATS' && c !== 'SAT' && c !== 'BTC'),
-      ),
-    ].filter((c) => !(c in btcPriceByCurrency) || btcPriceByCurrency[c] === null);
-    if (fiat.length === 0) return;
-    let cancelled = false;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    Promise.all(
-      fiat.map((currency) =>
-        // No stale fallback: an expired rate must not price a payable total.
-        getBtcPrice(currency, { allowStale: false })
-          .then((price) => [currency, price] as const)
-          .catch(() => [currency, null] as const),
-      ),
-    ).then((entries) => {
-      if (cancelled) return;
-      setBtcPriceByCurrency((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
-      if (entries.some(([, price]) => price === null) && rateAttempt < MAX_RATE_RETRIES) {
-        retryTimer = setTimeout(() => setRateAttempt((a) => a + 1), RATE_RETRY_MS);
-      }
-    });
-    return () => {
-      cancelled = true;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-    // btcPriceByCurrency intentionally omitted: the null-or-missing guard
-    // already prevents refetch loops, and depending on it would refire per
-    // result; `rateAttempt` is the deliberate retry trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasShipping, shipping.options, rateAttempt]);
-
   const compatibleOptions = useMemo(
-    () => (hasShipping && countryCode ? filterShippingOptions(shipping.options, countryCode) : []),
-    [hasShipping, shipping.options, countryCode],
+    () => (hasShipping && countryCode ? filterShippingOptions(sellerOptions, countryCode) : []),
+    [hasShipping, sellerOptions, countryCode],
   );
 
-  // Reactivity: changing country re-filters; if the current selection became
-  // incompatible, clear it so the buyer must re-pick (spec §3).
+  // Automatic choices are derived, so they do not become implicit choices
+  // when a later country or option refresh offers several alternatives.
+  const selectedCoordinate =
+    compatibleOptions.length === 1
+      ? compatibleOptions[0].coordinate
+      : compatibleOptions.some((o) => o.coordinate === chosenCoordinate)
+        ? chosenCoordinate
+        : null;
   useEffect(() => {
-    if (!selectedCoordinate) return;
-    if (!compatibleOptions.some((o) => o.coordinate === selectedCoordinate)) {
+    if (chosenCoordinate && !compatibleOptions.some((o) => o.coordinate === chosenCoordinate)) {
       setSelectedCoordinate(null);
     }
-  }, [compatibleOptions, selectedCoordinate]);
+  }, [compatibleOptions, chosenCoordinate]);
 
-  // All-in sats cost per option (base + product surcharge; static catalogue
-  // products carry no surcharge refs yet, so cost = base). null = no rate.
+  // All-in sats cost per option: the option's base (its own currency) plus a
+  // listing's `shipping_option` surcharge (the listing currency). null = no rate.
   const costSatsByCoordinate = useMemo(() => {
     const map = new Map<string, number | null>();
-    for (const option of shipping.options) {
-      const amount = shippingCostFor(option);
-      map.set(
-        option.coordinate,
-        shippingCostSats(amount, option.currency, btcPriceByCurrency[option.currency] ?? null),
-      );
+    for (const option of sellerOptions) {
+      map.set(option.coordinate, checkoutShippingCostSats(option, checkout, btcPriceByCurrency));
     }
     return map;
-  }, [shipping.options, btcPriceByCurrency]);
+  }, [sellerOptions, checkout, btcPriceByCurrency]);
+  // Unit price in sats — a fiat listing converts at the live rate.
+  const unitPriceSats = checkoutUnitPriceSats(product, checkout, btcPriceByCurrency);
 
   const selectedOption = useMemo(
     () =>
@@ -225,7 +208,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
   // `idle` (the initial render before the load effect fires), `loading`, and
   // `error` alike. Once ready, only require a country + a compatible option
   // with a priceable sats cost when the merchant actually has options.
-  const subtotalSats = product.priceSats * quantity;
+  const subtotalSats = unitPriceSats === null ? null : unitPriceSats * quantity;
   // The displayed total is only known once shipping has settled: `ready` with
   // no options (digital goods) or a priced selection. Until then it renders as
   // "—" rather than the bare subtotal masquerading as the order total.
@@ -233,11 +216,17 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     shipping.status === 'ready' &&
     !shippingMissing &&
     (!hasShipping || selectedShippingSats !== null);
-  const totalSats = shippingSettled
-    ? orderTotalWithShippingSats(subtotalSats, selectedShippingSats ?? 0)
-    : null;
+  const totalSats =
+    shippingSettled && subtotalSats !== null
+      ? orderTotalWithShippingSats(subtotalSats, selectedShippingSats ?? 0)
+      : null;
+  const address = composeDeliveryAddress(delivery.fields, countryCode ?? '');
+  const addressMissing = needsAddress && !address;
   const shippingBlocksSubmit =
     totalSats === null ||
+    outOfStock ||
+    quantity > maxQty ||
+    addressMissing ||
     shipping.status !== 'ready' ||
     shippingMissing ||
     (hasShipping && (!countryCode || !selectedOption || selectedShippingSats === null));
@@ -270,57 +259,65 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     submittingRef.current = true;
     setSubmitting(true);
     try {
-      let shippingInput: OrderShippingInput | undefined;
-      if (hasShipping && selectedOption && selectedShippingSats !== null) {
-        let costSats: number | null = selectedShippingSats;
-        const cur = selectedOption.currency.trim().toUpperCase();
-        if (cur !== 'SATS' && cur !== 'SAT' && cur !== 'BTC') {
-          // Revalidate at submit: the sheet may have sat open past the rate's
-          // 5-minute TTL, and the signed order total must not use an expired
-          // conversion. Served from cache while fresh, refetched otherwise;
-          // an outage yields null → block and hand off to the retry loop.
-          const fresh = await getBtcPrice(cur, { allowStale: false });
-          setBtcPriceByCurrency((prev) => ({ ...prev, [cur]: fresh }));
-          // Selection changed while we awaited (the section is locked, but a
-          // queued tap can still land) → don't sign the captured one.
-          if (
-            liveSelectionRef.current.coordinate !== selectedOption.coordinate ||
-            liveSelectionRef.current.country !== countryCode ||
-            liveSelectionRef.current.quantity !== quantity
-          ) {
-            return;
-          }
-          costSats = shippingCostSats(shippingCostFor(selectedOption), cur, fresh);
-          if (costSats === null) {
-            setRateAttempt((a) => a + 1);
-            return;
-          }
-          // Never sign a total the buyer hasn't seen: if the fresh rate moves
-          // the shipping sats, let the sheet re-render with the new total and
-          // require a second tap.
-          if (costSats !== selectedShippingSats) {
-            Toast.show({
-              type: 'info',
-              text1: t('market.checkout.rateUpdated'),
-              position: 'top',
-              visibilityTime: 3000,
-            });
-            return;
-          }
+      // Revalidate fiat rates at submit: the sheet may have sat open past the
+      // rate's 5-minute TTL, and the signed order total must not use an
+      // expired conversion. Served from cache while fresh, refetched
+      // otherwise; an outage yields null → block and hand off to the retry.
+      let unitSats = unitPriceSats;
+      let shippingSats = selectedShippingSats;
+      if (rateCurrencies.length > 0) {
+        const fresh = { ...btcPriceByCurrency, ...(await refreshRates(rateCurrencies)) };
+        // Selection changed while we awaited (the section is locked, but a
+        // queued tap can still land) → don't sign the captured one.
+        if (
+          liveSelectionRef.current.coordinate !== selectedCoordinate ||
+          liveSelectionRef.current.country !== countryCode ||
+          liveSelectionRef.current.quantity !== quantity
+        ) {
+          return;
         }
+        unitSats = checkoutUnitPriceSats(product, checkout, fresh);
+        shippingSats =
+          hasShipping && selectedOption
+            ? checkoutShippingCostSats(selectedOption, checkout, fresh)
+            : selectedShippingSats;
+        if (unitSats === null || (hasShipping && shippingSats === null)) {
+          retryRates();
+          return;
+        }
+        // Never sign a total the buyer hasn't seen: if the fresh rate moved
+        // a figure, let the sheet re-render the new total and require a
+        // second tap.
+        if (unitSats !== unitPriceSats || shippingSats !== selectedShippingSats) {
+          Toast.show({
+            type: 'info',
+            text1: t('market.checkout.rateUpdated'),
+            position: 'top',
+            visibilityTime: 3000,
+          });
+          return;
+        }
+      }
+      if (unitSats === null) return;
+      let shippingInput: OrderShippingInput | undefined;
+      if (hasShipping && selectedOption && shippingSats !== null) {
         shippingInput = {
           coordinate: selectedOption.coordinate,
-          costSats,
+          costSats: shippingSats,
           title: selectedOption.title,
         };
       }
       await placeOrder({
         vendorPubkey,
         dTag: listingDTag,
-        priceSats: product.priceSats,
+        priceSats: unitSats,
         quantity,
         shipping: shippingInput,
+        ...(needsAddress ? { address: address ?? '' } : {}),
+        title: product.title,
       });
+      if (needsAddress) await delivery.save();
+      if (hasShipping) rememberCountry();
       Toast.show({
         type: 'success',
         text1: t('market.checkout.toastPlaced'),
@@ -340,14 +337,25 @@ const MarketCheckoutSheet: React.FC<Props> = ({
     placeOrder,
     vendorPubkey,
     listingDTag,
-    product.priceSats,
+    product,
+    checkout,
+    unitPriceSats,
     quantity,
     sellerName,
     shippingBlocksSubmit,
     hasShipping,
     selectedOption,
+    selectedCoordinate,
     selectedShippingSats,
     countryCode,
+    rememberCountry,
+    rateCurrencies,
+    btcPriceByCurrency,
+    refreshRates,
+    retryRates,
+    needsAddress,
+    delivery,
+    address,
     t,
   ]);
 
@@ -412,10 +420,33 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 {t('market.checkout.goToChat')}
               </Text>
             </TouchableOpacity>
+            {onViewOrders ? (
+              <TouchableOpacity
+                style={styles.fallbackLink}
+                onPress={() => {
+                  onClose();
+                  onViewOrders();
+                }}
+                accessibilityRole="link"
+                accessibilityLabel={t('myOrders.open')}
+                testID="market-checkout-my-orders"
+              >
+                <Text style={styles.fallbackLinkText}>{t('myOrders.viewAll')}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : (
           <>
-            <Text style={styles.title}>{t('market.detail.buyFrom', { seller: sellerName })}</Text>
+            <View style={styles.header}>
+              <MarketHeader
+                title={t('market.detail.buyFrom', { seller: sellerName })}
+                backLabel={t('market.detail.back')}
+                onBack={onClose}
+                testID="market-checkout-back"
+                insetTop={false}
+                backDisabled={dismissLocked}
+              />
+            </View>
 
             <View style={styles.productRow}>
               {hasThumb ? (
@@ -429,9 +460,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 />
               ) : (
                 <View style={styles.thumbFallback}>
-                  <Text style={styles.thumbFallbackText}>
-                    {product.title.charAt(0).toUpperCase()}
-                  </Text>
+                  <Text style={styles.thumbFallbackText}>{titleInitial(product.title)}</Text>
                 </View>
               )}
               <View style={styles.productInfo}>
@@ -441,11 +470,16 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 <Text style={styles.productSeller}>
                   {t('market.fromSeller', { seller: sellerName })}
                 </Text>
-                <Text style={styles.unitPrice}>
-                  {t('market.checkout.unitPrice', {
-                    amount: product.priceSats.toLocaleString(formatLocale),
-                    fiat: product.priceFiatLabel,
-                  })}
+                <Text style={styles.unitPrice} testID="market-checkout-unit-price">
+                  {isListing && checkout.price && isSatsDenominated(checkout.price.currency)
+                    ? t('market.checkout.unitPriceSats', {
+                        amount: unitPriceSats?.toLocaleString(formatLocale) ?? '—',
+                      })
+                    : t('market.checkout.unitPrice', {
+                        amount: unitPriceSats?.toLocaleString(formatLocale) ?? '—',
+                        fiat: product.priceFiatLabel,
+                      })}
+                  <FiatAmount inline sats={unitPriceSats} testID="market-checkout-unit-fiat" />
                 </Text>
               </View>
             </View>
@@ -471,21 +505,29 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                   {quantity}
                 </Text>
                 <TouchableOpacity
-                  style={[styles.stepButton, quantity >= MAX_QTY && styles.stepButtonDisabled]}
-                  onPress={() => setQuantity((q) => Math.min(MAX_QTY, q + 1))}
-                  disabled={quantity >= MAX_QTY || submitting || isPlacing}
+                  style={[styles.stepButton, quantity >= maxQty && styles.stepButtonDisabled]}
+                  onPress={() => setQuantity((q) => Math.min(maxQty, q + 1))}
+                  disabled={quantity >= maxQty || submitting || isPlacing}
                   accessibilityRole="button"
                   accessibilityLabel={t('market.checkout.increaseQuantity')}
                   testID="market-checkout-qty-plus"
                 >
                   <Plus
                     size={18}
-                    color={quantity >= MAX_QTY ? colors.divider : colors.brandPink}
+                    color={quantity >= maxQty ? colors.divider : colors.brandPink}
                     strokeWidth={2.5}
                   />
                 </TouchableOpacity>
               </View>
             </View>
+
+            {checkout.stock !== null ? (
+              <Text style={styles.stockNote} testID="market-checkout-stock">
+                {outOfStock
+                  ? t('market.checkout.outOfStock')
+                  : t('market.checkout.inStock', { stock: checkout.stock })}
+              </Text>
+            ) : null}
 
             {shipping.status !== 'idle' && (hasShipping || shipping.status !== 'ready') ? (
               <MarketShippingSection
@@ -503,6 +545,19 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 costSatsByCoordinate={costSatsByCoordinate}
                 sellerName={sellerName}
                 onMessageShop={handleGoToConversation}
+                showAddressNote={!needsAddress}
+              />
+            ) : null}
+
+            {needsAddress ? (
+              <MarketDeliveryAddress
+                delivery={delivery}
+                countryCode={countryCode}
+                disabled={submitting || isPlacing}
+                onOpenCountryPicker={() => {
+                  if (!submitting && !isPlacing) setCountryPickerVisible(true);
+                }}
+                sellerName={sellerName}
               />
             ) : null}
 
@@ -510,15 +565,22 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               <>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('market.checkout.subtotal')}</Text>
-                  <Text style={styles.summaryValue} testID="market-checkout-subtotal">
+                  <Text
+                    style={[styles.summaryValue, styles.amountColumn]}
+                    testID="market-checkout-subtotal"
+                  >
                     {t('market.sats', {
                       amount: subtotalSats?.toLocaleString(formatLocale) ?? '—',
                     })}
+                    <FiatAmount inline sats={subtotalSats} testID="market-checkout-subtotal-fiat" />
                   </Text>
                 </View>
                 <View style={styles.summaryRow}>
                   <Text style={styles.summaryLabel}>{t('market.checkout.shipping')}</Text>
-                  <Text style={styles.summaryValue} testID="market-checkout-shipping">
+                  <Text
+                    style={[styles.summaryValue, styles.amountColumn]}
+                    testID="market-checkout-shipping"
+                  >
                     {selectedShippingSats !== null
                       ? selectedShippingSats === 0
                         ? t('market.free')
@@ -526,6 +588,11 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                             amount: selectedShippingSats.toLocaleString(formatLocale),
                           })
                       : '—'}
+                    <FiatAmount
+                      inline
+                      sats={selectedShippingSats}
+                      testID="market-checkout-shipping-fiat"
+                    />
                   </Text>
                 </View>
               </>
@@ -537,6 +604,7 @@ const MarketCheckoutSheet: React.FC<Props> = ({
                 <Zap size={16} color={colors.brandPink} strokeWidth={2.5} fill={colors.brandPink} />
                 <Text style={styles.totalSats} testID="market-checkout-total">
                   {t('market.sats', { amount: totalSats?.toLocaleString(formatLocale) ?? '—' })}
+                  <FiatAmount inline sats={totalSats} testID="market-checkout-total-fiat" />
                 </Text>
               </View>
             </View>
@@ -581,20 +649,22 @@ const MarketCheckoutSheet: React.FC<Props> = ({
               <Text style={styles.hint}>{t('market.checkout.hint')}</Text>
             )}
 
-            <TouchableOpacity
-              style={styles.fallbackLink}
-              onPress={openWebsite}
-              accessibilityRole="link"
-              accessibilityLabel={t('market.checkout.openWebsiteAccessibility', {
-                seller: sellerName,
-              })}
-              testID="market-checkout-website"
-            >
-              <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
-              <Text style={styles.fallbackLinkText}>
-                {t('market.checkout.websiteFallback', { seller: sellerName })}
-              </Text>
-            </TouchableOpacity>
+            {isListing ? null : (
+              <TouchableOpacity
+                style={styles.fallbackLink}
+                onPress={openWebsite}
+                accessibilityRole="link"
+                accessibilityLabel={t('market.checkout.openWebsiteAccessibility', {
+                  seller: sellerName,
+                })}
+                testID="market-checkout-website"
+              >
+                <ExternalLink size={14} color={colors.brandPink} strokeWidth={2.5} />
+                <Text style={styles.fallbackLinkText}>
+                  {t('market.checkout.websiteFallback', { seller: sellerName })}
+                </Text>
+              </TouchableOpacity>
+            )}
           </>
         )}
       </BottomSheetScrollView>
@@ -603,7 +673,10 @@ const MarketCheckoutSheet: React.FC<Props> = ({
         visible={countryPickerVisible}
         onClose={() => setCountryPickerVisible(false)}
         selectedCode={countryCode}
-        onSelect={setCountryCode}
+        onSelect={(country) => {
+          setSelectedCoordinate(null);
+          setCountryCode(country);
+        }}
       />
     </BottomSheetModal>
   );

@@ -3,7 +3,8 @@ import type { Palette } from './palettes';
 
 export const createMarmotInvitationsStyles = (colors: Palette) =>
   StyleSheet.create({
-    section: { maxHeight: 280 },
+    // A FlatList grows by default: size to the rows, up to the cap.
+    section: { maxHeight: 280, flexGrow: 0 },
     row: {
       padding: 12,
       gap: 8,

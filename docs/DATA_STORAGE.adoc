@@ -70,6 +70,11 @@ changing how anything is stored.
   the *only* at-rest home for 1:1 DM content; no plaintext side blobs.
   Marmot 1:1 rows live here too, tagged `protocol = 'marmot'` (NULL on
   NIP-04/NIP-17 rows, whose protocol is inferred from `wire_kind`).
+  `rumor_id` is set on received rows as well as sent ones (#1320; older
+  rows get it on the next thread open). Wrapped NIP-17 reactions and
+  retractions are rows with `wire_kind` 7 / 5 whose `content` is
+  `{"content", "tags"}` JSON; thread pages, the inbox and the
+  existing-conversation check skip them (#1321).
   `marmot_kv` holds every Marmot (MLS) store — group ratchet state, epoch
   secrets, key-package private keys, invites, each group's decrypted
   message history, photo file keys and MIP-05 push records — keyed
@@ -395,6 +400,22 @@ Logout / account wipe deletes the **Keystore** secrets and the **Encrypted DB**
 (+ its key) — a clean, complete user-data wipe. **AsyncStorage** scalars and the
 **Plain cache** survive: they're either non-identifying settings or public data
 that isn't yours to wipe.
+
+=== Buyer order lifecycle admission and history
+
+Live and backfill NIP-17 ingest accept incoming payment requests, status,
+shipping updates and receipts only when the order id matches this account's
+stored outgoing type-1 order and the sender is that order's seller. Rejected
+lifecycle events increment a bounded per-account diagnostic counter and never
+enter the encrypted DM store. Incoming type-1 orders remain available to the
+seller flow. Messages' Only friends setting controls inbox entries and alerts;
+a matching invoice still refreshes an open conversation after persistence.
+
+`getOrderRows` selects the newest 500 placed orders (configurable up to 2,000),
+then retrieves all lifecycle rows for those order ids and seller conversations.
+The limit counts purchases, so hundreds of newer status updates cannot evict a
+placed order or its invoice from My orders (#1563). Invalid legacy JSON and
+updates from unrelated sellers are excluded.
 
 === Migration (old store → new): import the decrypt memo, then delete
 

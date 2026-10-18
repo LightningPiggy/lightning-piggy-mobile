@@ -1,3 +1,10 @@
+import {
+  loadAppRelayPrefs,
+  setAppRelayEnabled,
+  forgetAppRelayPrefs,
+} from '../services/appRelayPrefs';
+import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
+import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { useRelayListEditor } from './useRelayListEditor';
@@ -601,4 +608,28 @@ it('displays only LAN lists and disables public edits for a locked identity', as
   expect(result.current.inboxDraft).toEqual([TEST_RELAY_URL]);
   expect(result.current.addNip65('wss://public.example')).toBe(false);
   expect(result.current.addInbox('wss://public.example')).toBe(false);
+});
+
+it('retries discovery on preference hydration and edits while preserving unsaved drafts', async () => {
+  const owner = mockPubkey;
+  await forgetAppRelayPrefs(owner);
+  setCurrentUserPubkey(owner);
+  const h = renderHook(() => useRelayListEditor());
+  await waitFor(() => expect(h.result.current.nip65Loading).toBe(false));
+  expect(fetchLatest.mock.calls[0][2]).not.toContain(RELAY_LIST_INDEXERS[0]);
+  await act(async () => loadAppRelayPrefs(owner));
+  await waitFor(() => expect(h.result.current.inboxLoading).toBe(false));
+  expect(fetchLatest.mock.calls.at(-1)[2]).toContain(RELAY_LIST_INDEXERS[0]);
+  act(() => {
+    h.result.current.addNip65('wss://draft.example');
+    h.result.current.addInbox('wss://inbox-draft.example');
+  });
+  await act(async () => setAppRelayEnabled(owner, 'indexers', RELAY_LIST_INDEXERS[0], false));
+  await waitFor(() => expect(h.result.current.inboxLoading).toBe(false));
+  expect(fetchLatest.mock.calls.at(-1)[2]).not.toContain(RELAY_LIST_INDEXERS[0]);
+  expect(h.result.current.nip65Draft.some((r) => r.url === 'wss://draft.example')).toBe(true);
+  expect(h.result.current.inboxDraft).toContain('wss://inbox-draft.example');
+  h.unmount();
+  setCurrentUserPubkey(null);
+  await forgetAppRelayPrefs(owner);
 });

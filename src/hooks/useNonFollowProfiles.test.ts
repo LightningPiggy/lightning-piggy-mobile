@@ -85,6 +85,24 @@ describe('useNonFollowProfiles', () => {
     expect(await AsyncStorage.getItem(nonFollowProfilesKey(A))).not.toBeNull();
   });
 
+  it('also names extra people (group senders, people mentioned in previews), never the viewer', async () => {
+    const MENTIONED = 'e'.repeat(64);
+    const fetchProfiles = jest.fn(
+      async (pks: string[]) => new Map(pks.map((pk) => [pk, profile(pk.slice(0, 1))])),
+    );
+    const { result } = renderHook(() =>
+      useNonFollowProfiles({
+        pubkey: A,
+        dmInbox: [],
+        contacts: [],
+        fetchProfilesForPubkeys: fetchProfiles,
+        extraPubkeys: [MENTIONED, A],
+      }),
+    );
+    await waitFor(() => expect(result.current.contactInfoMap.get(MENTIONED)?.name).toBe('e'));
+    expect(fetchProfiles).toHaveBeenCalledWith([MENTIONED]);
+  });
+
   it('retries a partner after a failed fetch', async () => {
     const fetchProfiles = jest
       .fn()

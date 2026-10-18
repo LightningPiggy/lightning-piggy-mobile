@@ -1,3 +1,12 @@
+import { reviveAccountWrites } from '../services/accountWriteGuards';
+import {
+  beginSkipSetRecheck,
+  completeSkipSetRecheck,
+  hasRepliedTo,
+  loadRepliedPartners,
+  pendingSkipSetRecheck,
+  skipSetRecheckDone,
+} from '../services/dmRepliedPartners';
 import { useLiveFollowGate } from './useLiveFollowGate';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Kind4RetryStore } from './kind4RetryStore';
@@ -46,6 +55,7 @@ import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { bindDmDeliveryStorePersistence } from './dmDeliveryStorePersistence';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { useMarmotDmInbound } from './useMarmotDmInbound';
+import { useDmInboxDeletions } from './useDmInboxDeletions';
 import {
   applyScopedDmInboxUpdate,
   INITIAL_SCOPED_DM_INBOX,
@@ -53,7 +63,6 @@ import {
   selectScopedDmInbox,
   type ScopedDmInbox,
 } from './dmInboxScope';
-
 import { useDmRefreshCoordinator, canJoinDmRefresh } from './dmRefreshCoordinator';
 
 type DmInboxSetter = React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
@@ -122,6 +131,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     getReadRelays,
   } = options;
 
+  useEffect(() => {
+    if (isLoggedIn && pubkey) reviveAccountWrites(pubkey);
+  }, [isLoggedIn, pubkey]);
+
   // The inbox is tagged with the account that owns it (see dmInboxScope):
   // only the active account's entries are ever exposed, and writes computed
   // for a previous account (an in-flight refresh, a live-sub / Marmot
@@ -173,6 +186,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   const setDmInboxForPubkey = useMemo(() => inboxSetterFor(pubkey), [inboxSetterFor, pubkey]);
   // Marmot 1:1 chats land in the same store + list (protocol 'marmot').
   useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInboxForPubkey, followPubkeys);
+  useDmInboxDeletions(inboxSetterFor);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
   // Welcomes and DMs must arrive before first Messages focus (#1399).
   // The provider remains the sole owner; the pool reserves inbox capacity.
@@ -440,6 +454,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           lastRefreshAt,
           bypassesFreshnessTtl(opts) ||
             widensView ||
+            // A reply's skip-set recheck (#1623) shouldn't wait out the TTL.
+            pendingSkipSetRecheck(pubkey) !== null ||
             (retryAt !== undefined && retryAt <= Date.now()),
           performance.now(),
         )
@@ -474,7 +490,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       // of the parental-control filter from a single switch.
       const refreshForSigner = signerType;
       const refreshFollows = followPubkeys;
-      const passesFollowGate = (pk: string): boolean => includeNonFollows || refreshFollows.has(pk);
+      // Someone we've replied to passes too (#1623), so their later messages
+      // are stored like a follow's (the Messages list keeps its trust tiers).
+      const passesFollowGate = (pk: string): boolean =>
+        includeNonFollows || refreshFollows.has(pk) || hasRepliedTo(refreshForPubkey, pk);
 
       if (!isStillActive()) return;
       const accountSignal = accountSignalFor(refreshForPubkey);
@@ -492,6 +511,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // single-flighted per account; after the first call it costs one
           // Map lookup, so firing it on every refresh is safe.
           await ensureDmStoreMigrated(refreshForPubkey);
+          // `passesFollowGate` reads it: people we've replied to pass (#1623).
+          await loadRepliedPartners(refreshForPubkey);
+          // Replying to someone new re-reads wraps the skip-set rejected before:
+          // one forced pass per session, cleared once a refresh completes it.
+          const skipSetRecheck = beginSkipSetRecheck(refreshForPubkey);
 
           // Cold REBUILD detection (F1, #849). A post-login / post-wipe inbox
           // has an empty store: this sweep is the ONLY thing that will populate
@@ -679,13 +703,14 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   wraps: kind1059,
                   passesFollowGate,
                   isFollowed: (pk) => refreshFollows.has(pk),
-                  bypassSkipSet,
+                  bypassSkipSet: bypassSkipSet || skipSetRecheck !== null,
                   isColdStart,
                   signal: effectiveSignal,
                   onSkip,
                   amberNip44DecryptSilent,
                 })
               : null;
+          const skipSetRechecked = skipSetRecheckDone(nip17 !== null, effectiveSignal.aborted);
           if (nip17) {
             // No early return on abort: entries is [] when aborted, but
             // nip17Stored counts rows persisted before the abort (F1, #849)
@@ -756,7 +781,6 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
               `dbInbox=${dbLatest.length}, ` +
               `yields=${nip17YieldCount}`,
           );
-
           setInboxForRefresh(filteredFinal);
 
           // Advance only after all targets were processed and rows persisted.
@@ -770,6 +794,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           // Completion drives TTL and full wrap backfill independently of the
           // history floor. A productive abort still needs another pass.
           refreshCompleted = !effectiveSignal.aborted && kind4Complete;
+          if (refreshCompleted && skipSetRechecked && skipSetRecheck !== null) {
+            completeSkipSetRecheck(refreshForPubkey, skipSetRecheck);
+          }
         } catch (error) {
           if (__DEV__) console.warn('[Nostr] refreshDmInbox failed:', error);
         } finally {
@@ -902,19 +929,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   //     broadcast to `dmMessageListeners` so an open
   //     ConversationScreen for that peer re-fetches.
   //
-  // Follow gate: matches `refreshDmInbox`'s default — non-followed
-  // sender wraps are decrypted (so we can group-route them) but NOT
-  // cached or surfaced to dmInbox state. The dev-mode "All (dev)"
-  // toggle still relies on the next pull-to-refresh to surface
-  // unfollowed live wraps; live delivery for that view is a
-  // follow-up. Rationale: storing unfollowed plaintext on disk
-  // violates the "B1 — never cache rumors from non-followed senders"
-  // invariant in `refreshDmInbox`.
-  //
-  // Store upserts + inbox-blob writes go through a serial queue to
-  // avoid racing with `refreshDmInbox` (both touch the same inbox
-  // summary blob). The queue is per-effect-instance; the
-  // single-flight guard in `refreshDmInbox` serialises on its side.
+  // Non-followed free text retains the follow gate. Bounded NIP-17 order
+  // rumors persist for Orders regardless of Messages policy; their inbox
+  // entries and alerts use the latest include-non-follows view setting.
+  // Store writes run through the subscription's serial queue.
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
     // Keep the gift-wrap inbox armed throughout the signed-in session.
@@ -938,6 +956,9 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       setDmInbox: inboxSetterFor(pubkey),
       setAmberNip44Permission,
       followGateBuffer: followGateBufferRef.current,
+      includeNonFollowOrders: () =>
+        dmInboxLastRefresh.current.pubkey === pubkey &&
+        dmInboxLastRefresh.current.includeNonFollows,
       setDeferredReplay,
       // Close the reconnect blind window (#1035): after a JS-sub socket-drop
       // or Doze-resume re-arm — or the native engine's relay reconnect

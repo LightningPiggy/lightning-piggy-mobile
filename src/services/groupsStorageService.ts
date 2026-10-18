@@ -13,13 +13,18 @@ import { perAccountKey } from './perAccountStorage';
 // namespaced slot.
 const GROUPS_KEY_BASE = 'nostr_groups';
 
-export async function loadGroups(pubkey: string | null): Promise<Group[]> {
+export async function loadGroups(
+  pubkey: string | null,
+  options: { strict?: boolean } = {},
+): Promise<Group[]> {
   try {
     const raw = await AsyncStorage.getItem(perAccountKey(GROUPS_KEY_BASE, pubkey));
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Group[];
+    if (!Array.isArray(parsed) && options.strict) throw new Error('Invalid stored groups');
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (error) {
+    if (options.strict) throw error;
     return [];
   }
 }

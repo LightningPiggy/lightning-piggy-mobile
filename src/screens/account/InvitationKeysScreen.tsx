@@ -64,6 +64,21 @@ export default function InvitationKeysScreen() {
         </Text>
       </TouchableOpacity>
       <Text style={styles.note}>{t('invitationKeys.removeOldHint')}</Text>
+      {state.publicationFailed && (
+        <View testID="invitation-keys-publish-failed">
+          <Text style={styles.note}>{t('invitationKeys.refreshFailedTitle')}</Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={t('invitationKeys.refresh')}
+            testID="invitation-keys-retry-publish"
+            style={[styles.link, disabled && styles.disabled]}
+            disabled={disabled}
+            onPress={state.retryPublication}
+          >
+            <Text style={styles.linkText}>{t('invitationKeys.refresh')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       {state.partial && (
         <Text style={styles.note} testID="invitation-keys-partial">
           {t('invitationKeys.partial')}

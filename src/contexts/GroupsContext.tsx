@@ -1,3 +1,4 @@
+import { enabledAppRelays } from '../services/appRelayPrefs';
 import { groupDisplay } from '../utils/groupDisplay';
 import { useAccountState } from './useAccountState';
 import React, {
@@ -49,6 +50,8 @@ import {
 import { deriveInitialWotTier } from '../utils/wotMigration';
 import { activityFromMessages } from '../utils/groupActivity';
 import { isMarmotGroupId } from '../services/marmotSession';
+import { isNip171GroupId } from '../utils/nip171';
+import { useNip171Groups } from './useNip171Groups';
 import { useMarmotGroups } from './useMarmotGroups';
 
 const FOLLOWING_ONLY_KEY_BASE = 'groups_following_only';
@@ -145,7 +148,7 @@ const EMPTY_ACTIVITY: Record<string, GroupActivity> = {};
 
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // NIP-17 groups (AsyncStorage-persisted). Marmot groups are merged in below.
-  const { publishGroupState, pubkey, relays, isLoggedIn } = useNostr();
+  const { publishGroupState, pubkey, relays, isLoggedIn, sendDirectMessage } = useNostr();
   // Re-activating a signed-out account lifts its group-history write guard
   // (#1240). Layout effect: before any child effect can write its history.
   useLayoutEffect(() => reviveGroupHistoryOwner(pubkey), [pubkey]);
@@ -178,9 +181,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [contacts],
   );
   const marmot = useMarmotGroups(pubkey, contactName);
+  const nip171 = useNip171Groups(isLoggedIn ? pubkey : null);
   const groups = useMemo(
-    () => [...storedGroups, ...marmot.groups].map(groupDisplay),
-    [storedGroups, marmot.groups],
+    () => [...storedGroups, ...marmot.groups, ...nip171.groups].map(groupDisplay),
+    [storedGroups, marmot.groups, nip171.groups],
   );
   // Track the latest reconciler in a ref so the subscription effect can
   // call it without re-subscribing on every group state change.
@@ -599,6 +603,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const renameGroup = useCallback(
     async (groupId: string, newName: string): Promise<boolean> => {
       if (isMarmotGroupId(groupId)) return marmot.rename(groupId, newName);
+      // NIP-171: only the group's owner (holder of its recovery words) can.
+      if (isNip171GroupId(groupId)) return false;
       const trimmed = newName.trim();
       if (!trimmed) return false;
       let updated: Group | null = null;
@@ -642,6 +648,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const addMembersToGroup = useCallback(
     async (groupId: string, pubkeys: string[]): Promise<Group | null> => {
       if (isMarmotGroupId(groupId)) return marmot.addMembers(groupId, pubkeys);
+      if (isNip171GroupId(groupId)) return null;
       let updated: Group | null = null;
       let didChange = false;
       await persist((curr) => {
@@ -688,6 +695,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const removeMemberFromGroup = useCallback(
     async (groupId: string, pubkey: string): Promise<Group | null> => {
       if (isMarmotGroupId(groupId)) return marmot.removeMember(groupId, pubkey);
+      if (isNip171GroupId(groupId)) return null;
       let updated: Group | null = null;
       await persist((curr) => {
         const idx = curr.findIndex((g) => g.id === groupId);
@@ -731,9 +739,16 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     async (groupId: string): Promise<void> => {
       // A Marmot group is left (an MLS self-remove), not just forgotten.
       if (isMarmotGroupId(groupId)) return marmot.leave(groupId);
+      // NIP-171: ask the owner to remove us (a NIP-17 "-" to the group), then
+      // forget its keys.
+      if (isNip171GroupId(groupId)) {
+        return nip171.leave(groupId, async (groupPubkey) => {
+          await sendDirectMessage(groupPubkey, '-', { protocol: 'nip17' });
+        });
+      }
       await persist((curr) => curr.filter((g) => g.id !== groupId));
     },
-    [persist, marmot],
+    [persist, marmot, nip171, sendDirectMessage],
   );
 
   const getGroup = useCallback(
@@ -827,7 +842,9 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     if (!isLoggedIn || !pubkey) return;
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const targetRelays = Array.from(new Set([...readRelays, ...DEFAULT_RELAYS]));
+    const targetRelays = Array.from(
+      new Set([...readRelays, ...enabledAppRelays('default', DEFAULT_RELAYS)]),
+    );
     let active = true;
     const unsubscribe = subscribeGroupStateForViewer({
       viewerPubkey: pubkey,
