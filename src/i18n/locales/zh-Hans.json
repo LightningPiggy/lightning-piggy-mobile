@@ -1612,7 +1612,7 @@
     "electrumServerA11y": "Electrum服务器",
     "useSsl": "使用SSL",
     "save": "检查并保存 Electrum 服务器",
-    "saved": "Electrum 服务器已保存。On-chain 钱包将使用此服务器。",
+    "saved": "Electrum 服务器已保存。链上钱包将使用此服务器。",
     "errorInvalidServer": "服务器未保存。请输入 Electrum 主机名和端口，例如 electrum.blockstream.info:50002。",
     "errorUnreachable": "服务器未保存。无法连接到 Electrum 服务器。请检查主机名、端口、SSL 设置和网络连接。",
     "hint": "链上钱包通过这个Electrum服务器读取余额并广播交易。如果你不想把地址泄露给公共服务器，请将其指向你自己的服务器。",

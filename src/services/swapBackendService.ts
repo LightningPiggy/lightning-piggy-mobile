@@ -100,7 +100,9 @@ export async function checkSwapBackend(input: string, signal?: AbortSignal): Pro
             let pairs: { BTC?: { BTC?: unknown } } | null;
             try {
               pairs = await response.json();
-            } catch {
+            } catch (error) {
+              if (error instanceof Error && error.name === 'AbortError')
+                throw new SwapBackendError('unreachable', 'Swap server timed out.');
               throw new SwapBackendError('incompatible', 'Swap server returned invalid JSON.');
             }
             const pair = pairs?.BTC?.BTC;
@@ -118,6 +120,7 @@ export async function checkSwapBackend(input: string, signal?: AbortSignal): Pro
           },
         );
       } catch (error) {
+        if (signal?.aborted) throw new Error('Connection check cancelled.');
         if (error instanceof SwapBackendError) throw error;
         // fetch rejections: offline, DNS, TLS, timeout abort.
         throw new SwapBackendError(

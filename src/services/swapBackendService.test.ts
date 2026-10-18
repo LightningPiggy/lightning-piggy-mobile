@@ -307,3 +307,24 @@ describe('save failure classification', () => {
     expect(swapBackendSaveErrorKey(new Error('disk full'))).toBe('swapBackend.saveError');
   });
 });
+it('reports a body-read timeout as unreachable, not incompatible', async () => {
+  mockFetch.mockResolvedValue({
+    ok: true,
+    json: async () => {
+      throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    },
+  });
+  await expect(checkAndSaveSwapBackend('https://slow.example')).rejects.toMatchObject({
+    reason: 'unreachable',
+  });
+});
+it('keeps caller cancellation distinct from an unreachable server', async () => {
+  const controller = new AbortController();
+  mockFetch.mockImplementation(async () => {
+    controller.abort();
+    throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+  });
+  await expect(checkSwapBackend('https://draft.example', controller.signal)).rejects.toThrow(
+    'cancelled',
+  );
+});

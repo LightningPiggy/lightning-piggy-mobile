@@ -85,7 +85,15 @@ async function probeElectrumDraft(
       passed = true;
       return height;
     } finally {
-      if ((!keep || !passed) && previous !== setting) await writeSetting(previous);
+      if ((!keep || !passed) && previous !== setting) {
+        try {
+          await writeSetting(previous);
+        } catch (error) {
+          // Never leave the probe's draft client cached as if it were selected.
+          disconnectElectrum();
+          throw error;
+        }
+      }
     }
   });
 }

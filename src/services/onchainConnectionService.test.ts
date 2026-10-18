@@ -116,3 +116,14 @@ it('does not turn cancellation into success and still restores the previous serv
   );
   expect(mockStored.value).toBe('old.example:50002:s');
 });
+it('drops the cached draft client when restoring the previous server fails', async () => {
+  mockSave.mockImplementationOnce(async (value: string) => {
+    mockStored.value = value;
+  });
+  mockSave.mockRejectedValueOnce(new Error('disk full'));
+  await expect(checkElectrumConnection('draft.example:50002', true, signal())).rejects.toThrow(
+    'disk full',
+  );
+  // Once after writing the draft, once more after the failed restore.
+  expect(mockDisconnect).toHaveBeenCalledTimes(2);
+});
