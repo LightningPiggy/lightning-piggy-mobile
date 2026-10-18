@@ -2580,7 +2580,12 @@
         "addCountry": "添加国家/地区",
         "removeCountry": "移除{{country}}",
         "remove": "移除配送选项",
-        "defaultName": "标准配送"
+        "defaultName": "标准配送",
+        "untitled": "未命名的配送选项",
+        "countryCount": {
+          "one": "{{count}} 个国家/地区",
+          "other": "{{count}} 个国家/地区"
+        }
       },
       "editor": {
         "newTitle": "出售商品",

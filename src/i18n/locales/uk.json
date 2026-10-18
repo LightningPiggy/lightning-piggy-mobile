@@ -2584,7 +2584,14 @@
         "addCountry": "Додати країну",
         "removeCountry": "Прибрати {{country}}",
         "remove": "Прибрати варіант доставки",
-        "defaultName": "Стандартна доставка"
+        "defaultName": "Стандартна доставка",
+        "untitled": "Варіант доставки без назви",
+        "countryCount": {
+          "one": "{{count}} країна",
+          "few": "{{count}} країни",
+          "many": "{{count}} країн",
+          "other": "{{count}} країни"
+        }
       },
       "editor": {
         "newTitle": "Продати товар",

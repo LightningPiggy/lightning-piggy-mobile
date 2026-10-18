@@ -2584,7 +2584,14 @@
         "addCountry": "Dodaj kraj",
         "removeCountry": "Usuń: {{country}}",
         "remove": "Usuń opcję dostawy",
-        "defaultName": "Dostawa standardowa"
+        "defaultName": "Dostawa standardowa",
+        "untitled": "Opcja wysyłki bez nazwy",
+        "countryCount": {
+          "one": "{{count}} kraj",
+          "few": "{{count}} kraje",
+          "many": "{{count}} krajów",
+          "other": "{{count}} kraju"
+        }
       },
       "editor": {
         "newTitle": "Sprzedaj produkt",

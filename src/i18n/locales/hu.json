@@ -2580,7 +2580,12 @@
         "addCountry": "Ország hozzáadása",
         "removeCountry": "Ország eltávolítása: {{country}}",
         "remove": "Szállítási lehetőség eltávolítása",
-        "defaultName": "Normál szállítás"
+        "defaultName": "Normál szállítás",
+        "untitled": "Névtelen szállítási mód",
+        "countryCount": {
+          "one": "{{count}} ország",
+          "other": "{{count}} ország"
+        }
       },
       "editor": {
         "newTitle": "Termék eladása",

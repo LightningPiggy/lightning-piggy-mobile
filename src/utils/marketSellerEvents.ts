@@ -181,16 +181,23 @@ export function validateShop(
   const errors: SellerDraftError[] = [];
   if (!SELLER_CURRENCIES.includes(normaliseCurrency(shop.currency))) errors.push('currency');
   if (zones.length > MAX_SHIPPING_ZONES) errors.push('zones');
-  if (zones.some((z) => !z.name.trim() || z.name.trim().length > 100)) errors.push('zoneName');
+  const perZone = new Set(zones.flatMap(validateZone));
+  for (const error of ['zoneName', 'zoneCost', 'zoneCountries'] as const)
+    if (perZone.has(error)) errors.push(error);
+  return errors;
+}
+
+/** One zone's errors: the same checks `validateShop` runs, so the editor can
+ * point at the exact card Save rejected. */
+export function validateZone(zone: ShippingZoneDraft): SellerDraftError[] {
+  const errors: SellerDraftError[] = [];
+  if (!zone.name.trim() || zone.name.trim().length > 100) errors.push('zoneName');
   if (
-    zones.some(
-      (z) =>
-        !SELLER_CURRENCIES.includes(normaliseCurrency(z.currency)) ||
-        normaliseAmount(z.cost, z.currency) === null,
-    )
+    !SELLER_CURRENCIES.includes(normaliseCurrency(zone.currency)) ||
+    normaliseAmount(zone.cost, zone.currency) === null
   )
     errors.push('zoneCost');
-  if (zones.some((z) => z.countries.some((c) => !isKnownCountry(c)))) errors.push('zoneCountries');
+  if (zone.countries.some((c) => !isKnownCountry(c))) errors.push('zoneCountries');
   return errors;
 }
 
