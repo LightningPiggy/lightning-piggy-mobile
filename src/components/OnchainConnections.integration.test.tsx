@@ -22,7 +22,8 @@ jest.mock('../screens/account/AccountScreenLayout', () => {
 const mockSaveElectrum = jest.fn(async (..._args: unknown[]) => 'electrum.example:50002:s');
 const mockCheckElectrum = jest.fn(async (..._args: unknown[]) => 1000000);
 jest.mock('../services/onchainConnectionService', () => ({
-  saveElectrumSetting: (...args: unknown[]) => mockSaveElectrum(...args),
+  checkAndSaveElectrumServer: (...args: unknown[]) => mockSaveElectrum(...args),
+  electrumSaveErrorKey: () => 'onChainScreen.errorUnreachable',
   checkElectrumConnection: (...args: unknown[]) => mockCheckElectrum(...args),
 }));
 const mockGetElectrum = jest.fn(async () => 'electrum.example:50002:s');
@@ -38,6 +39,7 @@ jest.mock('../services/swapBackendService', () => ({
   getSwapBackend: async () => 'https://example.com/v2',
   checkSwapBackend: (...args: unknown[]) => mockCheckBoltz(...args),
   checkAndSaveSwapBackend: (...args: unknown[]) => mockSaveBoltz(...args),
+  swapBackendSaveErrorKey: () => 'swapBackend.saveError',
 }));
 beforeEach(() => {
   jest.clearAllMocks();
@@ -57,18 +59,26 @@ test('Electrum tests the edited endpoint and clears the green result on SSL chan
   );
   expect(screen.getByTestId('electrum-connection-success')).toBeTruthy();
   await act(async () => fireEvent.press(screen.getByTestId('electrum-ssl-toggle')));
-  expect(mockSaveElectrum).toHaveBeenCalledWith('new.example:50002', false);
   expect(screen.queryByTestId('electrum-connection-success')).toBeNull();
+  // Neither the SSL toggle nor leaving the field saves anything any more.
+  fireEvent(screen.getByTestId('electrum-server-input'), 'blur');
+  expect(mockSaveElectrum).not.toHaveBeenCalled();
 });
 
-test('Electrum autosave rejection is visible rather than unhandled', async () => {
-  mockSaveElectrum.mockRejectedValueOnce(new Error('storage unavailable'));
+test('Electrum saves only via its own button and shows the result under it', async () => {
   render(<OnChainScreen />);
   await waitFor(() =>
     expect(screen.getByTestId('electrum-server-input').props.editable).toBe(true),
   );
-  await act(async () => fireEvent(screen.getByTestId('electrum-server-input'), 'blur'));
-  expect(screen.getByTestId('electrum-settings-error')).toBeTruthy();
+  fireEvent.changeText(screen.getByTestId('electrum-server-input'), 'mine.example:50002');
+  await act(async () => fireEvent.press(screen.getByTestId('electrum-save')));
+  expect(mockSaveElectrum).toHaveBeenCalledWith('mine.example:50002', true);
+  expect(screen.getByText('onChainScreen.saved')).toBeTruthy();
+  mockSaveElectrum.mockRejectedValueOnce(new Error('Electrum client error: timed out'));
+  await act(async () => fireEvent.press(screen.getByTestId('electrum-save')));
+  expect(screen.getByTestId('electrum-save-message')).toBeTruthy();
+  expect(screen.getByText('onChainScreen.errorUnreachable')).toBeTruthy();
+  expect(screen.queryByText(/timed out/)).toBeNull();
 });
 
 test('Boltz Test checks the unsaved draft without choosing it as the backend', async () => {
@@ -92,8 +102,9 @@ test('failed Electrum settings load cannot silently save or test the public defa
   expect(screen.getByTestId('electrum-connection-test').props.accessibilityState.disabled).toBe(
     true,
   );
+  expect(screen.getByTestId('electrum-save').props.accessibilityState.disabled).toBe(true);
   await act(async () => {
-    fireEvent(screen.getByTestId('electrum-server-input'), 'blur');
+    fireEvent.press(screen.getByTestId('electrum-save'));
     fireEvent.press(screen.getByTestId('electrum-connection-test'));
   });
   expect(mockSaveElectrum).not.toHaveBeenCalled();

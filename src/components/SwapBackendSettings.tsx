@@ -1,12 +1,11 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
-import { CheckCircle, CircleAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedAccountStyles } from '../screens/account/sharedStyles';
 import ServerConnectionTest from './ServerConnectionTest';
 import { createSwapBackendSettingsStyles } from '../styles/SwapBackendSettings.styles';
-import { createServerConnectionTestStyles } from '../styles/ServerConnectionTest.styles';
+import SaveResultBox from './SaveResultBox';
 import {
   DEFAULT_SWAP_BACKEND,
   getSwapBackend,
@@ -20,7 +19,6 @@ export default function SwapBackendSettings() {
   const t = useTranslation();
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const styles = useMemo(() => createSwapBackendSettingsStyles(), []);
-  const resultStyles = useMemo(() => createServerConnectionTestStyles(colors), [colors]);
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -112,22 +110,7 @@ export default function SwapBackendSettings() {
         </Text>
       </TouchableOpacity>
       {!!message && (
-        <View
-          style={[resultStyles.result, failed ? resultStyles.error : resultStyles.success]}
-          accessibilityLiveRegion="polite"
-          testID="swap-backend-message"
-        >
-          {failed ? (
-            <CircleAlert size={20} color={colors.red} />
-          ) : (
-            <CheckCircle size={20} color={colors.greenDark} />
-          )}
-          <Text
-            style={[resultStyles.text, failed ? resultStyles.errorText : resultStyles.successText]}
-          >
-            {message}
-          </Text>
-        </View>
+        <SaveResultBox message={message} failed={failed} testID="swap-backend-message" />
       )}
       <TouchableOpacity
         style={styles.reset}
