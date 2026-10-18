@@ -2580,7 +2580,12 @@
         "addCountry": "Add country",
         "removeCountry": "Remove {{country}}",
         "remove": "Remove shipping option",
-        "defaultName": "Standard shipping"
+        "defaultName": "Standard shipping",
+        "untitled": "Untitled shipping option",
+        "countryCount": {
+          "one": "{{count}} country",
+          "other": "{{count}} countries"
+        }
       },
       "editor": {
         "newTitle": "Sell an item",

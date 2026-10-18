@@ -2580,7 +2580,12 @@
         "addCountry": "Land hinzufügen",
         "removeCountry": "{{country}} entfernen",
         "remove": "Versandoption entfernen",
-        "defaultName": "Standardversand"
+        "defaultName": "Standardversand",
+        "untitled": "Unbenannte Versandoption",
+        "countryCount": {
+          "one": "{{count}} Land",
+          "other": "{{count}} Länder"
+        }
       },
       "editor": {
         "newTitle": "Produkt verkaufen",
