@@ -16,11 +16,15 @@ import {
 } from '../services/listingRepublish';
 import { listingDTag, listingRelayCoverage } from '../utils/listingRelayCoverage';
 import { parseListingDraft } from '../utils/marketSellerEvents';
+import { useCoalescedMap } from '../utils/useCoalescedMap';
 
+/** One listing's row in the republish sheet; `results` fill in as relays answer. */
 export interface RepublishSummary {
+  key: string;
   title: string;
   results: ListingRepublishResult[];
   missing?: boolean;
+  done: boolean;
 }
 
 export function useListingRepublish(
@@ -41,14 +45,25 @@ export function useListingRepublish(
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const controller = useRef<AbortController | null>(null);
-  const [summary, setSummary] = useState<RepublishSummary[] | null>(null);
+  // The sheet opens the moment a run starts and fills in as relays answer.
+  const [open, setOpen] = useState(false);
+  const sheetOpen = useRef(false);
+  const [finished, setFinished] = useState(false);
+  const {
+    map: items,
+    setMap: setItems,
+    enqueue,
+    flush,
+    reset,
+  } = useCoalescedMap<RepublishSummary>();
   const [revision, setRevision] = useState(0);
   useFocusEffect(
     useCallback(() => {
       const abort = new AbortController();
       controller.current = abort;
       setSnapshot(null);
-      setSummary(null);
+      sheetOpen.current = false;
+      setOpen(false);
       if (pubkey)
         void fetchListingCoverage(pubkey, targetKey.split('\n'), listingsRef.current, abort.signal)
           .then((value) => {
@@ -57,6 +72,9 @@ export function useListingRepublish(
           .catch(() => {});
       return () => {
         abort.abort();
+        // Leaving the screen stops the run, so don't leave its sheet spinning.
+        sheetOpen.current = false;
+        setOpen(false);
       };
       // Keys avoid duplicate queries when the store emits an unchanged snapshot.
       // revision explicitly re-arms after closing results or rebuilding.
@@ -75,36 +93,63 @@ export function useListingRepublish(
   }, [snapshot, listings]);
 
   const run = useCallback(
-    async (items: readonly Event[]) => {
+    async (selected: readonly Event[]) => {
       const abort = controller.current;
       if (!pubkey || !snapshot || running.current || !abort || abort.signal.aborted) return;
       running.current = true;
       setBusy(true);
+      const rows = selected.map(
+        (listing): RepublishSummary => ({
+          key: listingDTag(listing),
+          title: parseListingDraft(listing).title || listingDTag(listing),
+          results: [],
+          done: false,
+        }),
+      );
+      reset();
+      setItems(new Map(rows.map((row) => [row.key, row])));
+      setFinished(false);
+      sheetOpen.current = true;
+      setOpen(true);
       const scheduler = createYieldScheduler({ signal: abort.signal, safetyEvery: 10 });
-      const results: RepublishSummary[] = [];
       try {
-        for (const listing of items) {
+        for (const row of rows) {
           if (abort.signal.aborted) break;
-          const d = listingDTag(listing);
-          const exists = newestSignedListing(snapshot, d);
-          results.push({
-            title: parseListingDraft(listing).title || d,
-            missing: !exists,
-            results: exists ? await republishListing(pubkey, d, snapshot, abort.signal) : [],
-          });
+          if (!newestSignedListing(snapshot, row.key)) {
+            enqueue(row.key, { ...row, missing: true, done: true });
+            continue;
+          }
+          const answered: ListingRepublishResult[] = [];
+          const results = await republishListing(
+            pubkey,
+            row.key,
+            snapshot,
+            abort.signal,
+            undefined,
+            (result) => {
+              answered.push(result);
+              enqueue(row.key, { ...row, results: [...answered] });
+            },
+          );
+          enqueue(row.key, { ...row, results, done: true });
           await scheduler.maybeYield();
         }
-        if (!abort.signal.aborted) setSummary(results);
       } catch (error) {
         if (!abort.signal.aborted)
           Toast.show({ type: 'error', text1: t('market.republish.failed'), text2: String(error) });
       } finally {
         scheduler.dispose();
+        if (!abort.signal.aborted) {
+          flush();
+          setFinished(true);
+          // Closed mid-run: refresh the coverage pills now the run is over.
+          if (!sheetOpen.current) setRevision((v) => v + 1);
+        }
         running.current = false;
         setBusy(false);
       }
     },
-    [pubkey, snapshot, t],
+    [pubkey, snapshot, t, reset, setItems, enqueue, flush],
   );
 
   const republish = useCallback(
@@ -147,9 +192,17 @@ export function useListingRepublish(
   const republishAll = useCallback(() => {
     void run(listings);
   }, [run, listings]);
+  /** Closing only hides the sheet; a run in progress carries on. */
   const close = useCallback(() => {
-    setSummary(null);
-    setRevision((v) => v + 1);
+    if (!sheetOpen.current) return;
+    sheetOpen.current = false;
+    setOpen(false);
+    // Re-check coverage once nothing is publishing; a live run does it on finish.
+    if (!running.current) setRevision((v) => v + 1);
   }, []);
-  return { coverage, busy, ready: !!snapshot, republish, republishAll, summary, close };
+  const progress = useMemo(
+    () => ({ open, finished, items: [...items.values()] }),
+    [open, finished, items],
+  );
+  return { coverage, busy, ready: !!snapshot, republish, republishAll, progress, close };
 }

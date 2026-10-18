@@ -11,7 +11,7 @@ import { useSellItem } from '../hooks/useSellItem';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 import MarketSellerHeader from '../components/MarketSellerHeader';
-import ListingRepublishResults from '../components/ListingRepublishResults';
+import ListingRepublishSheet from '../components/ListingRepublishSheet';
 import { useListingRepublish } from '../hooks/useListingRepublish';
 import SellerListingRow from '../components/SellerListingRow';
 import { createMarketSellerStyles } from '../styles/MarketSeller.styles';
@@ -157,7 +157,7 @@ const MarketShopListingsScreen: React.FC<Props> = ({ navigation }) => {
         onBack={() => navigation.goBack()}
         testID="shop-listings-back"
       />
-      <ListingRepublishResults summary={republish.summary} onClose={republish.close} />
+      <ListingRepublishSheet progress={republish.progress} onClose={republish.close} />
       <FlatList
         data={rows}
         keyExtractor={rowKey}

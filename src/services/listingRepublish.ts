@@ -154,13 +154,15 @@ export interface ListingRepublishResult {
   reason?: string;
 }
 
-/** No signer dependency: only existing, verified signed events can reach publish. */
+/** No signer dependency: only existing, verified signed events can reach publish.
+ * `onResult` reports each relay as it answers, so the UI can show progress. */
 export async function republishListing(
   pubkey: string,
   dTag: string,
   snapshot: ListingCoverageSnapshot,
   signal: AbortSignal,
   timeoutMs = 8000,
+  onResult?: (result: ListingRepublishResult) => void,
 ): Promise<ListingRepublishResult[]> {
   const event = newestListing(
     await validListingCopies(
@@ -174,40 +176,47 @@ export async function republishListing(
   const lease = acquireMarketListingsPool(targets);
   try {
     return await Promise.all(
-      targets.map(async (url): Promise<ListingRepublishResult> => {
-        if (snapshot.relays.get(url)?.some((copy) => copy.id === event.id))
-          return { url, status: 'alreadyPresent' };
-        if (signal.aborted) return { url, status: 'noResponse' };
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        let onAbort: () => void = () => {};
-        const deadline = new Promise<ListingRepublishResult>((resolve) => {
-          onAbort = () => resolve({ url, status: 'noResponse' });
-          signal.addEventListener('abort', onAbort, { once: true });
-          timer = setTimeout(onAbort, timeoutMs);
-        });
-        try {
-          const attempt = Promise.resolve()
-            .then(() => lease.pool.publish([url], event)[0])
-            .then(
-              (reason): ListingRepublishResult =>
-                reason === undefined || isConnectionFailure(reason)
-                  ? { url, status: 'noResponse' }
-                  : { url, status: 'accepted' },
-              (error: unknown): ListingRepublishResult => {
-                const reason = error instanceof Error ? error.message : String(error);
-                return /^(?:(?:relay )?connection (?:failure|failed|closed|timed out)|publish timed out|websocket closed|timed out|timeout)/i.test(
-                  reason,
-                )
-                  ? { url, status: 'noResponse' }
-                  : { url, status: 'rejected', reason };
-              },
-            );
-          return await Promise.race([attempt, deadline]);
-        } finally {
-          clearTimeout(timer);
-          signal.removeEventListener('abort', onAbort);
-        }
-      }),
+      targets
+        .map(async (url): Promise<ListingRepublishResult> => {
+          if (snapshot.relays.get(url)?.some((copy) => copy.id === event.id))
+            return { url, status: 'alreadyPresent' };
+          if (signal.aborted) return { url, status: 'noResponse' };
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          let onAbort: () => void = () => {};
+          const deadline = new Promise<ListingRepublishResult>((resolve) => {
+            onAbort = () => resolve({ url, status: 'noResponse' });
+            signal.addEventListener('abort', onAbort, { once: true });
+            timer = setTimeout(onAbort, timeoutMs);
+          });
+          try {
+            const attempt = Promise.resolve()
+              .then(() => lease.pool.publish([url], event)[0])
+              .then(
+                (reason): ListingRepublishResult =>
+                  reason === undefined || isConnectionFailure(reason)
+                    ? { url, status: 'noResponse' }
+                    : { url, status: 'accepted' },
+                (error: unknown): ListingRepublishResult => {
+                  const reason = error instanceof Error ? error.message : String(error);
+                  return /^(?:(?:relay )?connection (?:failure|failed|closed|timed out)|publish timed out|websocket closed|timed out|timeout)/i.test(
+                    reason,
+                  )
+                    ? { url, status: 'noResponse' }
+                    : { url, status: 'rejected', reason };
+                },
+              );
+            return await Promise.race([attempt, deadline]);
+          } finally {
+            clearTimeout(timer);
+            signal.removeEventListener('abort', onAbort);
+          }
+        })
+        .map((pending) =>
+          pending.then((result) => {
+            onResult?.(result);
+            return result;
+          }),
+        ),
     );
   } finally {
     lease.release();
