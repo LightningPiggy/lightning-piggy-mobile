@@ -33,6 +33,19 @@ export const MORE_REACTIONS: readonly string[] = [
 ]; // prettier-ignore
 
 /**
+ * A reaction send that failed for a reason the user can act on (e.g. a
+ * Marmot group still applying a membership change). `message` is already
+ * user-facing, so the reaction-failed alert shows it instead of the generic
+ * "check your relays" body.
+ */
+export class ReactionPublishError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReactionPublishError';
+  }
+}
+
+/**
  * The unsigned event body for a NIP-25 reaction. Caller hands this to
  * `signEvent` (NostrContext) and then `publishSignedEvent`.
  */

@@ -15,8 +15,9 @@
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 import { useConversationReactions } from './useConversationReactions';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
-import { isOptimisticReactionId } from '../utils/reactions';
+import { isOptimisticReactionId, ReactionPublishError } from '../utils/reactions';
 import { Toast } from '../components/BrandedToast';
+import { Alert } from '../components/BrandedAlert';
 
 import {
   cacheConversationReactions,
@@ -468,6 +469,23 @@ it('handles a rejected publish without leaving an optimistic reaction or rejecti
     result.current.buildOnToggleReaction(sentItem)!('👍', null);
   });
   expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
+});
+
+it("alerts with a failed send's own reason, falling back to the generic body", async () => {
+  const toggle = async (publishReaction: jest.Mock) => {
+    const { result } = renderHook(() => useConversationReactions(makeParams({ publishReaction })));
+    await act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+  };
+  await toggle(jest.fn().mockRejectedValue(new ReactionPublishError('Chat is catching up')));
+  await toggle(jest.fn().mockRejectedValue(new Error('raw internal error')));
+  await toggle(jest.fn().mockResolvedValue(null));
+  expect((Alert.alert as jest.Mock).mock.calls).toEqual([
+    ['messageActionsSheet.reactionFailedTitle', 'Chat is catching up'],
+    ['messageActionsSheet.reactionFailedTitle', 'messageActionsSheet.reactionFailedBody'],
+    ['messageActionsSheet.reactionFailedTitle', 'messageActionsSheet.reactionFailedBody'],
+  ]);
 });
 
 describe('cached reactions on initial message render', () => {

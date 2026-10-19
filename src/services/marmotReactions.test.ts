@@ -1,5 +1,8 @@
 import { marmotReactionSource } from './marmotReactions';
 import { setMarmotSession, type MarmotRumor, type MarmotSession } from './marmotSession';
+import { MarmotGroupNotReadyError } from './marmotSendGate';
+import { marmotSendError } from './marmotSend';
+import { ReactionPublishError } from '../utils/reactions';
 
 const ME = 'a'.repeat(64);
 const PEER = 'b'.repeat(64);
@@ -62,6 +65,39 @@ describe('marmotReactionSource', () => {
     const [groupId, sent] = session.sendRumor.mock.calls[0] as unknown as [string, MarmotRumor];
     expect(groupId).toBe('g-old');
     expect(sent).toMatchObject({ kind: 7, content: '🐷', tags: [['e', 'm-old']] });
+  });
+
+  it('sends a group reaction into that group, shaped the way White Noise reads it', async () => {
+    const session = fakeSession();
+    setMarmotSession(session as unknown as MarmotSession);
+    await marmotReactionSource(ME, '', 'g-group').publishReaction({
+      emoji: '❤️',
+      targetEventId: 'm-wn',
+    });
+    const [groupId, sent] = session.sendRumor.mock.calls[0] as unknown as [string, MarmotRumor];
+    expect(groupId).toBe('g-group');
+    expect(sent).toMatchObject({ kind: 7, content: '❤️', tags: [['e', 'm-wn']], pubkey: ME });
+  });
+
+  it("fails a group reaction with the send's real reason, not a silent null", async () => {
+    const session = fakeSession();
+    session.sendRumor.mockRejectedValueOnce(new MarmotGroupNotReadyError());
+    setMarmotSession(session as unknown as MarmotSession);
+    const publish = marmotReactionSource(ME, '', 'g-group').publishReaction({
+      emoji: '👍',
+      targetEventId: 'm-wn',
+    });
+    await expect(publish).rejects.toBeInstanceOf(ReactionPublishError);
+    await expect(publish).rejects.toThrow(marmotSendError(new MarmotGroupNotReadyError()));
+  });
+
+  it('resolves null when the send went out but no relay accepted it', async () => {
+    const session = fakeSession();
+    session.sendRumor.mockResolvedValueOnce({ 'wss://r': false });
+    setMarmotSession(session as unknown as MarmotSession);
+    await expect(
+      marmotReactionSource(ME, '', 'g-group').publishReaction({ emoji: '👍', targetEventId: 'm' }),
+    ).resolves.toBeNull();
   });
 
   it('keeps live reactions flowing across a session restart', () => {

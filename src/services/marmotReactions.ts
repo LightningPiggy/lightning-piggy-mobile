@@ -13,6 +13,8 @@ import {
   type MarmotRumor,
   type MarmotSession,
 } from './marmotSession';
+import { marmotSendError } from './marmotSend';
+import { ReactionPublishError } from '../utils/reactions';
 
 const REACTION_KIND = 7;
 const DELETION_KIND = 5;
@@ -104,8 +106,14 @@ export function marmotReactionSource(
   return {
     fetchReactionsForMessages: (ids) => eventsReferencing(REACTION_KIND, ids),
     fetchReactionDeletions: (ids) => eventsReferencing(DELETION_KIND, ids),
+    // A send that throws (group still applying a change, session restarting,
+    // MLS error) carries its real reason to the alert — the same wording a
+    // text send in that group shows. Only "no relay accepted it" stays null.
     publishReaction: ({ emoji, targetEventId }) =>
-      sendReferencing(REACTION_KIND, emoji, targetEventId).catch(() => null),
+      sendReferencing(REACTION_KIND, emoji, targetEventId).catch((e: unknown) => {
+        if (__DEV__) console.warn('[Marmot] reaction send failed:', e);
+        throw new ReactionPublishError(marmotSendError(e));
+      }),
     deleteReaction: async (reactionEventId) =>
       (await sendReferencing(DELETION_KIND, '', reactionEventId).catch(() => null)) !== null,
     // Follows the active session, so a thread opened during cold start (or

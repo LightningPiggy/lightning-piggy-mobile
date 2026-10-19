@@ -18,6 +18,7 @@ import {
   isOptimisticReactionId,
   makeOptimisticReactionId,
   parseReactionEvent,
+  ReactionPublishError,
   reduceReactions,
   type MessageReactionState,
   type ReactionRecord,
@@ -443,6 +444,7 @@ export function useConversationReactions({
       };
       setReactionRecords((prev) => [...prev, optimistic]);
       let realId: string | null;
+      let failureReason: string | null = null;
       try {
         realId = await publishReaction({
           emoji,
@@ -450,8 +452,9 @@ export function useConversationReactions({
           targetAuthorPubkey: target.authorPubkey,
           targetEventKind: target.targetKind,
         });
-      } catch {
+      } catch (err) {
         realId = null;
+        if (err instanceof ReactionPublishError) failureReason = err.message;
       }
       if (!writerIsCurrent()) return;
       // Did the user un-react while the publish was in flight? (`delete` both
@@ -493,7 +496,7 @@ export function useConversationReactions({
         if (!cancelled) {
           Alert.alert(
             t('messageActionsSheet.reactionFailedTitle'),
-            t('messageActionsSheet.reactionFailedBody'),
+            failureReason ?? t('messageActionsSheet.reactionFailedBody'),
           );
         }
       }
