@@ -16,6 +16,7 @@ import type { MarmotUnreachableReason } from './marmotFallback';
 import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import { MarmotGroupNotReadyError } from './marmotSendGate';
 import { t } from '../i18n';
+import { MarmotKeyPackageLookupError } from './marmotKeyPackages';
 import {
   MarmotNoKeyPackageError,
   MarmotUnusableKeyPackageError,
@@ -57,10 +58,44 @@ function marmotUnreachableReason(e: unknown): MarmotUnreachableReason | null {
   return null;
 }
 
+/**
+ * Longest a send waits for a NEW 1:1 to be set up (key-package lookup, group
+ * creation, the invite commit and its Welcomes). Each step is bounded, but the
+ * chain isn't: a Welcome seal waits in the shared signer queue behind any
+ * signer request that never settles, and the send button spun for ever (#1658).
+ * Headroom for Amber / NIP-46 approvals (two per invited device). Set-up keeps
+ * running after this; a retry reuses it (single-flight per peer) or, once the
+ * chat exists, sends straight away.
+ */
+export const DM_SETUP_TIMEOUT_MS = 90_000;
+
+/** Setting up the 1:1 took longer than DM_SETUP_TIMEOUT_MS; nothing was sent. */
+export class MarmotDmSetupTimeoutError extends Error {
+  constructor() {
+    super('marmot: secure chat set-up timed out');
+    this.name = 'MarmotDmSetupTimeoutError';
+  }
+}
+
+/** `session.getOrCreateDm`, bounded by DM_SETUP_TIMEOUT_MS. */
+export function getOrCreateDmWithin(
+  session: Pick<MarmotSession, 'getOrCreateDm'>,
+  peer: string,
+  timeoutMs = DM_SETUP_TIMEOUT_MS,
+): ReturnType<MarmotSession['getOrCreateDm']> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new MarmotDmSetupTimeoutError()), timeoutMs);
+  });
+  return Promise.race([session.getOrCreateDm(peer), deadline]).finally(() => clearTimeout(timer));
+}
+
 /** A user-facing reason a Marmot send couldn't start. */
 export function marmotSendError(e: unknown): string {
   const reason = marmotUnreachableReason(e);
   if (reason) return t(`marmotSend.${reason}`);
+  if (e instanceof MarmotKeyPackageLookupError) return t('marmotSend.keyPackageLookupFailed');
+  if (e instanceof MarmotDmSetupTimeoutError) return t('marmotSend.chatSetupTimedOut');
   if (e instanceof MarmotWelcomeDeliveryError) return t('marmotSend.inviteNotDelivered');
   if (e instanceof MarmotGroupNotReadyError) return t('marmotSend.chatNotReady');
   return (e as Error)?.message || 'Marmot send failed';
@@ -99,7 +134,7 @@ export async function sendMarmotDm(
 ): Promise<SendResult> {
   try {
     const session = requireMarmotSession(pubkey);
-    const dm = await session.getOrCreateDm(recipient);
+    const dm = await getOrCreateDmWithin(session, recipient);
     // Devices the peer installed since the chat began (#1559): short wait.
     await session.syncDmDevices(dm.id).catch(() => undefined);
     const rumor = buildMarmotRumor(pubkey, {
@@ -195,7 +230,7 @@ export async function sendMarmotImage(
     const session = requireMarmotSession(pubkey);
     const group =
       'peer' in target
-        ? await session.getOrCreateDm(target.peer)
+        ? await getOrCreateDmWithin(session, target.peer)
         : session.getGroup(target.groupId);
     if (!group) throw new Error('This group is not available yet.');
     // Before encrypting: a device added now needs this epoch's key (#1559).

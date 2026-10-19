@@ -2985,7 +2985,9 @@
     "noRelayAcceptedVoice": "Ningún relé aceptó la nota de voz",
     "noRelayAcceptedPhoto": "Ningún relé aceptó la foto",
     "inviteNotDelivered": "No pudimos enviar la invitación: ningún relé la aceptó. Revisa tu conexión e inténtalo de nuevo.",
-    "chatNotReady": "Este chat todavía se está poniendo al día con un cambio reciente, así que no se completó. Inténtalo de nuevo en un momento."
+    "chatNotReady": "Este chat todavía se está poniendo al día con un cambio reciente, así que no se completó. Inténtalo de nuevo en un momento.",
+    "keyPackageLookupFailed": "No pudimos contactar con ningún relay para buscar la clave de Marmot de esta persona, así que no se envió nada. Revisa tu conexión e inténtalo de nuevo.",
+    "chatSetupTimedOut": "Configurar este chat seguro está tardando demasiado, así que no se envió nada. Revisa tu conexión (y tu app de firma, si usas una) e inténtalo de nuevo."
   },
   "signOutPrompt": {
     "walletsRemoved": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta, incluidas las frases de recuperación guardadas aquí. Guarda sus frases de recuperación y datos de conexión por separado antes de cerrar sesión.",
