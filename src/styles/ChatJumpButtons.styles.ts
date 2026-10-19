@@ -3,18 +3,21 @@ import type { Palette } from './palettes';
 
 export const createChatJumpButtonsStyles = (colors: Palette) =>
   StyleSheet.create({
-    // Centred lane above the composer; mentions stack above the latest arrow.
-    column: {
+    // One lane above the composer, level with the "New messages" pill: the
+    // latest arrow is centred, the mention button sits at its right end.
+    row: {
       position: 'absolute',
       left: 0,
       right: 0,
       bottom: 16,
+      height: 40,
       alignItems: 'center',
-      gap: 12,
     },
-    // The latest arrow is hidden for the pill; keep pending mentions above it.
-    aboveNewMessages: {
-      bottom: 80,
+    // Right-aligned on the arrow's row, clear of the centred arrow / pill.
+    mention: {
+      position: 'absolute',
+      right: 16,
+      top: 0,
     },
     fab: {
       width: 40,

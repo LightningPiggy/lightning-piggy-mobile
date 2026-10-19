@@ -227,3 +227,88 @@ describe('a jump that lands (first unread / a mention)', () => {
     expect(jump).toHaveBeenCalledWith(true);
   });
 });
+
+describe('jump to latest keeps going until it lands', () => {
+  const setup = (edge: 'start' | 'end' = 'end') => {
+    const jump = jest.fn();
+    const hook = renderHook(() =>
+      useLiveMessageIndicator({
+        scope: 'g',
+        entries: [entry('old', 1)],
+        edge,
+        scrollToLatest: jump,
+      }),
+    );
+    return { jump, ...hook };
+  };
+
+  it('treats scroll events on the way down as at the edge and re-aims on content changes', () => {
+    const { jump, result } = setup();
+    act(() => result.current.onScroll(scroll(0, 5000))); // far up a normal list
+    expect(result.current.atEdge).toBe(false);
+    act(() => result.current.jumpToLatest());
+    expect(jump).toHaveBeenLastCalledWith(true);
+    // Mid-animation, still far from the (moving) end: not "left the edge".
+    act(() => result.current.onScroll(scroll(2000, 5000)));
+    expect(result.current.atEdge).toBe(true);
+    // Rows below mounted, so the end moved: aim at the new end.
+    act(() => result.current.onContentSizeChange());
+    expect(jump).toHaveBeenLastCalledWith(false);
+  });
+
+  it('retries until the list reports it reached the edge, then stops', () => {
+    const { jump, result } = setup();
+    act(() => result.current.onScroll(scroll(0, 5000)));
+    act(() => result.current.jumpToLatest());
+    // The animation stopped short (estimated end): the retry finishes the job.
+    act(() => result.current.onScroll(scroll(4000, 5000)));
+    jump.mockClear();
+    act(() => jest.advanceTimersByTime(400));
+    expect(jump).toHaveBeenCalledWith(false);
+    act(() => result.current.onScroll(scroll(4600, 5000))); // 5000 - 400 = the end
+    jump.mockClear();
+    act(() => jest.advanceTimersByTime(2000));
+    expect(jump).not.toHaveBeenCalled();
+    expect(result.current.atEdge).toBe(true);
+  });
+
+  it('gives up after the time cap and reports where the list really is', () => {
+    const { jump, result } = setup();
+    act(() => result.current.onScroll(scroll(0, 5000)));
+    act(() => result.current.jumpToLatest());
+    act(() => result.current.onScroll(scroll(1000, 5000)));
+    act(() => jest.advanceTimersByTime(2400));
+    expect(result.current.atEdge).toBe(false);
+    jump.mockClear();
+    act(() => jest.advanceTimersByTime(2000));
+    expect(jump).not.toHaveBeenCalled();
+  });
+
+  it('stops chasing the edge when the reader grabs the list', () => {
+    const { jump, result } = setup();
+    act(() => result.current.onScroll(scroll(0, 5000)));
+    act(() => result.current.jumpToLatest());
+    act(() => result.current.onScroll(scroll(2000, 5000)));
+    act(() => result.current.onScrollBeginDrag());
+    expect(result.current.atEdge).toBe(false);
+    jump.mockClear();
+    act(() => jest.advanceTimersByTime(2000));
+    act(() => result.current.onContentSizeChange());
+    expect(jump).not.toHaveBeenCalled();
+  });
+
+  it('works the same on an inverted list (edge at offset 0)', () => {
+    const { jump, result } = setup('start');
+    act(() => result.current.onScroll(scroll(3000, 5000)));
+    act(() => result.current.jumpToLatest());
+    act(() => result.current.onScroll(scroll(900, 5000))); // cut short
+    expect(result.current.atEdge).toBe(true);
+    jump.mockClear();
+    act(() => jest.advanceTimersByTime(400));
+    expect(jump).toHaveBeenCalledWith(false);
+    act(() => result.current.onScroll(scroll(0, 5000)));
+    jump.mockClear();
+    act(() => jest.advanceTimersByTime(2000));
+    expect(jump).not.toHaveBeenCalled();
+  });
+});

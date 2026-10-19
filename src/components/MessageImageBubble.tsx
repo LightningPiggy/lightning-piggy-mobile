@@ -45,6 +45,18 @@ interface Props {
  * address. Otherwise a tap-to-load placeholder shows the host, and nothing is
  * requested (DecryptedImage isn't even mounted) until the reader taps.
  */
+/** Loaded sizes of `dim`-less images, by URL (bounded, oldest dropped first). */
+const loadedImageSizes = new Map<string, { width: number; height: number }>();
+const MAX_REMEMBERED_SIZES = 300;
+function rememberImageSize(url: string, size: { width: number; height: number }) {
+  loadedImageSizes.delete(url);
+  loadedImageSizes.set(url, size);
+  if (loadedImageSizes.size > MAX_REMEMBERED_SIZES) {
+    const oldest = loadedImageSizes.keys().next().value;
+    if (oldest !== undefined) loadedImageSizes.delete(oldest);
+  }
+}
+
 const MessageImageBubble: React.FC<Props> = ({
   styles,
   image,
@@ -58,14 +70,24 @@ const MessageImageBubble: React.FC<Props> = ({
   testID,
   footer,
 }) => {
-  const [sourceSize, setSourceSize] = useState({ width: 1, height: 1 });
+  // Without a `dim` tag the size is only known once the image loads; reuse it
+  // when the row re-mounts (scrolled away and back) so it doesn't open square
+  // and then resize, moving the rows around it.
+  const [sourceSize, setSourceSize] = useState(
+    () => loadedImageSizes.get(image.url) ?? { width: 1, height: 1 },
+  );
   const dim = image.dim?.match(/^(\d+)x(\d+)$/);
   const aspect = dim
     ? chatImageAspectRatio(Number(dim[1]), Number(dim[2]))
     : chatImageAspectRatio(sourceSize.width, sourceSize.height);
-  const onImageLoad = useCallback((event: { source: { width: number; height: number } }) => {
-    setSourceSize({ width: event.source.width, height: event.source.height });
-  }, []);
+  const onImageLoad = useCallback(
+    (event: { source: { width: number; height: number } }) => {
+      const size = { width: event.source.width, height: event.source.height };
+      rememberImageSize(image.url, size);
+      setSourceSize(size);
+    },
+    [image.url],
+  );
   const { t } = useLocale();
   const owner = useActivePubkey();
   const safe = checkRemoteUrl(image.url, { kind: 'media' }).ok;

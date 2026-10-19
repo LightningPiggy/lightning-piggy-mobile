@@ -92,6 +92,7 @@ const EMPTY_PUBKEYS: string[] = [];
 const EMPTY_MESSAGES: GroupMessage[] = [];
 const groupMessageId = (m: GroupMessage) => m.id;
 const timelineRowId = (row: GroupTimelineRow) => row.id;
+const GROUP_LIST_ANCHOR = { minIndexForVisible: 0 };
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -252,7 +253,9 @@ const GroupConversationScreen: React.FC = () => {
   });
   const actioned = reactions.actionsForMessage;
   const closeActions = reactions.closeMessageActions;
-  const { replyTo, cancelReply, startReply, replyQuote } = reactions;
+  // Destructured: `reactions` itself is a new object every render, so a
+  // renderItem depending on it re-rendered every row on screen each time.
+  const { replyTo, cancelReply, startReply, replyQuote, propsForMessage } = reactions;
 
   // Send / upload / share orchestration + in-flight flags live in the
   // useGroupComposerActions hook (parallel to the 1:1 screen's
@@ -279,7 +282,8 @@ const GroupConversationScreen: React.FC = () => {
     draft,
     setDraft,
     setMessages,
-    scrollToEnd: () => listRef.current?.scrollToEnd({ animated: true }),
+    // Same as the arrow: keeps re-aiming until the list really is at the end.
+    scrollToEnd: live.jumpToLatest,
     setAttachPanelOpen,
     setGifPickerOpen,
     setContactPickerOpen,
@@ -540,7 +544,7 @@ const GroupConversationScreen: React.FC = () => {
           quote={item.quote}
           edited={item.editedAt !== undefined}
           autoLoadMedia={canAutoLoadMedia(fromMe, item.senderPubkey, followed)}
-          {...reactions.propsForMessage(item)}
+          {...propsForMessage(item)}
           testIdPrefix="group-conversation"
         />
       );
@@ -561,7 +565,7 @@ const GroupConversationScreen: React.FC = () => {
       openSender,
       followed,
       read.dividerId,
-      reactions,
+      propsForMessage,
       myPubkey,
       memberNameByPubkey,
       sharedProfiles,
@@ -640,7 +644,11 @@ const GroupConversationScreen: React.FC = () => {
                 contentContainerStyle={styles.messagesList}
                 testID="group-messages-list"
                 onScroll={live.onScroll}
+                onScrollBeginDrag={live.onScrollBeginDrag}
                 scrollEventThrottle={100}
+                // Keep the rows on screen still when rows above them change
+                // height (re-mounted while scrolling back, history landing).
+                maintainVisibleContentPosition={GROUP_LIST_ANCHOR}
                 onContentSizeChange={live.onContentSizeChange}
                 viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
                 onScrollToIndexFailed={onScrollToIndexFailed}
@@ -661,7 +669,6 @@ const GroupConversationScreen: React.FC = () => {
                 mentionCount={read.pendingMentions.length}
                 onJumpToMention={read.jumpToNextMention}
                 showLatest={!live.atEdge && !live.hasNewMessages}
-                hasNewMessages={live.hasNewMessages}
                 unreadCount={read.unread}
                 onJumpToLatest={live.jumpToLatest}
                 testIDs={{ mention: 'group-jump-to-mention', latest: 'group-jump-to-latest' }}
