@@ -2980,7 +2980,9 @@
     "noRelayAcceptedVoice": "Kein Relay hat die Sprachnachricht angenommen",
     "noRelayAcceptedPhoto": "Kein Relay hat das Foto angenommen",
     "inviteNotDelivered": "Die Einladung konnte nicht gesendet werden – kein Relay hat sie angenommen. Prüfe deine Verbindung und versuche es erneut.",
-    "chatNotReady": "Dieser Chat holt gerade noch eine kürzliche Änderung nach, daher ist das nicht durchgegangen. Versuche es gleich noch einmal."
+    "chatNotReady": "Dieser Chat holt gerade noch eine kürzliche Änderung nach, daher ist das nicht durchgegangen. Versuche es gleich noch einmal.",
+    "keyPackageLookupFailed": "Wir konnten kein Relay erreichen, um den Marmot-Schlüssel dieser Person abzurufen, daher wurde nichts gesendet. Prüfe deine Verbindung und versuche es erneut.",
+    "chatSetupTimedOut": "Die Einrichtung dieses sicheren Chats dauert zu lange, daher wurde nichts gesendet. Prüfe deine Verbindung (und deine Signer-App, falls du eine nutzt) und versuche es erneut."
   },
   "signOutPrompt": {
     "walletsRemoved": "Alle mit diesem Konto verbundenen Wallets, einschließlich hier gespeicherter Wiederherstellungsphrasen, werden ebenfalls von diesem Handy entfernt. Sichere ihre Wiederherstellungsphrasen und Verbindungsdaten separat, bevor du dich abmeldest.",

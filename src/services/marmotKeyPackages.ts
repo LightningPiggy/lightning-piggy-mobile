@@ -47,6 +47,16 @@ export class MarmotNoKeyPackageError extends Error {
   }
 }
 
+/** No relay answered the key-package lookup (offline, every relay failed or
+ * timed out) — we don't know whether the peer is on Marmot. Retryable; not a
+ * reason to offer NIP-17 as if they weren't. */
+export class MarmotKeyPackageLookupError extends Error {
+  constructor(readonly pubkey: string) {
+    super(`Could not reach relays to look up ${pubkey.slice(0, 8)}'s Marmot key package`);
+    this.name = 'MarmotKeyPackageLookupError';
+  }
+}
+
 /**
  * A retired slot's placeholder, not a key package: what a signed-out install
  * publishes into its slot (#1204) — no content and/or no `i` tag.

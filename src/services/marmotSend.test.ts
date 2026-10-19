@@ -9,7 +9,13 @@ import {
   setMarmotSession,
   type MarmotSession,
 } from './marmotSession';
-import { marmotDelivery, sendMarmotDm, sendMarmotGroupRumor } from './marmotSend';
+import {
+  DM_SETUP_TIMEOUT_MS,
+  marmotDelivery,
+  sendMarmotDm,
+  sendMarmotGroupRumor,
+} from './marmotSend';
+import { MarmotKeyPackageLookupError } from './marmotKeyPackages';
 import { marmotReplyTags } from './marmotEdits';
 import { marmotRumorToGroupMessage, marmotRumorToDmRow } from './marmotInbox';
 import { buildMarmotRumor } from './marmotSession';
@@ -136,6 +142,37 @@ describe('sendMarmotDm', () => {
       error: expect.stringMatching(/expired, or uses an older version of Marmot/),
       marmotUnreachable: 'outdatedKeyPackage',
     });
+  });
+
+  it('does not claim "not on Marmot" when the key-package lookup got no answer (#1658)', async () => {
+    fakeSession({
+      getOrCreateDm: async () => {
+        throw new MarmotKeyPackageLookupError(PEER);
+      },
+    });
+    const result = await sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
+    // A plain, retryable failure — no NIP-17 "isn't on Marmot yet" prompt.
+    expect(result).toEqual({
+      success: false,
+      error: expect.stringMatching(/couldn't reach any relay/),
+    });
+  });
+
+  it('gives up on a chat set-up that never settles instead of spinning for ever (#1658)', async () => {
+    jest.useFakeTimers();
+    try {
+      const ready = jest.fn();
+      fakeSession({ getOrCreateDm: () => new Promise(() => undefined) });
+      const pending = sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' }, { onRumorReady: ready });
+      await jest.advanceTimersByTimeAsync(DM_SETUP_TIMEOUT_MS);
+      expect(await pending).toEqual({
+        success: false,
+        error: expect.stringMatching(/taking too long/),
+      });
+      expect(ready).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('still sends to the current members when adding new devices fails (#1559)', async () => {

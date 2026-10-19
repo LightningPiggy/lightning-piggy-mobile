@@ -53,6 +53,12 @@ export function cleanPushRelays(relays: readonly unknown[], max = MAX_PUSH_RELAY
   return out;
 }
 
+/** Extra, app-only options on `request` (marmot-ts itself never passes any):
+ * `requireAnswer` rejects an empty read that no relay completed. */
+export interface MarmotRequestOptions {
+  requireAnswer?: boolean;
+}
+
 const asArray = (f: Filter | Filter[]) => (Array.isArray(f) ? f : [f]);
 const cleanRelays = (relays: string[]) => [...new Set(relays.filter(isRelayUrl))];
 const withTimeout = <T>(p: Promise<T>, ms: number) =>
@@ -157,13 +163,15 @@ export function createMarmotNetwork(
       );
     },
 
-    async request(relays, filters) {
+    // App callers may add `{ requireAnswer }` (see MarmotRequestOptions).
+    async request(relays, filters, opts?: MarmotRequestOptions) {
       const targets = relaysOr(relays);
       trackRelays(targets);
       return pool.querySyncFilters(
         targets,
         asArray(filters as Filter | Filter[]),
         REQUEST_MAX_WAIT_MS,
+        ...(opts?.requireAnswer ? [{ requireAnswer: true }] : []),
       );
     },
 

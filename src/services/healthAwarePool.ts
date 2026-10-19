@@ -439,7 +439,10 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       urls: string[],
       filters: Parameters<AbstractSimplePool['subscribe']>[1][],
       maxWait: number,
-      options: { abort?: AbortSignal; requireEose?: boolean } = {},
+      /** `requireAnswer`: reject an EMPTY read no relay completed (all failed,
+       * timed out in the REQ budget, or were skipped), so the caller can tell
+       * "nothing published" from "couldn't ask". Timing is unchanged. */
+      options: { abort?: AbortSignal; requireEose?: boolean; requireAnswer?: boolean } = {},
     ): Promise<NostrEvent[]> {
       return new Promise((resolve, reject) => {
         const events: NostrEvent[] = [];
@@ -464,6 +467,13 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
               const eosed = reasons.filter((reason) => reason === 'closed automatically on eose');
               if (options.requireEose && !options.abort?.aborted && eosed.length === 0)
                 reject(new Error('Group recovery did not reach EOSE: ' + reasons.join('; ')));
+              else if (
+                options.requireAnswer &&
+                !options.abort?.aborted &&
+                eosed.length === 0 &&
+                events.length === 0
+              )
+                reject(new Error('No relay answered: ' + reasons.join('; ')));
               else resolve(events);
             },
           },
