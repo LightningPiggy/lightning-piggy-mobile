@@ -18,6 +18,7 @@ import {
   listPersistedGroupWrapIds,
   reviveGroupHistoryOwner,
   rekeyGroupMessage,
+  markGroupMessageSendFailed,
   type GroupMessage,
 } from './groupMessagesStorageService';
 import { resetGroupMessagesMigrationForTests } from './groupMessagesMigration';
@@ -766,4 +767,29 @@ it('does not repair metadata from a different sender or timestamp, or overwrite 
   await appendGroupMessage(OWNER, GROUP, { ...message, wireKind: 14 });
   await appendGroupMessage(OWNER, GROUP, { ...message, wireKind: 1234 });
   expect(await loadGroupMessages(OWNER, GROUP)).toEqual([{ ...message, wireKind: 14 }]);
+});
+
+describe('markGroupMessageSendFailed', () => {
+  const local = (id: string, text = 'hi'): GroupMessage => ({
+    id,
+    senderPubkey: SENDER,
+    text,
+    createdAt: 10,
+  });
+  it('marks only that row failed, on disk', async () => {
+    await appendGroupMessage(OWNER, GROUP, local('local_1_a'));
+    await appendGroupMessage(OWNER, GROUP, local('local_2_b', 'other'));
+    const next = await markGroupMessageSendFailed(OWNER, GROUP, 'local_1_a');
+    expect(next.find((m) => m.id === 'local_1_a')?.sendFailed).toBe(true);
+    expect(next.find((m) => m.id === 'local_2_b')?.sendFailed).toBeUndefined();
+    const loaded = await loadGroupMessages(OWNER, GROUP);
+    expect(loaded.find((m) => m.id === 'local_1_a')?.sendFailed).toBe(true);
+  });
+  it('leaves storage untouched for an unknown or already-failed row', async () => {
+    await appendGroupMessage(OWNER, GROUP, local('local_1_a'));
+    const marked = await markGroupMessageSendFailed(OWNER, GROUP, 'local_1_a');
+    expect(await markGroupMessageSendFailed(OWNER, GROUP, 'local_1_a')).toEqual(marked);
+    expect(await markGroupMessageSendFailed(OWNER, GROUP, 'missing')).toEqual(marked);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual(marked);
+  });
 });

@@ -5,6 +5,7 @@ import { useNostr, notifyGroupMessage } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import {
   appendGroupMessage,
+  markGroupMessageSendFailed,
   rekeyGroupMessage,
   removeGroupMessage,
   type GroupMessage,
@@ -17,6 +18,11 @@ import type { SharedLocation } from '../services/locationService';
 import { confirmGroupLocationShare } from '../utils/confirmLocationShare';
 import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
 import { isMarmotGroupId } from '../services/marmotSession';
+import { pendingDelivery, type DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { setGroupDeliveryStatus, settledGroupDelivery } from '../utils/groupDeliveryStore';
+
+/** A send that never settles flips its pending clock to failed after this. */
+const SEND_SETTLE_WATCHDOG_MS = 20_000;
 
 /**
  * Group GroupConversationScreen composer actions. A thin wrapper over the
@@ -31,10 +37,13 @@ import { isMarmotGroupId } from '../services/marmotSession';
  *   full `sendGroupMessage` round-trip. The row is captured synchronously and
  *   the async storage write is exposed as a settle-promise, so outcomes stay
  *   truthful regardless of how the two races interleave:
- *   - Relay send FAILED → send-failure Alert; await the storage write, then
- *     remove the row from state+storage (a never-published message must not
- *     linger, and removal after the write settles can't be raced by a late
- *     `setMessages` from the write).
+ *   - Each optimistic row shows pending → sent / failed ticks from the send's
+ *     per-relay result (session-scoped `groupDeliveryStore`, keyed by the
+ *     row's optimistic id).
+ *   - Text send FAILED → the bubble stays, marked failed (persisted as
+ *     `sendFailed`), with Re-publish in the message-info sheet — the 1:1
+ *     behaviour. File / photo / voice sends still alert and remove the row
+ *     (Re-publish only re-sends text).
  *   - Relay send OK, storage write FAILED → 'Saved on relay, not on device'
  *     Alert (only now is "your message was sent" true) and return false so the
  *     caller keeps the draft for retry — the pre-#1033 semantics.
@@ -133,6 +142,39 @@ export function useGroupComposerActions(params: {
     [group, myPubkey, setMessages, scrollToEnd],
   );
 
+  // Pending tick for a just-painted row, settled from the send's result (or by
+  // the watchdog if the send hangs). Returns the settle function.
+  const trackDelivery = useCallback(
+    (rowId: string, meta: { eventId?: string; kind?: number; relays?: string[] }) => {
+      setGroupDeliveryStatus(rowId, pendingDelivery(meta));
+      const watchdog = setTimeout(
+        () => setGroupDeliveryStatus(rowId, settledGroupDelivery({ success: false }, meta)),
+        SEND_SETTLE_WATCHDOG_MS,
+      );
+      return (result: { success: boolean; delivery?: DeliveryStatus }) => {
+        clearTimeout(watchdog);
+        setGroupDeliveryStatus(rowId, settledGroupDelivery(result, meta));
+      };
+    },
+    [],
+  );
+
+  // A text send no relay took: keep the bubble, marked failed (also on disk,
+  // so it still reads as failed after a restart).
+  const markOptimisticFailed = useCallback(
+    async (rowId: string, targetGroup = group): Promise<void> => {
+      if (!targetGroup) return;
+      setMessages((prev) => prev.map((m) => (m.id === rowId ? { ...m, sendFailed: true } : m)));
+      try {
+        setMessages(await markGroupMessageSendFailed(myPubkey, targetGroup.id, rowId));
+      } catch (err) {
+        if (__DEV__)
+          console.warn('[GroupConversationScreen] markGroupMessageSendFailed failed:', err);
+      }
+    },
+    [group, myPubkey, setMessages],
+  );
+
   // Relay send succeeded but the local storage write didn't — only here is
   // "your message was sent" actually true, so the alert lives with the caller
   // outcome, not inside appendOptimisticGroupRow.
@@ -199,6 +241,8 @@ export function useGroupComposerActions(params: {
       const optimistic: { current: { row: GroupMessage; persisted: Promise<boolean> } | null } = {
         current: null,
       };
+      // Boxed (like `optimistic`) so TS doesn't narrow it away in the closure.
+      const settle: { current: ReturnType<typeof trackDelivery> | null } = { current: null };
 
       const result = await sendGroupMessage(
         {
@@ -209,22 +253,31 @@ export function useGroupComposerActions(params: {
           replyTo: parent,
         },
         {
-          onRumorReady: () => {
+          onRumorReady: ({ rumorId, kind, relays }) => {
             optimistic.current = appendOptimisticGroupRow(text, group, myPubkey, parent);
+            if (optimistic.current) {
+              settle.current = trackDelivery(optimistic.current.row.id, {
+                eventId: rumorId,
+                kind,
+                relays,
+              });
+            }
           },
         },
       );
+      settle.current?.(result);
 
       if (!result.success) {
-        Alert.alert('Send failed', result.error ?? 'Unknown error');
-        // Remove the optimistic row we painted before signing — the message
-        // never went out. Await the storage write first so its trailing
-        // setMessages can't re-add the row after removal.
-        if (optimistic.current) {
-          await optimistic.current.persisted;
-          await removeOptimisticRow(optimistic.current.row.id, group);
+        if (!optimistic.current) {
+          Alert.alert('Send failed', result.error ?? 'Unknown error');
+          return false;
         }
-        return false;
+        // The bubble stays, marked failed, with Re-publish in its info sheet.
+        // Mark it once the storage write has settled, so that write's trailing
+        // setMessages can't put back an unmarked row.
+        await optimistic.current.persisted;
+        await markOptimisticFailed(optimistic.current.row.id, group);
+        return true;
       }
       // Sent, but not saved locally: keep the draft (return false) so the user
       // can retry/refresh — pre-#1033 semantics.
@@ -239,7 +292,8 @@ export function useGroupComposerActions(params: {
     [
       sendGroupMessage,
       appendOptimisticGroupRow,
-      removeOptimisticRow,
+      trackDelivery,
+      markOptimisticFailed,
       alertSavedOnRelayOnly,
       adoptRumorId,
     ],
@@ -262,6 +316,8 @@ export function useGroupComposerActions(params: {
       const optimistic: { current: { row: GroupMessage; persisted: Promise<boolean> } | null } = {
         current: null,
       };
+      // Boxed (like `optimistic`) so TS doesn't narrow it away in the closure.
+      const settle: { current: ReturnType<typeof trackDelivery> | null } = { current: null };
 
       const result = await sendGroupMessage(
         {
@@ -271,7 +327,7 @@ export function useGroupComposerActions(params: {
           file,
         },
         {
-          onRumorReady: ({ kind: wireKind }) => {
+          onRumorReady: ({ rumorId, kind: wireKind, relays }) => {
             optimistic.current = appendOptimisticGroupRow(
               fileText,
               group,
@@ -279,9 +335,17 @@ export function useGroupComposerActions(params: {
               undefined,
               wireKind,
             );
+            if (optimistic.current) {
+              settle.current = trackDelivery(optimistic.current.row.id, {
+                eventId: rumorId,
+                kind: wireKind,
+                relays,
+              });
+            }
           },
         },
       );
+      settle.current?.(result);
 
       if (!result.success) {
         if (kind === 'file') {
@@ -311,6 +375,7 @@ export function useGroupComposerActions(params: {
       myPubkey,
       sendGroupMessage,
       appendOptimisticGroupRow,
+      trackDelivery,
       removeOptimisticRow,
       alertSavedOnRelayOnly,
       adoptRumorId,
@@ -326,12 +391,18 @@ export function useGroupComposerActions(params: {
         current: null,
       };
       let rumorId: string | undefined;
+      // Boxed (like `optimistic`) so TS doesn't narrow it away in the closure.
+      const settle: { current: ReturnType<typeof trackDelivery> | null } = { current: null };
       const result = await sendMarmotImage(myPubkey, { groupId: group.id }, image, signEvent, {
-        onRumorReady: ({ text, eventId }) => {
+        onRumorReady: ({ text, eventId, kind, relays }) => {
           rumorId = eventId;
           optimistic.current = appendOptimisticGroupRow(text);
+          if (optimistic.current) {
+            settle.current = trackDelivery(optimistic.current.row.id, { eventId, kind, relays });
+          }
         },
       });
+      settle.current?.(result);
       if (!result.success) {
         Alert.alert(
           t('marmotSend.sendFailedTitle'),
@@ -360,6 +431,7 @@ export function useGroupComposerActions(params: {
       myPubkey,
       signEvent,
       appendOptimisticGroupRow,
+      trackDelivery,
       removeOptimisticRow,
       alertSavedOnRelayOnly,
       t,

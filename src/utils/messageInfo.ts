@@ -83,7 +83,7 @@ export interface MessageInfoInput {
   rowId: string;
   /** The stored app kind (see the header). */
   wireKind?: number;
-  /** Sent 1:1 messages only — groups don't track per-relay delivery. */
+  /** Sent messages: 1:1 always, group sends made this session. */
   deliveryStatus?: DeliveryStatus;
   /** From `resendPayloadFor`. */
   resendText: string;

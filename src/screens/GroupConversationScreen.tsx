@@ -9,6 +9,7 @@ import { useAccountState } from '../contexts/useAccountState';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import ChatJumpButtons from '../components/ChatJumpButtons';
+import { groupRowDelivery, useGroupDeliveryStatuses } from '../utils/groupDeliveryStore';
 import UnreadDivider from '../components/UnreadDivider';
 import MentionPicker from '../components/MentionPicker';
 import { useChatReadPosition } from '../hooks/useChatReadPosition';
@@ -482,6 +483,8 @@ const GroupConversationScreen: React.FC = () => {
     [memberByPubkey, contacts, presentContactSheet],
   );
 
+  // This session's group send ticks (pending → sent / failed).
+  const deliveries = useGroupDeliveryStatuses();
   const renderMessage = useCallback(
     ({ item }: { item: GroupTimelineRow }) => {
       if (isDeviceNoticeRow(item)) {
@@ -537,9 +540,9 @@ const GroupConversationScreen: React.FC = () => {
           // Stored kind: 14 chat or 15 encrypted file (voice/image) — a Marmot
           // group's kind-9 rumors are stored the same way. The info sheet reads this,
           // so pass the per-message wireKind derived above rather than a hard
-          // 14. Group sends aren't per-relay tracked, so no deliveryStatus (the
-          // sheet shows "Not tracked").
+          // 14. Sends from this session carry their pending → sent / failed tick.
           wireKind={item.wireKind}
+          deliveryStatus={fromMe ? groupRowDelivery(item, deliveries) : undefined}
           onShowInfo={handleShowInfo}
           quote={item.quote}
           edited={item.editedAt !== undefined}
@@ -581,6 +584,7 @@ const GroupConversationScreen: React.FC = () => {
       handleToggleSecretMode,
       isInvoicePaid,
       handleShowInfo,
+      deliveries,
     ],
   );
 

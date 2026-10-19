@@ -167,7 +167,7 @@ it('after a group switch mid-dialog, re-asks and records the optimistic row in t
   expect(alert.mock.calls[1][0]).toBe('Share your location with the 2 people in Cousins?');
 
   mockSendGroup.mockImplementation(async (_args, hooks) => {
-    hooks?.onRumorReady?.();
+    hooks?.onRumorReady?.({ rumorId: 'rumor', kind: 14 });
     return { success: true };
   });
   await act(async () => {

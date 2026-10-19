@@ -24,6 +24,11 @@ jest.mock('../services/nostrService', () => ({
 jest.mock('../services/nostrNip04Send', () => ({ sendNip04Message: jest.fn() }));
 jest.mock('../services/amberService', () => ({}));
 jest.mock('../services/nostrConnectService', () => ({}));
+// Fake timers also fake requestAnimationFrame: skip the paint-a-frame yield.
+jest.mock('../contexts/nostrDecryptPacing', () => ({
+  ...jest.requireActual('../contexts/nostrDecryptPacing'),
+  paintOptimisticBubble: async () => undefined,
+}));
 jest.mock('../contexts/nostrSecretKeyCache', () => ({
   getMemoisedSecretKey: jest.fn().mockResolvedValue(new Uint8Array(32)),
 }));

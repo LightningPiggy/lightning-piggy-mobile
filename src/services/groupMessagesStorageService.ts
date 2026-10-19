@@ -39,6 +39,9 @@ export interface GroupMessage {
   /** Marmot: pubkeys the message `p`-tags as mentions (#1295). Text mentions
    * (`nostr:npub…`) are read from `text` and not duplicated here. */
   mentions?: string[];
+  /** Our own send that no relay took (or not every member got): the bubble
+   * keeps a failed mark, with Re-publish, after a restart too. */
+  sendFailed?: boolean;
 }
 
 // Account scoping (#1240): history is keyed per owner —
@@ -255,6 +258,28 @@ export async function removeGroupMessage(
     if (filtered.length === existing.length) return existing;
     await AsyncStorage.setItem(key, JSON.stringify(filtered));
     return filtered;
+  });
+}
+
+/**
+ * Mark our own optimistic row as a failed send (it stays in the thread, red,
+ * with Re-publish — the 1:1 behaviour). Returns the updated list; rejects on
+ * a storage write error, like `removeGroupMessage`.
+ */
+export async function markGroupMessageSendFailed(
+  owner: string | null | undefined,
+  groupId: string,
+  messageId: string,
+): Promise<GroupMessage[]> {
+  await ensureGroupMessagesMigrated();
+  const key = requireOwnerKey(owner, groupId);
+  return mutateGroupStorage(key, async () => {
+    requireOwnerKey(owner, groupId);
+    const existing = await readLog(key);
+    if (!existing.some((m) => m.id === messageId && !m.sendFailed)) return existing;
+    const next = existing.map((m) => (m.id === messageId ? { ...m, sendFailed: true } : m));
+    await AsyncStorage.setItem(key, JSON.stringify(next));
+    return next;
   });
 }
 

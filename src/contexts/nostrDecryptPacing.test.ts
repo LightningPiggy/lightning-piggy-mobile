@@ -14,6 +14,7 @@
 import {
   createYieldScheduler,
   yieldToEventLoop,
+  paintOptimisticBubble,
   DECRYPT_FRAME_BUDGET_MS,
 } from './nostrDecryptPacing';
 
@@ -93,6 +94,28 @@ describe('yieldToEventLoop', () => {
 
     rafSpy.mockRestore();
     timeoutSpy.mockRestore();
+  });
+});
+
+describe('paintOptimisticBubble', () => {
+  it('waits one frame when a bubble was painted, so it shows before the crypto', async () => {
+    let done = false;
+    const p = paintOptimisticBubble({ onRumorReady: () => undefined }).then(() => {
+      done = true;
+    });
+    await Promise.resolve();
+    expect(done).toBe(false);
+    flushRaf();
+    await p;
+    expect(done).toBe(true);
+  });
+
+  it('does not wait when nothing was painted', async () => {
+    const rafSpy = jest.spyOn(global, 'requestAnimationFrame');
+    await paintOptimisticBubble(undefined);
+    await paintOptimisticBubble({});
+    expect(rafSpy).not.toHaveBeenCalled();
+    rafSpy.mockRestore();
   });
 });
 
