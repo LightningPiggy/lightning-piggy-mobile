@@ -18,14 +18,13 @@ import { useSharedContactProfiles } from '../hooks/useSharedContactProfiles';
 import { groupReadKey } from '../services/chatReadPositions';
 import { messageMentions } from '../utils/chatMentions';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList, Linking } from 'react-native';
+import { View, Text, FlatList, Linking } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
 import {
   KeyboardController,
   useReanimatedKeyboardAnimation,
 } from 'react-native-keyboard-controller';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -40,12 +39,11 @@ import { buildGroupMemberRows } from '../utils/groupMemberRows';
 import { shortNpub } from '../utils/shortNpub';
 import RenameGroupSheet from '../components/RenameGroupSheet';
 import GroupMembersSheet from '../components/GroupMembersSheet';
-import GroupHeaderActions from '../components/GroupHeaderActions';
-import GroupHeaderTitle from '../components/GroupHeaderTitle';
+import ChatHeaderBar from '../components/ChatHeaderBar';
+import GroupConversationHeader from '../components/GroupConversationHeader';
 import { canManageGroup } from '../utils/groupAdmins';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
-import BrandPatternBackground from '../components/BrandPatternBackground';
 import FullscreenGifModal from '../components/FullscreenGifModal';
 import GifPickerSheet from '../components/GifPickerSheet';
 import PollComposerSheet from '../components/PollComposerSheet';
@@ -121,6 +119,9 @@ const GroupConversationScreen: React.FC = () => {
   const followed = useFollowedPubkeys();
   const [renameVisible, setRenameVisible] = useState(false);
   const [membersSheetVisible, setMembersSheetVisible] = useState(false);
+  const goBack = useCallback(() => navigation.goBack(), [navigation]);
+  const openRename = useCallback(() => setRenameVisible(true), []);
+  const openMembers = useCallback(() => setMembersSheetVisible(true), []);
   const messageOwner = myPubkey ? `${myPubkey}:${route.params.groupId}` : null;
   const [draft, setDraft] = useAccountState(messageOwner, '');
   const [rawMessages, setMessages] = useAccountState(messageOwner, EMPTY_MESSAGES);
@@ -582,27 +583,15 @@ const GroupConversationScreen: React.FC = () => {
   if (!group) {
     return (
       <View style={styles.container}>
-        <BrandPatternBackground variant="messages-weave" />
-        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-          <View style={styles.titleRow}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => navigation.goBack()}
-              accessibilityLabel={t('groupConversationScreen.back')}
-            >
-              <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="m15 18-6-6 6-6"
-                  stroke={colors.brandPink}
-                  strokeWidth={2.5}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            </TouchableOpacity>
-            <Text style={styles.title}>{t('groupConversationScreen.group')}</Text>
-          </View>
-        </View>
+        <View style={{ height: insets.top, backgroundColor: colors.brandPink }} />
+        <ChatHeaderBar
+          onBack={goBack}
+          backLabel={t('groupConversationScreen.back')}
+          backTestID="group-back"
+          avatar={null}
+          title={<Text style={styles.title}>{t('groupConversationScreen.group')}</Text>}
+          trailing={null}
+        />
         <View style={styles.content}>
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>{t('groupConversationScreen.groupNotFound')}</Text>
@@ -616,51 +605,21 @@ const GroupConversationScreen: React.FC = () => {
   return (
     <ChatToolsProvider query={tools.search.query} highlightedId={tools.highlightedId}>
       <View style={styles.container}>
-        <BrandPatternBackground variant="messages-weave" />
+        {/* Same pink status-bar strip as the 1:1 thread, so the light
+          system icons stay legible above the compact header. */}
+        <View style={{ height: insets.top, backgroundColor: colors.brandPink }} />
         {tools.search.active ? (
-          <ChatSearchHeader search={tools.search} topInset={insets.top} />
+          <ChatSearchHeader search={tools.search} />
         ) : (
-          <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-            <View style={styles.titleRow}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => navigation.goBack()}
-                accessibilityLabel={t('groupConversationScreen.back')}
-                testID="group-back"
-              >
-                <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                  <Path
-                    d="m15 18-6-6 6-6"
-                    stroke={colors.brandPink}
-                    strokeWidth={2.5}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </Svg>
-              </TouchableOpacity>
-              <GroupHeaderTitle
-                name={group.name}
-                canRename={canManageGroup(group, myPubkey)}
-                onRename={() => setRenameVisible(true)}
-              />
-              <GroupHeaderActions group={group} menu={tools.menu} />
-            </View>
-            {/* Tappable member-count line — opens GroupMembersSheet for
-            add/remove. Replaces the inert text + horizontal chip strip
-            that used to live below this header. See issue #259. */}
-            <TouchableOpacity
-              onPress={() => setMembersSheetVisible(true)}
-              accessibilityLabel={t('groupConversationScreen.manageMembers')}
-              testID="group-member-count"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.memberCount}>
-                {members.length === 1
-                  ? t('groupConversationScreen.memberCountOne', { count: members.length })
-                  : t('groupConversationScreen.memberCountOther', { count: members.length })}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <GroupConversationHeader
+            group={group}
+            members={members}
+            canRename={canManageGroup(group, myPubkey)}
+            menu={tools.menu}
+            onBack={goBack}
+            onRename={openRename}
+            onOpenMembers={openMembers}
+          />
         )}
 
         <View style={styles.content}>

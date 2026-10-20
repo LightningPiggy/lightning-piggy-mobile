@@ -6,12 +6,13 @@ export const createGroupHeaderTitleStyles = (colors: Palette) =>
     container: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 8,
+      gap: 6,
       flexShrink: 1,
     },
+    // Same typography as the 1:1 header name (ChatHeader.styles headerName).
     title: {
-      color: colors.white,
-      fontSize: 22,
+      color: colors.textHeader,
+      fontSize: 16,
       fontWeight: '700',
       flexShrink: 1,
     },

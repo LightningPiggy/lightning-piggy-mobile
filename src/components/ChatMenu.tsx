@@ -88,7 +88,7 @@ export default function ChatMenu({
           setVisible(true);
         }}
       >
-        <MoreVertical size={22} color={group ? colors.white : colors.textHeader} />
+        <MoreVertical size={22} color={colors.textHeader} />
       </TouchableOpacity>
       <Modal visible={visible} transparent animationType="fade" onRequestClose={close}>
         <Pressable

@@ -7,45 +7,19 @@ export const createGroupConversationScreenStyles = (colors: Palette) =>
   StyleSheet.create({
     container: {
       flex: 1,
-      backgroundColor: colors.brandPink,
+      backgroundColor: colors.background,
     },
-    header: {
-      paddingHorizontal: 20,
-      paddingBottom: 40,
-    },
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-    },
-    backButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: 'rgba(255,255,255,0.9)',
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
+    // The thread header is the compact GroupConversationHeader (shared
+    // ChatHeaderBar layout with the 1:1 thread); this is only the "Group"
+    // title of the not-found fallback, in the same typography.
     title: {
-      color: colors.white,
-      fontSize: 22,
+      color: colors.textHeader,
+      fontSize: 16,
       fontWeight: '700',
-      flexShrink: 1,
-    },
-    memberCount: {
-      color: 'rgba(255,255,255,0.8)',
-      fontSize: 13,
-      fontWeight: '500',
-      marginTop: 8,
-      marginLeft: 48,
     },
     content: {
       flex: 1,
       backgroundColor: colors.background,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-      marginTop: -24,
-      overflow: 'hidden',
     },
     messagesList: {
       paddingVertical: 12,
