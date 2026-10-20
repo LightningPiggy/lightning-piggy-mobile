@@ -122,8 +122,8 @@ export function marmotReactionSource(
     };
   };
 
-  // No relay acknowledged in time, but one timed out: the event may still be
-  // stored. Look for it a few times; it's lost only if the last look completed
+  // No relay acknowledged it, but one didn't explicitly refuse it either: the
+  // event may still be stored. Look for it a few times; it's lost only if the last look completed
   // without finding it. A look no relay answered proves nothing, so the
   // reaction is kept (it's in the group history) rather than failed falsely.
   const settleLater = async (
@@ -156,18 +156,22 @@ export function marmotReactionSource(
         throw new ReactionPublishError(marmotSendError(e));
       }
       if (sent.accepted) return sent.id;
-      if (sent.receipt?.timedOut) return { id: sent.id, settled: settleLater(sent) };
+      if (sent.receipt?.indeterminate) return { id: sent.id, settled: settleLater(sent) };
+      // Every relay refused it. Settled as lost through the same shared path,
+      // so a chat reopened meanwhile (which read it from history) drops it too.
       await sent.forget();
-      return null;
+      return { id: sent.id, settled: Promise.resolve<ReactionSettlement>('lost') };
     },
-    // A timed-out retraction is confirmed the same way before it's called failed.
+    // An unacknowledged retraction is confirmed the same way. Only a confirmed
+    // one counts: an inconclusive one is reported failed (the pill comes back,
+    // so the user can retry) and dropped locally so it can't hide it later.
     deleteReaction: async (reactionEventId) => {
       const sent = await sendReferencing(DELETION_KIND, '', reactionEventId).catch(() => null);
       if (!sent) return false;
       if (sent.accepted) return true;
-      if (sent.receipt?.timedOut) return (await settleLater(sent)) !== 'lost';
-      await sent.forget();
-      return false;
+      const outcome = sent.receipt?.indeterminate ? await settleLater(sent) : 'lost';
+      if (outcome !== 'sent') await sent.forget();
+      return outcome === 'sent';
     },
     // Follows the active session, so a thread opened during cold start (or
     // kept open across a session restart) still gets live reactions.

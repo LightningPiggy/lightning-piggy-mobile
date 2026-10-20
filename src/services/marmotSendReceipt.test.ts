@@ -49,18 +49,27 @@ it('reports a slow relay as timed out, though its publish still lands afterwards
   expect(landed).toBe(true);
   mockQuery.mockResolvedValue([envelope]);
   const receipt = marmotSendReceipt(resultFor(response));
-  expect(receipt.timedOut).toBe(true);
+  expect(receipt.indeterminate).toBe(true);
   await expect(receipt.lookup()).resolves.toBe('found');
   expect(mockQuery).toHaveBeenCalledWith([RELAY], [{ ids: [envelope.id] }], expect.any(Number), {
     requireEose: true,
   });
 });
 
-it('tells an outright refusal apart from a timeout', () => {
-  const receipt = marmotSendReceipt(
-    resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: blocked: not allowed' } }),
+it('counts only an explicit relay refusal as definite', () => {
+  const receipt = (message: string) =>
+    marmotSendReceipt(resultFor({ [RELAY]: { from: RELAY, ok: false, message } }));
+  expect(receipt('Error: blocked: not allowed').indeterminate).toBe(false);
+  expect(receipt('Error: rate-limited: slow down').indeterminate).toBe(false);
+  expect(receipt('Error: error: internal').indeterminate).toBe(false);
+  // Never connected / sent on a closed socket: the EVENT never left.
+  expect(receipt('Error: connection failure: Error: offline').indeterminate).toBe(false);
+  expect(receipt("SendingOnClosedConnection: Tried to send message '[...]'").indeterminate).toBe(
+    false,
   );
-  expect(receipt.timedOut).toBe(false);
+  // The socket closed after the EVENT went out, before its OK: it may be stored.
+  expect(receipt('Error: relay connection closed').indeterminate).toBe(true);
+  expect(receipt('Error: publish timed out').indeterminate).toBe(true);
 });
 
 it('reports absent only when every relay completed the read without it', async () => {

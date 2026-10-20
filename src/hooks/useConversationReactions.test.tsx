@@ -597,6 +597,37 @@ describe('unacknowledged (pending) reactions (#1656)', () => {
     expect(readConversationReactions(`${MY_PK}:${scopeKey}`).records).toEqual([]);
   });
 
+  it('drops a refused reaction from a chat reopened before the refusal arrived', async () => {
+    let returnPublish!: (outcome: unknown) => void;
+    const publishReaction = jest.fn(() => new Promise((resolve) => (returnPublish = resolve)));
+    const first = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    act(() => {
+      first.result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+    first.unmount();
+    // Reopened while the publish was out: it read the reaction from history.
+    const owner = `${MY_PK}:${scopeKey}`;
+    const record = {
+      id: 'real-id',
+      reactorPubkey: MY_PK,
+      emoji: '👍',
+      createdAt: 1,
+      targetEventId: TARGET,
+    };
+    cacheConversationReactions(
+      owner,
+      { records: [record], retractions: new Map() },
+      reactionCacheGeneration(),
+    );
+    const reopened = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    expect(mine(reopened.result)?.myReactions['👍']).toBe('real-id');
+    // Every relay refused it.
+    await act(async () => returnPublish({ id: 'real-id', settled: Promise.resolve('lost') }));
+    await waitFor(() => expect(mine(reopened.result)).toBeUndefined());
+    expect(readConversationReactions(owner).records).toEqual([]);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
   it('stays pending in a reopened chat, and a later loss leaves the cache too', async () => {
     const { publishReaction, settle } = pendingPublish();
     const first = renderHook(() => useConversationReactions(scoped(publishReaction)));

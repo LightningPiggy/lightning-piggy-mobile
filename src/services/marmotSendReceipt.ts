@@ -16,13 +16,19 @@ type PublishResults = Awaited<ReturnType<MarmotGroup['submitIntent']>>;
 export type MarmotLookup = 'found' | 'absent' | 'unknown';
 
 export interface MarmotSendReceipt {
-  /** A relay timed out (rather than refusing), so the event may still land. */
-  timedOut: boolean;
+  /** A relay failed without explicitly refusing it (timed out, connection
+   * dropped before the OK), so the event may still have landed. */
+  indeterminate: boolean;
   /** Whether a target relay now holds one of the sent kind-445 envelopes. */
   lookup: () => Promise<MarmotLookup>;
 }
 
-const TIMEOUT = /timed? ?out/i;
+// Definitely not stored on that relay: it said no (NIP-01's machine-readable
+// OK prefixes), or the EVENT never left (no connection / sent on a closed
+// one). Anything else — a timeout, the socket closing after the EVENT went
+// out — leaves the outcome open.
+const NOT_STORED =
+  /^(?:Error: (?:pow|blocked|rate-limited|invalid|restricted|mute|error|auth-required|connection failure):|SendingOnClosedConnection\b)/i;
 const LOOKUP_WAIT_MS = 6_000;
 
 export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
@@ -30,7 +36,9 @@ export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
   const responses = results.flatMap((r) => Object.entries(r.response));
   const relays = [...new Set(responses.map(([url]) => url))];
   return {
-    timedOut: responses.some(([, res]) => !res.ok && TIMEOUT.test(String(res.message ?? ''))),
+    indeterminate: responses.some(
+      ([, res]) => !res.ok && !NOT_STORED.test(String(res.message ?? '')),
+    ),
     // Each relay on its own: one that answered empty says nothing about one
     // that couldn't answer. Absent only if every relay completed the read.
     lookup: async () => {

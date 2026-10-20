@@ -116,7 +116,7 @@ describe('marmotReactionSource', () => {
     jest.useFakeTimers();
     const session = fakeSession();
     const lookup = jest.fn().mockResolvedValueOnce('absent').mockResolvedValue('found');
-    unacknowledged(session, { timedOut: true, lookup });
+    unacknowledged(session, { indeterminate: true, lookup });
     setMarmotSession(session as unknown as MarmotSession);
     const outcome = await publishInGroup();
     expect(outcome).toEqual({ id: expect.any(String), settled: expect.any(Promise) });
@@ -133,7 +133,7 @@ describe('marmotReactionSource', () => {
   it('calls a timed-out reaction lost only once a completed lookup still misses it', async () => {
     jest.useFakeTimers();
     const session = fakeSession();
-    unacknowledged(session, { timedOut: true, lookup: jest.fn().mockResolvedValue('absent') });
+    unacknowledged(session, { indeterminate: true, lookup: jest.fn().mockResolvedValue('absent') });
     setMarmotSession(session as unknown as MarmotSession);
     const outcome = (await publishInGroup()) as PendingReactionPublish;
     const settled = outcome.settled;
@@ -148,7 +148,7 @@ describe('marmotReactionSource', () => {
     const session = fakeSession();
     // Seen absent early (the late publish hadn't landed yet), then offline.
     const lookup = jest.fn().mockResolvedValueOnce('absent').mockResolvedValue('unknown');
-    unacknowledged(session, { timedOut: true, lookup });
+    unacknowledged(session, { indeterminate: true, lookup });
     setMarmotSession(session as unknown as MarmotSession);
     const settled = ((await publishInGroup()) as PendingReactionPublish).settled;
     await jest.advanceTimersByTimeAsync(43_000);
@@ -157,18 +157,36 @@ describe('marmotReactionSource', () => {
     jest.useRealTimers();
   });
 
-  it('fails at once (null) when every relay refused it, forgetting the local copy', async () => {
+  it('settles at once as lost when every relay refused it, forgetting the local copy', async () => {
     const session = fakeSession();
-    unacknowledged(session, { timedOut: false, lookup: jest.fn() });
+    const lookup = jest.fn();
+    unacknowledged(session, { indeterminate: false, lookup });
     setMarmotSession(session as unknown as MarmotSession);
-    await expect(publishInGroup()).resolves.toBeNull();
-    expect(session.forgetRumor).toHaveBeenCalledWith('g-group', expect.any(String));
+    const outcome = (await publishInGroup()) as PendingReactionPublish;
+    await expect(outcome.settled).resolves.toBe('lost');
+    expect(lookup).not.toHaveBeenCalled();
+    expect(session.forgetRumor).toHaveBeenCalledWith('g-group', outcome.id);
+  });
+
+  it('reports an inconclusive retraction as failed (retryable) and drops it locally', async () => {
+    jest.useFakeTimers();
+    const session = fakeSession();
+    unacknowledged(session, {
+      indeterminate: true,
+      lookup: jest.fn().mockResolvedValue('unknown'),
+    });
+    setMarmotSession(session as unknown as MarmotSession);
+    const deleted = marmotReactionSource(ME, '', 'g-group').deleteReaction('r');
+    await jest.advanceTimersByTimeAsync(43_000);
+    await expect(deleted).resolves.toBe(false);
+    expect(session.forgetRumor).toHaveBeenCalled();
+    jest.useRealTimers();
   });
 
   it('confirms a timed-out retraction instead of reporting it failed', async () => {
     jest.useFakeTimers();
     const session = fakeSession();
-    unacknowledged(session, { timedOut: true, lookup: jest.fn().mockResolvedValue('found') });
+    unacknowledged(session, { indeterminate: true, lookup: jest.fn().mockResolvedValue('found') });
     setMarmotSession(session as unknown as MarmotSession);
     const deleted = marmotReactionSource(ME, '', 'g-group').deleteReaction('r');
     await jest.advanceTimersByTimeAsync(3_000);
