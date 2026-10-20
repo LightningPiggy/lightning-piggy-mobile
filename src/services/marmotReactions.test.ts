@@ -52,6 +52,10 @@ function fakeSession() {
       return () => undefined;
     }),
     emit: (e: unknown) => listeners.forEach((l) => l(e)),
+    // Own sends go through the inbound path, as in MarmotSession.
+    deliverOwn: jest.fn((groupId: string, rumor: MarmotRumor) =>
+      listeners.forEach((l) => l({ group: { id: groupId, isDm: false }, rumor })),
+    ),
   };
   return session;
 }
@@ -202,6 +206,36 @@ describe('marmotReactionSource', () => {
     await expect(deleted).resolves.toBe(false);
     expect(session.forgetRumor).toHaveBeenCalled();
     delete history['g-group'];
+    jest.useRealTimers();
+  });
+
+  it('tells a chat reopened mid-confirmation once a retraction is confirmed', async () => {
+    jest.useFakeTimers();
+    const session = fakeSession();
+    unacknowledged(session, { indeterminate: true, lookup: jest.fn().mockResolvedValue('found') });
+    setMarmotSession(session as unknown as MarmotSession);
+    const deleted = marmotReactionSource(ME, '', 'g-group').deleteReaction('r-mine');
+    // Reopened before it was confirmed: its history read skips the kind-5...
+    const onEvent = jest.fn();
+    const unsubscribe = marmotReactionSource(ME, '', 'g-group').subscribe(onEvent);
+    await jest.advanceTimersByTimeAsync(3_000);
+    await expect(deleted).resolves.toBe(true);
+    // ...so the confirmed retraction reaches it live instead.
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 5, tags: [['e', 'r-mine']] }),
+    );
+    unsubscribe();
+    jest.useRealTimers();
+  });
+
+  it('rebuilds the same id for a retry within the same second', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-20T12:00:00.100Z') });
+    const session = fakeSession();
+    setMarmotSession(session as unknown as MarmotSession);
+    const first = await publishInGroup();
+    jest.setSystemTime(new Date('2026-10-20T12:00:00.900Z'));
+    // Why a later attempt has to supersede an earlier attempt's lost marker.
+    expect(await publishInGroup()).toBe(first);
     jest.useRealTimers();
   });
 

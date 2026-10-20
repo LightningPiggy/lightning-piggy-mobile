@@ -20,6 +20,7 @@ import {
   isLostReaction,
   pendingReactionIds,
   subscribePendingReactions,
+  supersedeLostReaction,
   trackPendingReaction,
 } from '../utils/pendingReactionStore';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
@@ -510,6 +511,7 @@ export function useConversationReactions({
       // Sent, but no relay acknowledged in time: keep it showing as pending,
       // with no alert, until it's found on a relay or given up on. Tracked
       // before the cancel path, so a restored reaction still gets settled.
+      if (owner && realId) supersedeLostReaction(owner, realId);
       if (pending && owner) trackPendingReaction(owner, pending.id, pending.settled);
       if (realId) {
         if (cancelled) {

@@ -21,6 +21,13 @@ function rememberLost(owner: string, id: string): void {
   lostByOwner.set(owner, lost);
 }
 
+/** A new publish attempt for `id` supersedes an earlier loss. A retry within
+ * the same second rebuilds the same event id (created_at has 1 s resolution),
+ * so an acknowledged retry must not inherit the old attempt's lost marker. */
+export function supersedeLostReaction(owner: string, id: string): void {
+  lostByOwner.get(owner)?.delete(id);
+}
+
 /** Whether `id` was a reaction that definitely never went out. */
 export const isLostReaction = (owner: string | null, id: string): boolean =>
   !!owner && !!lostByOwner.get(owner)?.has(id);

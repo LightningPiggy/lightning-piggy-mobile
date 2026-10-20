@@ -131,6 +131,9 @@ export function marmotReactionSource(
       // marmot-ts saves a sent event into the group's history before
       // publishing; one that never landed must not reappear on reopen.
       forget: () => session.forgetRumor(group, rumor.id).catch(() => undefined),
+      // MLS never echoes our own sends: run a confirmed one through the inbound
+      // path so every open view of this chat applies it (a reopened one too).
+      deliver: () => session.deliverOwn(group, rumor),
     };
   };
 
@@ -186,9 +189,13 @@ export function marmotReactionSource(
           unconfirmedDeletions.add(id);
         }).catch(() => null);
         if (!sent) return false;
-        if (sent.accepted) return true;
-        const outcome = sent.receipt?.indeterminate ? await settleLater(sent) : 'lost';
-        if (outcome !== 'sent') await sent.forget();
+        const outcome = sent.accepted
+          ? 'sent'
+          : sent.receipt?.indeterminate
+            ? await settleLater(sent)
+            : 'lost';
+        if (outcome === 'sent') sent.deliver();
+        else await sent.forget();
         return outcome === 'sent';
       } finally {
         if (rumorId) unconfirmedDeletions.delete(rumorId);
