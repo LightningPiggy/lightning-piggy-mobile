@@ -622,6 +622,41 @@ describe('unacknowledged (pending) reactions (#1656)', () => {
     expect(Alert.alert).toHaveBeenCalledTimes(1);
   });
 
+  it('settles a publish that returns after an account switch (A → B → A)', async () => {
+    let returnPublish!: (outcome: unknown) => void;
+    let settle!: (outcome: ReactionSettlement) => void;
+    const settled = new Promise<ReactionSettlement>((resolve) => (settle = resolve));
+    const publishReaction = jest.fn(() => new Promise((resolve) => (returnPublish = resolve)));
+    const first = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    act(() => {
+      first.result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+    // Switched to another account and back while the publish was out.
+    clearConversationReactions();
+    first.unmount();
+    await act(async () => returnPublish({ id: 'real-id', settled }));
+    // Back on A, the chat reads the reaction from history: still pending...
+    const owner = `${MY_PK}:${scopeKey}`;
+    const record = {
+      id: 'real-id',
+      reactorPubkey: MY_PK,
+      emoji: '👍',
+      createdAt: 1,
+      targetEventId: TARGET,
+    };
+    cacheConversationReactions(
+      owner,
+      { records: [record], retractions: new Map() },
+      reactionCacheGeneration(),
+    );
+    const back = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    expect(mine(back.result)).toMatchObject({ pending: { '👍': true } });
+    // ...and a later loss still reaches it.
+    await act(async () => settle('lost'));
+    await waitFor(() => expect(mine(back.result)).toBeUndefined());
+    expect(readConversationReactions(owner).records).toEqual([]);
+  });
+
   it('drops a refused reaction from a chat reopened before the refusal arrived', async () => {
     let returnPublish!: (outcome: unknown) => void;
     const publishReaction = jest.fn(() => new Promise((resolve) => (returnPublish = resolve)));

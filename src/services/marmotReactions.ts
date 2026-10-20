@@ -32,6 +32,30 @@ const CONFIRM_DELAYS_MS = [3_000, 10_000, 30_000];
  * reads skip it, so a chat reopened meanwhile can't apply a retraction that
  * may turn out never to have gone out (and would hide the pill for good). */
 const unconfirmedDeletions = new Set<string>();
+/** Ids already used by a send. The id hashes a 1-second created_at, so a
+ * quick add → remove → add would rebuild the same event; each attempt gets
+ * its own id instead, and an older attempt's outcome (or its history
+ * cleanup) can never apply to a newer one. Bounded. */
+const issuedRumorIds = new Set<string>();
+const MAX_ISSUED_IDS = 500;
+
+function uniqueRumor(myPubkey: string, kind: number, content: string, targetId: string) {
+  const now = Math.floor(Date.now() / 1000);
+  let rumor = buildMarmotRumor(myPubkey, { kind, content, tags: [['e', targetId]] });
+  for (let bump = 1; issuedRumorIds.has(rumor.id); bump++) {
+    rumor = buildMarmotRumor(myPubkey, {
+      kind,
+      content,
+      tags: [['e', targetId]],
+      created_at: now + bump,
+    });
+  }
+  issuedRumorIds.add(rumor.id);
+  if (issuedRumorIds.size > MAX_ISSUED_IDS) {
+    issuedRumorIds.delete(issuedRumorIds.values().next().value!);
+  }
+  return rumor;
+}
 
 export interface MarmotReactionSource {
   fetchReactionsForMessages: (targetEventIds: string[]) => Promise<MarmotRumor[]>;
@@ -119,7 +143,7 @@ export function marmotReactionSource(
       }
     }
     if (!home) throw new Error('No Marmot chat with this person yet');
-    const rumor = buildMarmotRumor(myPubkey, { kind, content, tags: [['e', targetId]] });
+    const rumor = uniqueRumor(myPubkey, kind, content, targetId);
     onBuilt?.(rumor.id);
     let receipt: MarmotSendReceipt | undefined;
     const byRelay = await session.sendRumor(home, rumor, { onSent: (r) => (receipt = r) });

@@ -504,15 +504,16 @@ export function useConversationReactions({
       }
       const pending = isPendingReactionPublish(outcome) ? outcome : null;
       const realId = pending ? pending.id : (outcome as string | null);
+      // Sent, but no relay acknowledged in time: keep it showing as pending,
+      // with no alert, until it's found on a relay or given up on. Tracked
+      // per owner before any early return (an account switch meanwhile, or
+      // the cancel path), so whichever view shows it later still settles it.
+      if (owner && realId) supersedeLostReaction(owner, realId);
+      if (pending && owner) trackPendingReaction(owner, pending.id, pending.settled);
       if (!writerIsCurrent()) return;
       // Did the user un-react while the publish was in flight? (`delete` both
       // reads and clears the flag in one shot.)
       const cancelled = cancelledOptimisticRef.current.delete(optimisticId);
-      // Sent, but no relay acknowledged in time: keep it showing as pending,
-      // with no alert, until it's found on a relay or given up on. Tracked
-      // before the cancel path, so a restored reaction still gets settled.
-      if (owner && realId) supersedeLostReaction(owner, realId);
-      if (pending && owner) trackPendingReaction(owner, pending.id, pending.settled);
       if (realId) {
         if (cancelled) {
           // The reaction WAS published (real id now known) but the user has

@@ -228,14 +228,23 @@ describe('marmotReactionSource', () => {
     jest.useRealTimers();
   });
 
-  it('rebuilds the same id for a retry within the same second', async () => {
+  it('gives each attempt its own id, so an older pending loss only touches itself', async () => {
     jest.useFakeTimers({ now: new Date('2026-10-20T12:00:00.100Z') });
     const session = fakeSession();
+    // First attempt: unacknowledged, and never found.
+    unacknowledged(session, { indeterminate: true, lookup: jest.fn().mockResolvedValue('absent') });
     setMarmotSession(session as unknown as MarmotSession);
-    const first = await publishInGroup();
+    const older = (await publishInGroup()) as PendingReactionPublish;
+    // Same second, same emoji and target: acknowledged this time.
     jest.setSystemTime(new Date('2026-10-20T12:00:00.900Z'));
-    // Why a later attempt has to supersede an earlier attempt's lost marker.
-    expect(await publishInGroup()).toBe(first);
+    const newer = await publishInGroup();
+    expect(newer).toEqual(expect.any(String));
+    expect(newer).not.toBe(older.id);
+    // The older attempt's loss forgets only its own event.
+    await jest.advanceTimersByTimeAsync(43_000);
+    await expect(older.settled).resolves.toBe('lost');
+    expect(session.forgetRumor).toHaveBeenCalledWith('g-group', older.id);
+    expect(session.forgetRumor).not.toHaveBeenCalledWith('g-group', newer);
     jest.useRealTimers();
   });
 
