@@ -21,8 +21,6 @@ const RELAY = 'wss://relay.example.com/';
 const envelope = { id: 'e'.repeat(64), kind: 445, tags: [] } as unknown as Event;
 const resultFor = (response: Record<string, { from: string; ok: boolean; message?: string }>) =>
   [{ work: { kind: 'applicationMessage', envelope }, response }] as never;
-const timedOut = () =>
-  marmotSendReceipt(resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' } }));
 
 beforeEach(() => mockQuery.mockReset());
 afterEach(() => jest.useRealTimers());
@@ -65,11 +63,26 @@ it('tells an outright refusal apart from a timeout', () => {
   expect(receipt.timedOut).toBe(false);
 });
 
-it('reports absent only when a relay completed the read without it', async () => {
-  // A completed read with an unrelated event: not ours.
-  mockQuery.mockResolvedValueOnce([{ id: 'f'.repeat(64) }]);
-  await expect(timedOut().lookup()).resolves.toBe('absent');
-  // No relay reached EOSE (offline, timed out): absence proves nothing.
-  mockQuery.mockRejectedValueOnce(new Error('did not reach EOSE'));
-  await expect(timedOut().lookup()).resolves.toBe('unknown');
+it('reports absent only when every relay completed the read without it', async () => {
+  const OTHER = 'wss://other.example.com/';
+  const twoRelays = () =>
+    marmotSendReceipt(
+      resultFor({
+        [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' },
+        [OTHER]: { from: OTHER, ok: false, message: 'Error: timeout' },
+      }),
+    );
+  // Both completed; one returned an unrelated event: not ours anywhere.
+  mockQuery.mockResolvedValueOnce([{ id: 'f'.repeat(64) }]).mockResolvedValueOnce([]);
+  await expect(twoRelays().lookup()).resolves.toBe('absent');
+  // One answered empty, the other couldn't answer: it may hold it.
+  mockQuery.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('did not reach EOSE'));
+  await expect(twoRelays().lookup()).resolves.toBe('unknown');
+  // Any relay holding it is enough, whatever the others did.
+  mockQuery.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([envelope]);
+  await expect(twoRelays().lookup()).resolves.toBe('found');
+  // Each relay is asked on its own.
+  expect(mockQuery).toHaveBeenCalledWith([OTHER], [{ ids: [envelope.id] }], expect.any(Number), {
+    requireEose: true,
+  });
 });

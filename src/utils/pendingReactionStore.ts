@@ -8,7 +8,22 @@ type Listener = (lost?: { owner: string; id: string }) => void;
 
 const NONE: ReadonlySet<string> = new Set();
 const byOwner = new Map<string, ReadonlySet<string>>();
+// Lost ids stay known, so a later restore (a failed retraction) or a stale
+// read can't merge one back as a ghost pill. Bounded per owner.
+const lostByOwner = new Map<string, Set<string>>();
+const MAX_LOST_PER_OWNER = 200;
 const listeners = new Set<Listener>();
+
+function rememberLost(owner: string, id: string): void {
+  const lost = lostByOwner.get(owner) ?? new Set<string>();
+  lost.add(id);
+  if (lost.size > MAX_LOST_PER_OWNER) lost.delete(lost.values().next().value!);
+  lostByOwner.set(owner, lost);
+}
+
+/** Whether `id` was a reaction that definitely never went out. */
+export const isLostReaction = (owner: string | null, id: string): boolean =>
+  !!owner && !!lostByOwner.get(owner)?.has(id);
 
 // Copy-on-write, so each owner's set is a stable snapshot between changes.
 function update(owner: string, change: (ids: Set<string>) => void): void {
@@ -29,7 +44,10 @@ export function trackPendingReaction(
   listeners.forEach((l) => l());
   void settled.then((outcome) => {
     update(owner, (ids) => ids.delete(id));
-    if (outcome === 'lost') dropCachedReaction(owner, id);
+    if (outcome === 'lost') {
+      rememberLost(owner, id);
+      dropCachedReaction(owner, id);
+    }
     const lost = outcome === 'lost' ? { owner, id } : undefined;
     listeners.forEach((l) => l(lost));
   });

@@ -17,6 +17,7 @@ import {
   readConversationReactions,
 } from '../utils/conversationReactionCache';
 import {
+  isLostReaction,
   pendingReactionIds,
   subscribePendingReactions,
   trackPendingReaction,
@@ -232,6 +233,8 @@ export function useConversationReactions({
         for (const r of fresh) {
           // NIP-09: only the reactor's own retraction counts.
           if (retractions.get(r.id.toLowerCase())?.has(r.reactorPubkey)) continue;
+          // A reaction that never went out can't be restored or re-read (#1656).
+          if (isLostReaction(owner, r.id)) continue;
           if (!seen.has(r.id)) {
             merged.push(r);
             seen.add(r.id);
@@ -240,7 +243,7 @@ export function useConversationReactions({
         return merged;
       });
     },
-    [setReactionRecords, retractions, writerIsCurrent],
+    [setReactionRecords, retractions, writerIsCurrent, owner],
   );
 
   // Apply a batch of NIP-09 (kind-5) deletion events to the local record list.
@@ -503,6 +506,10 @@ export function useConversationReactions({
       // Did the user un-react while the publish was in flight? (`delete` both
       // reads and clears the flag in one shot.)
       const cancelled = cancelledOptimisticRef.current.delete(optimisticId);
+      // Sent, but no relay acknowledged in time: keep it showing as pending,
+      // with no alert, until it's found on a relay or given up on. Tracked
+      // before the cancel path, so a restored reaction still gets settled.
+      if (pending && owner) trackPendingReaction(owner, pending.id, pending.settled);
       if (realId) {
         if (cancelled) {
           // The reaction WAS published (real id now known) but the user has
@@ -517,7 +524,7 @@ export function useConversationReactions({
           }
           if (deleted) {
             applyDeletionEvents([{ pubkey: myPubkey, tags: [['e', realId]] }]);
-          } else {
+          } else if (!isLostReaction(owner, realId)) {
             mergeFreshRecords([{ ...optimistic, id: realId }]);
             if (writerIsCurrent()) {
               Toast.show({
@@ -532,9 +539,6 @@ export function useConversationReactions({
         setReactionRecords((prev) =>
           prev.map((r) => (r.id === optimisticId ? { ...r, id: realId } : r)),
         );
-        // Sent, but no relay acknowledged in time: keep it showing as pending,
-        // with no alert, until it's found on a relay or given up on.
-        if (pending && owner) trackPendingReaction(owner, realId, pending.settled);
       } else {
         // Publish failed — nothing landed on a relay. Drop the placeholder and
         // only warn if the user hadn't already cancelled the reaction.

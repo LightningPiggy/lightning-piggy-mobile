@@ -31,17 +31,20 @@ export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
   const relays = [...new Set(responses.map(([url]) => url))];
   return {
     timedOut: responses.some(([, res]) => !res.ok && TIMEOUT.test(String(res.message ?? ''))),
+    // Each relay on its own: one that answered empty says nothing about one
+    // that couldn't answer. Absent only if every relay completed the read.
     lookup: async () => {
       if (ids.length === 0 || relays.length === 0) return 'unknown';
-      try {
-        // Rejects when no relay served the read to EOSE.
-        const found = await pool.querySyncFilters(relays, [{ ids }], LOOKUP_WAIT_MS, {
-          requireEose: true,
-        });
-        return found.some((e) => ids.includes(e.id)) ? 'found' : 'absent';
-      } catch {
-        return 'unknown';
-      }
+      const reads = await Promise.allSettled(
+        relays.map((relay) =>
+          // Rejects when the relay didn't serve the read to EOSE.
+          pool.querySyncFilters([relay], [{ ids }], LOOKUP_WAIT_MS, { requireEose: true }),
+        ),
+      );
+      const held = (r: (typeof reads)[number]) =>
+        r.status === 'fulfilled' && r.value.some((e) => ids.includes(e.id));
+      if (reads.some(held)) return 'found';
+      return reads.every((r) => r.status === 'fulfilled') ? 'absent' : 'unknown';
     },
   };
 }
