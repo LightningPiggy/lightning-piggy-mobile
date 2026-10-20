@@ -826,7 +826,7 @@ https://zapstore.dev[Zapstore] is a permissionless Android app store built on No
 .. passes zsp a bunker URI with the `secret` parameter removed via `SIGN_WITH`: the pre-flight has already paired the stable client key, so zsp must not resend the consumed token;
 .. runs `zsp publish --quiet --skip-metadata`. zsp downloads the APK, uploads it with the icon and screenshots to `cdn.zapstore.dev` (Blossom), and publishes to `wss://relay.zapstore.dev`.
 * **Events signed by the Lightning Piggy account:** kind `32267` (app), `30063` (release, `d` = `com.lightningpiggy.app@X.Y.Z`), `3063` (APK asset: SHA-256, size, `apk_certificate_hash`, platforms), and one kind `24242` Blossom upload authorisation per uploaded file (icon, 5 screenshots, APK). That makes 10 signatures per release.
-* **The signer is the Lightning Piggy team account**, `npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq` (hex `22818ec3…5a79f429`). Richard holds its key. The kind-1 release announcement (see "Publishing the release note to Nostr (Amber)") still comes from Ben's own account, unchanged.
+* **The signer is the Lightning Piggy team account**, `npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq` (hex `22818ec3…5a79f429`). Richard (@bitcoin3us) and Mannohat (@Mannohat) each hold a copy of its key. The kind-1 release announcement (see "Publishing the release note to Nostr (Amber)") still comes from Ben's own account, unchanged.
 * **Re-runs are safe.** If the version is already on the relay for this account, zsp reports nothing to do and exits.
 
 ==== Who signs owns the listing
@@ -852,16 +852,20 @@ Every asset event records the APK's signing certificate hash. For the EAS produc
 * *nsec.app* works the same way: create a connection for the Lightning Piggy account, copy its `bunker://` URI, and allow the same four kinds without prompting.
 * Keep the signer online, with background running allowed, so release-time requests reach it.
 
-*2. Store the secrets (whoever has admin on the repository).* If Richard isn't a repo admin, he sends the URI privately (an encrypted DM, never email or chat in plain text) and Ben runs this. The secrets go in a `zapstore` Environment that only deploys from `main`, so a workflow dispatched from any other branch can't read them. Create the Environment first: if the workflow runs before it exists, GitHub creates it without the branch rule. Neither secret command echoes the value:
+*2. Store the secrets (whoever has admin on the repository).* If Richard isn't a repo admin, he sends the URI privately (an encrypted DM, never email or chat in plain text) and Ben runs this. The secrets go in a `zapstore` Environment that only deploys from `main`, so a workflow dispatched from any other branch can't read them. The Environment also has *required reviewers*: every publish pauses until a reviewer approves the deployment on the run page, so nothing is signed with the Lightning Piggy account without a second person agreeing. Create the Environment first: if the workflow runs before it exists, GitHub creates it without the branch rule. Neither secret command echoes the value:
 
 [source,bash]
 ----
 set +x
 set -o pipefail
-# The Environment, restricted to deployments from main.
-gh api -X PUT repos/LightningPiggy/lightning-piggy-mobile/environments/zapstore \
-  -F 'deployment_branch_policy[protected_branches]=false' \
-  -F 'deployment_branch_policy[custom_branch_policies]=true'
+# The Environment, restricted to deployments from main, with required
+# reviewers (Ben and Richard): each publish waits for one of them to approve.
+ben_id=$(gh api users/BenGWeeks --jq .id)
+richard_id=$(gh api users/bitcoin3us --jq .id)
+jq -n --argjson ben "$ben_id" --argjson richard "$richard_id" '{
+  deployment_branch_policy: {protected_branches: false, custom_branch_policies: true},
+  reviewers: [{type: "User", id: $ben}, {type: "User", id: $richard}]
+}' | gh api -X PUT repos/LightningPiggy/lightning-piggy-mobile/environments/zapstore --input -
 gh api -X POST repos/LightningPiggy/lightning-piggy-mobile/environments/zapstore/deployment-branch-policies \
   -f name=main -f type=branch
 
