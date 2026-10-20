@@ -14,7 +14,6 @@ import {
   buildInviteBatch,
   deliveredAccounts,
   DEVICE_MAX_AGE_SECS,
-  devicesForDm,
   MAX_DEVICES_PER_PERSON,
   WHITE_NOISE_MAX_AGE_SECS,
   resolveInvitees,
@@ -287,7 +286,7 @@ describe('selectDeviceKeyPackages', () => {
     expect(await selectDeviceKeyPackages(little.pubkey, [])).toEqual([]);
   });
 
-  it('1:1s with a White Noise user get their newest White Noise device only', async () => {
+  it("a contact's White Noise and Lightning Piggy installs are all selected (#1663)", async () => {
     const asClient = (e: NostrEvent, client: string, createdAt: number) =>
       finalizeEvent(
         {
@@ -305,11 +304,8 @@ describe('selectDeviceKeyPackages', () => {
     const all = await selectDeviceKeyPackages(little.pubkey, [wnOld, lpTablet, wnNew, lpPhone], {
       nowSecs: now,
     });
-    expect(all).toHaveLength(4);
-    // White Noise counts leaves to spot a DM: one White Noise device keeps it a DM there.
-    expect(devicesForDm(all)).toEqual([wnNew]);
-    // Lightning Piggy-only contacts get every device in a 1:1 too.
-    expect(devicesForDm([lpPhone, lpTablet])).toEqual([lpPhone, lpTablet]);
+    // Every app's install, newest first: 1:1s and groups invite them all (#1663).
+    expect(all).toEqual([lpPhone, lpTablet, wnNew, wnOld]);
   });
 
   it('yields between signature checks', async () => {

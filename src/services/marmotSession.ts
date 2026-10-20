@@ -554,8 +554,8 @@ export class MarmotSession {
     // missing key package). Not awaited: the invite doesn't depend on it.
     void this.ensureKeyPackage();
     // Resolve every invitee's devices first so a missing one fails before we
-    // create an orphan group. DM shape: unnamed, one other (devicesForDm).
-    const devices = await this.invitees(members, { dm: name === '' && members.length === 1 });
+    // create an orphan group. Every device of each person, 1:1s included.
+    const devices = await this.invitees(members);
     const group = await this.client.groups.create(name, {
       description: opts.description ?? '',
       relays: this.writeRelays(),
@@ -802,9 +802,9 @@ export class MarmotSession {
   }
 
   /** Each invitee's devices; throws for anyone with none we can invite. */
-  private invitees(members: string[], opts?: { dm?: boolean }) {
+  private invitees(members: string[]) {
     const lookup = this.opts.getLookupRelays();
-    return resolveInvitees(this.client.network, lookup, this.pubkey, members, opts);
+    return resolveInvitees(this.client.network, lookup, this.pubkey, members);
   }
 
   private summarise(g: SessionGroup): MarmotGroupSummary {
