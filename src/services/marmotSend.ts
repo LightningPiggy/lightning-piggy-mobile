@@ -18,6 +18,7 @@ import { MarmotGroupNotReadyError } from './marmotSendGate';
 import { t } from '../i18n';
 import { MarmotKeyPackageLookupError } from './marmotKeyPackages';
 import { amberRequestOpenSince } from './marmotSigner';
+import { beginDmSetupTrace } from './marmotDmSetupTrace';
 import {
   MarmotNoKeyPackageError,
   MarmotUnusableKeyPackageError,
@@ -92,7 +93,18 @@ export function getOrCreateDmWithin(
       timeoutMs,
     );
   });
-  return Promise.race([session.getOrCreateDm(peer), deadline]).finally(() => clearTimeout(timer));
+  const trace = beginDmSetupTrace(peer);
+  return Promise.race([session.getOrCreateDm(peer), deadline])
+    .then(
+      (dm) => (trace.end('ok'), dm),
+      (e: unknown) => {
+        trace.end(
+          e instanceof MarmotDmSetupTimeoutError ? 'timeout' : `failed ${(e as Error)?.name}`,
+        );
+        throw e;
+      },
+    )
+    .finally(() => clearTimeout(timer));
 }
 
 /** A user-facing reason a Marmot send couldn't start. */

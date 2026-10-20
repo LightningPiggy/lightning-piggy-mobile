@@ -18,6 +18,7 @@ import { NSEC_KEY } from '../contexts/nostrAuthKeys';
 import type { SignerType } from '../types/nostr';
 import * as amberService from './amberService';
 import { AmberSignerError } from './amberErrors';
+import { markDmSetup } from './marmotDmSetupTrace';
 import { nip44DecryptFrom, nip44EncryptForRecipient } from './nostrCrypto';
 import * as nostrConnectService from './nostrConnectService';
 import * as nostrService from './nostrService';
@@ -70,9 +71,19 @@ export const AMBER_REQUEST_TIMEOUT_MS = 120_000;
 let amberOpenSince: number | null = null;
 export const amberRequestOpenSince = (): number | null => amberOpenSince;
 
-function withAmberDeadline<T>(task: () => Promise<T>): Promise<T> {
+/** An Amber answer faster than this almost certainly came from its silent
+ * ContentResolver path (no approval sheet); slower ones from an Intent. */
+const AMBER_SILENT_GUESS_MS = 1_500;
+
+function withAmberDeadline<T>(task: () => Promise<T>, op: string): Promise<T> {
   const startedAt = Date.now();
   amberOpenSince = startedAt;
+  markDmSetup(`amber ${op} start`);
+  const settled = (outcome: string) => {
+    const ms = Date.now() - startedAt;
+    const path = ms < AMBER_SILENT_GUESS_MS ? 'silent?' : 'intent?';
+    markDmSetup(`amber ${op} ${outcome} ${ms}ms ${path}`);
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -83,10 +94,18 @@ function withAmberDeadline<T>(task: () => Promise<T>): Promise<T> {
       AMBER_REQUEST_TIMEOUT_MS,
     );
   });
-  return Promise.race([task(), deadline]).finally(() => {
-    clearTimeout(timer);
-    if (amberOpenSince === startedAt) amberOpenSince = null;
-  });
+  return Promise.race([task(), deadline])
+    .then(
+      (value) => (settled('ok'), value),
+      (e: unknown) => {
+        settled((e as { code?: string })?.code ?? 'error');
+        throw e;
+      },
+    )
+    .finally(() => {
+      clearTimeout(timer);
+      if (amberOpenSince === startedAt) amberOpenSince = null;
+    });
 }
 
 /** Settle with `p`, or reject as soon as `cancelled()` turns true — so an
@@ -114,8 +133,8 @@ export function createMarmotSigner(
   opts: { cancelled?: () => boolean } = {},
 ): EventSigner {
   const { cancelled } = opts;
-  const run = <T>(rawTask: () => Promise<T>): Promise<T> => {
-    const task = signerType === 'amber' ? () => withAmberDeadline(rawTask) : rawTask;
+  const run = <T>(rawTask: () => Promise<T>, op = 'request'): Promise<T> => {
+    const task = signerType === 'amber' ? () => withAmberDeadline(rawTask, op) : rawTask;
     if (!cancelled) return enqueue(task);
     return new Promise<T>((resolve, reject) => {
       void enqueue(async () => {
@@ -165,7 +184,7 @@ export function createMarmotSigner(
           return parseSigned(event, 'NIP-46 signer');
         }
       }
-    });
+    }, `sign:${draft.kind}`);
 
   const nip44 = {
     encrypt: (peer: string, plaintext: string) =>
@@ -178,7 +197,7 @@ export function createMarmotSigner(
           case 'nip46':
             return nostrConnectService.requestNip44Encrypt(plaintext, peer, pubkey);
         }
-      }),
+      }, 'nip44_encrypt'),
     decrypt: (peer: string, ciphertext: string) =>
       run(async () => {
         switch (signerType) {
@@ -189,7 +208,7 @@ export function createMarmotSigner(
           case 'nip46':
             return nostrConnectService.requestNip44Decrypt(ciphertext, peer, pubkey);
         }
-      }),
+      }, 'nip44_decrypt'),
   };
 
   return { getPublicKey: () => pubkey, signEvent, nip44 };
