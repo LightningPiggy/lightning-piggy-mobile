@@ -518,7 +518,7 @@ export class MarmotSession {
       .sort((a, b) => b.createdAt - a.createdAt)[0];
   }
 
-  /** Whether `peer` has a key package we could invite; throws if the lookup failed. */
+  /** Whether `peer` has a key package to invite; throws on a failed lookup / only unusable keys. */
   async canMessage(peer: string): Promise<boolean> {
     const lookup = this.opts.getLookupRelays();
     return (await fetchDevices(this.client.network, lookup, peer)).length > 0;

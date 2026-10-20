@@ -9,6 +9,8 @@ export const createDmProtocolPickerSheetStyles = (colors: Palette) =>
     title: { fontSize: 20, fontWeight: '700', color: colors.textHeader },
     option: { padding: 12, borderRadius: 12, backgroundColor: colors.background, gap: 6 },
     disabled: { opacity: 0.6 },
+    optionBody: { gap: 6 },
+    dimmed: { gap: 6, opacity: 0.45 },
     heading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     name: { color: colors.textHeader, fontSize: 14, fontWeight: '600' },
     badge: { color: colors.courseTeal, fontSize: 12, flex: 1 },

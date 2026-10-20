@@ -88,19 +88,22 @@ export default function DmProtocolPickerSheet({
           const label = `${DM_PROTOCOL_LABEL[protocol]}. ${t(`dmProtocol.${protocol}.badge`)}. ${t(`dmProtocol.${protocol}.description`)}${status}`;
           const content = (
             <>
-              <View style={styles.heading}>
-                <Text style={styles.name}>{DM_PROTOCOL_LABEL[protocol]}</Text>
-                <Text style={styles.badge}>{t(`dmProtocol.${protocol}.badge`)}</Text>
-                {selected === protocol && (
-                  <View testID={`dm-protocol-selected-${protocol}`}>
-                    <Check size={18} color={colors.courseTeal} />
-                  </View>
+              {/* Greyed out, but the reason under it stays readable. */}
+              <View style={unavailable ? styles.dimmed : styles.optionBody}>
+                <View style={styles.heading}>
+                  <Text style={styles.name}>{DM_PROTOCOL_LABEL[protocol]}</Text>
+                  <Text style={styles.badge}>{t(`dmProtocol.${protocol}.badge`)}</Text>
+                  {selected === protocol && (
+                    <View testID={`dm-protocol-selected-${protocol}`}>
+                      <Check size={18} color={colors.courseTeal} />
+                    </View>
+                  )}
+                </View>
+                {protocol === 'nip17' && (
+                  <Text style={styles.name}>{t('dmProtocol.privateMessages')}</Text>
                 )}
+                <Text style={styles.description}>{t(`dmProtocol.${protocol}.description`)}</Text>
               </View>
-              {protocol === 'nip17' && (
-                <Text style={styles.name}>{t('dmProtocol.privateMessages')}</Text>
-              )}
-              <Text style={styles.description}>{t(`dmProtocol.${protocol}.description`)}</Text>
               {marmot && (
                 <MarmotAvailabilityNote
                   availability={availability}
@@ -127,7 +130,7 @@ export default function DmProtocolPickerSheet({
           ) : (
             <TouchableOpacity
               key={protocol}
-              style={unavailable ? [styles.option, styles.disabled] : styles.option}
+              style={styles.option}
               onPress={unavailable ? explainUnavailable : () => onSelect(protocol)}
               testID={`dm-protocol-option-${protocol}`}
               accessibilityLabel={label}
