@@ -116,6 +116,10 @@ export function marmotReactionSource(
   groupId?: string,
 ): MarmotReactionSource {
   const p = peer.toLowerCase();
+  // Only this account's own pending retractions are held back: another
+  // account on the device (also in the group) must still apply one it got.
+  const isOwnUnconfirmed = (r: MarmotRumor) =>
+    unconfirmedDeletions.has(r.id) && r.pubkey.toLowerCase() === myPubkey.toLowerCase();
   const groupsFor = (session: MarmotSession) =>
     groupId ? Promise.resolve([groupId]) : session.dmGroupIdsWith(p);
 
@@ -129,7 +133,7 @@ export function marmotReactionSource(
     const out: MarmotRumor[] = [];
     for (const groupId of await groupsFor(session)) {
       for (const r of await session.queryHistory(groupId, [kind])) {
-        if (unconfirmedDeletions.has(r.id)) continue;
+        if (isOwnUnconfirmed(r)) continue;
         if (eTargets(r).some((t) => wanted.has(t))) out.push(r);
       }
     }
@@ -259,7 +263,7 @@ export function marmotReactionSource(
             if (rumor.kind !== REACTION_KIND && rumor.kind !== DELETION_KIND) return;
             // A startup replay can surface our own retraction before it's
             // confirmed; it arrives via the listener below once it is.
-            if (unconfirmedDeletions.has(rumor.id)) return;
+            if (isOwnUnconfirmed(rumor)) return;
             if (groupId ? group.id === groupId : group.isDm && group.memberPubkeys[0] === p) {
               onEvent(rumor);
             }

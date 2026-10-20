@@ -306,6 +306,34 @@ describe('marmotReactionSource', () => {
     jest.useRealTimers();
   });
 
+  it("holds back only the sending account's own pending retraction", async () => {
+    jest.useFakeTimers();
+    const session = fakeSession();
+    let saved: MarmotRumor | undefined;
+    session.sendRumor.mockImplementationOnce(async (_g, rumor, opts) => {
+      saved = rumor;
+      opts?.onSent?.({ indeterminate: true, lookup: jest.fn().mockResolvedValue('unknown') });
+      return { 'wss://r': false };
+    });
+    setMarmotSession(session as unknown as MarmotSession);
+    const deleted = marmotReactionSource(ME, '', 'g-group').deleteReaction('r-mine');
+    await jest.advanceTimersByTimeAsync(0);
+    // Switched to B, another member of the group: A's retraction reaches B over
+    // MLS while A's own confirmation is still pending — B must apply it.
+    const B = 'c'.repeat(64);
+    const asB = fakeSession();
+    (asB as { pubkey: string }).pubkey = B;
+    setMarmotSession(asB as unknown as MarmotSession);
+    const onEvent = jest.fn();
+    const unsubscribe = marmotReactionSource(B, '', 'g-group').subscribe(onEvent);
+    asB.emit({ group: { id: 'g-group', isDm: false }, rumor: saved });
+    expect(onEvent).toHaveBeenCalledWith(saved);
+    unsubscribe();
+    await jest.advanceTimersByTimeAsync(43_000);
+    await deleted;
+    jest.useRealTimers();
+  });
+
   it('confirms a timed-out retraction instead of reporting it failed', async () => {
     jest.useFakeTimers();
     const session = fakeSession();
