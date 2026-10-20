@@ -9,6 +9,7 @@
 
 import type { MarmotGroup } from '@internet-privacy/marmot-ts';
 import { pool } from './nostrPool';
+import { getCurrentUserPubkey } from './nostrActiveAccount';
 
 type PublishResults = Awaited<ReturnType<MarmotGroup['submitIntent']>>;
 
@@ -32,6 +33,11 @@ const NOT_STORED =
 const LOOKUP_WAIT_MS = 6_000;
 
 export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
+  // Reads route through the active account's relays (test accounts are locked
+  // to the test relay), so a look made while another account is active asks
+  // somewhere else: it proves nothing about where this send went.
+  const account = getCurrentUserPubkey();
+  const sameAccount = () => getCurrentUserPubkey() === account;
   const ids = results.flatMap((r) => ('envelope' in r.work ? [r.work.envelope.id] : []));
   const responses = results.flatMap((r) => Object.entries(r.response));
   // Relays that refused it or never got it can't hold it: only ask the rest.
@@ -49,7 +55,7 @@ export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
     // match counts even if the relay closed before EOSE); only a read served
     // to EOSE can establish that the relay doesn't hold it.
     lookup: async () => {
-      if (ids.length === 0 || relays.length === 0) return 'unknown';
+      if (ids.length === 0 || relays.length === 0 || !sameAccount()) return 'unknown';
       const holds = (events: { id: string }[]) => events.some((e) => ids.includes(e.id));
       const perRelay = await Promise.all(
         relays.map(async (relay): Promise<MarmotLookup> => {
@@ -64,6 +70,8 @@ export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
           return strict.status === 'fulfilled' ? 'absent' : 'unknown';
         }),
       );
+      // Switched mid-read: the reads may have gone to the other account's relays.
+      if (!sameAccount()) return 'unknown';
       if (perRelay.includes('found')) return 'found';
       return perRelay.every((r) => r === 'absent') ? 'absent' : 'unknown';
     },

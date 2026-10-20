@@ -6,6 +6,7 @@ import type { Event } from 'nostr-tools';
 import { createMarmotNetwork } from './marmotNetwork';
 import { marmotSendReceipt } from './marmotSendReceipt';
 import { RELAY_SKIPPED_REASON } from './relayHealth';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
 
 const mockPublish = jest.fn();
 const mockQuery = jest.fn();
@@ -138,4 +139,29 @@ it('looks only at relays that may hold it', async () => {
   // The never-connected relay can't hold it, so it can't make this unknown.
   await expect(receipt.lookup()).resolves.toBe('absent');
   expect(mockQuery.mock.calls.every(([urls]) => urls[0] === RELAY)).toBe(true);
+});
+
+it("can't establish anything while another account is active", async () => {
+  const ACCOUNT_A = 'a'.repeat(64);
+  setCurrentUserPubkey(ACCOUNT_A);
+  const receipt = marmotSendReceipt(
+    resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' } }),
+  );
+  // Switched before the look: its reads would route to the other account's relays.
+  setCurrentUserPubkey('b'.repeat(64));
+  relaysAnswer({ [RELAY]: { events: [], eose: true } });
+  await expect(receipt.lookup()).resolves.toBe('unknown');
+  expect(mockQuery).not.toHaveBeenCalled();
+  // Switched while the read was out: the same.
+  setCurrentUserPubkey(ACCOUNT_A);
+  mockQuery.mockImplementation(async () => {
+    setCurrentUserPubkey('b'.repeat(64));
+    return [];
+  });
+  await expect(receipt.lookup()).resolves.toBe('unknown');
+  // Back on the sending account, an EOSE-served miss counts again.
+  setCurrentUserPubkey(ACCOUNT_A);
+  relaysAnswer({ [RELAY]: { events: [], eose: true } });
+  await expect(receipt.lookup()).resolves.toBe('absent');
+  setCurrentUserPubkey(null);
 });
