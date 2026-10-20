@@ -17,6 +17,7 @@ import {
 } from './marmotSend';
 import { MarmotKeyPackageLookupError } from './marmotKeyPackages';
 import * as marmotSigner from './marmotSigner';
+import { markDmSetup } from './marmotDmSetupTrace';
 import { marmotReplyTags } from './marmotEdits';
 import { marmotRumorToGroupMessage, marmotRumorToDmRow } from './marmotInbox';
 import { buildMarmotRumor } from './marmotSession';
@@ -172,6 +173,30 @@ describe('sendMarmotDm', () => {
       });
       expect(ready).not.toHaveBeenCalled();
     } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('logs one [MarmotDiag] line naming the stage a timed-out set-up was stuck in (#1658)', async () => {
+    jest.useFakeTimers();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      fakeSession({
+        getOrCreateDm: () => {
+          markDmSetup('invite queued welcomes=1');
+          return new Promise(() => undefined);
+        },
+      });
+      const pending = sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
+      await jest.advanceTimersByTimeAsync(DM_SETUP_TIMEOUT_MS);
+      await pending;
+      const lines = warn.mock.calls
+        .map((c) => String(c[0]))
+        .filter((l) => l.includes('MarmotDiag'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/dm set-up bbbbbbbb timeout in \d+ms: invite queued welcomes=1/);
+    } finally {
+      warn.mockRestore();
       jest.useRealTimers();
     }
   });

@@ -48,6 +48,7 @@ import {
 import { advertisesMediaV2 } from './marmotKeyPackageLifecycle';
 import type { MarmotRequestOptions } from './marmotNetwork';
 import type { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
+import { markDmSetup } from './marmotDmSetupTrace';
 
 const KEY_PACKAGE_KIND = 30443;
 const DAY_SECS = 24 * 60 * 60;
@@ -326,7 +327,18 @@ export async function resolveInvitees(
 ): Promise<Map<string, NostrEvent[]>> {
   const me = self.toLowerCase();
   const peers = [...new Set(members.map((m) => m.toLowerCase()))].filter((m) => m !== me);
-  const lists = await Promise.all(peers.map((p) => fetchDevices(network, lookupRelays, p)));
+  markDmSetup(`lookup start peers=${peers.length}`);
+  const lists = await Promise.all(
+    peers.map((p) =>
+      fetchDevices(network, lookupRelays, p).then(
+        (devices) => (markDmSetup(`lookup ${p.slice(0, 8)} devices=${devices.length}`), devices),
+        (e: unknown) => {
+          markDmSetup(`lookup ${p.slice(0, 8)} failed ${(e as Error)?.name ?? 'error'}`);
+          throw e;
+        },
+      ),
+    ),
+  );
   peers.forEach((p, i) => {
     if (lists[i].length === 0) throw new MarmotNoKeyPackageError(p);
   });
@@ -367,14 +379,18 @@ export async function inviteDevices(
   const total = intent.welcomeRecipients?.length ?? 0;
   let done = 0;
   onProgress?.(0, total);
+  // "queued" → "sending": a gap means an earlier invite still holds the outbox.
+  markDmSetup(`invite queued welcomes=${total}`);
   const { result, failed } = await outbox.capture(
-    () => groups.send(mlsId, intent),
-    () => onProgress?.(++done, total),
+    () => (markDmSetup('invite sending'), groups.send(mlsId, intent)),
+    () => (markDmSetup(`welcome ${done + 1}/${total} published`), onProgress?.(++done, total)),
   );
+  markDmSetup(`invite sent failedWelcomes=${failed.length}`);
   const delivered = deliveredAccounts(result);
   const stillFailed = failed.length > 0 ? await outbox.resend(failed) : [];
   for (const w of failed) if (!stillFailed.includes(w)) delivered.add(w.recipient);
   if (stillFailed.length > 0) await outbox.enqueue(mlsId, stillFailed);
+  if (failed.length > 0) markDmSetup(`welcome resend stillFailed=${stillFailed.length}`);
   const undelivered = [...batch.devices.keys()].filter((p) => !delivered.has(p));
   if (__DEV__) {
     const counts = [...batch.devices].map(([p, n]) => `${p.slice(0, 8)}×${n}`).join(', ');
