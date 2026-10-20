@@ -276,6 +276,36 @@ describe('marmotReactionSource', () => {
     },
   );
 
+  it('never lets a late history read apply a retraction that failed', async () => {
+    jest.useFakeTimers();
+    const session = fakeSession();
+    history['g-group'] = [];
+    session.sendRumor.mockImplementationOnce(async (groupId, rumor, opts) => {
+      history[groupId].push(rumor);
+      opts?.onSent?.({ indeterminate: true, lookup: jest.fn().mockResolvedValue('absent') });
+      return { 'wss://r': false };
+    });
+    setMarmotSession(session as unknown as MarmotSession);
+    const deleted = marmotReactionSource(ME, '', 'g-group').deleteReaction('r-mine');
+    await jest.advanceTimersByTimeAsync(0);
+    // A reopened chat's history read starts now, but its result lands late...
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const snapshot = [...history['g-group']];
+    session.queryHistory.mockImplementationOnce(async () => {
+      await gate;
+      return snapshot;
+    });
+    const late = marmotReactionSource(ME, '', 'g-group').fetchReactionDeletions(['r-mine']);
+    await jest.advanceTimersByTimeAsync(43_000);
+    await expect(deleted).resolves.toBe(false);
+    // ...after the failure was cleaned up: it still mustn't carry the kind-5.
+    release();
+    await expect(late).resolves.toEqual([]);
+    delete history['g-group'];
+    jest.useRealTimers();
+  });
+
   it('confirms a timed-out retraction instead of reporting it failed', async () => {
     jest.useFakeTimers();
     const session = fakeSession();

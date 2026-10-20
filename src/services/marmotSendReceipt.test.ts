@@ -48,7 +48,7 @@ it('reports a slow relay as timed out, though its publish still lands afterwards
   // ...yet the publish was never cancelled: it lands, and the relay holds it.
   await jest.advanceTimersByTimeAsync(2_000);
   expect(landed).toBe(true);
-  mockQuery.mockResolvedValue([envelope]);
+  relaysAnswer({ [RELAY]: { events: [envelope], eose: true } });
   const receipt = marmotSendReceipt(resultFor(response));
   expect(receipt.indeterminate).toBe(true);
   await expect(receipt.lookup()).resolves.toBe('found');
@@ -75,6 +75,18 @@ it('counts only an explicit relay refusal as definite', () => {
   expect(receipt('Error: publish timed out').indeterminate).toBe(true);
 });
 
+// How each relay answers a lookup: what it streamed, and whether it then
+// served the read to EOSE (a strict read rejects without it).
+type RelayRead = { events: { id: string }[]; eose: boolean };
+const relaysAnswer = (reads: Record<string, RelayRead>) =>
+  mockQuery.mockImplementation(
+    async (urls: string[], _f: unknown, _wait: number, opts?: { requireEose?: boolean }) => {
+      const read = reads[urls[0]] ?? { events: [], eose: false };
+      if (opts?.requireEose && !read.eose) throw new Error('did not reach EOSE');
+      return read.events;
+    },
+  );
+
 it('reports absent only when every relay completed the read without it', async () => {
   const OTHER = 'wss://other.example.com/';
   const twoRelays = () =>
@@ -85,18 +97,33 @@ it('reports absent only when every relay completed the read without it', async (
       }),
     );
   // Both completed; one returned an unrelated event: not ours anywhere.
-  mockQuery.mockResolvedValueOnce([{ id: 'f'.repeat(64) }]).mockResolvedValueOnce([]);
+  relaysAnswer({
+    [RELAY]: { events: [{ id: 'f'.repeat(64) }], eose: true },
+    [OTHER]: { events: [], eose: true },
+  });
   await expect(twoRelays().lookup()).resolves.toBe('absent');
   // One answered empty, the other couldn't answer: it may hold it.
-  mockQuery.mockResolvedValueOnce([]).mockRejectedValueOnce(new Error('did not reach EOSE'));
+  relaysAnswer({ [RELAY]: { events: [], eose: true }, [OTHER]: { events: [], eose: false } });
   await expect(twoRelays().lookup()).resolves.toBe('unknown');
   // Any relay holding it is enough, whatever the others did.
-  mockQuery.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([envelope]);
+  relaysAnswer({
+    [RELAY]: { events: [], eose: false },
+    [OTHER]: { events: [envelope], eose: true },
+  });
   await expect(twoRelays().lookup()).resolves.toBe('found');
-  // Each relay is asked on its own.
+  // Each relay is asked on its own, strictly as well as laxly.
   expect(mockQuery).toHaveBeenCalledWith([OTHER], [{ ids: [envelope.id] }], expect.any(Number), {
     requireEose: true,
   });
+  expect(mockQuery).toHaveBeenCalledWith([OTHER], [{ ids: [envelope.id] }], expect.any(Number));
+});
+
+it('counts a match even when the relay closed before EOSE', async () => {
+  relaysAnswer({ [RELAY]: { events: [envelope], eose: false } });
+  const receipt = marmotSendReceipt(
+    resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' } }),
+  );
+  await expect(receipt.lookup()).resolves.toBe('found');
 });
 
 it('looks only at relays that may hold it', async () => {
@@ -107,11 +134,8 @@ it('looks only at relays that may hold it', async () => {
       [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' },
     }),
   );
-  mockQuery.mockResolvedValueOnce([]);
+  relaysAnswer({ [RELAY]: { events: [], eose: true } });
   // The never-connected relay can't hold it, so it can't make this unknown.
   await expect(receipt.lookup()).resolves.toBe('absent');
-  expect(mockQuery).toHaveBeenCalledTimes(1);
-  expect(mockQuery).toHaveBeenCalledWith([RELAY], expect.anything(), expect.any(Number), {
-    requireEose: true,
-  });
+  expect(mockQuery.mock.calls.every(([urls]) => urls[0] === RELAY)).toBe(true);
 });

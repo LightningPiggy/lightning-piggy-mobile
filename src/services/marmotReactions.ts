@@ -27,11 +27,20 @@ const DELETION_KIND = 5;
 const SESSION_WAIT_MS = 60_000;
 /** When to look for an unacknowledged reaction on the relays (#1656). */
 const CONFIRM_DELAYS_MS = [3_000, 10_000, 30_000];
-/** Our own retractions not yet acknowledged or confirmed. marmot-ts saves a
- * send into the history before publishing; until one is confirmed, history
- * reads skip it, so a chat reopened meanwhile can't apply a retraction that
- * may turn out never to have gone out (and would hide the pill for good). */
+/** Our own retractions not (yet) confirmed. marmot-ts saves a send into the
+ * history before publishing; history reads and replays skip these, so a chat
+ * reopened meanwhile can't apply a retraction that may never have gone out
+ * (and would hide the pill for good). A failed one stays here: a read that
+ * started before its cleanup may still return it. Only confirmation removes
+ * an id. Bounded. */
 const unconfirmedDeletions = new Set<string>();
+const MAX_UNCONFIRMED_DELETIONS = 500;
+function markUnconfirmedDeletion(id: string): void {
+  unconfirmedDeletions.add(id);
+  if (unconfirmedDeletions.size > MAX_UNCONFIRMED_DELETIONS) {
+    unconfirmedDeletions.delete(unconfirmedDeletions.values().next().value!);
+  }
+}
 /** Confirmed own retractions, told straight to every open reaction view.
  * Not via the session: MLS never echoes our sends, and its delivery is
  * deduplicated by id, so a startup replay that met the retraction while it
@@ -213,10 +222,11 @@ export function marmotReactionSource(
     // so the user can retry) and dropped locally so it can't hide it later.
     deleteReaction: async (reactionEventId) => {
       let rumorId: string | undefined;
+      let confirmed = false;
       try {
         const sent = await sendReferencing(DELETION_KIND, '', reactionEventId, (id) => {
           rumorId = id;
-          unconfirmedDeletions.add(id);
+          markUnconfirmedDeletion(id);
         }).catch(() => null);
         if (!sent) return false;
         const outcome = sent.accepted
@@ -224,11 +234,16 @@ export function marmotReactionSource(
           : sent.receipt?.indeterminate
             ? await settleLater(sent)
             : 'lost';
-        if (outcome === 'sent') sent.deliver();
-        else await sent.forget();
-        return outcome === 'sent';
+        confirmed = outcome === 'sent';
+        if (confirmed) {
+          unconfirmedDeletions.delete(sent.id);
+          sent.deliver();
+        } else await sent.forget();
+        return confirmed;
       } finally {
-        if (rumorId) unconfirmedDeletions.delete(rumorId);
+        // Sent but its outcome never established (e.g. the send threw):
+        // keep it excluded rather than risk applying it later.
+        if (rumorId && confirmed) unconfirmedDeletions.delete(rumorId);
       }
     },
     // Follows the active session, so a thread opened during cold start (or

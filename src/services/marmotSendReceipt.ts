@@ -45,19 +45,27 @@ export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
   return {
     indeterminate: relays.length > 0,
     // Each relay on its own: one that answered empty says nothing about one
-    // that couldn't answer. Absent only if every relay completed the read.
+    // that couldn't answer. Per relay, a lax read keeps whatever arrived (a
+    // match counts even if the relay closed before EOSE); only a read served
+    // to EOSE can establish that the relay doesn't hold it.
     lookup: async () => {
       if (ids.length === 0 || relays.length === 0) return 'unknown';
-      const reads = await Promise.allSettled(
-        relays.map((relay) =>
-          // Rejects when the relay didn't serve the read to EOSE.
-          pool.querySyncFilters([relay], [{ ids }], LOOKUP_WAIT_MS, { requireEose: true }),
-        ),
+      const holds = (events: { id: string }[]) => events.some((e) => ids.includes(e.id));
+      const perRelay = await Promise.all(
+        relays.map(async (relay): Promise<MarmotLookup> => {
+          const [lax, strict] = await Promise.allSettled([
+            pool.querySyncFilters([relay], [{ ids }], LOOKUP_WAIT_MS),
+            // Rejects when the relay didn't serve the read to EOSE.
+            pool.querySyncFilters([relay], [{ ids }], LOOKUP_WAIT_MS, { requireEose: true }),
+          ]);
+          if ([lax, strict].some((r) => r.status === 'fulfilled' && holds(r.value))) {
+            return 'found';
+          }
+          return strict.status === 'fulfilled' ? 'absent' : 'unknown';
+        }),
       );
-      const held = (r: (typeof reads)[number]) =>
-        r.status === 'fulfilled' && r.value.some((e) => ids.includes(e.id));
-      if (reads.some(held)) return 'found';
-      return reads.every((r) => r.status === 'fulfilled') ? 'absent' : 'unknown';
+      if (perRelay.includes('found')) return 'found';
+      return perRelay.every((r) => r === 'absent') ? 'absent' : 'unknown';
     },
   };
 }
