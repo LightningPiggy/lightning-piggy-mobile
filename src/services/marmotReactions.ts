@@ -32,6 +32,12 @@ const CONFIRM_DELAYS_MS = [3_000, 10_000, 30_000];
  * reads skip it, so a chat reopened meanwhile can't apply a retraction that
  * may turn out never to have gone out (and would hide the pill for good). */
 const unconfirmedDeletions = new Set<string>();
+/** Confirmed own retractions, told straight to every open reaction view.
+ * Not via the session: MLS never echoes our sends, and its delivery is
+ * deduplicated by id, so a startup replay that met the retraction while it
+ * was still hidden would swallow a later re-delivery. */
+type ConfirmedRetraction = { groupId: string; peer: string; rumor: MarmotRumor };
+const confirmedRetractionListeners = new Set<(e: ConfirmedRetraction) => void>();
 /** Ids already used by a send. The id hashes a 1-second created_at, so a
  * quick add → remove → add would rebuild the same event; each attempt gets
  * its own id instead, and an older attempt's outcome (or its history
@@ -155,9 +161,9 @@ export function marmotReactionSource(
       // marmot-ts saves a sent event into the group's history before
       // publishing; one that never landed must not reappear on reopen.
       forget: () => session.forgetRumor(group, rumor.id).catch(() => undefined),
-      // MLS never echoes our own sends: run a confirmed one through the inbound
-      // path so every open view of this chat applies it (a reopened one too).
-      deliver: () => session.deliverOwn(group, rumor),
+      // Every open view of this chat applies a confirmed one (a reopened one too).
+      deliver: () =>
+        confirmedRetractionListeners.forEach((l) => l({ groupId: group, peer: p, rumor })),
     };
   };
 
@@ -236,15 +242,24 @@ export function marmotReactionSource(
         detach = session.subscribe({
           onMessage: ({ group, rumor }) => {
             if (rumor.kind !== REACTION_KIND && rumor.kind !== DELETION_KIND) return;
+            // A startup replay can surface our own retraction before it's
+            // confirmed; it arrives via the listener below once it is.
+            if (unconfirmedDeletions.has(rumor.id)) return;
             if (groupId ? group.id === groupId : group.isDm && group.memberPubkeys[0] === p) {
               onEvent(rumor);
             }
           },
         });
       });
+      const onConfirmed = (e: ConfirmedRetraction) => {
+        if (e.rumor.pubkey !== myPubkey) return;
+        if (groupId ? e.groupId === groupId : !!p && e.peer === p) onEvent(e.rumor);
+      };
+      confirmedRetractionListeners.add(onConfirmed);
       return () => {
         unsubscribeSession();
         detach?.();
+        confirmedRetractionListeners.delete(onConfirmed);
       };
     },
   };

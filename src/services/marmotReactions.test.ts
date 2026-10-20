@@ -52,10 +52,6 @@ function fakeSession() {
       return () => undefined;
     }),
     emit: (e: unknown) => listeners.forEach((l) => l(e)),
-    // Own sends go through the inbound path, as in MarmotSession.
-    deliverOwn: jest.fn((groupId: string, rumor: MarmotRumor) =>
-      listeners.forEach((l) => l({ group: { id: groupId, isDm: false }, rumor })),
-    ),
   };
   return session;
 }
@@ -247,6 +243,38 @@ describe('marmotReactionSource', () => {
     expect(session.forgetRumor).not.toHaveBeenCalledWith('g-group', newer);
     jest.useRealTimers();
   });
+
+  it.each([
+    ['confirmed', 'found', 1],
+    ['never confirmed', 'unknown', 0],
+  ] as const)(
+    'gates a retraction replayed by a replacement session until %s',
+    async (_label, lookupResult, deliveries) => {
+      jest.useFakeTimers();
+      const first = fakeSession();
+      let saved: MarmotRumor | undefined;
+      first.sendRumor.mockImplementationOnce(async (_g, rumor, opts) => {
+        saved = rumor;
+        opts?.onSent?.({ indeterminate: true, lookup: jest.fn().mockResolvedValue(lookupResult) });
+        return { 'wss://r': false };
+      });
+      setMarmotSession(first as unknown as MarmotSession);
+      const onEvent = jest.fn();
+      const unsubscribe = marmotReactionSource(ME, '', 'g-group').subscribe(onEvent);
+      const deleted = marmotReactionSource(ME, '', 'g-group').deleteReaction('r-mine');
+      await jest.advanceTimersByTimeAsync(0);
+      // Account switched away and back: the new session replays its history.
+      const second = fakeSession();
+      setMarmotSession(second as unknown as MarmotSession);
+      second.emit({ group: { id: 'g-group', isDm: false }, rumor: saved });
+      expect(onEvent).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(43_000);
+      await deleted;
+      expect(onEvent).toHaveBeenCalledTimes(deliveries);
+      unsubscribe();
+      jest.useRealTimers();
+    },
+  );
 
   it('confirms a timed-out retraction instead of reporting it failed', async () => {
     jest.useFakeTimers();
