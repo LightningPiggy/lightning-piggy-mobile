@@ -16,6 +16,7 @@ import {
   sendMarmotGroupRumor,
 } from './marmotSend';
 import { MarmotKeyPackageLookupError } from './marmotKeyPackages';
+import * as marmotSigner from './marmotSigner';
 import { marmotReplyTags } from './marmotEdits';
 import { marmotRumorToGroupMessage, marmotRumorToDmRow } from './marmotInbox';
 import { buildMarmotRumor } from './marmotSession';
@@ -170,6 +171,23 @@ describe('sendMarmotDm', () => {
         error: expect.stringMatching(/taking too long/),
       });
       expect(ready).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('names Amber when an unanswered Amber approval is what holds the set-up (#1658)', async () => {
+    jest.useFakeTimers();
+    try {
+      const openSince = jest.spyOn(marmotSigner, 'amberRequestOpenSince').mockReturnValue(1);
+      fakeSession({ getOrCreateDm: () => new Promise(() => undefined) });
+      const pending = sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
+      await jest.advanceTimersByTimeAsync(DM_SETUP_TIMEOUT_MS);
+      expect(await pending).toEqual({
+        success: false,
+        error: expect.stringMatching(/Open Amber, allow Lightning Piggy/),
+      });
+      openSince.mockRestore();
     } finally {
       jest.useRealTimers();
     }

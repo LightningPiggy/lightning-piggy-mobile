@@ -3009,7 +3009,8 @@
     "inviteNotDelivered": "Nie udało się wysłać zaproszenia — żaden przekaźnik go nie przyjął. Sprawdź połączenie i spróbuj ponownie.",
     "chatNotReady": "Ten czat wciąż nadrabia niedawną zmianę, więc to nie przeszło. Spróbuj za chwilę.",
     "keyPackageLookupFailed": "Nie udało się połączyć z żadnym relayem, aby pobrać klucz Marmot tej osoby, więc nic nie zostało wysłane. Sprawdź połączenie i spróbuj ponownie.",
-    "chatSetupTimedOut": "Konfiguracja tego bezpiecznego czatu trwa zbyt długo, więc nic nie zostało wysłane. Sprawdź połączenie (i aplikację do podpisywania, jeśli z niej korzystasz) i spróbuj ponownie."
+    "chatSetupTimedOut": "Konfiguracja tego bezpiecznego czatu trwa zbyt długo, więc nic nie zostało wysłane. Sprawdź połączenie (i aplikację do podpisywania, jeśli z niej korzystasz) i spróbuj ponownie.",
+    "waitingForAmber": "Czekamy na zatwierdzenie w Amber, więc nic jeszcze nie zostało wysłane. Otwórz Amber, zezwól na żądanie Lightning Piggy i spróbuj ponownie."
   },
   "signOutPrompt": {
     "walletsRemoved": "Wszystkie portfele połączone z tym kontem, w tym zapisane tu frazy odzyskiwania, również zostaną usunięte z tego telefonu. Przed wylogowaniem zapisz osobno ich frazy odzyskiwania i dane połączenia.",

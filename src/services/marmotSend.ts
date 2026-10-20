@@ -17,6 +17,7 @@ import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import { MarmotGroupNotReadyError } from './marmotSendGate';
 import { t } from '../i18n';
 import { MarmotKeyPackageLookupError } from './marmotKeyPackages';
+import { amberRequestOpenSince } from './marmotSigner';
 import {
   MarmotNoKeyPackageError,
   MarmotUnusableKeyPackageError,
@@ -69,9 +70,10 @@ function marmotUnreachableReason(e: unknown): MarmotUnreachableReason | null {
  */
 export const DM_SETUP_TIMEOUT_MS = 90_000;
 
-/** Setting up the 1:1 took longer than DM_SETUP_TIMEOUT_MS; nothing was sent. */
+/** Setting up the 1:1 took longer than DM_SETUP_TIMEOUT_MS; nothing was sent.
+ * `waitingForAmber`: an Amber approval was still open when it gave up. */
 export class MarmotDmSetupTimeoutError extends Error {
-  constructor() {
+  constructor(readonly waitingForAmber = false) {
     super('marmot: secure chat set-up timed out');
     this.name = 'MarmotDmSetupTimeoutError';
   }
@@ -85,7 +87,10 @@ export function getOrCreateDmWithin(
 ): ReturnType<MarmotSession['getOrCreateDm']> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new MarmotDmSetupTimeoutError()), timeoutMs);
+    timer = setTimeout(
+      () => reject(new MarmotDmSetupTimeoutError(amberRequestOpenSince() !== null)),
+      timeoutMs,
+    );
   });
   return Promise.race([session.getOrCreateDm(peer), deadline]).finally(() => clearTimeout(timer));
 }
@@ -95,7 +100,8 @@ export function marmotSendError(e: unknown): string {
   const reason = marmotUnreachableReason(e);
   if (reason) return t(`marmotSend.${reason}`);
   if (e instanceof MarmotKeyPackageLookupError) return t('marmotSend.keyPackageLookupFailed');
-  if (e instanceof MarmotDmSetupTimeoutError) return t('marmotSend.chatSetupTimedOut');
+  if (e instanceof MarmotDmSetupTimeoutError)
+    return t(e.waitingForAmber ? 'marmotSend.waitingForAmber' : 'marmotSend.chatSetupTimedOut');
   if (e instanceof MarmotWelcomeDeliveryError) return t('marmotSend.inviteNotDelivered');
   if (e instanceof MarmotGroupNotReadyError) return t('marmotSend.chatNotReady');
   return (e as Error)?.message || 'Marmot send failed';
