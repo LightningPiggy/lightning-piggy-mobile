@@ -27,6 +27,11 @@ const DELETION_KIND = 5;
 const SESSION_WAIT_MS = 60_000;
 /** When to look for an unacknowledged reaction on the relays (#1656). */
 const CONFIRM_DELAYS_MS = [3_000, 10_000, 30_000];
+/** Our own retractions not yet acknowledged or confirmed. marmot-ts saves a
+ * send into the history before publishing; until one is confirmed, history
+ * reads skip it, so a chat reopened meanwhile can't apply a retraction that
+ * may turn out never to have gone out (and would hide the pill for good). */
+const unconfirmedDeletions = new Set<string>();
 
 export interface MarmotReactionSource {
   fetchReactionsForMessages: (targetEventIds: string[]) => Promise<MarmotRumor[]>;
@@ -85,6 +90,7 @@ export function marmotReactionSource(
     const out: MarmotRumor[] = [];
     for (const groupId of await groupsFor(session)) {
       for (const r of await session.queryHistory(groupId, [kind])) {
+        if (unconfirmedDeletions.has(r.id)) continue;
         if (eTargets(r).some((t) => wanted.has(t))) out.push(r);
       }
     }
@@ -94,7 +100,12 @@ export function marmotReactionSource(
   // Send into the group the referenced event lives in: a reaction to a
   // message from an older DM must land beside it, where White Noise can
   // match it. Falls back to the newest DM.
-  const sendReferencing = async (kind: number, content: string, targetId: string) => {
+  const sendReferencing = async (
+    kind: number,
+    content: string,
+    targetId: string,
+    onBuilt?: (rumorId: string) => void,
+  ) => {
     const session = await sessionFor(myPubkey);
     let home = groupId;
     if (!home) {
@@ -109,6 +120,7 @@ export function marmotReactionSource(
     }
     if (!home) throw new Error('No Marmot chat with this person yet');
     const rumor = buildMarmotRumor(myPubkey, { kind, content, tags: [['e', targetId]] });
+    onBuilt?.(rumor.id);
     let receipt: MarmotSendReceipt | undefined;
     const byRelay = await session.sendRumor(home, rumor, { onSent: (r) => (receipt = r) });
     const group = home;
@@ -123,9 +135,10 @@ export function marmotReactionSource(
   };
 
   // No relay acknowledged it, but one didn't explicitly refuse it either: the
-  // event may still be stored. Look for it a few times; it's lost only if the last look completed
-  // without finding it. A look no relay answered proves nothing, so the
-  // reaction is kept (it's in the group history) rather than failed falsely.
+  // event may still be stored. Look for it a few times; it's lost only if the
+  // last look completed without finding it. A look no relay answered proves
+  // nothing, so the reaction is kept (it's in the group history) rather than
+  // failed falsely.
   const settleLater = async (
     sent: Awaited<ReturnType<typeof sendReferencing>>,
   ): Promise<ReactionSettlement> => {
@@ -166,12 +179,20 @@ export function marmotReactionSource(
     // one counts: an inconclusive one is reported failed (the pill comes back,
     // so the user can retry) and dropped locally so it can't hide it later.
     deleteReaction: async (reactionEventId) => {
-      const sent = await sendReferencing(DELETION_KIND, '', reactionEventId).catch(() => null);
-      if (!sent) return false;
-      if (sent.accepted) return true;
-      const outcome = sent.receipt?.indeterminate ? await settleLater(sent) : 'lost';
-      if (outcome !== 'sent') await sent.forget();
-      return outcome === 'sent';
+      let rumorId: string | undefined;
+      try {
+        const sent = await sendReferencing(DELETION_KIND, '', reactionEventId, (id) => {
+          rumorId = id;
+          unconfirmedDeletions.add(id);
+        }).catch(() => null);
+        if (!sent) return false;
+        if (sent.accepted) return true;
+        const outcome = sent.receipt?.indeterminate ? await settleLater(sent) : 'lost';
+        if (outcome !== 'sent') await sent.forget();
+        return outcome === 'sent';
+      } finally {
+        if (rumorId) unconfirmedDeletions.delete(rumorId);
+      }
     },
     // Follows the active session, so a thread opened during cold start (or
     // kept open across a session restart) still gets live reactions.

@@ -597,6 +597,17 @@ describe('unacknowledged (pending) reactions (#1656)', () => {
     expect(readConversationReactions(`${MY_PK}:${scopeKey}`).records).toEqual([]);
   });
 
+  it('drops a reaction refused outright, in the chat it was sent from', async () => {
+    const publishReaction = jest
+      .fn()
+      .mockResolvedValue({ id: 'real-id', settled: Promise.resolve('lost') });
+    const { result } = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    await react(result);
+    await waitFor(() => expect(mine(result)).toBeUndefined());
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(readConversationReactions(`${MY_PK}:${scopeKey}`).records).toEqual([]);
+  });
+
   it('drops a refused reaction from a chat reopened before the refusal arrived', async () => {
     let returnPublish!: (outcome: unknown) => void;
     const publishReaction = jest.fn(() => new Promise((resolve) => (returnPublish = resolve)));

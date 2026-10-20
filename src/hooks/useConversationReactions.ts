@@ -172,26 +172,27 @@ export function useConversationReactions({
     () => markPendingReactions(reduceReactions(reactionRecords, myPubkey ?? null), confirmingIds),
     [reactionRecords, myPubkey, confirmingIds],
   );
-  // Read when a late confirmation settles, long after this render.
-  const recordsRef = useRef(reactionRecords);
-  useLayoutEffect(() => {
-    recordsRef.current = reactionRecords;
-  }, [reactionRecords]);
-  // A pending reaction that definitely didn't go out: if it's still showing
-  // (the user didn't remove it meanwhile), drop it and say so.
+  // A reaction that definitely didn't go out: if it's still showing (the user
+  // didn't remove it meanwhile), drop it and say so. Checked on every record
+  // change as well as on each loss, since a loss can be announced before the
+  // optimistic → real id swap has committed.
+  const [lossSignal, setLossSignal] = useState(0);
   useEffect(
     () =>
       subscribePendingReactions((lost) => {
-        if (!lost || lost.owner !== owner || !writerIsCurrent()) return;
-        if (!recordsRef.current.some((r) => r.id === lost.id)) return;
-        setReactionRecords((prev) => prev.filter((r) => r.id !== lost.id));
-        Alert.alert(
-          t('messageActionsSheet.reactionFailedTitle'),
-          t('messageActionsSheet.reactionFailedBody'),
-        );
+        if (lost?.owner === owner) setLossSignal((n) => n + 1);
       }),
-    [owner, writerIsCurrent, setReactionRecords, t],
+    [owner],
   );
+  useEffect(() => {
+    if (!owner || !writerIsCurrent()) return;
+    if (!reactionRecords.some((r) => isLostReaction(owner, r.id))) return;
+    setReactionRecords((prev) => prev.filter((r) => !isLostReaction(owner, r.id)));
+    Alert.alert(
+      t('messageActionsSheet.reactionFailedTitle'),
+      t('messageActionsSheet.reactionFailedBody'),
+    );
+  }, [reactionRecords, lossSignal, owner, writerIsCurrent, setReactionRecords, t]);
 
   // Commit markers contain no account, message, or event identifiers.
   const renderTiming = useMemo(

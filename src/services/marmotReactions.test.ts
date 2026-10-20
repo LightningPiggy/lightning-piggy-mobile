@@ -183,6 +183,28 @@ describe('marmotReactionSource', () => {
     jest.useRealTimers();
   });
 
+  it("hides an unconfirmed retraction from a chat reopened while it's checked", async () => {
+    jest.useFakeTimers();
+    const session = fakeSession();
+    history['g-group'] = [];
+    // marmot-ts saves the send into the history before publishing.
+    session.sendRumor.mockImplementationOnce(async (groupId, rumor, opts) => {
+      history[groupId].push(rumor);
+      opts?.onSent?.({ indeterminate: true, lookup: jest.fn().mockResolvedValue('unknown') });
+      return { 'wss://r': false };
+    });
+    setMarmotSession(session as unknown as MarmotSession);
+    const deleted = marmotReactionSource(ME, '', 'g-group').deleteReaction('r-mine');
+    await jest.advanceTimersByTimeAsync(0);
+    const reopened = marmotReactionSource(ME, '', 'g-group');
+    await expect(reopened.fetchReactionDeletions(['r-mine'])).resolves.toEqual([]);
+    await jest.advanceTimersByTimeAsync(43_000);
+    await expect(deleted).resolves.toBe(false);
+    expect(session.forgetRumor).toHaveBeenCalled();
+    delete history['g-group'];
+    jest.useRealTimers();
+  });
+
   it('confirms a timed-out retraction instead of reporting it failed', async () => {
     jest.useFakeTimers();
     const session = fakeSession();

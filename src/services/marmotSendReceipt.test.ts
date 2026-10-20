@@ -5,6 +5,7 @@
 import type { Event } from 'nostr-tools';
 import { createMarmotNetwork } from './marmotNetwork';
 import { marmotSendReceipt } from './marmotSendReceipt';
+import { RELAY_SKIPPED_REASON } from './relayHealth';
 
 const mockPublish = jest.fn();
 const mockQuery = jest.fn();
@@ -67,6 +68,8 @@ it('counts only an explicit relay refusal as definite', () => {
   expect(receipt("SendingOnClosedConnection: Tried to send message '[...]'").indeterminate).toBe(
     false,
   );
+  // Skipped as unhealthy: nothing was sent.
+  expect(receipt(`Error: ${RELAY_SKIPPED_REASON}`).indeterminate).toBe(false);
   // The socket closed after the EVENT went out, before its OK: it may be stored.
   expect(receipt('Error: relay connection closed').indeterminate).toBe(true);
   expect(receipt('Error: publish timed out').indeterminate).toBe(true);
@@ -92,6 +95,23 @@ it('reports absent only when every relay completed the read without it', async (
   await expect(twoRelays().lookup()).resolves.toBe('found');
   // Each relay is asked on its own.
   expect(mockQuery).toHaveBeenCalledWith([OTHER], [{ ids: [envelope.id] }], expect.any(Number), {
+    requireEose: true,
+  });
+});
+
+it('looks only at relays that may hold it', async () => {
+  const OFFLINE = 'wss://offline.example.com/';
+  const receipt = marmotSendReceipt(
+    resultFor({
+      [OFFLINE]: { from: OFFLINE, ok: false, message: 'Error: connection failure: offline' },
+      [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' },
+    }),
+  );
+  mockQuery.mockResolvedValueOnce([]);
+  // The never-connected relay can't hold it, so it can't make this unknown.
+  await expect(receipt.lookup()).resolves.toBe('absent');
+  expect(mockQuery).toHaveBeenCalledTimes(1);
+  expect(mockQuery).toHaveBeenCalledWith([RELAY], expect.anything(), expect.any(Number), {
     requireEose: true,
   });
 });

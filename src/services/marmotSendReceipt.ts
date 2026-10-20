@@ -24,21 +24,26 @@ export interface MarmotSendReceipt {
 }
 
 // Definitely not stored on that relay: it said no (NIP-01's machine-readable
-// OK prefixes), or the EVENT never left (no connection / sent on a closed
-// one). Anything else — a timeout, the socket closing after the EVENT went
-// out — leaves the outcome open.
+// OK prefixes), or the EVENT never left (no connection, sent on a closed one,
+// or skipped as unhealthy — RELAY_SKIPPED_REASON). Anything else — a timeout,
+// the socket closing after the EVENT went out — leaves the outcome open.
 const NOT_STORED =
-  /^(?:Error: (?:pow|blocked|rate-limited|invalid|restricted|mute|error|auth-required|connection failure):|SendingOnClosedConnection\b)/i;
+  /^(?:Error: (?:pow|blocked|rate-limited|invalid|restricted|mute|error|auth-required|connection failure|relay skipped):|SendingOnClosedConnection\b)/i;
 const LOOKUP_WAIT_MS = 6_000;
 
 export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
   const ids = results.flatMap((r) => ('envelope' in r.work ? [r.work.envelope.id] : []));
   const responses = results.flatMap((r) => Object.entries(r.response));
-  const relays = [...new Set(responses.map(([url]) => url))];
-  return {
-    indeterminate: responses.some(
-      ([, res]) => !res.ok && !NOT_STORED.test(String(res.message ?? '')),
+  // Relays that refused it or never got it can't hold it: only ask the rest.
+  const relays = [
+    ...new Set(
+      responses
+        .filter(([, res]) => !res.ok && !NOT_STORED.test(String(res.message ?? '')))
+        .map(([url]) => url),
     ),
+  ];
+  return {
+    indeterminate: relays.length > 0,
     // Each relay on its own: one that answered empty says nothing about one
     // that couldn't answer. Absent only if every relay completed the read.
     lookup: async () => {
