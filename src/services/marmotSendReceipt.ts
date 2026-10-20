@@ -7,31 +7,41 @@
 // and its late OK is dropped. So "no relay acknowledged in time" isn't a
 // failure yet; the caller can look for the envelope on the relays later.
 
-import type { MarmotGroup, NostrNetworkInterface } from '@internet-privacy/marmot-ts';
+import type { MarmotGroup } from '@internet-privacy/marmot-ts';
+import { pool } from './nostrPool';
 
 type PublishResults = Awaited<ReturnType<MarmotGroup['submitIntent']>>;
+
+/** `unknown`: no relay completed the read, so absence proves nothing. */
+export type MarmotLookup = 'found' | 'absent' | 'unknown';
 
 export interface MarmotSendReceipt {
   /** A relay timed out (rather than refusing), so the event may still land. */
   timedOut: boolean;
-  /** Whether any target relay now holds one of the sent kind-445 envelopes. */
-  isStored: () => Promise<boolean>;
+  /** Whether a target relay now holds one of the sent kind-445 envelopes. */
+  lookup: () => Promise<MarmotLookup>;
 }
 
 const TIMEOUT = /timed? ?out/i;
+const LOOKUP_WAIT_MS = 6_000;
 
-export function marmotSendReceipt(
-  results: PublishResults,
-  network: Pick<NostrNetworkInterface, 'request'>,
-): MarmotSendReceipt {
+export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
   const ids = results.flatMap((r) => ('envelope' in r.work ? [r.work.envelope.id] : []));
   const responses = results.flatMap((r) => Object.entries(r.response));
   const relays = [...new Set(responses.map(([url]) => url))];
   return {
     timedOut: responses.some(([, res]) => !res.ok && TIMEOUT.test(String(res.message ?? ''))),
-    isStored: async () =>
-      ids.length > 0 &&
-      relays.length > 0 &&
-      (await network.request(relays, { ids })).some((e) => ids.includes(e.id)),
+    lookup: async () => {
+      if (ids.length === 0 || relays.length === 0) return 'unknown';
+      try {
+        // Rejects when no relay served the read to EOSE.
+        const found = await pool.querySyncFilters(relays, [{ ids }], LOOKUP_WAIT_MS, {
+          requireEose: true,
+        });
+        return found.some((e) => ids.includes(e.id)) ? 'found' : 'absent';
+      } catch {
+        return 'unknown';
+      }
+    },
   };
 }

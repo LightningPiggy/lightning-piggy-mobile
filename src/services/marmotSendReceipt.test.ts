@@ -1,6 +1,7 @@
 // #1656: a relay that answers after the publish window is reported as not
 // accepting, yet the event lands. The receipt tells "timed out" apart from a
-// refusal, and finds the event on the relay afterwards.
+// refusal, and looks the event up on the relay afterwards — telling "not
+// there" apart from "couldn't tell".
 import type { Event } from 'nostr-tools';
 import { createMarmotNetwork } from './marmotNetwork';
 import { marmotSendReceipt } from './marmotSendReceipt';
@@ -20,7 +21,10 @@ const RELAY = 'wss://relay.example.com/';
 const envelope = { id: 'e'.repeat(64), kind: 445, tags: [] } as unknown as Event;
 const resultFor = (response: Record<string, { from: string; ok: boolean; message?: string }>) =>
   [{ work: { kind: 'applicationMessage', envelope }, response }] as never;
+const timedOut = () =>
+  marmotSendReceipt(resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' } }));
 
+beforeEach(() => mockQuery.mockReset());
 afterEach(() => jest.useRealTimers());
 
 it('reports a slow relay as timed out, though its publish still lands afterwards', async () => {
@@ -46,26 +50,26 @@ it('reports a slow relay as timed out, though its publish still lands afterwards
   await jest.advanceTimersByTimeAsync(2_000);
   expect(landed).toBe(true);
   mockQuery.mockResolvedValue([envelope]);
-  const receipt = marmotSendReceipt(resultFor(response), network);
+  const receipt = marmotSendReceipt(resultFor(response));
   expect(receipt.timedOut).toBe(true);
-  await expect(receipt.isStored()).resolves.toBe(true);
-  expect(mockQuery).toHaveBeenCalledWith([RELAY], [{ ids: [envelope.id] }], expect.any(Number));
+  await expect(receipt.lookup()).resolves.toBe('found');
+  expect(mockQuery).toHaveBeenCalledWith([RELAY], [{ ids: [envelope.id] }], expect.any(Number), {
+    requireEose: true,
+  });
 });
 
-it('tells an outright refusal apart from a timeout', async () => {
+it('tells an outright refusal apart from a timeout', () => {
   const receipt = marmotSendReceipt(
     resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: blocked: not allowed' } }),
-    { request: jest.fn().mockResolvedValue([]) },
   );
   expect(receipt.timedOut).toBe(false);
-  await expect(receipt.isStored()).resolves.toBe(false);
 });
 
-it("doesn't count an unrelated event as the one sent", async () => {
-  const receipt = marmotSendReceipt(
-    resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'publish timed out' } }),
-    { request: jest.fn().mockResolvedValue([{ id: 'f'.repeat(64) }]) },
-  );
-  expect(receipt.timedOut).toBe(true);
-  await expect(receipt.isStored()).resolves.toBe(false);
+it('reports absent only when a relay completed the read without it', async () => {
+  // A completed read with an unrelated event: not ours.
+  mockQuery.mockResolvedValueOnce([{ id: 'f'.repeat(64) }]);
+  await expect(timedOut().lookup()).resolves.toBe('absent');
+  // No relay reached EOSE (offline, timed out): absence proves nothing.
+  mockQuery.mockRejectedValueOnce(new Error('did not reach EOSE'));
+  await expect(timedOut().lookup()).resolves.toBe('unknown');
 });

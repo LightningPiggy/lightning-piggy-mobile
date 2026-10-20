@@ -45,15 +45,18 @@ export class ReactionPublishError extends Error {
   }
 }
 
+/** How an unacknowledged reaction ended: seen on a relay, definitely not
+ * stored, or never established (no relay answered the lookups). */
+export type ReactionSettlement = 'sent' | 'lost' | 'unknown';
+
 /**
  * A reaction that went out but no relay acknowledged in time (#1656): it may
- * still land. `confirmed` resolves true once a relay is seen holding it, or
- * false once it's definitely lost — never rejects. Until then the pill shows
- * as pending, with no failure alert.
+ * still land. Until `settled` resolves (it never rejects) the pill shows as
+ * pending, with no failure alert; only `lost` is reported as a failure.
  */
 export interface PendingReactionPublish {
   id: string;
-  confirmed: Promise<boolean>;
+  settled: Promise<ReactionSettlement>;
 }
 
 /** What a backend's `publishReaction` resolves with: the event id (sent),

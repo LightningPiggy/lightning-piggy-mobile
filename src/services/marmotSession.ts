@@ -740,7 +740,7 @@ export class MarmotSession {
       createApplicationMessageIntent(rumor),
       opts.settleTimeoutMs,
     );
-    opts.onSent?.(marmotSendReceipt(results, this.client.network));
+    opts.onSent?.(marmotSendReceipt(results));
     const byRelay: Record<string, boolean> = {};
     for (const r of results) {
       for (const [url, res] of Object.entries(r.response)) byRelay[url] = byRelay[url] || res.ok;

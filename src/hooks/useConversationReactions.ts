@@ -1,5 +1,13 @@
 import { useCoalescedMap } from '../utils/useCoalescedMap';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAccountState } from '../contexts/useAccountState';
 import {
@@ -8,6 +16,11 @@ import {
   isReactionCacheGenerationCurrent,
   readConversationReactions,
 } from '../utils/conversationReactionCache';
+import {
+  pendingReactionIds,
+  subscribePendingReactions,
+  trackPendingReaction,
+} from '../utils/pendingReactionStore';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
@@ -26,8 +39,6 @@ import {
   type MessageReactionState,
   type ReactionRecord,
 } from '../utils/reactions';
-
-const NO_IDS: ReadonlySet<string> = new Set();
 
 // Per-message reactions + long-press action state for the 1:1 conversation
 // (#205). Lifted out of ConversationScreen (file-size cap) so the screen stays
@@ -152,7 +163,10 @@ export function useConversationReactions({
   const initial = useMemo(() => readConversationReactions(owner), [owner]);
   const [reactionRecords, setReactionRecords] = useAccountState(owner, initial.records);
   // Sent reactions no relay acknowledged in time, awaiting a relay copy (#1656).
-  const [confirmingIds, setConfirmingIds] = useState<ReadonlySet<string>>(NO_IDS);
+  // Shared per owner, so a chat reopened mid-confirmation still shows them.
+  const confirmingIds = useSyncExternalStore(subscribePendingReactions, () =>
+    pendingReactionIds(owner),
+  );
   const reactionsByTarget = useMemo<Map<string, MessageReactionState>>(
     () => markPendingReactions(reduceReactions(reactionRecords, myPubkey ?? null), confirmingIds),
     [reactionRecords, myPubkey, confirmingIds],
@@ -162,6 +176,21 @@ export function useConversationReactions({
   useLayoutEffect(() => {
     recordsRef.current = reactionRecords;
   }, [reactionRecords]);
+  // A pending reaction that definitely didn't go out: if it's still showing
+  // (the user didn't remove it meanwhile), drop it and say so.
+  useEffect(
+    () =>
+      subscribePendingReactions((lost) => {
+        if (!lost || lost.owner !== owner || !writerIsCurrent()) return;
+        if (!recordsRef.current.some((r) => r.id === lost.id)) return;
+        setReactionRecords((prev) => prev.filter((r) => r.id !== lost.id));
+        Alert.alert(
+          t('messageActionsSheet.reactionFailedTitle'),
+          t('messageActionsSheet.reactionFailedBody'),
+        );
+      }),
+    [owner, writerIsCurrent, setReactionRecords, t],
+  );
 
   // Commit markers contain no account, message, or event identifiers.
   const renderTiming = useMemo(
@@ -503,27 +532,9 @@ export function useConversationReactions({
         setReactionRecords((prev) =>
           prev.map((r) => (r.id === optimisticId ? { ...r, id: realId } : r)),
         );
-        if (pending) {
-          // Sent, but no relay acknowledged in time: keep it showing as
-          // pending, with no alert, until it's found on a relay or given up on.
-          setConfirmingIds((prev) => new Set(prev).add(realId));
-          void pending.confirmed.then((confirmed) => {
-            setConfirmingIds((prev) => {
-              const next = new Set(prev);
-              next.delete(realId);
-              return next;
-            });
-            if (confirmed || !writerIsCurrent()) return;
-            // Still showing (the user didn't remove it meanwhile)? Then it
-            // definitely didn't go out: drop it and say so.
-            if (!recordsRef.current.some((r) => r.id === realId)) return;
-            setReactionRecords((prev) => prev.filter((r) => r.id !== realId));
-            Alert.alert(
-              t('messageActionsSheet.reactionFailedTitle'),
-              t('messageActionsSheet.reactionFailedBody'),
-            );
-          });
-        }
+        // Sent, but no relay acknowledged in time: keep it showing as pending,
+        // with no alert, until it's found on a relay or given up on.
+        if (pending && owner) trackPendingReaction(owner, realId, pending.settled);
       } else {
         // Publish failed — nothing landed on a relay. Drop the placeholder and
         // only warn if the user hadn't already cancelled the reaction.
@@ -548,6 +559,7 @@ export function useConversationReactions({
       deleteReaction,
       fetchReactionsForMessages,
       mergeFreshRecords,
+      owner,
       t,
     ],
   );

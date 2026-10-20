@@ -14,8 +14,12 @@ import {
   type MarmotSession,
 } from './marmotSession';
 import { marmotSendError } from './marmotSend';
-import { ReactionPublishError, type ReactionPublishOutcome } from '../utils/reactions';
-import type { MarmotSendReceipt } from './marmotSendReceipt';
+import {
+  ReactionPublishError,
+  type ReactionPublishOutcome,
+  type ReactionSettlement,
+} from '../utils/reactions';
+import type { MarmotLookup, MarmotSendReceipt } from './marmotSendReceipt';
 
 const REACTION_KIND = 7;
 const DELETION_KIND = 5;
@@ -119,14 +123,21 @@ export function marmotReactionSource(
   };
 
   // No relay acknowledged in time, but one timed out: the event may still be
-  // stored. Look for it a few times before calling it lost.
-  const confirmLater = async (sent: Awaited<ReturnType<typeof sendReferencing>>) => {
+  // stored. Look for it a few times; it's lost only if the last look completed
+  // without finding it. A look no relay answered proves nothing, so the
+  // reaction is kept (it's in the group history) rather than failed falsely.
+  const settleLater = async (
+    sent: Awaited<ReturnType<typeof sendReferencing>>,
+  ): Promise<ReactionSettlement> => {
+    let last: MarmotLookup = 'unknown';
     for (const delay of CONFIRM_DELAYS_MS) {
       await new Promise((resolve) => setTimeout(resolve, delay));
-      if (await sent.receipt!.isStored().catch(() => false)) return true;
+      last = await sent.receipt!.lookup();
+      if (last === 'found') return 'sent';
     }
+    if (last === 'unknown') return 'unknown';
     await sent.forget();
-    return false;
+    return 'lost';
   };
 
   return {
@@ -145,13 +156,19 @@ export function marmotReactionSource(
         throw new ReactionPublishError(marmotSendError(e));
       }
       if (sent.accepted) return sent.id;
-      if (sent.receipt?.timedOut) return { id: sent.id, confirmed: confirmLater(sent) };
+      if (sent.receipt?.timedOut) return { id: sent.id, settled: settleLater(sent) };
       await sent.forget();
       return null;
     },
-    deleteReaction: async (reactionEventId) =>
-      (await sendReferencing(DELETION_KIND, '', reactionEventId).catch(() => null))?.accepted ??
-      false,
+    // A timed-out retraction is confirmed the same way before it's called failed.
+    deleteReaction: async (reactionEventId) => {
+      const sent = await sendReferencing(DELETION_KIND, '', reactionEventId).catch(() => null);
+      if (!sent) return false;
+      if (sent.accepted) return true;
+      if (sent.receipt?.timedOut) return (await settleLater(sent)) !== 'lost';
+      await sent.forget();
+      return false;
+    },
     // Follows the active session, so a thread opened during cold start (or
     // kept open across a session restart) still gets live reactions.
     subscribe: (onEvent) => {
