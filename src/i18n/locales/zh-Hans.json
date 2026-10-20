@@ -2856,6 +2856,15 @@
     "nip04": {
       "badge": "旧版",
       "description": "较旧的格式；消息内容已加密，但中继能看到你在给谁发消息。适用于尚不支持NIP-17的应用。"
+    },
+    "availability": {
+      "checking": "正在检查…",
+      "unavailable": "{{name}} 还没有设置 Marmot。请让对方打开 Lightning Piggy 或 White Noise。",
+      "error": "无法检查 — 请重试",
+      "someone": "此联系人",
+      "unavailableTitle": "Marmot 不可用",
+      "useNip17": "改用 NIP-17 发送",
+      "cancel": "取消"
     }
   },
   "accountScreenLayout": {

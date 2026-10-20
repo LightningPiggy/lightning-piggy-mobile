@@ -518,10 +518,10 @@ export class MarmotSession {
       .sort((a, b) => b.createdAt - a.createdAt)[0];
   }
 
-  /** Whether `peer` has published a Marmot key package we could invite. */
+  /** Whether `peer` has a key package we could invite; throws if the lookup failed. */
   async canMessage(peer: string): Promise<boolean> {
     const lookup = this.opts.getLookupRelays();
-    return (await fetchDevices(this.client.network, lookup, peer).catch(() => [])).length > 0;
+    return (await fetchDevices(this.client.network, lookup, peer)).length > 0;
   }
 
   async getOrCreateDm(peer: string): Promise<MarmotGroupSummary> {

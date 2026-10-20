@@ -109,7 +109,7 @@ const ConversationHeader: React.FC<Props> = ({
       }
       trailing={
         <>
-          <ConversationProtocolControl protocol={protocol} />
+          <ConversationProtocolControl protocol={protocol} name={name} />
           <ChatMenu {...menu} />
         </>
       }

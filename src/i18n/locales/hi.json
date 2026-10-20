@@ -2856,6 +2856,15 @@
     "nip04": {
       "badge": "पुराना",
       "description": "पुराना फ़ॉर्मैट; मैसेज की सामग्री एन्क्रिप्टेड होती है, लेकिन रिले देख सकते हैं कि आप किसे मैसेज भेज रहे हैं। उन ऐप के लिए जो अभी NIP-17 सपोर्ट नहीं करते।"
+    },
+    "availability": {
+      "checking": "जाँच हो रही है…",
+      "unavailable": "{{name}} ने अभी तक Marmot सेट अप नहीं किया है। उनसे Lightning Piggy या White Noise खोलने को कहें।",
+      "error": "जाँच नहीं हो सकी — फिर से कोशिश करें",
+      "someone": "यह संपर्क",
+      "unavailableTitle": "Marmot उपलब्ध नहीं है",
+      "useNip17": "इसके बजाय NIP-17 से भेजें",
+      "cancel": "रद्द करें"
     }
   },
   "accountScreenLayout": {
