@@ -24,8 +24,19 @@ const envelope = { id: 'e'.repeat(64), kind: 445, tags: [] } as unknown as Event
 const resultFor = (response: Record<string, { from: string; ok: boolean; message?: string }>) =>
   [{ work: { kind: 'applicationMessage', envelope }, response }] as never;
 
-beforeEach(() => mockQuery.mockReset());
-afterEach(() => jest.useRealTimers());
+// The account whose session sent it, active unless a test switches away.
+const OWNER = 'a'.repeat(64);
+const receiptOf = (results: Parameters<typeof marmotSendReceipt>[0]) =>
+  marmotSendReceipt(results, OWNER);
+
+beforeEach(() => {
+  mockQuery.mockReset();
+  setCurrentUserPubkey(OWNER);
+});
+afterEach(() => {
+  jest.useRealTimers();
+  setCurrentUserPubkey(null);
+});
 
 it('reports a slow relay as timed out, though its publish still lands afterwards', async () => {
   jest.useFakeTimers();
@@ -50,7 +61,7 @@ it('reports a slow relay as timed out, though its publish still lands afterwards
   await jest.advanceTimersByTimeAsync(2_000);
   expect(landed).toBe(true);
   relaysAnswer({ [RELAY]: { events: [envelope], eose: true } });
-  const receipt = marmotSendReceipt(resultFor(response));
+  const receipt = receiptOf(resultFor(response));
   expect(receipt.indeterminate).toBe(true);
   await expect(receipt.lookup()).resolves.toBe('found');
   expect(mockQuery).toHaveBeenCalledWith([RELAY], [{ ids: [envelope.id] }], expect.any(Number), {
@@ -60,7 +71,7 @@ it('reports a slow relay as timed out, though its publish still lands afterwards
 
 it('counts only an explicit relay refusal as definite', () => {
   const receipt = (message: string) =>
-    marmotSendReceipt(resultFor({ [RELAY]: { from: RELAY, ok: false, message } }));
+    receiptOf(resultFor({ [RELAY]: { from: RELAY, ok: false, message } }));
   expect(receipt('Error: blocked: not allowed').indeterminate).toBe(false);
   expect(receipt('Error: rate-limited: slow down').indeterminate).toBe(false);
   expect(receipt('Error: error: internal').indeterminate).toBe(false);
@@ -91,7 +102,7 @@ const relaysAnswer = (reads: Record<string, RelayRead>) =>
 it('reports absent only when every relay completed the read without it', async () => {
   const OTHER = 'wss://other.example.com/';
   const twoRelays = () =>
-    marmotSendReceipt(
+    receiptOf(
       resultFor({
         [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' },
         [OTHER]: { from: OTHER, ok: false, message: 'Error: timeout' },
@@ -121,7 +132,7 @@ it('reports absent only when every relay completed the read without it', async (
 
 it('counts a match even when the relay closed before EOSE', async () => {
   relaysAnswer({ [RELAY]: { events: [envelope], eose: false } });
-  const receipt = marmotSendReceipt(
+  const receipt = receiptOf(
     resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' } }),
   );
   await expect(receipt.lookup()).resolves.toBe('found');
@@ -129,7 +140,7 @@ it('counts a match even when the relay closed before EOSE', async () => {
 
 it('looks only at relays that may hold it', async () => {
   const OFFLINE = 'wss://offline.example.com/';
-  const receipt = marmotSendReceipt(
+  const receipt = receiptOf(
     resultFor({
       [OFFLINE]: { from: OFFLINE, ok: false, message: 'Error: connection failure: offline' },
       [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' },
@@ -142,9 +153,7 @@ it('looks only at relays that may hold it', async () => {
 });
 
 it("can't establish anything while another account is active", async () => {
-  const ACCOUNT_A = 'a'.repeat(64);
-  setCurrentUserPubkey(ACCOUNT_A);
-  const receipt = marmotSendReceipt(
+  const receipt = receiptOf(
     resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' } }),
   );
   // Switched before the look: its reads would route to the other account's relays.
@@ -153,15 +162,27 @@ it("can't establish anything while another account is active", async () => {
   await expect(receipt.lookup()).resolves.toBe('unknown');
   expect(mockQuery).not.toHaveBeenCalled();
   // Switched while the read was out: the same.
-  setCurrentUserPubkey(ACCOUNT_A);
+  setCurrentUserPubkey(OWNER);
   mockQuery.mockImplementation(async () => {
     setCurrentUserPubkey('b'.repeat(64));
     return [];
   });
   await expect(receipt.lookup()).resolves.toBe('unknown');
   // Back on the sending account, an EOSE-served miss counts again.
-  setCurrentUserPubkey(ACCOUNT_A);
+  setCurrentUserPubkey(OWNER);
   relaysAnswer({ [RELAY]: { events: [], eose: true } });
   await expect(receipt.lookup()).resolves.toBe('absent');
-  setCurrentUserPubkey(null);
+});
+
+it('belongs to the sending account even if the publish returned after a switch', async () => {
+  // Switched while the publish was out: the receipt still names the sender...
+  setCurrentUserPubkey('b'.repeat(64));
+  const receipt = receiptOf(
+    resultFor({ [RELAY]: { from: RELAY, ok: false, message: 'Error: timeout' } }),
+  );
+  relaysAnswer({ [RELAY]: { events: [], eose: true } });
+  // ...so the other account's routing can't establish anything for it.
+  await expect(receipt.lookup()).resolves.toBe('unknown');
+  setCurrentUserPubkey(OWNER.toUpperCase());
+  await expect(receipt.lookup()).resolves.toBe('absent');
 });

@@ -32,12 +32,13 @@ const NOT_STORED =
   /^(?:Error: (?:pow|blocked|rate-limited|invalid|restricted|mute|error|auth-required|connection failure|relay skipped):|SendingOnClosedConnection\b)/i;
 const LOOKUP_WAIT_MS = 6_000;
 
-export function marmotSendReceipt(results: PublishResults): MarmotSendReceipt {
+/** `owner`: the account whose session sent it (not whoever is active when the
+ * publish returns — the user may have switched meanwhile). */
+export function marmotSendReceipt(results: PublishResults, owner: string): MarmotSendReceipt {
   // Reads route through the active account's relays (test accounts are locked
   // to the test relay), so a look made while another account is active asks
   // somewhere else: it proves nothing about where this send went.
-  const account = getCurrentUserPubkey();
-  const sameAccount = () => getCurrentUserPubkey() === account;
+  const sameAccount = () => getCurrentUserPubkey()?.toLowerCase() === owner.toLowerCase();
   const ids = results.flatMap((r) => ('envelope' in r.work ? [r.work.envelope.id] : []));
   const responses = results.flatMap((r) => Object.entries(r.response));
   // Relays that refused it or never got it can't hold it: only ask the rest.
