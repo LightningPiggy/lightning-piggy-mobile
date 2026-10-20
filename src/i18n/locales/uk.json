@@ -2869,6 +2869,15 @@
     "nip04": {
       "badge": "Застарілий",
       "description": "Старіший формат; вміст повідомлень зашифровано, але реле бачать, кому ви пишете. Для застосунків, які ще не підтримують NIP-17."
+    },
+    "availability": {
+      "checking": "Перевірка…",
+      "unavailable": "{{name}} ще не налаштував(-ла) Marmot. Попросіть відкрити Lightning Piggy або White Noise.",
+      "error": "Не вдалося перевірити — спробуйте ще раз",
+      "someone": "Цей контакт",
+      "unavailableTitle": "Marmot недоступний",
+      "useNip17": "Надіслати через NIP-17",
+      "cancel": "Скасувати"
     }
   },
   "accountScreenLayout": {

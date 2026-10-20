@@ -1,4 +1,5 @@
 import { getMarmotSession } from './marmotSession';
+import { invalidateMarmotAvailability } from '../utils/marmotAvailability';
 import type { RootStackParamList } from '../navigation/types';
 import type { DmProtocol } from '../utils/dmProtocol';
 
@@ -43,6 +44,8 @@ export async function preferredDmProtocol(
         }),
       ]);
       const protocol = supported ? 'marmot' : 'nip17';
+      // A key we just found supersedes the picker's cached "not on Marmot".
+      if (supported) invalidateMarmotAvailability(recipient);
       if (cache.size >= MAX_CACHED_PEERS) cache.delete(cache.keys().next().value!);
       cache.set(key, {
         protocol,

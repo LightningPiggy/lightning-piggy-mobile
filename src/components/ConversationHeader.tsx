@@ -120,7 +120,7 @@ const ConversationHeader: React.FC<Props> = ({
           ) : null}
         </View>
       </View>
-      <ConversationProtocolControl protocol={protocol} />
+      <ConversationProtocolControl protocol={protocol} name={name} />
       <ChatMenu {...menu} />
     </View>
   );

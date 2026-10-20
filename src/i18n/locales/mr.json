@@ -2851,6 +2851,15 @@
     "nip04": {
       "badge": "जुने",
       "description": "जुने स्वरूप; मेसेजचा मजकूर एन्क्रिप्टेड असतो पण तुम्ही कोणाला मेसेज करता ते रिले पाहू शकतात. अजून NIP-17 समर्थित न करणाऱ्या ॲप्ससाठी."
+    },
+    "availability": {
+      "checking": "तपासत आहे…",
+      "unavailable": "{{name}} यांनी अजून Marmot सेट अप केलेले नाही. त्यांना Lightning Piggy किंवा White Noise उघडायला सांगा.",
+      "error": "तपासता आले नाही — पुन्हा प्रयत्न करा",
+      "someone": "हा संपर्क",
+      "unavailableTitle": "Marmot उपलब्ध नाही",
+      "useNip17": "त्याऐवजी NIP-17 ने पाठवा",
+      "cancel": "रद्द करा"
     }
   },
   "accountScreenLayout": {

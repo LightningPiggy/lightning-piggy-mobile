@@ -13,4 +13,9 @@ export const createDmProtocolPickerSheetStyles = (colors: Palette) =>
     name: { color: colors.textHeader, fontSize: 14, fontWeight: '600' },
     badge: { color: colors.courseTeal, fontSize: 12, flex: 1 },
     description: { color: colors.textBody, fontSize: 13, lineHeight: 19 },
+    availability: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start' },
+    availabilityText: { color: colors.textSupplementary, fontSize: 13, lineHeight: 19 },
+    retryText: { color: colors.brandPink, fontSize: 13, fontWeight: '600', lineHeight: 19 },
   });
+
+export type DmProtocolPickerSheetStyles = ReturnType<typeof createDmProtocolPickerSheetStyles>;

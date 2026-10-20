@@ -939,6 +939,7 @@ const MessagesScreen: React.FC = () => {
         selected={preferredProtocol}
         onSelect={selectProtocol}
         onClose={closeProtocolPicker}
+        peer={pickedFriend}
       />
       <FriendPickerSheet
         visible={pickerVisible}
