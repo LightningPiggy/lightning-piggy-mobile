@@ -471,6 +471,64 @@ it('handles a rejected publish without leaving an optimistic reaction or rejecti
   expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
 });
 
+describe('unacknowledged (pending) reactions (#1656)', () => {
+  const pendingPublish = () => {
+    let settle!: (confirmed: boolean) => void;
+    const confirmed = new Promise<boolean>((resolve) => (settle = resolve));
+    return {
+      publishReaction: jest.fn().mockResolvedValue({ id: 'real-id', confirmed }),
+      settle: (value: boolean) => act(async () => settle(value)),
+    };
+  };
+  const mine = (result: { current: ReturnType<typeof useConversationReactions> }) =>
+    result.current.reactionsByTarget.get(TARGET);
+
+  it('shows it as pending with no alert, then settles quietly once confirmed', async () => {
+    const { publishReaction, settle } = pendingPublish();
+    const { result } = renderHook(() => useConversationReactions(makeParams({ publishReaction })));
+    await act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+    expect(mine(result)).toMatchObject({
+      myReactions: { '👍': 'real-id' },
+      pending: { '👍': true },
+    });
+    expect(Alert.alert).not.toHaveBeenCalled();
+    await settle(true);
+    expect(mine(result)?.myReactions['👍']).toBe('real-id');
+    expect(mine(result)?.pending).toBeUndefined();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('drops it and alerts only once it has definitely not gone out', async () => {
+    const { publishReaction, settle } = pendingPublish();
+    const { result } = renderHook(() => useConversationReactions(makeParams({ publishReaction })));
+    await act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+    await settle(false);
+    expect(mine(result)).toBeUndefined();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'messageActionsSheet.reactionFailedTitle',
+      'messageActionsSheet.reactionFailedBody',
+    );
+  });
+
+  it('stays quiet if the user removed the reaction while it was pending', async () => {
+    const { publishReaction, settle } = pendingPublish();
+    const { result } = renderHook(() => useConversationReactions(makeParams({ publishReaction })));
+    await act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+    await act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', 'real-id');
+    });
+    await settle(false);
+    expect(mine(result)).toBeUndefined();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+});
+
 it("alerts with a failed send's own reason, falling back to the generic body", async () => {
   const toggle = async (publishReaction: jest.Mock) => {
     const { result } = renderHook(() => useConversationReactions(makeParams({ publishReaction })));

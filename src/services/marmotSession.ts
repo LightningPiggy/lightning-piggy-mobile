@@ -68,6 +68,7 @@ import { MarmotWelcomePayloads } from './marmotWelcomePayloads';
 import { boundGroupQueries } from './marmotGroupBackfill';
 import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
+import { marmotSendReceipt, type MarmotSendReceipt } from './marmotSendReceipt';
 import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
 import {
   PUSH_TOKEN_LIST_KIND,
@@ -727,27 +728,26 @@ export class MarmotSession {
   }
 
   /** Send an app event; resolves with relay URL → accepted. Rejects with
-   * MarmotGroupNotReadyError if the group is still mid-change (#1280). */
+   * MarmotGroupNotReadyError if the group is still mid-change (#1280).
+   * `onSent` gets a receipt to check later whether a slow relay stored it. */
   async sendRumor(
     appGroupId: string,
     rumor: MarmotRumor,
-    opts: { settleTimeoutMs?: number } = {},
+    opts: { settleTimeoutMs?: number; onSent?: (receipt: MarmotSendReceipt) => void } = {},
   ): Promise<Record<string, boolean>> {
     const results = await this.sendIntent(
       toMlsGroupId(appGroupId),
       createApplicationMessageIntent(rumor),
       opts.settleTimeoutMs,
     );
+    opts.onSent?.(marmotSendReceipt(results, this.client.network));
     const byRelay: Record<string, boolean> = {};
     for (const r of results) {
       for (const [url, res] of Object.entries(r.response)) byRelay[url] = byRelay[url] || res.ok;
     }
-    if (__DEV__) {
-      const ok = Object.values(byRelay).filter(Boolean).length;
-      console.log(
-        `[Marmot] sent kind ${rumor.kind} to ${appGroupId.slice(7, 15)}: ${ok}/${Object.keys(byRelay).length} relays`,
-      );
-    }
+    const ok = Object.values(byRelay).filter(Boolean).length;
+    if (__DEV__)
+      console.log(`[Marmot] sent kind ${rumor.kind}: ${ok}/${Object.keys(byRelay).length}`);
     // MIP-05: wake the other members' devices (best-effort, off the send path).
     const sent = this.client.groups.loaded.find((g) => g.idStr === toMlsGroupId(appGroupId));
     if (

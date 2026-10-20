@@ -15,6 +15,7 @@ import {
   applyReactionDeletion,
   isOptimisticReactionId,
   makeOptimisticReactionId,
+  markPendingReactions,
   OPTIMISTIC_REACTION_PREFIX,
   type ReactionRecord,
 } from './reactions';
@@ -379,5 +380,35 @@ describe('optimistic reaction ids', () => {
     const a = makeOptimisticReactionId(0);
     const b = makeOptimisticReactionId(1);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('markPendingReactions (#1656)', () => {
+  const record = (id: string, emoji: string, reactor = PK_A): ReactionRecord => ({
+    id,
+    reactorPubkey: reactor,
+    emoji,
+    createdAt: 1,
+    targetEventId: 't',
+  });
+
+  it("flags only the viewer's in-flight and unconfirmed reactions", () => {
+    const reduced = reduceReactions(
+      [
+        record(makeOptimisticReactionId(0), '👍'),
+        record('sent-unconfirmed', '❤️'),
+        record('sent-confirmed', '🐷'),
+        record('theirs', '😮', 'b'.repeat(64)),
+      ],
+      PK_A,
+    );
+    const marked = markPendingReactions(reduced, new Set(['sent-unconfirmed', 'theirs']));
+    expect(marked.get('t')?.pending).toEqual({ '👍': true, '❤️': true });
+  });
+
+  it('leaves a fully confirmed state untouched', () => {
+    const reduced = reduceReactions([record('sent-confirmed', '🐷')], PK_A);
+    const before = reduced.get('t');
+    expect(markPendingReactions(reduced, new Set()).get('t')).toBe(before);
   });
 });

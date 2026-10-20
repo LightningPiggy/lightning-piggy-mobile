@@ -17,12 +17,17 @@ import {
   applyReactionDeletion,
   isOptimisticReactionId,
   makeOptimisticReactionId,
+  isPendingReactionPublish,
+  markPendingReactions,
   parseReactionEvent,
   ReactionPublishError,
+  type ReactionPublishOutcome,
   reduceReactions,
   type MessageReactionState,
   type ReactionRecord,
 } from '../utils/reactions';
+
+const NO_IDS: ReadonlySet<string> = new Set();
 
 // Per-message reactions + long-press action state for the 1:1 conversation
 // (#205). Lifted out of ConversationScreen (file-size cap) so the screen stays
@@ -54,7 +59,7 @@ export interface UseConversationReactionsParams {
     targetEventId: string;
     targetAuthorPubkey: string;
     targetEventKind?: number;
-  }) => Promise<string | null>;
+  }) => Promise<ReactionPublishOutcome>;
   deleteReaction: (reactionEventId: string) => Promise<boolean>;
   // Fetch NIP-09 (kind-5) retractions of the given reaction event ids, so a
   // peer un-reacting is reflected locally instead of leaving a stale pill.
@@ -146,10 +151,17 @@ export function useConversationReactions({
   );
   const initial = useMemo(() => readConversationReactions(owner), [owner]);
   const [reactionRecords, setReactionRecords] = useAccountState(owner, initial.records);
+  // Sent reactions no relay acknowledged in time, awaiting a relay copy (#1656).
+  const [confirmingIds, setConfirmingIds] = useState<ReadonlySet<string>>(NO_IDS);
   const reactionsByTarget = useMemo<Map<string, MessageReactionState>>(
-    () => reduceReactions(reactionRecords, myPubkey ?? null),
-    [reactionRecords, myPubkey],
+    () => markPendingReactions(reduceReactions(reactionRecords, myPubkey ?? null), confirmingIds),
+    [reactionRecords, myPubkey, confirmingIds],
   );
+  // Read when a late confirmation settles, long after this render.
+  const recordsRef = useRef(reactionRecords);
+  useLayoutEffect(() => {
+    recordsRef.current = reactionRecords;
+  }, [reactionRecords]);
 
   // Commit markers contain no account, message, or event identifiers.
   const renderTiming = useMemo(
@@ -443,19 +455,21 @@ export function useConversationReactions({
         targetEventId: target.targetId,
       };
       setReactionRecords((prev) => [...prev, optimistic]);
-      let realId: string | null;
+      let outcome: ReactionPublishOutcome;
       let failureReason: string | null = null;
       try {
-        realId = await publishReaction({
+        outcome = await publishReaction({
           emoji,
           targetEventId: target.targetId,
           targetAuthorPubkey: target.authorPubkey,
           targetEventKind: target.targetKind,
         });
       } catch (err) {
-        realId = null;
+        outcome = null;
         if (err instanceof ReactionPublishError) failureReason = err.message;
       }
+      const pending = isPendingReactionPublish(outcome) ? outcome : null;
+      const realId = pending ? pending.id : (outcome as string | null);
       if (!writerIsCurrent()) return;
       // Did the user un-react while the publish was in flight? (`delete` both
       // reads and clears the flag in one shot.)
@@ -489,6 +503,27 @@ export function useConversationReactions({
         setReactionRecords((prev) =>
           prev.map((r) => (r.id === optimisticId ? { ...r, id: realId } : r)),
         );
+        if (pending) {
+          // Sent, but no relay acknowledged in time: keep it showing as
+          // pending, with no alert, until it's found on a relay or given up on.
+          setConfirmingIds((prev) => new Set(prev).add(realId));
+          void pending.confirmed.then((confirmed) => {
+            setConfirmingIds((prev) => {
+              const next = new Set(prev);
+              next.delete(realId);
+              return next;
+            });
+            if (confirmed || !writerIsCurrent()) return;
+            // Still showing (the user didn't remove it meanwhile)? Then it
+            // definitely didn't go out: drop it and say so.
+            if (!recordsRef.current.some((r) => r.id === realId)) return;
+            setReactionRecords((prev) => prev.filter((r) => r.id !== realId));
+            Alert.alert(
+              t('messageActionsSheet.reactionFailedTitle'),
+              t('messageActionsSheet.reactionFailedBody'),
+            );
+          });
+        }
       } else {
         // Publish failed — nothing landed on a relay. Drop the placeholder and
         // only warn if the user hadn't already cancelled the reaction.

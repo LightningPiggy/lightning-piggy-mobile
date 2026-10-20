@@ -14,17 +14,23 @@ import {
   type MarmotSession,
 } from './marmotSession';
 import { marmotSendError } from './marmotSend';
-import { ReactionPublishError } from '../utils/reactions';
+import { ReactionPublishError, type ReactionPublishOutcome } from '../utils/reactions';
+import type { MarmotSendReceipt } from './marmotSendReceipt';
 
 const REACTION_KIND = 7;
 const DELETION_KIND = 5;
 /** How long a thread opened during cold start waits for Marmot to come up. */
 const SESSION_WAIT_MS = 60_000;
+/** When to look for an unacknowledged reaction on the relays (#1656). */
+const CONFIRM_DELAYS_MS = [3_000, 10_000, 30_000];
 
 export interface MarmotReactionSource {
   fetchReactionsForMessages: (targetEventIds: string[]) => Promise<MarmotRumor[]>;
   fetchReactionDeletions: (reactionEventIds: string[]) => Promise<MarmotRumor[]>;
-  publishReaction: (input: { emoji: string; targetEventId: string }) => Promise<string | null>;
+  publishReaction: (input: {
+    emoji: string;
+    targetEventId: string;
+  }) => Promise<ReactionPublishOutcome>;
   deleteReaction: (reactionEventId: string) => Promise<boolean>;
   /** Reactions / retractions arriving live in this chat. Returns unsubscribe. */
   subscribe: (onEvent: (rumor: MarmotRumor) => void) => () => void;
@@ -99,8 +105,28 @@ export function marmotReactionSource(
     }
     if (!home) throw new Error('No Marmot chat with this person yet');
     const rumor = buildMarmotRumor(myPubkey, { kind, content, tags: [['e', targetId]] });
-    const byRelay = await session.sendRumor(home, rumor);
-    return Object.values(byRelay).some(Boolean) ? rumor.id : null;
+    let receipt: MarmotSendReceipt | undefined;
+    const byRelay = await session.sendRumor(home, rumor, { onSent: (r) => (receipt = r) });
+    const group = home;
+    return {
+      id: rumor.id,
+      accepted: Object.values(byRelay).some(Boolean),
+      receipt,
+      // marmot-ts saves a sent event into the group's history before
+      // publishing; one that never landed must not reappear on reopen.
+      forget: () => session.forgetRumor(group, rumor.id).catch(() => undefined),
+    };
+  };
+
+  // No relay acknowledged in time, but one timed out: the event may still be
+  // stored. Look for it a few times before calling it lost.
+  const confirmLater = async (sent: Awaited<ReturnType<typeof sendReferencing>>) => {
+    for (const delay of CONFIRM_DELAYS_MS) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (await sent.receipt!.isStored().catch(() => false)) return true;
+    }
+    await sent.forget();
+    return false;
   };
 
   return {
@@ -108,14 +134,24 @@ export function marmotReactionSource(
     fetchReactionDeletions: (ids) => eventsReferencing(DELETION_KIND, ids),
     // A send that throws (group still applying a change, session restarting,
     // MLS error) carries its real reason to the alert — the same wording a
-    // text send in that group shows. Only "no relay accepted it" stays null.
-    publishReaction: ({ emoji, targetEventId }) =>
-      sendReferencing(REACTION_KIND, emoji, targetEventId).catch((e: unknown) => {
+    // text send in that group shows. A relay timeout isn't a failure (#1656):
+    // the reaction stays pending until it's found on a relay or given up on.
+    publishReaction: async ({ emoji, targetEventId }) => {
+      let sent;
+      try {
+        sent = await sendReferencing(REACTION_KIND, emoji, targetEventId);
+      } catch (e) {
         if (__DEV__) console.warn('[Marmot] reaction send failed:', e);
         throw new ReactionPublishError(marmotSendError(e));
-      }),
+      }
+      if (sent.accepted) return sent.id;
+      if (sent.receipt?.timedOut) return { id: sent.id, confirmed: confirmLater(sent) };
+      await sent.forget();
+      return null;
+    },
     deleteReaction: async (reactionEventId) =>
-      (await sendReferencing(DELETION_KIND, '', reactionEventId).catch(() => null)) !== null,
+      (await sendReferencing(DELETION_KIND, '', reactionEventId).catch(() => null))?.accepted ??
+      false,
     // Follows the active session, so a thread opened during cold start (or
     // kept open across a session restart) still gets live reactions.
     subscribe: (onEvent) => {

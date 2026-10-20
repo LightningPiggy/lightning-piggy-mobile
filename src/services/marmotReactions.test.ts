@@ -2,7 +2,8 @@ import { marmotReactionSource } from './marmotReactions';
 import { setMarmotSession, type MarmotRumor, type MarmotSession } from './marmotSession';
 import { MarmotGroupNotReadyError } from './marmotSendGate';
 import { marmotSendError } from './marmotSend';
-import { ReactionPublishError } from '../utils/reactions';
+import { ReactionPublishError, type PendingReactionPublish } from '../utils/reactions';
+import type { MarmotSendReceipt } from './marmotSendReceipt';
 
 const ME = 'a'.repeat(64);
 const PEER = 'b'.repeat(64);
@@ -34,7 +35,14 @@ function fakeSession() {
     queryHistory: jest.fn(async (id: string, kinds?: number[]) =>
       (history[id] ?? []).filter((r) => !kinds || kinds.includes(r.kind)),
     ),
-    sendRumor: jest.fn(async () => ({ 'wss://r': true })),
+    sendRumor: jest.fn(
+      async (
+        _groupId: string,
+        _rumor: MarmotRumor,
+        _opts?: { onSent?: (receipt: MarmotSendReceipt) => void },
+      ): Promise<Record<string, boolean>> => ({ 'wss://r': true }),
+    ),
+    forgetRumor: jest.fn(async () => undefined),
     subscribe: jest.fn((l: { onMessage: (e: unknown) => void }) => {
       listeners.push(l.onMessage);
       return () => undefined;
@@ -91,13 +99,52 @@ describe('marmotReactionSource', () => {
     await expect(publish).rejects.toThrow(marmotSendError(new MarmotGroupNotReadyError()));
   });
 
-  it('resolves null when the send went out but no relay accepted it', async () => {
+  // The relay answered after the publish window: reported not-accepted, yet stored (#1656).
+  const unacknowledged = (session: ReturnType<typeof fakeSession>, receipt: MarmotSendReceipt) =>
+    session.sendRumor.mockImplementationOnce(async (_g, _r, opts) => {
+      opts?.onSent?.(receipt);
+      return { 'wss://r': false };
+    });
+  const publishInGroup = () =>
+    marmotReactionSource(ME, '', 'g-group').publishReaction({ emoji: '👍', targetEventId: 'm' });
+
+  it('keeps a timed-out reaction pending, then confirms it once a relay holds it', async () => {
+    jest.useFakeTimers();
     const session = fakeSession();
-    session.sendRumor.mockResolvedValueOnce({ 'wss://r': false });
+    const isStored = jest.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    unacknowledged(session, { timedOut: true, isStored });
     setMarmotSession(session as unknown as MarmotSession);
-    await expect(
-      marmotReactionSource(ME, '', 'g-group').publishReaction({ emoji: '👍', targetEventId: 'm' }),
-    ).resolves.toBeNull();
+    const outcome = await publishInGroup();
+    expect(outcome).toEqual({ id: expect.any(String), confirmed: expect.any(Promise) });
+    let confirmed: boolean | undefined;
+    void (outcome as PendingReactionPublish).confirmed.then((c) => (confirmed = c));
+    await jest.advanceTimersByTimeAsync(3_000);
+    expect(confirmed).toBeUndefined();
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(confirmed).toBe(true);
+    expect(session.forgetRumor).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
+  it('gives up on a timed-out reaction no relay ever shows, and forgets it locally', async () => {
+    jest.useFakeTimers();
+    const session = fakeSession();
+    unacknowledged(session, { timedOut: true, isStored: jest.fn().mockResolvedValue(false) });
+    setMarmotSession(session as unknown as MarmotSession);
+    const outcome = (await publishInGroup()) as PendingReactionPublish;
+    const settled = outcome.confirmed;
+    await jest.advanceTimersByTimeAsync(43_000);
+    await expect(settled).resolves.toBe(false);
+    expect(session.forgetRumor).toHaveBeenCalledWith('g-group', outcome.id);
+    jest.useRealTimers();
+  });
+
+  it('fails at once (null) when every relay refused it, forgetting the local copy', async () => {
+    const session = fakeSession();
+    unacknowledged(session, { timedOut: false, isStored: jest.fn() });
+    setMarmotSession(session as unknown as MarmotSession);
+    await expect(publishInGroup()).resolves.toBeNull();
+    expect(session.forgetRumor).toHaveBeenCalledWith('g-group', expect.any(String));
   });
 
   it('keeps live reactions flowing across a session restart', () => {
@@ -129,8 +176,16 @@ it('scopes group history, sends kind 7 and kind 5 into that group, and filters t
   await source.publishReaction({ emoji: '❤️', targetEventId: 'm-old' });
   await source.deleteReaction('r-old');
   expect(session.sendRumor.mock.calls).toEqual([
-    ['g-old', expect.objectContaining({ kind: 7, content: '❤️', tags: [['e', 'm-old']] })],
-    ['g-old', expect.objectContaining({ kind: 5, content: '', tags: [['e', 'r-old']] })],
+    [
+      'g-old',
+      expect.objectContaining({ kind: 7, content: '❤️', tags: [['e', 'm-old']] }),
+      expect.anything(),
+    ],
+    [
+      'g-old',
+      expect.objectContaining({ kind: 5, content: '', tags: [['e', 'r-old']] }),
+      expect.anything(),
+    ],
   ]);
   const onEvent = jest.fn();
   const unsubscribe = source.subscribe(onEvent);
@@ -157,6 +212,7 @@ it.each(['publish', 'delete'])(
     expect(session.sendRumor).toHaveBeenCalledWith(
       'g-old',
       expect.objectContaining({ kind: action === 'publish' ? 7 : 5 }),
+      expect.anything(),
     );
   },
 );
@@ -168,5 +224,6 @@ it('retracts a reaction in its older DM group', async () => {
   expect(session.sendRumor).toHaveBeenCalledWith(
     'g-old',
     expect.objectContaining({ kind: 5, tags: [['e', 'r-old']] }),
+    expect.anything(),
   );
 });
