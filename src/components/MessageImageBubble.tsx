@@ -80,9 +80,17 @@ const MessageImageBubble: React.FC<Props> = ({
   const [display, setDisplay] = useState<{ key: string; uri: string } | null>(null);
   const displayUri = display?.key === mediaKey ? display.uri : null;
   const onResolved = useCallback((uri: string) => setDisplay({ key: mediaKey, uri }), [mediaKey]);
+  // A failed load shows a retry box; the bubble's tap retries it.
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const canOpen = safe && loadAllowed && !!onOpenImageFullscreen && !!displayUri;
   // Until revealed, a tap loads the image; long-press still opens the menu.
-  const onPress = loadAllowed ? () => displayUri && onOpenImageFullscreen?.(displayUri) : reveal;
+  const onPress = !loadAllowed
+    ? reveal
+    : failed
+      ? retry
+      : () => displayUri && onOpenImageFullscreen?.(displayUri);
   return (
     <View style={[styles.bubbleRow, fromMe ? styles.bubbleRowRight : styles.bubbleRowLeft]}>
       <TouchableOpacity
@@ -94,17 +102,19 @@ const MessageImageBubble: React.FC<Props> = ({
         accessibilityLabel={
           !loadAllowed
             ? t('messageBubble.loadImageA11y', { host: displayHost(image.url) })
-            : fromMe
-              ? t('messageBubble.imageSent')
-              : t('messageBubble.imageReceived')
+            : failed
+              ? `${t('messageBubble.imageLoadFailed')}. ${t('messageBubble.tapToRetry')}`
+              : fromMe
+                ? t('messageBubble.imageSent')
+                : t('messageBubble.imageReceived')
         }
         // Announce as an image-button whenever it's interactive — either it can
         // open fullscreen (tap) OR it can open the actions sheet (long-press).
         // Only a purely-static image announces as a plain 'image'.
         accessibilityRole={
-          !loadAllowed ? 'button' : canOpen || onLongPress ? 'imagebutton' : 'image'
+          !loadAllowed || failed ? 'button' : canOpen || onLongPress ? 'imagebutton' : 'image'
         }
-        disabled={loadAllowed && !canOpen && !onLongPress}
+        disabled={loadAllowed && !failed && !canOpen && !onLongPress}
         testID={testID}
       >
         <OutgoingBubbleBackground fromMe={fromMe} />
@@ -123,6 +133,8 @@ const MessageImageBubble: React.FC<Props> = ({
             accessibilityLabel={t('messageBubble.sharedImage')}
             onResolved={onResolved}
             size={image.size}
+            attempt={attempt}
+            onFailedChange={setFailed}
           />
         ) : (
           <TapToLoadMedia

@@ -1,12 +1,31 @@
-import { useEffect, useState } from 'react';
-import { captureDecryptedMediaSession } from '../services/decryptedMediaCache';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  captureDecryptedMediaSession,
+  DecryptedMediaCancelledError,
+} from '../services/decryptedMediaCache';
 import { useActivePubkey } from './useActivePubkey';
 import type { FileAttachment } from '../utils/fileAttachment';
 
-export function usePdfPreview(file: FileAttachment, enabled: boolean) {
+/** `none`: nothing to show (too big, not a PDF, couldn't render) — the
+ * bubble falls back to its file icon. `failed`: the download or decrypt
+ * failed, so `retry` is worth offering. */
+export type PdfPreviewStatus = 'idle' | 'loading' | 'ready' | 'none' | 'failed';
+
+export interface PdfPreview {
+  uri: string | null;
+  status: PdfPreviewStatus;
+  retry: () => void;
+}
+
+export function usePdfPreview(file: FileAttachment, enabled: boolean): PdfPreview {
   const owner = useActivePubkey();
-  const identity = JSON.stringify([owner, file]);
-  const [result, setResult] = useState<{ identity: string; uri: string | null } | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const identity = JSON.stringify([owner, file, attempt]);
+  const [result, setResult] = useState<{
+    identity: string;
+    uri: string | null;
+    failed: boolean;
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     if (enabled) {
@@ -22,9 +41,13 @@ export function usePdfPreview(file: FileAttachment, enabled: boolean) {
         })
         .then(
           (uri) => {
-            if (!cancelled) setResult({ identity, uri });
+            if (!cancelled) setResult({ identity, uri, failed: false });
           },
-          () => {},
+          (error) => {
+            // An account switch ends the session; the new owner re-runs this.
+            if (cancelled || error instanceof DecryptedMediaCancelledError) return;
+            setResult({ identity, uri: null, failed: true });
+          },
         );
     }
     return () => {
@@ -33,5 +56,16 @@ export function usePdfPreview(file: FileAttachment, enabled: boolean) {
     // File identity includes every field without requiring a stable parsed object.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity, enabled]);
-  return enabled && result?.identity === identity ? result.uri : null;
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const current = enabled && result?.identity === identity ? result : null;
+  const status: PdfPreviewStatus = !enabled
+    ? 'idle'
+    : !current
+      ? 'loading'
+      : current.failed
+        ? 'failed'
+        : current.uri
+          ? 'ready'
+          : 'none';
+  return { uri: current?.uri ?? null, status, retry };
 }

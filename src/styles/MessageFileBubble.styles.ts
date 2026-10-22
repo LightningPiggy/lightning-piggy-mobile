@@ -21,6 +21,14 @@ export const createMessageFileBubbleStyles = (colors: Palette, cardWidth = CHAT_
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.divider,
     },
+    // Tap-to-load / loading / retry box, the size of the first-page preview.
+    previewBox: {
+      width: 'auto',
+      alignSelf: 'stretch',
+      aspectRatio: 1 / Math.SQRT2,
+      margin: 8,
+      marginBottom: 0,
+    },
     name: { color: colors.textBody, fontWeight: '600', marginTop: 6 },
     caption: { color: colors.textSupplementary, fontSize: 12, marginTop: 4 },
     actions: { flexDirection: 'row', gap: 8, marginTop: 12 },

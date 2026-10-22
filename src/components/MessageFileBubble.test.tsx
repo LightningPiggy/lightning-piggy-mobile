@@ -8,11 +8,21 @@ import { shareFileAttachment } from '../services/fileShare';
 import { FileVerificationError } from '../services/fileDownload';
 import { parseFileAttachment, parsePlainFileAttachment } from '../utils/fileAttachment';
 
-jest.mock('../hooks/usePdfPreview', () => ({ usePdfPreview: jest.fn(() => null) }));
+const mockRetry = jest.fn();
+jest.mock('../hooks/usePdfPreview', () => ({
+  usePdfPreview: jest.fn((_file: unknown, enabled: boolean) => ({
+    uri: null,
+    status: enabled ? 'loading' : 'idle',
+    retry: mockRetry,
+  })),
+}));
 jest.mock('../contexts/ThemeContext', () => ({
   useThemeColors: () => jest.requireActual('../styles/palettes').lightPalette,
 }));
-jest.mock('../contexts/LocaleContext', () => ({ useLocale: () => ({ t: (key: string) => key }) }));
+jest.mock('../contexts/LocaleContext', () => ({
+  useLocale: () => ({ t: (key: string) => key }),
+  useTranslation: () => (key: string) => key,
+}));
 jest.mock('./BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
 jest.mock('../services/fileShare', () => ({ shareFileAttachment: jest.fn(async () => {}) }));
 const file = (name = 'invoice.pdf', mime = 'application/pdf') =>
@@ -122,4 +132,36 @@ it('shows a mismatch discovered while sharing a plain link', async () => {
   expect(ui.queryByText('messageBubble.fileTypeMismatch')).toBeNull();
   fireEvent.press(ui.getByTestId('file-share-file'));
   await waitFor(() => expect(ui.getByText('messageBubble.fileTypeMismatch')).toBeTruthy());
+});
+
+it('holds a first-page box for a previewable PDF: tap to load, then loading', () => {
+  const ui = bubble();
+  expect(ui.getByTestId('chat-file-placeholder-file')).toBeTruthy();
+  expect(ui.getByText('messageBubble.tapToLoadPdf')).toBeTruthy();
+  expect(ui.queryByText('chatMenu.loadMedia')).toBeNull();
+  fireEvent.press(ui.getByTestId('chat-file-load-file'));
+  expect(ui.queryByTestId('chat-file-placeholder-file')).toBeNull();
+  expect(ui.queryByText('messageBubble.tapToLoadPdf')).toBeNull();
+});
+
+it('offers a retry when the PDF failed to load', () => {
+  jest.mocked(usePdfPreview).mockReturnValue({ uri: null, status: 'failed', retry: mockRetry });
+  const ui = render(
+    <MessageFileBubble id="failed" file={file()} fromMe={false} autoLoad footer={null} />,
+  );
+  expect(ui.getByText('messageBubble.pdfLoadFailed')).toBeTruthy();
+  fireEvent.press(ui.getByTestId('chat-file-retry-failed'));
+  expect(mockRetry).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the text link for a PDF too big to preview', () => {
+  jest.mocked(usePdfPreview).mockImplementation((_f, enabled) => ({
+    uri: null,
+    status: enabled ? 'none' : 'idle',
+    retry: mockRetry,
+  }));
+  const big = { ...file(), size: 50 * 1024 * 1024 };
+  const ui = bubble(big);
+  expect(ui.queryByTestId('chat-file-placeholder-file')).toBeNull();
+  expect(ui.getByText('chatMenu.loadMedia')).toBeTruthy();
 });

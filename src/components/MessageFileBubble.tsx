@@ -12,6 +12,9 @@ import type { FileAttachment } from '../utils/fileAttachment';
 import { Image } from 'expo-image';
 import { useTapToReveal } from '../hooks/useTapToReveal';
 import { usePdfPreview } from '../hooks/usePdfPreview';
+import { pdfPreviewEligible } from '../utils/pdfPreviewEligibility';
+import MediaStatusBox from './MediaStatusBox';
+import TapToLoadMedia, { displayHost } from './TapToLoadMedia';
 import { attachmentTypeLabel, formatAttachmentSize } from '../utils/attachmentPresentation';
 import { isSafeFileUrl } from '../utils/fileAttachment';
 
@@ -48,7 +51,22 @@ export default React.memo(function MessageFileBubble({
     (autoLoad || fromMe) && safe && !file.plainUrl,
   );
   const isPdf = file.mime === 'application/pdf' && !file.dangerous && !file.typeMismatch;
-  const preview = usePdfPreview(file, safe && allowed && isPdf);
+  const {
+    uri: preview,
+    status: previewStatus,
+    retry: retryPreview,
+  } = usePdfPreview(file, safe && allowed && isPdf);
+  // A previewable PDF holds a first-page-sized box until its preview is in:
+  // tap to load, loading, or tap to retry. Too big (or nothing rendered)
+  // falls back to the file icon and a text link.
+  const previewBox =
+    isPdf &&
+    safe &&
+    pdfPreviewEligible(file) &&
+    previewStatus !== 'ready' &&
+    previewStatus !== 'none'
+      ? previewStatus
+      : null;
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<'verification' | 'share' | null>(null);
   const [verified, setVerified] = useState<{ size: number; mime: string } | null>(null);
@@ -118,11 +136,43 @@ export default React.memo(function MessageFileBubble({
             contentFit="contain"
           />
         )}
+        {previewBox === 'loading' && <MediaStatusBox status="loading" style={styles.previewBox} />}
+        {(previewBox === 'idle' || previewBox === 'failed') && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={previewBox === 'idle' ? reveal : retryPreview}
+            onLongPress={onLongPress}
+            delayLongPress={350}
+            accessibilityRole="button"
+            accessibilityLabel={
+              previewBox === 'idle'
+                ? t('messageBubble.loadPdfA11y', { host: displayHost(file.url) })
+                : `${t('messageBubble.pdfLoadFailed')}. ${t('messageBubble.tapToRetry')}`
+            }
+            testID={`chat-file-${previewBox === 'idle' ? 'load' : 'retry'}-${shortId}`}
+          >
+            {previewBox === 'idle' ? (
+              <TapToLoadMedia
+                variant="pdf"
+                url={file.url}
+                fromMe={fromMe}
+                style={styles.previewBox}
+                testID={`chat-file-placeholder-${shortId}`}
+              />
+            ) : (
+              <MediaStatusBox
+                status="failed"
+                label={t('messageBubble.pdfLoadFailed')}
+                style={styles.previewBox}
+              />
+            )}
+          </TouchableOpacity>
+        )}
         <View style={styles.body}>
           {header}
           {file.plainUrl ? (
             <ShieldOff size={24} color={colors.textSupplementary} />
-          ) : !preview ? (
+          ) : !preview && !previewBox ? (
             <FileText size={24} color={colors.textSupplementary} />
           ) : null}
           {file.plainUrl && <Text style={styles.caption}>{t('messageBubble.filePlainUrl')}</Text>}
@@ -132,7 +182,7 @@ export default React.memo(function MessageFileBubble({
           <Text style={styles.caption}>
             {[friendlyType, sizeLabel].filter(Boolean).join(' · ')}
           </Text>
-          {isPdf && safe && !allowed && (
+          {isPdf && safe && !allowed && !previewBox && (
             <TouchableOpacity
               onPress={reveal}
               accessibilityRole="button"
