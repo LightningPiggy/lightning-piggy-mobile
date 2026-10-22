@@ -1,5 +1,13 @@
 import { useCoalescedMap } from '../utils/useCoalescedMap';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAccountState } from '../contexts/useAccountState';
 import {
@@ -8,6 +16,13 @@ import {
   isReactionCacheGenerationCurrent,
   readConversationReactions,
 } from '../utils/conversationReactionCache';
+import {
+  isLostReaction,
+  pendingReactionIds,
+  subscribePendingReactions,
+  supersedeLostReaction,
+  trackPendingReaction,
+} from '../utils/pendingReactionStore';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
@@ -17,7 +32,11 @@ import {
   applyReactionDeletion,
   isOptimisticReactionId,
   makeOptimisticReactionId,
+  isPendingReactionPublish,
+  markPendingReactions,
   parseReactionEvent,
+  ReactionPublishError,
+  type ReactionPublishOutcome,
   reduceReactions,
   type MessageReactionState,
   type ReactionRecord,
@@ -53,7 +72,7 @@ export interface UseConversationReactionsParams {
     targetEventId: string;
     targetAuthorPubkey: string;
     targetEventKind?: number;
-  }) => Promise<string | null>;
+  }) => Promise<ReactionPublishOutcome>;
   deleteReaction: (reactionEventId: string) => Promise<boolean>;
   // Fetch NIP-09 (kind-5) retractions of the given reaction event ids, so a
   // peer un-reacting is reflected locally instead of leaving a stale pill.
@@ -145,10 +164,36 @@ export function useConversationReactions({
   );
   const initial = useMemo(() => readConversationReactions(owner), [owner]);
   const [reactionRecords, setReactionRecords] = useAccountState(owner, initial.records);
-  const reactionsByTarget = useMemo<Map<string, MessageReactionState>>(
-    () => reduceReactions(reactionRecords, myPubkey ?? null),
-    [reactionRecords, myPubkey],
+  // Sent reactions no relay acknowledged in time, awaiting a relay copy (#1656).
+  // Shared per owner, so a chat reopened mid-confirmation still shows them.
+  const confirmingIds = useSyncExternalStore(subscribePendingReactions, () =>
+    pendingReactionIds(owner),
   );
+  const reactionsByTarget = useMemo<Map<string, MessageReactionState>>(
+    () => markPendingReactions(reduceReactions(reactionRecords, myPubkey ?? null), confirmingIds),
+    [reactionRecords, myPubkey, confirmingIds],
+  );
+  // A reaction that definitely didn't go out: if it's still showing (the user
+  // didn't remove it meanwhile), drop it and say so. Checked on every record
+  // change as well as on each loss, since a loss can be announced before the
+  // optimistic → real id swap has committed.
+  const [lossSignal, setLossSignal] = useState(0);
+  useEffect(
+    () =>
+      subscribePendingReactions((lost) => {
+        if (lost?.owner === owner) setLossSignal((n) => n + 1);
+      }),
+    [owner],
+  );
+  useEffect(() => {
+    if (!owner || !writerIsCurrent()) return;
+    if (!reactionRecords.some((r) => isLostReaction(owner, r.id))) return;
+    setReactionRecords((prev) => prev.filter((r) => !isLostReaction(owner, r.id)));
+    Alert.alert(
+      t('messageActionsSheet.reactionFailedTitle'),
+      t('messageActionsSheet.reactionFailedBody'),
+    );
+  }, [reactionRecords, lossSignal, owner, writerIsCurrent, setReactionRecords, t]);
 
   // Commit markers contain no account, message, or event identifiers.
   const renderTiming = useMemo(
@@ -190,6 +235,8 @@ export function useConversationReactions({
         for (const r of fresh) {
           // NIP-09: only the reactor's own retraction counts.
           if (retractions.get(r.id.toLowerCase())?.has(r.reactorPubkey)) continue;
+          // A reaction that never went out can't be restored or re-read (#1656).
+          if (isLostReaction(owner, r.id)) continue;
           if (!seen.has(r.id)) {
             merged.push(r);
             seen.add(r.id);
@@ -198,7 +245,7 @@ export function useConversationReactions({
         return merged;
       });
     },
-    [setReactionRecords, retractions, writerIsCurrent],
+    [setReactionRecords, retractions, writerIsCurrent, owner],
   );
 
   // Apply a batch of NIP-09 (kind-5) deletion events to the local record list.
@@ -442,17 +489,27 @@ export function useConversationReactions({
         targetEventId: target.targetId,
       };
       setReactionRecords((prev) => [...prev, optimistic]);
-      let realId: string | null;
+      let outcome: ReactionPublishOutcome;
+      let failureReason: string | null = null;
       try {
-        realId = await publishReaction({
+        outcome = await publishReaction({
           emoji,
           targetEventId: target.targetId,
           targetAuthorPubkey: target.authorPubkey,
           targetEventKind: target.targetKind,
         });
-      } catch {
-        realId = null;
+      } catch (err) {
+        outcome = null;
+        if (err instanceof ReactionPublishError) failureReason = err.message;
       }
+      const pending = isPendingReactionPublish(outcome) ? outcome : null;
+      const realId = pending ? pending.id : (outcome as string | null);
+      // Sent, but no relay acknowledged in time: keep it showing as pending,
+      // with no alert, until it's found on a relay or given up on. Tracked
+      // per owner before any early return (an account switch meanwhile, or
+      // the cancel path), so whichever view shows it later still settles it.
+      if (owner && realId) supersedeLostReaction(owner, realId);
+      if (pending && owner) trackPendingReaction(owner, pending.id, pending.settled);
       if (!writerIsCurrent()) return;
       // Did the user un-react while the publish was in flight? (`delete` both
       // reads and clears the flag in one shot.)
@@ -471,7 +528,7 @@ export function useConversationReactions({
           }
           if (deleted) {
             applyDeletionEvents([{ pubkey: myPubkey, tags: [['e', realId]] }]);
-          } else {
+          } else if (!isLostReaction(owner, realId)) {
             mergeFreshRecords([{ ...optimistic, id: realId }]);
             if (writerIsCurrent()) {
               Toast.show({
@@ -493,7 +550,7 @@ export function useConversationReactions({
         if (!cancelled) {
           Alert.alert(
             t('messageActionsSheet.reactionFailedTitle'),
-            t('messageActionsSheet.reactionFailedBody'),
+            failureReason ?? t('messageActionsSheet.reactionFailedBody'),
           );
         }
       }
@@ -510,6 +567,7 @@ export function useConversationReactions({
       deleteReaction,
       fetchReactionsForMessages,
       mergeFreshRecords,
+      owner,
       t,
     ],
   );

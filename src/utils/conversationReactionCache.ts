@@ -74,6 +74,12 @@ export function readConversationReactions(key: string | null): ConversationReact
   return (key && snapshots.get(key)) || { records: [], retractions: new Map() };
 }
 
+/** Drop one reaction from a cached thread: it definitely never went out (#1656). */
+export function dropCachedReaction(key: string, id: string): void {
+  const snapshot = snapshots.get(key);
+  if (snapshot) snapshot.records = snapshot.records.filter((r) => r.id !== id);
+}
+
 export function cacheConversationReactions(
   key: string | null,
   snapshot: ConversationReactionSnapshot,

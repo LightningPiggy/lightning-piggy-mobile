@@ -15,8 +15,13 @@
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 import { useConversationReactions } from './useConversationReactions';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
-import { isOptimisticReactionId } from '../utils/reactions';
+import {
+  isOptimisticReactionId,
+  ReactionPublishError,
+  type ReactionSettlement,
+} from '../utils/reactions';
 import { Toast } from '../components/BrandedToast';
+import { Alert } from '../components/BrandedAlert';
 
 import {
   cacheConversationReactions,
@@ -468,6 +473,252 @@ it('handles a rejected publish without leaving an optimistic reaction or rejecti
     result.current.buildOnToggleReaction(sentItem)!('👍', null);
   });
   expect(result.current.reactionsByTarget.get(TARGET)).toBeUndefined();
+});
+
+describe('unacknowledged (pending) reactions (#1656)', () => {
+  const pendingPublish = () => {
+    let settle!: (outcome: ReactionSettlement) => void;
+    const settled = new Promise<ReactionSettlement>((resolve) => (settle = resolve));
+    return {
+      publishReaction: jest.fn().mockResolvedValue({ id: 'real-id', settled }),
+      settle: (outcome: ReactionSettlement) => act(async () => settle(outcome)),
+    };
+  };
+  const mine = (result: { current: ReturnType<typeof useConversationReactions> }) =>
+    result.current.reactionsByTarget.get(TARGET);
+  // The pending store is module state: a fresh thread per test keeps one
+  // test's lost ids from leaking into the next.
+  let thread = 0;
+  let scopeKey = '';
+  beforeEach(() => {
+    scopeKey = `pending-thread-${++thread}`;
+  });
+  const scoped = (publishReaction: jest.Mock) => makeParams({ publishReaction, scopeKey });
+  const react = async (result: { current: ReturnType<typeof useConversationReactions> }) =>
+    act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+
+  it('shows it as pending with no alert, then settles quietly once confirmed', async () => {
+    const { publishReaction, settle } = pendingPublish();
+    const { result } = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    await react(result);
+    expect(mine(result)).toMatchObject({
+      myReactions: { '👍': 'real-id' },
+      pending: { '👍': true },
+    });
+    expect(Alert.alert).not.toHaveBeenCalled();
+    await settle('sent');
+    expect(mine(result)?.myReactions['👍']).toBe('real-id');
+    expect(mine(result)?.pending).toBeUndefined();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("keeps it, with no alert, when it couldn't be established either way", async () => {
+    const { publishReaction, settle } = pendingPublish();
+    const { result } = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    await react(result);
+    await settle('unknown');
+    expect(mine(result)?.myReactions['👍']).toBe('real-id');
+    expect(mine(result)?.pending).toBeUndefined();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('drops it and alerts only once it has definitely not gone out', async () => {
+    const { publishReaction, settle } = pendingPublish();
+    const { result } = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    await react(result);
+    await settle('lost');
+    expect(mine(result)).toBeUndefined();
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'messageActionsSheet.reactionFailedTitle',
+      'messageActionsSheet.reactionFailedBody',
+    );
+  });
+
+  it('stays quiet if the user removed the reaction while it was pending', async () => {
+    const { publishReaction, settle } = pendingPublish();
+    const { result } = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    await react(result);
+    await act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', 'real-id');
+    });
+    await settle('lost');
+    expect(mine(result)).toBeUndefined();
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('leaves no ghost when a pending reaction is lost while its removal fails', async () => {
+    const { publishReaction, settle } = pendingPublish();
+    let failDelete!: () => void;
+    const deleteReaction = jest.fn(
+      () => new Promise<boolean>((resolve) => (failDelete = () => resolve(false))),
+    );
+    const { result } = renderHook(() =>
+      useConversationReactions({ ...scoped(publishReaction), deleteReaction }),
+    );
+    await react(result);
+    // Removed while pending; the retraction is slow...
+    await act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', 'real-id');
+    });
+    // ...the reaction turns out lost meanwhile, then the retraction fails.
+    await settle('lost');
+    await act(async () => failDelete());
+    expect(mine(result)).toBeUndefined();
+    expect(readConversationReactions(`${MY_PK}:${scopeKey}`).records).toEqual([]);
+  });
+
+  it('still settles a reaction cancelled before its publish returned', async () => {
+    let settle!: (outcome: ReactionSettlement) => void;
+    let returnPublish!: () => void;
+    const settled = new Promise<ReactionSettlement>((resolve) => (settle = resolve));
+    const publishReaction = jest.fn(
+      () => new Promise((resolve) => (returnPublish = () => resolve({ id: 'real-id', settled }))),
+    );
+    // The retraction of the real id fails, so the reaction is restored...
+    const deleteReaction = jest.fn().mockResolvedValue(false);
+    const { result } = renderHook(() =>
+      useConversationReactions({ ...scoped(publishReaction), deleteReaction }),
+    );
+    act(() => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+    const optimisticId = mine(result)!.myReactions['👍'];
+    act(() => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', optimisticId);
+    });
+    await act(async () => returnPublish());
+    expect(deleteReaction).toHaveBeenCalledWith('real-id');
+    // ...still tracked as pending, so its loss is applied rather than ignored.
+    await waitFor(() => expect(mine(result)).toMatchObject({ pending: { '👍': true } }));
+    await act(async () => settle('lost'));
+    expect(mine(result)).toBeUndefined();
+    expect(readConversationReactions(`${MY_PK}:${scopeKey}`).records).toEqual([]);
+  });
+
+  it('drops a reaction refused outright, in the chat it was sent from', async () => {
+    const publishReaction = jest
+      .fn()
+      .mockResolvedValue({ id: 'real-id', settled: Promise.resolve('lost') });
+    const { result } = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    await react(result);
+    await waitFor(() => expect(mine(result)).toBeUndefined());
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(readConversationReactions(`${MY_PK}:${scopeKey}`).records).toEqual([]);
+  });
+
+  it("keeps an acknowledged retry that reuses a refused attempt's id", async () => {
+    const publishReaction = jest
+      .fn()
+      .mockResolvedValueOnce({ id: 'real-id', settled: Promise.resolve('lost') })
+      // Same second, same event: rebuilt with the same id, and accepted this time.
+      .mockResolvedValueOnce('real-id');
+    const { result } = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    await react(result);
+    await waitFor(() => expect(mine(result)).toBeUndefined());
+    await react(result);
+    expect(mine(result)?.myReactions['👍']).toBe('real-id');
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles a publish that returns after an account switch (A → B → A)', async () => {
+    let returnPublish!: (outcome: unknown) => void;
+    let settle!: (outcome: ReactionSettlement) => void;
+    const settled = new Promise<ReactionSettlement>((resolve) => (settle = resolve));
+    const publishReaction = jest.fn(() => new Promise((resolve) => (returnPublish = resolve)));
+    const first = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    act(() => {
+      first.result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+    // Switched to another account and back while the publish was out.
+    clearConversationReactions();
+    first.unmount();
+    await act(async () => returnPublish({ id: 'real-id', settled }));
+    // Back on A, the chat reads the reaction from history: still pending...
+    const owner = `${MY_PK}:${scopeKey}`;
+    const record = {
+      id: 'real-id',
+      reactorPubkey: MY_PK,
+      emoji: '👍',
+      createdAt: 1,
+      targetEventId: TARGET,
+    };
+    cacheConversationReactions(
+      owner,
+      { records: [record], retractions: new Map() },
+      reactionCacheGeneration(),
+    );
+    const back = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    expect(mine(back.result)).toMatchObject({ pending: { '👍': true } });
+    // ...and a later loss still reaches it.
+    await act(async () => settle('lost'));
+    await waitFor(() => expect(mine(back.result)).toBeUndefined());
+    expect(readConversationReactions(owner).records).toEqual([]);
+  });
+
+  it('drops a refused reaction from a chat reopened before the refusal arrived', async () => {
+    let returnPublish!: (outcome: unknown) => void;
+    const publishReaction = jest.fn(() => new Promise((resolve) => (returnPublish = resolve)));
+    const first = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    act(() => {
+      first.result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+    first.unmount();
+    // Reopened while the publish was out: it read the reaction from history.
+    const owner = `${MY_PK}:${scopeKey}`;
+    const record = {
+      id: 'real-id',
+      reactorPubkey: MY_PK,
+      emoji: '👍',
+      createdAt: 1,
+      targetEventId: TARGET,
+    };
+    cacheConversationReactions(
+      owner,
+      { records: [record], retractions: new Map() },
+      reactionCacheGeneration(),
+    );
+    const reopened = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    expect(mine(reopened.result)?.myReactions['👍']).toBe('real-id');
+    // Every relay refused it.
+    await act(async () => returnPublish({ id: 'real-id', settled: Promise.resolve('lost') }));
+    await waitFor(() => expect(mine(reopened.result)).toBeUndefined());
+    expect(readConversationReactions(owner).records).toEqual([]);
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays pending in a reopened chat, and a later loss leaves the cache too', async () => {
+    const { publishReaction, settle } = pendingPublish();
+    const first = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    await react(first.result);
+    first.unmount();
+    // Reopened before the confirmation finished: the warm cache brings the
+    // reaction back, and it still reads as pending.
+    const reopened = renderHook(() => useConversationReactions(scoped(publishReaction)));
+    expect(mine(reopened.result)).toMatchObject({ pending: { '👍': true } });
+    await settle('lost');
+    expect(mine(reopened.result)).toBeUndefined();
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(readConversationReactions(`${MY_PK}:${scopeKey}`).records).toEqual([]);
+  });
+});
+
+it("alerts with a failed send's own reason, falling back to the generic body", async () => {
+  const toggle = async (publishReaction: jest.Mock) => {
+    const { result } = renderHook(() => useConversationReactions(makeParams({ publishReaction })));
+    await act(async () => {
+      result.current.buildOnToggleReaction(sentItem)!('👍', null);
+    });
+  };
+  await toggle(jest.fn().mockRejectedValue(new ReactionPublishError('Chat is catching up')));
+  await toggle(jest.fn().mockRejectedValue(new Error('raw internal error')));
+  await toggle(jest.fn().mockResolvedValue(null));
+  expect((Alert.alert as jest.Mock).mock.calls).toEqual([
+    ['messageActionsSheet.reactionFailedTitle', 'Chat is catching up'],
+    ['messageActionsSheet.reactionFailedTitle', 'messageActionsSheet.reactionFailedBody'],
+    ['messageActionsSheet.reactionFailedTitle', 'messageActionsSheet.reactionFailedBody'],
+  ]);
 });
 
 describe('cached reactions on initial message render', () => {

@@ -845,7 +845,8 @@ describe('MarmotSession (no WebCrypto)', () => {
     setMarmotSession(bob.session);
     const source = marmotReactionSource(bob.pubkey, alice.pubkey, dm.id);
     const reactionId = await source.publishReaction({ emoji: '🐷', targetEventId: hello.id });
-    expect(reactionId).not.toBeNull();
+    // Every relay acknowledged it, so it's a plain id — not pending.
+    expect(typeof reactionId).toBe('string');
     await waitFor(() => alice.inbox.some((m) => m.rumor.id === reactionId));
     // Both sides read it back from history (the sender's own copy included).
     for (const who of [alice, bob]) {
@@ -854,7 +855,7 @@ describe('MarmotSession (no WebCrypto)', () => {
       );
       expect(found.map((r) => r.content)).toEqual(['🐷']);
     }
-    expect(await source.deleteReaction(reactionId!)).toBe(true);
+    expect(await source.deleteReaction(reactionId as string)).toBe(true);
     await waitFor(() => alice.inbox.some((m) => m.rumor.kind === 5));
     const deletions = (await alice.session.queryHistory(dm.id, [5])).filter((r) =>
       r.tags.some((t) => t[0] === 'e' && t[1] === reactionId),

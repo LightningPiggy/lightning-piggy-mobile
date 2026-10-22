@@ -33,6 +33,41 @@ export const MORE_REACTIONS: readonly string[] = [
 ]; // prettier-ignore
 
 /**
+ * A reaction send that failed for a reason the user can act on (e.g. a
+ * Marmot group still applying a membership change). `message` is already
+ * user-facing, so the reaction-failed alert shows it instead of the generic
+ * "check your relays" body.
+ */
+export class ReactionPublishError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReactionPublishError';
+  }
+}
+
+/** How an unacknowledged reaction ended: seen on a relay, definitely not
+ * stored, or never established (no relay answered the lookups). */
+export type ReactionSettlement = 'sent' | 'lost' | 'unknown';
+
+/**
+ * A reaction that went out but no relay acknowledged in time (#1656): it may
+ * still land. Until `settled` resolves (it never rejects) the pill shows as
+ * pending, with no failure alert; only `lost` is reported as a failure.
+ */
+export interface PendingReactionPublish {
+  id: string;
+  settled: Promise<ReactionSettlement>;
+}
+
+/** What a backend's `publishReaction` resolves with: the event id (sent),
+ * `null` (every relay refused it), or a still-unconfirmed send. */
+export type ReactionPublishOutcome = string | null | PendingReactionPublish;
+
+export const isPendingReactionPublish = (
+  outcome: ReactionPublishOutcome,
+): outcome is PendingReactionPublish => typeof outcome === 'object' && outcome !== null;
+
+/**
  * The unsigned event body for a NIP-25 reaction. Caller hands this to
  * `signEvent` (NostrContext) and then `publishSignedEvent`.
  */
@@ -141,6 +176,8 @@ export interface ReactionRecord {
 export interface MessageReactionState {
   byEmoji: Record<string, string[]>;
   myReactions: Record<string, string>;
+  /** The viewer's reactions still being sent or confirmed (emoji → true). */
+  pending?: Record<string, true>;
 }
 
 /** Empty reaction state — useful so consumers can `?? EMPTY_REACTION_STATE`
@@ -303,4 +340,24 @@ export function applyReactionDeletion(
 ): ReactionRecord[] {
   const author = byPubkey.toLowerCase();
   return records.filter((r) => !(r.id === deletedId && r.reactorPubkey === author));
+}
+
+/**
+ * Flag the viewer's reactions that aren't confirmed yet — still in flight
+ * (optimistic id) or sent but awaiting a relay copy (`confirming`) — so the
+ * pill can show them as pending (#1656). Mutates and returns `byTarget`
+ * (callers pass a freshly reduced map).
+ */
+export function markPendingReactions(
+  byTarget: Map<string, MessageReactionState>,
+  confirming: ReadonlySet<string>,
+): Map<string, MessageReactionState> {
+  for (const [target, state] of byTarget) {
+    let pending: Record<string, true> | undefined;
+    for (const [emoji, id] of Object.entries(state.myReactions)) {
+      if (isOptimisticReactionId(id) || confirming.has(id)) (pending ??= {})[emoji] = true;
+    }
+    if (pending) byTarget.set(target, { ...state, pending });
+  }
+  return byTarget;
 }

@@ -29,15 +29,20 @@ export default function MessageReactionRow({
         const reactors = reactions!.byEmoji[emoji];
         const myReactionId = reactions!.myReactions[emoji] ?? null;
         const mine = myReactionId !== null;
+        const pending = mine && !!reactions!.pending?.[emoji];
         return (
           <TouchableOpacity
             key={emoji}
             activeOpacity={0.7}
             disabled={!onToggleReaction}
             onPress={() => onToggleReaction?.(emoji, myReactionId)}
-            style={[styles.reactionPill, mine && styles.reactionPillMine]}
+            style={[
+              styles.reactionPill,
+              mine && styles.reactionPillMine,
+              pending && styles.reactionPillPending,
+            ]}
             accessibilityRole="button"
-            accessibilityState={{ disabled: !onToggleReaction }}
+            accessibilityState={{ disabled: !onToggleReaction, busy: pending }}
             accessibilityLabel={
               mine
                 ? t('messageBubble.reactionRemove', { emoji, count: reactors.length })

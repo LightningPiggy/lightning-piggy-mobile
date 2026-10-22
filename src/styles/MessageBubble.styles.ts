@@ -41,6 +41,11 @@ export const createMessageBubbleStyles = (colors: Palette, cardWidth = CHAT_CARD
     reactionPillMine: {
       borderColor: colors.brandPink,
     },
+    // Sent but not yet confirmed by a relay (#1656).
+    reactionPillPending: {
+      opacity: 0.55,
+      borderStyle: 'dashed',
+    },
     reactionPillEmoji: {
       fontSize: 13,
     },
