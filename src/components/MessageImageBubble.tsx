@@ -73,18 +73,23 @@ const MessageImageBubble: React.FC<Props> = ({
   // Without a `dim` tag the size is only known once the image loads; reuse it
   // when the row re-mounts (scrolled away and back) so it doesn't open square
   // and then resize, moving the rows around it.
-  const [sourceSize, setSourceSize] = useState(
-    () => loadedImageSizes.get(image.url) ?? { width: 1, height: 1 },
-  );
+  const [sourceSize, setSourceSize] = useState(() => ({
+    url: image.url,
+    size: loadedImageSizes.get(image.url) ?? { width: 1, height: 1 },
+  }));
+  const size =
+    sourceSize.url === image.url
+      ? sourceSize.size
+      : (loadedImageSizes.get(image.url) ?? { width: 1, height: 1 });
   const dim = image.dim?.match(/^(\d+)x(\d+)$/);
   const aspect = dim
     ? chatImageAspectRatio(Number(dim[1]), Number(dim[2]))
-    : chatImageAspectRatio(sourceSize.width, sourceSize.height);
+    : chatImageAspectRatio(size.width, size.height);
   const onImageLoad = useCallback(
     (event: { source: { width: number; height: number } }) => {
       const size = { width: event.source.width, height: event.source.height };
       rememberImageSize(image.url, size);
-      setSourceSize(size);
+      setSourceSize({ url: image.url, size });
     },
     [image.url],
   );

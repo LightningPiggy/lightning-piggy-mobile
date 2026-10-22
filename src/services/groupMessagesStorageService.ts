@@ -151,7 +151,12 @@ export async function appendGroupMessage(
         }
       }
       if (bestKey !== null) {
-        message = { ...message, localId: map.get(bestKey)!.localId ?? bestKey };
+        const optimistic = map.get(bestKey)!;
+        message = {
+          ...message,
+          localId: optimistic.localId ?? bestKey,
+          ...(optimistic.sendFailed ? { sendFailed: true } : {}),
+        };
         map.delete(bestKey);
       }
     }
@@ -166,7 +171,11 @@ export async function appendGroupMessage(
       message.text !== prior.text &&
       isAttachmentPlaceholderText(prior.text);
     if (!prior || prior.createdAt < message.createdAt || repairs) {
-      map.set(message.id, { ...message, ...(prior?.localId ? { localId: prior.localId } : {}) });
+      map.set(message.id, {
+        ...message,
+        ...(prior?.localId ? { localId: prior.localId } : {}),
+        ...(prior?.sendFailed ? { sendFailed: true } : {}),
+      });
     } else if (
       prior.createdAt === message.createdAt &&
       prior.senderPubkey.toLowerCase() === message.senderPubkey.toLowerCase()
@@ -254,7 +263,7 @@ export async function removeGroupMessage(
   return mutateGroupStorage(key, async () => {
     requireOwnerKey(owner, groupId);
     const existing = await readLog(key);
-    const filtered = existing.filter((m) => m.id !== messageId);
+    const filtered = existing.filter((m) => m.id !== messageId && m.localId !== messageId);
     if (filtered.length === existing.length) return existing;
     await AsyncStorage.setItem(key, JSON.stringify(filtered));
     return filtered;
@@ -276,8 +285,11 @@ export async function markGroupMessageSendFailed(
   return mutateGroupStorage(key, async () => {
     requireOwnerKey(owner, groupId);
     const existing = await readLog(key);
-    if (!existing.some((m) => m.id === messageId && !m.sendFailed)) return existing;
-    const next = existing.map((m) => (m.id === messageId ? { ...m, sendFailed: true } : m));
+    if (!existing.some((m) => (m.id === messageId || m.localId === messageId) && !m.sendFailed))
+      return existing;
+    const next = existing.map((m) =>
+      m.id === messageId || m.localId === messageId ? { ...m, sendFailed: true } : m,
+    );
     await AsyncStorage.setItem(key, JSON.stringify(next));
     return next;
   });

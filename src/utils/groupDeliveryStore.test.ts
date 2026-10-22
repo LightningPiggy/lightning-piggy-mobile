@@ -6,6 +6,7 @@ import {
   MAX_GROUP_DELIVERY_STATUSES,
   setGroupDeliveryStatus,
   settledGroupDelivery,
+  trackGroupDelivery,
   useGroupDeliveryStatuses,
 } from './groupDeliveryStore';
 import { pendingDelivery, type DeliveryStatus } from './dmDeliveryStatus';
@@ -33,10 +34,10 @@ describe('settledGroupDelivery', () => {
     expect(status.pending).toBeUndefined();
   });
 
-  it('marks a failed or partial send all-failed over the relays it tried', () => {
+  it('preserves accepted relay outcomes while marking a partial send failed', () => {
     expect(
       settledGroupDelivery({ success: false, delivery: sent({ a: 'ok', b: 'ok' }) }, {}),
-    ).toMatchObject({ delivered: false, relayResults: { a: 'failed', b: 'failed' } });
+    ).toMatchObject({ sendFailed: true, relayResults: { a: 'ok', b: 'ok' } });
     expect(
       settledGroupDelivery({ success: false }, { eventId: 'e2', relays: ['x'] }),
     ).toMatchObject({ delivered: false, relayResults: { x: 'failed' }, eventId: 'e2' });
@@ -78,4 +79,31 @@ describe('groupRowDelivery', () => {
     expect(failed?.pending).toBeFalsy();
     expect(groupRowDelivery({ id: 'old' }, new Map())).toBeUndefined();
   });
+});
+
+it.each([true, false])('retains final relay results when final arrives first: %s', (finalFirst) => {
+  for (const success of [true, false]) {
+    const id = `local_${success}`;
+    const tracker = trackGroupDelivery(id, { eventId: 'rumor', relays: ['a', 'b'] });
+    const final = sent({ a: 'ok', b: 'ok' });
+    if (finalFirst) tracker.finalize(final);
+    tracker.settle({ success, delivery: sent({ a: 'ok' }) });
+    if (!finalFirst) tracker.finalize(final);
+    expect(getGroupDeliveryStatus(id)).toMatchObject({
+      relayResults: { a: 'ok', b: 'ok' },
+      sendFailed: !success,
+      eventId: 'rumor',
+    });
+  }
+});
+
+it('keeps an in-flight send pending beyond the old watchdog deadline', () => {
+  jest.useFakeTimers();
+  try {
+    trackGroupDelivery('local_slow', {});
+    jest.advanceTimersByTime(60_000);
+    expect(getGroupDeliveryStatus('local_slow')?.pending).toBe(true);
+  } finally {
+    jest.useRealTimers();
+  }
 });

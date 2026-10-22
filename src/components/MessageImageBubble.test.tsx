@@ -146,3 +146,24 @@ it('keeps blocked images at the same full-width bounded footprint', () => {
   fireEvent.press(ui.getByTestId('bubble'));
   expect(resolveRemoteMedia).not.toHaveBeenCalled();
 });
+
+it('uses the new URL cache or square footprint immediately when the image changes', async () => {
+  jest.mocked(resolveRemoteMedia).mockResolvedValue('file:///alice/size');
+  const cachedUrl = 'https://example.com/cached-size.png';
+  const onOpen = jest.fn();
+  const ui = render(bubble(cachedUrl, onOpen));
+  await waitFor(() => expect(ui.UNSAFE_getByType(Image)).toBeTruthy());
+  fireEvent(ui.UNSAFE_getByType(Image), 'load', { source: { width: 150, height: 100 } });
+  ui.rerender(bubble('https://example.com/other-size.png', onOpen));
+  await waitFor(() => expect(ui.UNSAFE_getByType(Image)).toBeTruthy());
+  fireEvent(ui.UNSAFE_getByType(Image), 'load', { source: { width: 100, height: 150 } });
+  ui.rerender(<MessageImageBubble {...bubble(cachedUrl, onOpen).props} autoLoad={false} />);
+  expect(ui.getByTestId('conversation-image-placeholder-m1')).toHaveStyle({ aspectRatio: 1.5 });
+  ui.rerender(
+    <MessageImageBubble
+      {...bubble('https://example.com/new-size.png', onOpen).props}
+      autoLoad={false}
+    />,
+  );
+  expect(ui.getByTestId('conversation-image-placeholder-m1')).toHaveStyle({ aspectRatio: 1 });
+});

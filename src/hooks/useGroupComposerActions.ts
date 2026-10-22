@@ -18,11 +18,8 @@ import type { SharedLocation } from '../services/locationService';
 import { confirmGroupLocationShare } from '../utils/confirmLocationShare';
 import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
 import { isMarmotGroupId } from '../services/marmotSession';
-import { pendingDelivery, type DeliveryStatus } from '../utils/dmDeliveryStatus';
-import { setGroupDeliveryStatus, settledGroupDelivery } from '../utils/groupDeliveryStore';
-
-/** A send that never settles flips its pending clock to failed after this. */
-const SEND_SETTLE_WATCHDOG_MS = 20_000;
+import { trackGroupDelivery } from '../utils/groupDeliveryStore';
+import { parseVote } from '../utils/pollMessage';
 
 /**
  * Group GroupConversationScreen composer actions. A thin wrapper over the
@@ -142,31 +139,18 @@ export function useGroupComposerActions(params: {
     [group, myPubkey, setMessages, scrollToEnd],
   );
 
-  // Pending tick for a just-painted row, settled from the send's result (or by
-  // the watchdog if the send hangs). Returns the settle function.
-  const trackDelivery = useCallback(
-    (rowId: string, meta: { eventId?: string; kind?: number; relays?: string[] }) => {
-      setGroupDeliveryStatus(rowId, pendingDelivery(meta));
-      const watchdog = setTimeout(
-        () => setGroupDeliveryStatus(rowId, settledGroupDelivery({ success: false }, meta)),
-        SEND_SETTLE_WATCHDOG_MS,
-      );
-      return (result: { success: boolean; delivery?: DeliveryStatus }) => {
-        clearTimeout(watchdog);
-        setGroupDeliveryStatus(rowId, settledGroupDelivery(result, meta));
-      };
-    },
-    [],
-  );
+  const trackDelivery = trackGroupDelivery;
 
   // A text send no relay took: keep the bubble, marked failed (also on disk,
   // so it still reads as failed after a restart).
   const markOptimisticFailed = useCallback(
     async (rowId: string, targetGroup = group): Promise<void> => {
       if (!targetGroup) return;
-      setMessages((prev) => prev.map((m) => (m.id === rowId ? { ...m, sendFailed: true } : m)));
+      setMessages((prev) =>
+        prev.map((m) => (m.id === rowId || m.localId === rowId ? { ...m, sendFailed: true } : m)),
+      );
       try {
-        setMessages(await markGroupMessageSendFailed(myPubkey, targetGroup.id, rowId));
+        await markGroupMessageSendFailed(myPubkey, targetGroup.id, rowId);
       } catch (err) {
         if (__DEV__)
           console.warn('[GroupConversationScreen] markGroupMessageSendFailed failed:', err);
@@ -198,7 +182,7 @@ export function useGroupComposerActions(params: {
   const removeOptimisticRow = useCallback(
     async (rowId: string, targetGroup = group): Promise<void> => {
       if (!targetGroup) return;
-      setMessages((prev) => prev.filter((m) => m.id !== rowId));
+      setMessages((prev) => prev.filter((m) => m.id !== rowId && m.localId !== rowId));
       try {
         await removeGroupMessage(myPubkey, targetGroup.id, rowId);
       } catch (err) {
@@ -253,6 +237,7 @@ export function useGroupComposerActions(params: {
           replyTo: parent,
         },
         {
+          onDeliveryFinalized: (delivery) => settle.current?.finalize(delivery),
           onRumorReady: ({ rumorId, kind, relays }) => {
             optimistic.current = appendOptimisticGroupRow(text, group, myPubkey, parent);
             if (optimistic.current) {
@@ -265,7 +250,7 @@ export function useGroupComposerActions(params: {
           },
         },
       );
-      settle.current?.(result);
+      settle.current?.settle(result);
 
       if (!result.success) {
         if (!optimistic.current) {
@@ -276,6 +261,11 @@ export function useGroupComposerActions(params: {
         // Mark it once the storage write has settled, so that write's trailing
         // setMessages can't put back an unmarked row.
         await optimistic.current.persisted;
+        // Replies need their parent restored; hidden vote rows must leave the tally.
+        if (parent || parseVote(text)) {
+          await removeOptimisticRow(optimistic.current.row.id, group);
+          return false;
+        }
         await markOptimisticFailed(optimistic.current.row.id, group);
         return true;
       }
@@ -294,6 +284,7 @@ export function useGroupComposerActions(params: {
       appendOptimisticGroupRow,
       trackDelivery,
       markOptimisticFailed,
+      removeOptimisticRow,
       alertSavedOnRelayOnly,
       adoptRumorId,
     ],
@@ -327,6 +318,7 @@ export function useGroupComposerActions(params: {
           file,
         },
         {
+          onDeliveryFinalized: (delivery) => settle.current?.finalize(delivery),
           onRumorReady: ({ rumorId, kind: wireKind, relays }) => {
             optimistic.current = appendOptimisticGroupRow(
               fileText,
@@ -345,7 +337,7 @@ export function useGroupComposerActions(params: {
           },
         },
       );
-      settle.current?.(result);
+      settle.current?.settle(result);
 
       if (!result.success) {
         if (kind === 'file') {
@@ -394,6 +386,7 @@ export function useGroupComposerActions(params: {
       // Boxed (like `optimistic`) so TS doesn't narrow it away in the closure.
       const settle: { current: ReturnType<typeof trackDelivery> | null } = { current: null };
       const result = await sendMarmotImage(myPubkey, { groupId: group.id }, image, signEvent, {
+        onDeliveryFinalized: (delivery) => settle.current?.finalize(delivery),
         onRumorReady: ({ text, eventId, kind, relays }) => {
           rumorId = eventId;
           optimistic.current = appendOptimisticGroupRow(text);
@@ -402,7 +395,7 @@ export function useGroupComposerActions(params: {
           }
         },
       });
-      settle.current?.(result);
+      settle.current?.settle(result);
       if (!result.success) {
         Alert.alert(
           t('marmotSend.sendFailedTitle'),

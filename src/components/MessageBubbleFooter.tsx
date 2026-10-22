@@ -50,7 +50,7 @@ const DeliveryTick: React.FC<{
 
   // No relay accepted (every relay rejected, or a hard pre-publish error) →
   // failed. The bubble's tap opens the info sheet with a Re-publish action.
-  if (ok === 0) {
+  if (status.sendFailed || ok === 0) {
     return (
       <View testID={testID} accessibilityLabel={t('messageBubbleFooter.sendFailed')}>
         <AlertCircle

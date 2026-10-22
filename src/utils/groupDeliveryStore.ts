@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { failedDelivery, type DeliveryStatus } from './dmDeliveryStatus';
+import { failedDelivery, pendingDelivery, type DeliveryStatus } from './dmDeliveryStatus';
 
 /**
  * Delivery status of group messages sent THIS session — the group twin of
@@ -53,31 +53,48 @@ export function useGroupDeliveryStatuses(): ReadonlyMap<string, DeliveryStatus> 
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-/**
- * A settled group send's status. "Sent" means the send succeeded — for a
- * gift-wrap group, every member's wrap reached at least one relay — and the
- * per-relay results drive the tick as in a 1:1 chat. A failed send (including
- * a partial one, where some members got nothing) is all-failed: the bubble
- * shows the red mark, whatever a relay did with the other members' wraps.
- */
+/** Keep actual relay outcomes; fan-out failure is a separate bubble state. */
 export function settledGroupDelivery(
   result: { success: boolean; delivery?: DeliveryStatus },
   meta: { eventId?: string; kind?: number; relays?: string[] },
 ): DeliveryStatus {
   const { delivery } = result;
-  if (!result.success || !delivery) {
-    const relays = delivery ? Object.keys(delivery.relayResults) : meta.relays;
-    return failedDelivery({
-      eventId: delivery?.eventId ?? meta.eventId,
-      kind: delivery?.kind ?? meta.kind,
-      relays,
-    });
-  }
+  if (!delivery) return failedDelivery(meta);
   return {
     ...delivery,
+    sendFailed: !result.success,
     pending: undefined,
     eventId: delivery.eventId ?? meta.eventId,
     kind: delivery.kind ?? meta.kind,
+  };
+}
+
+/** Track early and final snapshots in either order without losing send failure. */
+export function trackGroupDelivery(
+  rowId: string,
+  meta: { eventId?: string; kind?: number; relays?: string[] },
+) {
+  setGroupDeliveryStatus(rowId, pendingDelivery(meta));
+  let result: { success: boolean; delivery?: DeliveryStatus } | undefined;
+  let finalDelivery: DeliveryStatus | undefined;
+  const update = () => {
+    // Final relay acks alone cannot prove that every group member got a wrap.
+    if (result) {
+      setGroupDeliveryStatus(
+        rowId,
+        settledGroupDelivery({ ...result, delivery: finalDelivery ?? result.delivery }, meta),
+      );
+    }
+  };
+  return {
+    settle(value: { success: boolean; delivery?: DeliveryStatus }) {
+      result = value;
+      update();
+    },
+    finalize(delivery: DeliveryStatus) {
+      finalDelivery = delivery;
+      update();
+    },
   };
 }
 

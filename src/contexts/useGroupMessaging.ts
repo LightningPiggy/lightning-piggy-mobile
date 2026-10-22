@@ -40,6 +40,7 @@ export interface UseGroupMessagingOptions {
 // failed send keeps its bubble, with Re-publish in the message-info sheet.
 // `relays`: the send's target relays (a Marmot group's are its own, omitted).
 export interface GroupSendHooks {
+  onDeliveryFinalized?: (delivery: DeliveryStatus) => void;
   onRumorReady?: (meta: { rumorId: string; kind: number; relays?: string[] }) => void;
 }
 
@@ -177,7 +178,11 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         // its content fields alone). Fire onRumorReady synchronously so the
         // caller can paint the optimistic bubble before any async work (#1033).
         const rumorId = directMessageRumorEventId(rumor);
-        hooks?.onRumorReady?.({ rumorId, kind: rumor.kind, relays: sendRelays });
+        hooks?.onRumorReady?.({
+          rumorId,
+          kind: rumor.kind,
+          ...(isMarmotGroupId(input.groupId) ? {} : { relays: sendRelays }),
+        });
         await paintOptimisticBubble(hooks);
 
         // Marmot group: the same rumor rides the group's MLS session instead
@@ -195,6 +200,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
           });
           if (result.wrapsPublished === 0) {
             return {
@@ -232,6 +238,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               amberService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
             signerSignSeal: async (unsignedSeal) => {
@@ -289,6 +296,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               nostrConnectService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
             signerSignSeal: async (unsignedSeal) => {

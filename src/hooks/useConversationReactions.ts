@@ -164,6 +164,10 @@ export function useConversationReactions({
   );
   const initial = useMemo(() => readConversationReactions(owner), [owner]);
   const [reactionRecords, setReactionRecords] = useAccountState(owner, initial.records);
+  const reactionRecordsRef = useRef(reactionRecords);
+  useLayoutEffect(() => {
+    reactionRecordsRef.current = reactionRecords;
+  }, [reactionRecords]);
   // Sent reactions no relay acknowledged in time, awaiting a relay copy (#1656).
   // Shared per owner, so a chat reopened mid-confirmation still shows them.
   const confirmingIds = useSyncExternalStore(subscribePendingReactions, () =>
@@ -411,6 +415,7 @@ export function useConversationReactions({
         return;
       }
       closeMessageActions();
+      const reactionRecords = reactionRecordsRef.current;
       if (existingReactionId) {
         // Aggregation collapses duplicate votes, so retract every matching
         // own event rather than exposing an older vote after deleting the newest.
@@ -560,7 +565,6 @@ export function useConversationReactions({
       writerIsCurrent,
       setReactionRecords,
       scheduled,
-      reactionRecords,
       applyDeletionEvents,
       myPubkey,
       publishReaction,

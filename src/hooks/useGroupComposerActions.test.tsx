@@ -305,7 +305,7 @@ describe('useGroupComposerActions — a failed text send keeps its bubble, marke
       await result.current.sendText('hello');
     });
 
-    expect(getGroupDeliveryStatus(rowIdOf())?.relayResults).toEqual({ 'wss://a': 'failed' });
+    expect(getGroupDeliveryStatus(rowIdOf())?.relayResults).toEqual({ 'wss://a': 'ok' });
     expect(mockMarkGroupMessageSendFailed).toHaveBeenCalled();
   });
 
@@ -531,3 +531,76 @@ it('excludes a member removed while the document upload is pending', async () =>
     expect.anything(),
   );
 });
+
+it('retains the visible failed row when append fails and marking returns an empty log', async () => {
+  mockAppendGroupMessage.mockRejectedValue(new Error('storage unavailable'));
+  mockMarkGroupMessageSendFailed.mockResolvedValue([]);
+  mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+    hooks?.onRumorReady?.({ rumorId: 'failed', kind: 14 });
+    return { success: false };
+  });
+  const { result, setMessages } = setup();
+  await act(async () => {
+    expect(await result.current.sendText('hello')).toBe(true);
+  });
+  const echoed = { id: 'echo', localId: rowIdOf(), text: 'hello' };
+  const lastUpdate = setMessages.mock.calls.at(-1)![0];
+  expect(lastUpdate([echoed])).toEqual([{ ...echoed, sendFailed: true }]);
+  expect(setMessages.mock.calls.every(([update]) => typeof update === 'function')).toBe(true);
+});
+
+it.each(['reply', 'vote'])(
+  'rolls back a failed %s after persistence and reports failure',
+  async (type) => {
+    let persist!: (rows: unknown[]) => void;
+    mockAppendGroupMessage.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          persist = resolve;
+        }),
+    );
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'failed', kind: 14 });
+      return { success: false };
+    });
+    const clearReply = jest.fn();
+    const { result, setMessages } = setup(type === 'reply' ? 'parent' : undefined, clearReply);
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending =
+        type === 'reply'
+          ? result.current.handleSend()
+          : result.current.sendText('[POLL_VOTE] poll-id 1');
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    await act(async () => {
+      persist([mockAppendGroupMessage.mock.calls[0][2]]);
+      expect(await pending).toBe(false);
+    });
+    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(MY_PUBKEY, GROUP_ID, rowIdOf());
+    expect(clearReply).not.toHaveBeenCalled();
+    expect(mockMarkGroupMessageSendFailed).not.toHaveBeenCalled();
+    const remove = setMessages.mock.calls.at(-1)![0];
+    expect(remove([{ id: 'echo', localId: rowIdOf() }, { id: 'keep' }])).toEqual([{ id: 'keep' }]);
+  },
+);
+
+it.each([true, false])(
+  'wires final delivery to the composer store (final first: %s)',
+  async (finalFirst) => {
+    let finalize!: NonNullable<GroupSendHooks['onDeliveryFinalized']>;
+    const final = { delivered: true, relayResults: { a: 'ok' as const, b: 'ok' as const } };
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'rumor', kind: 14 });
+      finalize = hooks!.onDeliveryFinalized!;
+      if (finalFirst) finalize(final);
+      return { success: false, delivery: { delivered: true, relayResults: { a: 'ok' } } };
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.sendText('hello');
+    });
+    if (!finalFirst) finalize(final);
+    expect(getGroupDeliveryStatus(rowIdOf())).toMatchObject({ ...final, sendFailed: true });
+  },
+);
