@@ -82,7 +82,7 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
     return (
       <View style={[styles.imageBox, style, styles.boxTint]} testID={testID}>
         <Icon size={28} color={colors.brandPink} />
-        <Text style={[styles.boxLabel, styles.labelCentered]}>
+        <Text style={[styles.boxAction, styles.labelCentered]}>
           {t(variant === 'pdf' ? 'messageBubble.tapToLoadPdf' : 'messageBubble.tapToLoadImage')}
         </Text>
         <Text style={[styles.boxHost, styles.labelCentered]} numberOfLines={1}>

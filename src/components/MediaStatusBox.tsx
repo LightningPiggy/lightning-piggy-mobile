@@ -32,7 +32,7 @@ const MediaStatusBox: React.FC<Props> = ({ status, label, style, testID }) => {
         <>
           <AlertCircle size={28} color={colors.brandPink} />
           <Text style={[styles.boxLabel, styles.labelCentered]}>{label}</Text>
-          <Text style={[styles.boxHost, styles.labelCentered]}>
+          <Text style={[styles.boxAction, styles.labelCentered]}>
             {t('messageBubble.tapToRetry')}
           </Text>
         </>
