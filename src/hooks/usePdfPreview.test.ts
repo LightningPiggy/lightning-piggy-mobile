@@ -1,5 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
-import { captureDecryptedMediaSession } from '../services/decryptedMediaCache';
+import {
+  captureDecryptedMediaSession,
+  DecryptedMediaCancelledError,
+} from '../services/decryptedMediaCache';
 import { usePdfPreview } from './usePdfPreview';
 import { resolvePdfPreview } from '../services/pdfPreview';
 import type { FileAttachment } from '../utils/fileAttachment';
@@ -93,4 +96,15 @@ it('reports none when there is nothing to preview, and idle when not enabled', a
   await waitFor(() => expect(result.current.status).toBe('none'));
   const idle = renderHook(() => usePdfPreview(file, false));
   expect(idle.result.current.status).toBe('idle');
+});
+
+it('settles as none when the session ends before the preview starts', async () => {
+  jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
+    owner: 'alice',
+    assertCurrent: () => {
+      throw new DecryptedMediaCancelledError();
+    },
+  });
+  const { result } = renderHook(() => usePdfPreview(file, true));
+  await waitFor(() => expect(result.current.status).toBe('none'));
 });

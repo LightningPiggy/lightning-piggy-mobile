@@ -11,6 +11,8 @@ import type { FileAttachment } from '../utils/fileAttachment';
 import { MAX_PDF_PREVIEW_BYTES, pdfPreviewEligible } from '../utils/pdfPreviewEligibility';
 
 const previews = new Map<string, Promise<string | null>>();
+/** fetchBounded's error for a body over its byte cap. */
+const OVER_LIMIT = 'Remote body exceeds limit';
 
 /** Resolve only after trust consent. Native output is beside the account's hash-keyed local file.
  * Resolves null when there's no preview to show (too big, not really a PDF,
@@ -27,7 +29,12 @@ export async function resolvePdfPreview(
       renderPdfFirstPageAsync?: (uri: string, width: number) => Promise<string | null>;
     }>('DocumentMetadata');
     if (!native?.renderPdfFirstPageAsync || !pdfPreviewEligible(file)) return null;
-    const uri = await resolveDecryptedMedia({ ...file, kind: 'file' }, owner);
+    // An unknown-size link is fetched with the preview cap, not the 50 MB
+    // file cap: a preview never pulls more than it could render.
+    const uri = await resolveDecryptedMedia(
+      { ...file, size: file.size ?? MAX_PDF_PREVIEW_BYTES, kind: 'file' },
+      owner,
+    );
     session.assertCurrent();
     const metadata = verifiedFileMetadata(uri);
     if (!metadata || metadata.mime !== 'application/pdf' || metadata.size > MAX_PDF_PREVIEW_BYTES)
@@ -46,6 +53,9 @@ export async function resolvePdfPreview(
     return result;
   } catch (error) {
     if (error instanceof DecryptedMediaCancelledError) return null;
+    // Over the preview cap: nothing to preview (Save/Share still fetch it).
+    if (file.size === undefined && error instanceof Error && error.message === OVER_LIMIT)
+      return null;
     throw error;
   }
 }

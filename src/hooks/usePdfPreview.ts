@@ -44,9 +44,11 @@ export function usePdfPreview(file: FileAttachment, enabled: boolean): PdfPrevie
             if (!cancelled) setResult({ identity, uri, failed: false });
           },
           (error) => {
-            // An account switch ends the session; the new owner re-runs this.
-            if (cancelled || error instanceof DecryptedMediaCancelledError) return;
-            setResult({ identity, uri: null, failed: true });
+            if (cancelled) return;
+            // The session ended (account switch or cache wipe): settle as no
+            // preview rather than spin; a new owner re-runs this effect.
+            const ended = error instanceof DecryptedMediaCancelledError;
+            setResult({ identity, uri: null, failed: !ended });
           },
         );
     }

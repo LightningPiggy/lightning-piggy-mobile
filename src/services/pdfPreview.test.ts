@@ -98,3 +98,13 @@ it('skips files of unknown size before fetching or rendering', async () => {
   expect(resolveDecryptedMedia).not.toHaveBeenCalled();
   expect(render).not.toHaveBeenCalled();
 });
+
+it('caps an unknown-size link at the preview limit and treats over-limit as no preview', async () => {
+  const link = { ...file, size: undefined, plainUrl: true };
+  jest.mocked(resolveDecryptedMedia).mockRejectedValueOnce(new Error('Remote body exceeds limit'));
+  expect(await resolvePdfPreview(link, 'alice')).toBeNull();
+  expect(resolveDecryptedMedia).toHaveBeenCalledWith(
+    { ...link, size: 10 * 1024 * 1024, kind: 'file' },
+    'alice',
+  );
+});
