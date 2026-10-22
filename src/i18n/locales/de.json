@@ -2859,7 +2859,7 @@
     },
     "availability": {
       "checking": "Wird geprüft…",
-      "unavailable": "{{name}} hat Marmot noch nicht eingerichtet. Bitte sie, Lightning Piggy oder White Noise zu öffnen.",
+      "unavailable": "{{name}} hat Marmot noch nicht eingerichtet. Bitte die Person, Lightning Piggy oder White Noise zu öffnen.",
       "error": "Prüfung fehlgeschlagen — erneut versuchen",
       "someone": "Dieser Kontakt",
       "unavailableTitle": "Marmot ist nicht verfügbar",

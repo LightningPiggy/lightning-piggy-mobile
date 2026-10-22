@@ -26,10 +26,16 @@ export interface MarmotAvailabilitySession {
 /** One bounded lookup (two relay round trips); past this it's an `error`. */
 export const MARMOT_AVAILABILITY_TIMEOUT_MS = 10_000;
 const MAX_CACHED_PEERS = 256;
+const UNAVAILABLE_TTL_MS = 2 * 60_000;
 
-// Session-lifetime, in-memory only: a definite answer per viewer:peer.
-const cache = new Map<string, MarmotAvailabilityResult>();
-const pending = new Map<string, Promise<MarmotAvailabilityResult>>();
+// In-memory only: available lasts for the session; unavailable expires.
+type CachedAvailability = { result: MarmotAvailabilityResult; expiresAt: number };
+type PendingAvailability = {
+  promise: Promise<MarmotAvailabilityResult>;
+  invalidated: boolean;
+};
+const cache = new Map<string, CachedAvailability>();
+const pending = new Map<string, PendingAvailability>();
 
 const keyFor = (viewer: string, peer: string) =>
   `${viewer.toLowerCase()}:${peer.trim().toLowerCase()}`;
@@ -47,15 +53,21 @@ export function peekMarmotAvailability(
   if (!session) return null;
   const key = keyFor(session.pubkey, peer);
   if (session.findDm(peer.trim().toLowerCase())) {
-    cache.set(key, 'available');
+    cache.set(key, { result: 'available', expiresAt: Infinity });
     return 'available';
   }
-  return cache.get(key) ?? null;
+  const cached = cache.get(key);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    cache.delete(key);
+    return null;
+  }
+  return cached.result;
 }
 
 /**
- * Look the peer up (cached per viewer:peer for the app session; concurrent
- * calls share one lookup). `force` skips a cached answer — a retry. Only
+ * Look the peer up (cached per viewer:peer; concurrent calls share one lookup).
+ * Unavailable answers expire after two minutes. `force` skips a cached answer — a retry. Only
  * `available` / `unavailable` are cached; an `error` is always re-checked.
  * Without a session (signed out, or Marmot still starting) the answer is
  * `error`: we can't tell yet, so the user can retry rather than be told the
@@ -74,8 +86,12 @@ export function checkMarmotAvailability(
     if (known) return Promise.resolve(known);
   }
   const inFlight = pending.get(key);
-  if (inFlight) return inFlight;
+  if (inFlight) return inFlight.promise;
 
+  const flight: PendingAvailability = {
+    promise: Promise.resolve('error'),
+    invalidated: false,
+  };
   const run = (async (): Promise<MarmotAvailabilityResult> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -88,20 +104,25 @@ export function checkMarmotAvailability(
           );
         }),
       ]);
+      if (flight.invalidated) return 'error';
       if (result === 'error') cache.delete(key);
       else {
         if (!cache.has(key) && cache.size >= MAX_CACHED_PEERS) {
           cache.delete(cache.keys().next().value!);
         }
-        cache.set(key, result);
+        cache.set(key, {
+          result,
+          expiresAt: result === 'unavailable' ? Date.now() + UNAVAILABLE_TTL_MS : Infinity,
+        });
       }
       return result;
     } finally {
       clearTimeout(timer);
-      pending.delete(key);
+      if (pending.get(key) === flight) pending.delete(key);
     }
   })();
-  pending.set(key, run);
+  flight.promise = run;
+  pending.set(key, flight);
   return run;
 }
 
@@ -123,11 +144,20 @@ async function lookup(
 /** Forget the answer for a peer (e.g. we learned of a new key package). */
 export function invalidateMarmotAvailability(peer: string): void {
   const suffix = `:${peer.trim().toLowerCase()}`;
-  for (const key of [...cache.keys()]) if (key.endsWith(suffix)) cache.delete(key);
+  for (const key of new Set([...cache.keys(), ...pending.keys()])) {
+    if (!key.endsWith(suffix)) continue;
+    cache.delete(key);
+    const flight = pending.get(key);
+    if (flight) {
+      flight.invalidated = true;
+      pending.delete(key);
+    }
+  }
 }
 
 /** Test-only: forget everything. */
 export function resetMarmotAvailabilityCache(): void {
   cache.clear();
+  for (const flight of pending.values()) flight.invalidated = true;
   pending.clear();
 }

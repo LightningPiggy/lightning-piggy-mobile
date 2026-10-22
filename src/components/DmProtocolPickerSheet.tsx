@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { BackHandler, Text, View, TouchableOpacity } from 'react-native';
+import {
+  AccessibilityInfo,
+  BackHandler,
+  Platform,
+  Text,
+  View,
+  TouchableOpacity,
+} from 'react-native';
 import {
   BottomSheetBackdrop,
   BottomSheetView,
@@ -37,6 +44,18 @@ export default function DmProtocolPickerSheet({
   const styles = useMemo(() => createDmProtocolPickerSheetStyles(colors), [colors]);
   const { availability, retry } = useMarmotAvailability(peer?.pubkey, visible);
   const peerName = peer?.name?.trim() || t('dmProtocol.availability.someone');
+  useEffect(() => {
+    if (
+      Platform.OS === 'ios' &&
+      visible &&
+      peer?.pubkey &&
+      (availability === 'unavailable' || availability === 'error')
+    ) {
+      AccessibilityInfo.announceForAccessibility(
+        t(`dmProtocol.availability.${availability}`, { name: peerName }),
+      );
+    }
+  }, [availability, peer?.pubkey, peerName, t, visible]);
   // Greyed out but tappable: say why, and offer the protocol that works.
   const explainUnavailable = useCallback(() => {
     Alert.alert(
@@ -122,6 +141,7 @@ export default function DmProtocolPickerSheet({
               accessible
               testID={`dm-protocol-option-${protocol}`}
               accessibilityLabel={label}
+              accessibilityLiveRegion={marmot ? 'polite' : 'none'}
               accessibilityRole="button"
               accessibilityState={{ disabled: true, selected: selected === protocol }}
             >
@@ -134,6 +154,7 @@ export default function DmProtocolPickerSheet({
               onPress={unavailable ? explainUnavailable : () => onSelect(protocol)}
               testID={`dm-protocol-option-${protocol}`}
               accessibilityLabel={label}
+              accessibilityLiveRegion={marmot ? 'polite' : 'none'}
               accessibilityRole="button"
               accessibilityState={{ selected: selected === protocol }}
             >
