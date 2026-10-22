@@ -394,6 +394,7 @@ eas build:list --platform android --status finished --limit 1 \
 . Write release notes, click *Publish release*.
 . Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build (auto-distributed to the Public Beta external group via `eas.json` `submit.production.ios.groups`).
 . *What to Test* fills itself in — the `set-testflight-whats-new` workflow job uses the generated PR-title notes, polls App Store Connect for the just-submitted build, and PATCHes the localisation via `scripts/asc-set-whats-new.mjs` (see "TestFlight 'What to Test' notes" below). Manual pasting is only needed when the `EXPO_ASC_API_KEY_ID` / `EXPO_ASC_API_KEY_ISSUER_ID` / `EXPO_ASC_API_KEY_P8` secrets aren't configured.
+. *Zapstore* follows on its own: `release-zapstore.yml` publishes the attached APK, signed by the Lightning Piggy account (see "Zapstore (Nostr App Store)").
 
 NOTE: `versionCode` (Android) and `buildNumber` (iOS) are managed by EAS's remote counter (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). Don't hand-edit them for releases — cloud builds auto-increment past whatever's in `app.config.ts`. The integer in the file is only the floor for `eas build --local` and `expo run:android --variant release`, both of which are dev-test paths, not release paths.
 
@@ -437,6 +438,7 @@ A failed iOS build or TestFlight submission no longer skips the Android build: t
 ==== Secrets
 
 - **`EXPO_TOKEN`** — repo secret. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens and add under *Settings → Secrets and variables → Actions*. Everything else (iOS ASC API key, Apple distribution cert, future Google Play service account) lives on EAS's server via `eas credentials`, so the workflow never handles a `.p8` or service account JSON.
+- **`ZAPSTORE_BUNKER_URI`** / **`ZAPSTORE_CLIENT_KEY`**: the Lightning Piggy account's NIP-46 bunker URI and the stable hex client key for Zapstore publishing, stored as secrets of the `zapstore` Environment (deploys from `main` only), not as repo secrets. Setup is under "Zapstore (Nostr App Store)" → "One-time setup". Without them, the Zapstore workflow skips with a notice.
 
 ==== Build-time `EXPO_PUBLIC_*` environment variables
 
@@ -811,40 +813,115 @@ For wider testing, promote the build to the **closed** or **open** testing track
 
 === Zapstore (Nostr App Store)
 
-https://zapstore.dev[Zapstore] is a permissionless Android app store built on Nostr. Apps are discovered through social graphs, releases are cryptographically signed, and developers receive Bitcoin payments (zaps) directly from users.
+https://zapstore.dev[Zapstore] is a permissionless Android app store built on Nostr. Nobody has to approve a listing. Users zap the developer directly, and the app checks each release's signature and APK hash before it installs. Every stable GitHub Release is published there automatically: https://zapstore.dev/apps/com.lightningpiggy.app.
 
-==== Why Zapstore
+==== How it works
 
-* No registration or approval process — publish with a Nostr keypair
-* No fees — developers receive 100% of zaps
-* Cryptographic verification — releases are signed with your Nostr key; Zapstore verifies the signature on install
-* Native fit for a Bitcoin/Lightning app
+* **`zapstore.yaml`** (repo root) is the listing: name, summary, description, icon (`assets/icon.png`), screenshots (`docs/images/app-*.webp`), links, licence, supported NIPs, and the publishing `pubkey`. `relay.zapstore.dev` whitelists a new publisher by fetching this file from the repository and matching the `pubkey`, so it must be on `main` before the first publish. Listing edits take effect with the next release.
+* **`.github/workflows/release-zapstore.yml`** runs when the *Release* workflow completes (or by hand with a tag). It is separate from `release.yml`, so a Zapstore or signer problem never blocks a release. It skips, with a notice, prereleases, drafts, releases without `lightning-piggy-vX.Y.Z.apk` attached, and runs where the secrets are missing. Then it:
+.. installs the pinned https://github.com/zapstore/zsp[zsp] (`ZSP_VERSION`, binary checked against `ZSP_SHA256`);
+.. pins the tag: copies `zapstore.yaml` to `.zapstore-ci.yaml` and appends `release_filter: '^vX\.Y\.Z$'`, because zsp otherwise publishes the newest GitHub Release;
+.. runs `zsp publish --check`, a read-only fetch and parse of the APK;
+.. runs `scripts/zapstore-signer-preflight.mjs`, which installs the stable NIP-46 client key where zsp looks for it (`$XDG_CONFIG_HOME/zsp/bunker-keys/<bunker pubkey>.key`). It first requests the public key to reuse an already authorised client without resending the one-time pairing secret. If that fails or gets no answer within 10 seconds, it pairs the client, then checks the account even if the signer reports "already connected". It refuses to continue unless the bunker signs for the Lightning Piggy account. It waits up to **30 minutes** for the connection to be approved: ten minutes timed out twice for the release note;
+.. passes zsp a bunker URI with the `secret` parameter removed via `SIGN_WITH`: the pre-flight has already paired the stable client key, so zsp must not resend the consumed token;
+.. runs `zsp publish --quiet --skip-metadata`. zsp downloads the APK, uploads it with the icon and screenshots to `cdn.zapstore.dev` (Blossom), and publishes to `wss://relay.zapstore.dev`.
+* **Events signed by the Lightning Piggy account:** kind `32267` (app), `30063` (release, `d` = `com.lightningpiggy.app@X.Y.Z`), `3063` (APK asset: SHA-256, size, `apk_certificate_hash`, platforms), and one kind `24242` Blossom upload authorisation per uploaded file (icon, 5 screenshots, APK). That makes 10 signatures per release.
+* **The signer is the Lightning Piggy team account**, `npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq` (hex `22818ec3…5a79f429`). Richard (@bitcoin3us) and Mannohat (@Mannohat) each hold a copy of its key. The kind-1 release announcement (see "Publishing the release note to Nostr (Amber)") still comes from Ben's own account, unchanged.
+* **Re-runs are safe.** If the version is already on the relay for this account, zsp reports nothing to do and exits.
 
-==== Publishing
+==== Who signs owns the listing
 
-Install the `zsp` CLI tool:
+Whoever signs the first release for `com.lightningpiggy.app` owns the Zapstore listing. Releases from any other key look like a different publisher. Two guards keep that the Lightning Piggy account: zsp refuses a local signer that doesn't match `zapstore.yaml`'s `pubkey`, and the workflow pre-flight checks the bunker's account. Never run `zsp publish` from a laptop with a personal key. If a release is ever published under the wrong key, delete those events (NIP-09) and republish from the right one.
+
+==== APK signing key continuity
+
+Every asset event records the APK's signing certificate hash. For the EAS production keystore that is `9106c54b976ba48e5e89de6fdf950059e1b2abee58851dcdb86d79e83ee5d56d` (`zsp utils extract-apk` prints it as `cert_fingerprint`). Android refuses to update an installed app from an APK signed by a different key, so a certificate change strands every Zapstore user. Therefore:
+
+* Zapstore only ever gets the APK that `release.yml` builds on EAS with the production keystore. Never attach a locally built or locally signed APK to a Release.
+* Never reset or replace the Android keystore in `eas credentials`.
+* Optional follow-up: link the certificate to the Lightning Piggy account (NIP-C1 identity proof, kind `30509`) with `zsp identity --link-key`. This needs the EAS keystore and the account's signature. CI runs zsp in `--quiet` mode, which skips the linking prompt.
+
+==== One-time setup
+
+*0. Merge `zapstore.yaml` to `main`* (the relay reads it from the repository).
+
+*1. Richard: create the bunker connection for the Lightning Piggy account.*
+
+* *Amber:* select the **Lightning Piggy** account (`npub1y2qc…waffq`), not a personal one. Open Amber's Nostr Connect / NIP-46 screen and create a bunker connection called "Lightning Piggy Zapstore". Pick a relay that both the phone and GitHub Actions can reach (Amber's default is fine), then copy the `bunker://…` URI. Labels vary by Amber version.
+* *Permissions:* let the connection sign kinds **24242, 3063, 30063 and 32267** (plus connect / get public key) **without asking**, and nothing else. Never grant "sign any event". Asking every time doesn't work here: zsp waits only **30 seconds** for each Blossom upload signature (hard-coded), and a release needs seven of them, so prompts at release time would time out.
+* *nsec.app* works the same way: create a connection for the Lightning Piggy account, copy its `bunker://` URI, and allow the same four kinds without prompting.
+* Keep the signer online, with background running allowed, so release-time requests reach it.
+
+*2. Store the secrets (whoever has admin on the repository).* If Richard isn't a repo admin, he sends the URI privately (an encrypted DM, never email or chat in plain text) and Ben runs this. The secrets go in a `zapstore` Environment that only deploys from `main`, so a workflow dispatched from any other branch can't read them. The Environment also has *required reviewers*: every publish pauses until a reviewer approves the deployment on the run page, so nothing is signed with the Lightning Piggy account without a second person agreeing. Create the Environment first: if the workflow runs before it exists, GitHub creates it without the branch rule. Neither secret command echoes the value:
 
 [source,bash]
 ----
-# Install zsp (Zapstore Publisher)
-# See: https://github.com/zapstore/zsp
+set +x
+set -o pipefail
+# The Environment, restricted to deployments from main, with required
+# reviewers (Ben and Richard): each publish waits for one of them to approve.
+ben_id=$(gh api users/BenGWeeks --jq .id)
+richard_id=$(gh api users/bitcoin3us --jq .id)
+jq -n --argjson ben "$ben_id" --argjson richard "$richard_id" '{
+  deployment_branch_policy: {protected_branches: false, custom_branch_policies: true},
+  reviewers: [{type: "User", id: $ben}, {type: "User", id: $richard}]
+}' | gh api -X PUT repos/LightningPiggy/lightning-piggy-mobile/environments/zapstore --input -
+gh api -X POST repos/LightningPiggy/lightning-piggy-mobile/environments/zapstore/deployment-branch-policies \
+  -f name=main -f type=branch
+
+# A separate client key: 64 hex characters (zsp rejects nsec). Run ONCE and
+# keep it, so the bunker recognises the same client on every release.
+openssl rand -hex 32 | gh secret set ZAPSTORE_CLIENT_KEY --env zapstore --repo LightningPiggy/lightning-piggy-mobile
+
+# Paste the bunker:// URI into a hidden prompt; it never reaches history or the screen.
+read -r -s -p 'Zapstore bunker URI: ' zapstore_bunker_uri
+printf '\n'
+printf '%s' "$zapstore_bunker_uri" | gh secret set ZAPSTORE_BUNKER_URI --env zapstore --repo LightningPiggy/lightning-piggy-mobile
+unset zapstore_bunker_uri
 ----
 
-Publish a release:
+Never put the Lightning Piggy account's nsec in a secret. If a new bunker URI is ever needed, replace only `ZAPSTORE_BUNKER_URI`. Change `ZAPSTORE_CLIENT_KEY` only if it leaks, then create a fresh bunker connection too.
+
+*3. First publish: v1.5.2, by hand.* The tag's Release must have `lightning-piggy-v1.5.2.apk` attached. If the Release run stopped before attaching it, re-run its failed jobs from the Actions page (`gh run rerun <run-id> --failed`). A re-run keeps the release event; *Run workflow* on Release doesn't attach assets. Then, with Richard's phone at hand:
 
 [source,bash]
 ----
-# Build the APK
-eas build --platform android --profile preview
-
-# Run the publishing wizard (interactive)
-# Signs the release with your Nostr key and publishes metadata to relays
-zsp publish
+gh workflow run release-zapstore.yml --repo LightningPiggy/lightning-piggy-mobile --ref main -f tag=v1.5.2
 ----
 
-The wizard guides you through source repository, metadata, signing, and relay selection. Signing options include `nsec`, NIP-07 browser extension, or NIP-46 bunker.
+Richard approves the new client's connection when the pre-flight step asks. If Amber prompts for the four kinds, approve them with "remember". If the publish step then fails on a Blossom signature timeout, re-run it: the remembered permissions now apply. When it finishes, check https://zapstore.dev/apps/com.lightningpiggy.app shows the Lightning Piggy account as publisher.
 
-To receive payments, add a Lightning address to your Nostr profile.
+*4. From the next release on* it runs automatically after *Release*. The bunker connection signs without prompts.
+
+==== Limits
+
+* zsp only looks at the 10 most recent GitHub Releases, so a manual run can't publish an older tag.
+* The universal APK (~300 MB) is uploaded to Blossom on every release. Per-ABI APKs would shrink downloads (separate change).
+* To upgrade zsp, bump `ZSP_VERSION` and `ZSP_SHA256` together (`gh api repos/zapstore/zsp/releases/tags/vX.Y.Z --jq '.assets[] | .name + " " + .digest'`). Re-read the zsp README for schema changes (e.g. `zsp apk --extract` became `zsp utils extract-apk`), then repeat the dry run below.
+
+==== Dry run (local, offline, never signs)
+
+`--offline` makes no network calls. With an `npub` as `SIGN_WITH` it only prints *unsigned* events, which can't be published. It needs a local APK, so fetch one first. That's the only step that needs network:
+
+[source,bash]
+----
+gh release download v1.5.1 -p '*.apk' -D /tmp/zapstore-apk
+----
+
+Then, offline from here on (relative paths resolve against the config's folder, so build a copy of the config with absolute paths):
+
+[source,bash]
+----
+zsp utils extract-apk /tmp/zapstore-apk/lightning-piggy-v1.5.1.apk   # package, version, cert_fingerprint
+repo=$(git rev-parse --show-toplevel)
+sed "s#: \./#: $repo/#; s#^  - \./#  - $repo/#" "$repo/zapstore.yaml" > /tmp/zapstore-offline.yaml
+echo 'release_source: /tmp/zapstore-apk/lightning-piggy-v1.5.1.apk' >> /tmp/zapstore-offline.yaml
+SIGN_WITH=npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq \
+  zsp publish -q --offline /tmp/zapstore-offline.yaml > /tmp/zapstore-events.json
+node --test scripts/zapstore-signer-preflight.test.mjs
+----
+
+`zsp publish --check zapstore.yaml` also works locally. It is read-only: it fetches and parses the latest Release's APK and contacts no relay or signer.
 
 === F-Droid
 
@@ -894,7 +971,7 @@ Users can install the APK by:
 1. **Direct download**: Download the `.apk` file from the GitHub Releases page on the device, then tap to install
 2. **ADB install**: Connect via USB and run `adb install lightning-piggy.apk`
 3. **Obtainium**: Users can add the GitHub repository to https://github.com/ImranR98/Obtainium[Obtainium], which automatically tracks releases and notifies users of updates
-4. **Zapstore**: If published to Zapstore, users can install and update from there
+4. **Zapstore**: install and update from https://zapstore.dev/apps/com.lightningpiggy.app (stable releases are published there automatically, unless the workflow skips one, e.g. missing secrets or APK; see "Zapstore (Nostr App Store)")
 
 On GrapheneOS, sideloading works the same as stock Android — enable "Install unknown apps" for the browser or file manager, then open the APK.
 

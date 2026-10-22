@@ -1,0 +1,83 @@
+# Zapstore listing for Lightning Piggy (#1517).
+#
+# Read by zsp (https://github.com/zapstore/zsp — schema as of v0.4.17, pinned in
+# .github/workflows/release-zapstore.yml) and by relay.zapstore.dev, which
+# whitelists `pubkey` by fetching this file from the repository. The workflow
+# publishes each stable GitHub Release; the process is in docs/DEPLOYMENT.adoc →
+# "Zapstore (Nostr App Store)".
+#
+# Do not add `release_filter`: the workflow appends one per run to pin the
+# release tag (zsp otherwise publishes whichever release is latest).
+
+# Source code, and where zsp fetches the APK: the release workflow attaches the
+# EAS production build as `lightning-piggy-vX.Y.Z.apk` to every GitHub Release.
+repository: https://github.com/LightningPiggy/lightning-piggy-mobile
+match: '^lightning-piggy-v[0-9]+\.[0-9]+\.[0-9]+\.apk$'
+
+# Lightning Piggy team account. zsp refuses a local signer that doesn't match;
+# the workflow's pre-flight checks the NIP-46 bunker against the same key.
+pubkey: npub1y2qcaseaspuwvjtyk4suswdhgselydc42ttlt0t2kzhnykne7s5swvaffq
+
+name: Lightning Piggy
+summary: A Bitcoin and Lightning wallet for smart savers and their families, with Nostr messaging.
+description: |
+  Lightning Piggy is a Bitcoin wallet for smart savers and their families. Connect any Lightning wallet over Nostr Wallet Connect (NWC), add on-chain Bitcoin wallets, and save, send and receive sats together.
+
+  **Wallets**
+
+  - Connect any Lightning wallet via Nostr Wallet Connect (NWC), plus on-chain Bitcoin wallets (watch-only or hot)
+  - Send by QR code, invoice, Lightning address or on-chain address; receive with a QR code
+  - Move funds between your wallets, Lightning and on-chain
+  - Zap your Nostr friends
+  - Live balances with fiat conversion
+
+  **Messages and friends**
+
+  - Sign in with your Nostr identity: a local key, Amber, or a remote signer (NIP-46)
+  - Private NIP-17 chats and end-to-end encrypted Marmot (MLS) chats, for one-to-one and group conversations, with photos, voice notes, polls, invoices, zaps and live location
+  - Friends from your Nostr contacts, profiles with posts, media and a shop
+  - Opt-in push notifications that never show message content
+
+  **Explore**
+
+  - Find Bitcoin merchants nearby (BTC Map) and Bitcoin meetups and events
+  - Hunt for Piglets: geo-caches that hide sats on NFC tags or QR codes
+  - Buy and sell with sats in the Market, or set up your own shop
+
+  Open source under the MIT licence.
+tags:
+  - bitcoin
+  - lightning
+  - wallet
+  - nostr
+  - family
+  - savings
+  - messaging
+license: MIT
+website: https://lightningpiggy.com
+
+icon: ./assets/icon.png
+images:
+  - ./docs/images/app-wallets-tab.webp
+  - ./docs/images/app-hero-02-explore.webp
+  - ./docs/images/app-marmot-group-chat.webp
+  - ./docs/images/app-hero-04-hunt.webp
+  - ./docs/images/app-profile-shop-tab.webp
+
+supported_nips:
+  - '01'
+  - '02'
+  - '17'
+  - '19'
+  - '21'
+  - '22'
+  - '27'
+  - '44'
+  - '46'
+  - '47'
+  - '52'
+  - '55'
+  - '57'
+  - '59'
+  - '65'
+  - '99'

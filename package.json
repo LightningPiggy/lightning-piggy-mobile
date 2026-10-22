@@ -21,7 +21,7 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,json}\"",
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
     "test": "jest",
-    "test:release-note": "node --test scripts/build-release-note.test.mjs scripts/publish-release-note.test.mjs",
+    "test:release-note": "node --test scripts/build-release-note.test.mjs scripts/publish-release-note.test.mjs scripts/zapstore-signer-preflight.test.mjs",
     "test:coverage": "jest --coverage --coverageReporters=json-summary --coverageReporters=text",
     "perf": "bash scripts/perf-suite.sh",
     "perf:pixel": "bash scripts/perf-suite-pixel.sh",
