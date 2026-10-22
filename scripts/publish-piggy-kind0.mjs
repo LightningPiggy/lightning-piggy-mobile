@@ -4,8 +4,13 @@
 // hosted in this repo and `lud16` to the per-Piggy lud16 so test flows
 // can pay each Piggy independently and observe their wallet balance in
 // isolation. Other existing kind-0 fields (name, display_name, about,
-// banner, nip05, etc.) are fetched from DEFAULT_RELAYS and merged so
+// banner, nip05, etc.) are fetched from the test relay and merged so
 // we don't clobber them.
+//
+// Publishes ONLY to the LAN test relay (EXPO_PUBLIC_TEST_RELAY_URL in
+// .env, same default as src/config/testRelayLockdown.ts). Test Piggies
+// must never reach public relays — it leaks fixtures and gets the
+// publishing IP rate-limited or banned.
 //
 // Usage:
 //   node scripts/publish-piggy-kind0.mjs                       # publish all four
@@ -23,10 +28,6 @@ import { argv, exit, env } from 'node:process';
 import { SimplePool } from 'nostr-tools/pool';
 import * as nip19 from 'nostr-tools/nip19';
 import { getPublicKey, finalizeEvent } from 'nostr-tools/pure';
-
-// Mirror src/services/nostrService.ts → DEFAULT_RELAYS so we publish to
-// the same relays the app reads from.
-const RELAYS = ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'];
 
 const BRANCH = env.BRANCH || 'main';
 const RAW_BASE = `https://raw.githubusercontent.com/LightningPiggy/lightning-piggy-mobile/${BRANCH}/.maestro/fixtures`;
@@ -90,11 +91,19 @@ if (!existsSync('.env')) {
   exit(1);
 }
 const envText = readFileSync('.env', 'utf8');
-const LUD16_DOMAIN = envText
-  .split('\n')
-  .find((l) => l.startsWith('PIGGY_LUD16_DOMAIN='))
-  ?.slice('PIGGY_LUD16_DOMAIN='.length)
-  .trim();
+const envValue = (name) =>
+  envText
+    .split('\n')
+    .find((l) => l.startsWith(`${name}=`))
+    ?.slice(name.length + 1)
+    .trim()
+    .replace(/^['"]|['"]$/g, '');
+const RELAYS = [
+  env.EXPO_PUBLIC_TEST_RELAY_URL ||
+    envValue('EXPO_PUBLIC_TEST_RELAY_URL') ||
+    'ws://192.168.1.89:7778',
+];
+const LUD16_DOMAIN = envValue('PIGGY_LUD16_DOMAIN');
 if (!LUD16_DOMAIN) {
   console.error('Set PIGGY_LUD16_DOMAIN in .env (the LNbits host behind the Piggy lud16s).');
   exit(1);
