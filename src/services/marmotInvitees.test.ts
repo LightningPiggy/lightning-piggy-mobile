@@ -21,7 +21,11 @@ import {
 } from './marmotInvitees';
 import { MarmotDmDeviceSync } from './marmotDmDeviceSync';
 import { createMemoryMarmotBackend } from './marmotStore';
-import { MarmotNoKeyPackageError, MarmotUnusableKeyPackageError } from './marmotKeyPackages';
+import {
+  MarmotKeyPackageLookupError,
+  MarmotNoKeyPackageError,
+  MarmotUnusableKeyPackageError,
+} from './marmotKeyPackages';
 
 const RELAY = 'wss://relay.test';
 const DAY = 24 * 60 * 60;
@@ -338,6 +342,20 @@ describe('selectDeviceKeyPackages', () => {
     await expect(
       resolveInvitees(network, [RELAY], big.pubkey, [little.pubkey, middle.pubkey]),
     ).rejects.toBeInstanceOf(MarmotNoKeyPackageError);
+  });
+
+  it('reports a key-package lookup no relay answered as a lookup failure, not "no key package" (#1658)', async () => {
+    const big = makeAccount();
+    const request = jest.fn(async (_relays: string[], filter: unknown, _opts?: unknown) => {
+      if (Array.isArray(filter)) return [];
+      throw new Error('No relay answered: connection failure; query deadline');
+    });
+    await expect(
+      resolveInvitees({ request }, [RELAY], big.pubkey, [little.pubkey]),
+    ).rejects.toBeInstanceOf(MarmotKeyPackageLookupError);
+    // The key-package read asks the pool to tell "none published" from "no answer".
+    const keyPackageCall = request.mock.calls.find((c) => !Array.isArray(c[1]));
+    expect(keyPackageCall?.[2]).toEqual({ requireAnswer: true });
   });
 });
 

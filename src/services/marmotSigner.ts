@@ -17,6 +17,8 @@ import type { EventSigner } from 'applesauce-core';
 import { NSEC_KEY } from '../contexts/nostrAuthKeys';
 import type { SignerType } from '../types/nostr';
 import * as amberService from './amberService';
+import { AmberSignerError } from './amberErrors';
+import { markDmSetup } from './marmotDmSetupTrace';
 import { nip44DecryptFrom, nip44EncryptForRecipient } from './nostrCrypto';
 import * as nostrConnectService from './nostrConnectService';
 import * as nostrService from './nostrService';
@@ -55,6 +57,57 @@ const enqueue = createSerialQueue();
 
 const ABANDON_POLL_MS = 250;
 
+/**
+ * Longest one Amber request may hold the shared queue (#1658). Every Marmot
+ * signer call waits behind it, and the native module evicts a stale request
+ * only when ANOTHER one launches, which this queue never lets happen, so an
+ * unanswered approval used to block every later invite / Welcome for good.
+ * Past this it rejects as "no response" and the queue moves on; the next
+ * launch then either works or gets BUSY. It never hangs.
+ */
+export const AMBER_REQUEST_TIMEOUT_MS = 120_000;
+
+/** When the Amber request at the front of the queue started, or null. */
+let amberOpenSince: number | null = null;
+export const amberRequestOpenSince = (): number | null => amberOpenSince;
+
+/** An Amber answer faster than this almost certainly came from its silent
+ * ContentResolver path (no approval sheet); slower ones from an Intent. */
+const AMBER_SILENT_GUESS_MS = 1_500;
+
+function withAmberDeadline<T>(task: () => Promise<T>, op: string): Promise<T> {
+  const startedAt = Date.now();
+  amberOpenSince = startedAt;
+  markDmSetup(`amber ${op} start`);
+  const settled = (outcome: string) => {
+    const ms = Date.now() - startedAt;
+    const path = ms < AMBER_SILENT_GUESS_MS ? 'silent?' : 'intent?';
+    markDmSetup(`amber ${op} ${outcome} ${ms}ms ${path}`);
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new AmberSignerError('NO_RESULT', 'no-response', 'Amber did not answer in time (marmot)'),
+        ),
+      AMBER_REQUEST_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([task(), deadline])
+    .then(
+      (value) => (settled('ok'), value),
+      (e: unknown) => {
+        settled((e as { code?: string })?.code ?? 'error');
+        throw e;
+      },
+    )
+    .finally(() => {
+      clearTimeout(timer);
+      if (amberOpenSince === startedAt) amberOpenSince = null;
+    });
+}
+
 /** Settle with `p`, or reject as soon as `cancelled()` turns true — so an
  * abandoned request gives the shared queue back instead of holding it until
  * a remote signer that may never answer (an offline NIP-46 bunker) does. */
@@ -80,7 +133,8 @@ export function createMarmotSigner(
   opts: { cancelled?: () => boolean } = {},
 ): EventSigner {
   const { cancelled } = opts;
-  const run = <T>(task: () => Promise<T>): Promise<T> => {
+  const run = <T>(rawTask: () => Promise<T>, op = 'request'): Promise<T> => {
+    const task = signerType === 'amber' ? () => withAmberDeadline(rawTask, op) : rawTask;
     if (!cancelled) return enqueue(task);
     return new Promise<T>((resolve, reject) => {
       void enqueue(async () => {
@@ -93,8 +147,9 @@ export function createMarmotSigner(
         forCaller.then(resolve, reject);
         // The caller hears "abandoned" at once, but the queue is only given
         // back when the backend is free again: Amber's intent stays open until
-        // the user answers it (the next one would fail with BUSY), whereas a
-        // NIP-46 request may never settle (offline bunker).
+        // the user answers it (the next one would fail with BUSY) or until
+        // AMBER_REQUEST_TIMEOUT_MS, whereas a NIP-46 request may never settle
+        // (offline bunker).
         await (signerType === 'amber' ? request : forCaller).catch(() => undefined);
       });
     });
@@ -129,7 +184,7 @@ export function createMarmotSigner(
           return parseSigned(event, 'NIP-46 signer');
         }
       }
-    });
+    }, `sign:${draft.kind}`);
 
   const nip44 = {
     encrypt: (peer: string, plaintext: string) =>
@@ -142,7 +197,7 @@ export function createMarmotSigner(
           case 'nip46':
             return nostrConnectService.requestNip44Encrypt(plaintext, peer, pubkey);
         }
-      }),
+      }, 'nip44_encrypt'),
     decrypt: (peer: string, ciphertext: string) =>
       run(async () => {
         switch (signerType) {
@@ -153,7 +208,7 @@ export function createMarmotSigner(
           case 'nip46':
             return nostrConnectService.requestNip44Decrypt(ciphertext, peer, pubkey);
         }
-      }),
+      }, 'nip44_decrypt'),
   };
 
   return { getPublicKey: () => pubkey, signEvent, nip44 };

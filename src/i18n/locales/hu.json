@@ -2985,7 +2985,10 @@
     "noRelayAcceptedVoice": "Egyetlen relay sem fogadta el a hangüzenetet",
     "noRelayAcceptedPhoto": "Egyetlen relay sem fogadta el a fotót",
     "inviteNotDelivered": "A meghívót nem tudtuk elküldeni – egyetlen relay sem fogadta el. Ellenőrizd a kapcsolatot, és próbáld újra.",
-    "chatNotReady": "Ez a csevegés még egy friss változást dolgoz fel, ezért ez nem ment át. Próbáld újra egy pillanat múlva."
+    "chatNotReady": "Ez a csevegés még egy friss változást dolgoz fel, ezért ez nem ment át. Próbáld újra egy pillanat múlva.",
+    "keyPackageLookupFailed": "Egyetlen relayt sem értünk el, hogy lekérjük ennek a személynek a Marmot-kulcsát, így semmi sem lett elküldve. Ellenőrizd a kapcsolatot, és próbáld újra.",
+    "chatSetupTimedOut": "A biztonságos csevegés beállítása túl sokáig tart, így semmi sem lett elküldve. Ellenőrizd a kapcsolatot (és az aláíró alkalmazásodat, ha használsz ilyet), és próbáld újra.",
+    "waitingForAmber": "Az Amber jóváhagyására várunk, ezért még semmi sem lett elküldve. Nyisd meg az Ambert, engedélyezd a Lightning Piggy kérését, majd próbáld újra."
   },
   "signOutPrompt": {
     "walletsRemoved": "A fiókhoz csatlakoztatott pénztárcák, az itt tárolt helyreállító kifejezésekkel együtt, szintén el lesznek távolítva erről a telefonról. Kijelentkezés előtt külön mentsd el a helyreállító kifejezéseiket és a kapcsolati adataikat.",

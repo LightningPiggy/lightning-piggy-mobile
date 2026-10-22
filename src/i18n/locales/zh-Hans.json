@@ -2985,7 +2985,10 @@
     "noRelayAcceptedVoice": "没有中继接受该语音消息",
     "noRelayAcceptedPhoto": "没有中继接受该照片",
     "inviteNotDelivered": "我们无法发送邀请——没有中继接受它。请检查网络连接后重试。",
-    "chatNotReady": "此聊天仍在同步最近的变更，所以刚才没有发送成功。请稍后再试。"
+    "chatNotReady": "此聊天仍在同步最近的变更，所以刚才没有发送成功。请稍后再试。",
+    "keyPackageLookupFailed": "无法连接任何中继来查找此人的 Marmot 密钥，因此未发送任何内容。请检查网络连接后重试。",
+    "chatSetupTimedOut": "设置此安全聊天耗时过长，因此未发送任何内容。请检查网络连接（如使用签名应用，也请检查它）后重试。",
+    "waitingForAmber": "正在等待 Amber 批准，因此尚未发送任何内容。请打开 Amber，允许 Lightning Piggy 的请求，然后重试。"
   },
   "signOutPrompt": {
     "walletsRemoved": "与此账户相连的所有钱包，包括保存在这里的助记词，也会从这部手机上移除。退出登录前，请另外保存好它们的助记词和连接信息。",

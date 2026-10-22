@@ -7,6 +7,8 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import { createMemoryMarmotBackend } from './marmotStore';
 import { boundGroupQueries } from './marmotGroupBackfill';
+import { trackKeyPackageAcceptance } from './marmotKeyPackageLifecycle';
+import { fetchKeyPackageEvents } from './marmotInvitees';
 import {
   cleanPushRelays,
   createMarmotNetwork,
@@ -198,6 +200,23 @@ describe('push relay destination policy', () => {
     expect(publish).not.toHaveBeenCalled();
     await transport.publish(['ws://192.168.1.1/', 'wss://relay.ditto.pub'], {} as never);
     expect(publish).toHaveBeenCalledWith(['wss://relay.ditto.pub'], {});
+  });
+});
+
+describe('createMarmotNetwork().request', () => {
+  const filter = { kinds: [30443], authors: ['b'.repeat(64)], limit: 50 };
+
+  it('passes requireAnswer through to the pool (#1658)', async () => {
+    mockQuerySync.mockResolvedValue([]);
+    const request = createMarmotNetwork(() => []).request as (
+      relays: string[],
+      filters: object,
+      opts?: { requireAnswer?: boolean },
+    ) => Promise<unknown>;
+    await request(['wss://a.example'], filter, { requireAnswer: true });
+    await request(['wss://a.example'], filter);
+    expect(mockQuerySync.mock.calls[0][3]).toEqual({ requireAnswer: true });
+    expect(mockQuerySync.mock.calls[1]).toHaveLength(3);
   });
 });
 
@@ -534,6 +553,25 @@ test('Welcome ownership filters share one fresh REQ per relay', async () => {
   await sessionNetwork.request(['wss://relay.primal.net'], filters);
   expect(mockQuerySync).toHaveBeenCalledTimes(1);
   expect(mockQuerySync).toHaveBeenCalledWith(['wss://relay.primal.net'], filters, 6000);
+});
+
+test("the session's wrapped network keeps requireAnswer on key-package lookups (#1658)", async () => {
+  // Same wrapper chain as MarmotSession's client.network.
+  const sessionNetwork = boundGroupQueries(
+    trackKeyPackageAcceptance(
+      createMarmotNetwork(() => []),
+      new Set(),
+    ),
+    { watermarks: new Map(), persist: jest.fn() },
+  );
+  mockQuerySync.mockReset().mockResolvedValue([]);
+  await fetchKeyPackageEvents(sessionNetwork, ['wss://relay.primal.net'], 'b'.repeat(64));
+  const keyPackageCall = mockQuerySync.mock.calls.find(([, filters]) =>
+    (filters as { kinds?: number[] }[]).some((f) => f.kinds?.includes(30443)),
+  );
+  expect(keyPackageCall?.[3]).toEqual({ requireAnswer: true });
+  // The 10051 / 10002 list read before it stays lenient.
+  expect(mockQuerySync.mock.calls[0]).toHaveLength(3);
 });
 
 test('session-owned Welcome lookup and anonymous publications stay on LAN after an account switch', async () => {

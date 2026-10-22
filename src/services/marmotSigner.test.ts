@@ -1,3 +1,10 @@
+import { AmberSignerError } from './amberErrors';
+import {
+  AMBER_REQUEST_TIMEOUT_MS,
+  amberRequestOpenSince,
+  createMarmotSigner,
+} from './marmotSigner';
+
 const mockAmberSign = jest.fn();
 const mockBunkerSign = jest.fn();
 
@@ -12,8 +19,6 @@ jest.mock('./nostrConnectService', () => ({
 }));
 jest.mock('./nostrService', () => ({}));
 jest.mock('./nostrCrypto', () => ({}));
-
-import { createMarmotSigner } from './marmotSigner';
 
 const PK = 'a'.repeat(64);
 const draft = { kind: 13, created_at: 1, tags: [], content: 'x' };
@@ -82,5 +87,47 @@ describe('createMarmotSigner', () => {
     answerFirst();
     await expect(next).resolves.toBeDefined();
     expect(mockAmberSign).toHaveBeenCalledTimes(2);
+  });
+
+  it('an Amber request nobody answers times out and frees the queue for the next one (#1658)', async () => {
+    jest.useFakeTimers();
+    try {
+      const signed = { event: JSON.stringify({ ...draft, id: 'i', sig: 's', pubkey: PK }) };
+      mockAmberSign.mockImplementationOnce(() => new Promise(() => undefined)); // result never delivered
+      mockAmberSign.mockImplementationOnce(async () => signed);
+      const stuck = createMarmotSigner(PK, 'amber').signEvent(draft);
+      const stuckOutcome = Promise.resolve(stuck).catch((e: unknown) => e);
+      const next = createMarmotSigner(PK, 'amber').signEvent(draft);
+      await jest.advanceTimersByTimeAsync(0);
+      expect(amberRequestOpenSince()).not.toBeNull(); // the composer can name Amber
+      expect(mockAmberSign).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(AMBER_REQUEST_TIMEOUT_MS);
+      const error = await stuckOutcome;
+      expect(error).toBeInstanceOf(AmberSignerError);
+      expect(error).toMatchObject({ code: 'NO_RESULT', kind: 'no-response' });
+      await expect(next).resolves.toBeDefined();
+      expect(mockAmberSign).toHaveBeenCalledTimes(2);
+      expect(amberRequestOpenSince()).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a session-scoped (cancellable) Amber request also gives the queue back at the deadline', async () => {
+    jest.useFakeTimers();
+    try {
+      const signed = { event: JSON.stringify({ ...draft, id: 'i', sig: 's', pubkey: PK }) };
+      mockAmberSign.mockImplementationOnce(() => new Promise(() => undefined));
+      mockAmberSign.mockImplementationOnce(async () => signed);
+      const stuck = createMarmotSigner(PK, 'amber', { cancelled: () => false }).signEvent(draft);
+      const stuckOutcome = Promise.resolve(stuck).catch((e: unknown) => e);
+      const next = createMarmotSigner(PK, 'amber').signEvent(draft);
+      await jest.advanceTimersByTimeAsync(AMBER_REQUEST_TIMEOUT_MS);
+      expect(await stuckOutcome).toMatchObject({ kind: 'no-response' });
+      await jest.advanceTimersByTimeAsync(1_000); // abandonable's poll interval
+      await expect(next).resolves.toBeDefined();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

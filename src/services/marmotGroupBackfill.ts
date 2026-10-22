@@ -80,7 +80,8 @@ export function boundGroupQueries(
 
   return {
     ...network,
-    request: async (relays, filters) => {
+    // `rest`: app-only request options (MarmotRequestOptions) pass through.
+    request: async (relays, filters, ...rest: unknown[]) => {
       const list = (Array.isArray(filters) ? filters : [filters]) as Filter[];
       // Keep non-group filters together: Welcome ownership verification uses
       // an exact-id lookup plus a corroborating author filter in ONE REQ.
@@ -89,9 +90,12 @@ export function boundGroupQueries(
         ...list.filter((f) => groupH(f)).map((f) => backfill(relays, bound(f))),
         ...(ordinary.length
           ? [
-              network.request(relays, ordinary.length === 1 ? ordinary[0] : ordinary) as Promise<
-                NostrEvent[]
-              >,
+              (network.request as (...args: unknown[]) => Promise<NostrEvent[]>).call(
+                network,
+                relays,
+                ordinary.length === 1 ? ordinary[0] : ordinary,
+                ...rest,
+              ),
             ]
           : []),
       ]);
