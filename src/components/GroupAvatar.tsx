@@ -42,6 +42,9 @@ interface Props {
    * (without a parent map) fall back to the internal lookup.
    */
   contactInfoMap?: Map<string, ContactInfo>;
+  /** Render a lone avatar at the full `size` instead of the cluster's ~62%
+   * slot — for single-avatar headers that should match a 1:1 avatar. */
+  fillSingle?: boolean;
 }
 
 const MAX_AVATARS = 3;
@@ -54,7 +57,13 @@ const MAX_AVATARS = 3;
 // where animation IS wanted (e.g. a future GroupConversationScreen
 // header), promote `autoplay` to an `autoplayAvatar?: boolean` prop on
 // `Props` rather than flipping the literal.
-const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48, contactInfoMap }) => {
+const GroupAvatar: React.FC<Props> = ({
+  pubkeys,
+  groupName,
+  size = 48,
+  contactInfoMap,
+  fillSingle = false,
+}) => {
   const colors = useThemeColors();
   const { contacts } = useNostrContacts();
   const styles = useMemo(() => createStyles(colors, size), [colors, size]);
@@ -90,6 +99,10 @@ const GroupAvatar: React.FC<Props> = ({ pubkeys, groupName, size = 48, contactIn
         <Text style={styles.letterText}>{(groupName[0] || '?').toUpperCase()}</Text>
       </View>
     );
+  }
+
+  if (fillSingle && items.length === 1) {
+    return <SingleAvatar picture={items[0].picture} colors={colors} innerSize={size} />;
   }
 
   return (

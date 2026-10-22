@@ -615,8 +615,6 @@ const ConversationScreen: React.FC = () => {
             name={contact.name}
             picture={contact.picture}
             protocol={protocol}
-            styles={styles}
-            colors={colors}
             onBack={goBack}
             onOpenProfile={openPeerProfile}
             byline={dmDevices.byline}

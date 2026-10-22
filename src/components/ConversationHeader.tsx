@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { Image as ExpoImage } from 'expo-image';
 import { useTranslation } from '../contexts/LocaleContext';
+import { useThemeColors } from '../contexts/ThemeContext';
+import ChatHeaderBar from './ChatHeaderBar';
 import ChatMenu, { type ChatMenuProps } from './ChatMenu';
 import ConversationProtocolControl from './ConversationProtocolControl';
-import type { ConversationStyles } from '../styles/ConversationScreen.styles';
-import type { Palette } from '../styles/palettes';
+import { createChatHeaderStyles } from '../styles/ChatHeader.styles';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 
@@ -15,8 +16,6 @@ interface Props {
   name: string;
   picture?: string | null;
   protocol: DmProtocol;
-  styles: ConversationStyles;
-  colors: Palette;
   onBack: () => void;
   onOpenProfile: () => void;
   /** Marmot 1:1: "Secure chat · 2 devices" under the name (#1267). */
@@ -35,14 +34,14 @@ const ConversationHeader: React.FC<Props> = ({
   name,
   picture,
   protocol,
-  styles,
-  colors,
   onBack,
   onOpenProfile,
   byline,
   onBylinePress,
 }) => {
   const t = useTranslation();
+  const colors = useThemeColors();
+  const styles = useMemo(() => createChatHeaderStyles(colors), [colors]);
   const [avatarError, setAvatarError] = useState(false);
   const avatar =
     picture && !avatarError && isSupportedImageUrl(picture) ? (
@@ -69,25 +68,11 @@ const ConversationHeader: React.FC<Props> = ({
     );
 
   return (
-    <View style={styles.header}>
-      <TouchableOpacity
-        onPress={onBack}
-        style={styles.backButton}
-        accessibilityLabel={t('conversationScreen.goBack')}
-        testID="conversation-back"
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-          <Path
-            d="M15 18l-6-6 6-6"
-            stroke={colors.textHeader}
-            strokeWidth={2.4}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </Svg>
-      </TouchableOpacity>
-      <View style={styles.headerPeer}>
+    <ChatHeaderBar
+      onBack={onBack}
+      backLabel={t('conversationScreen.goBack')}
+      backTestID="conversation-back"
+      avatar={
         <TouchableOpacity
           onPress={onOpenProfile}
           accessibilityLabel={t('conversationScreen.openProfile', { name })}
@@ -95,34 +80,40 @@ const ConversationHeader: React.FC<Props> = ({
         >
           {avatar}
         </TouchableOpacity>
-        <View style={styles.headerNameBlock}>
+      }
+      title={
+        <TouchableOpacity
+          onPress={onOpenProfile}
+          accessibilityLabel={t('conversationScreen.openProfile', { name })}
+          testID="chat-header-open-profile-name"
+        >
+          <Text style={styles.headerName} numberOfLines={1}>
+            {name}
+          </Text>
+        </TouchableOpacity>
+      }
+      subtitle={
+        byline ? (
           <TouchableOpacity
-            onPress={onOpenProfile}
-            accessibilityLabel={t('conversationScreen.openProfile', { name })}
-            testID="chat-header-open-profile-name"
+            onPress={onBylinePress}
+            accessibilityRole="button"
+            accessibilityLabel={`${byline}. ${t('chatDevices.bylineA11y')}`}
+            testID="chat-header-devices"
+            hitSlop={{ top: 4, bottom: 8, left: 8, right: 8 }}
           >
-            <Text style={styles.headerName} numberOfLines={1}>
-              {name}
+            <Text style={styles.headerByline} numberOfLines={1}>
+              {byline}
             </Text>
           </TouchableOpacity>
-          {byline ? (
-            <TouchableOpacity
-              onPress={onBylinePress}
-              accessibilityRole="button"
-              accessibilityLabel={`${byline}. ${t('chatDevices.bylineA11y')}`}
-              testID="chat-header-devices"
-              hitSlop={{ top: 4, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.headerByline} numberOfLines={1}>
-                {byline}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </View>
-      <ConversationProtocolControl protocol={protocol} />
-      <ChatMenu {...menu} />
-    </View>
+        ) : null
+      }
+      trailing={
+        <>
+          <ConversationProtocolControl protocol={protocol} />
+          <ChatMenu {...menu} />
+        </>
+      }
+    />
   );
 };
 
