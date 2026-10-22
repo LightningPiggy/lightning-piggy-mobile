@@ -387,7 +387,7 @@ describe('stale-while-revalidate across partial refreshes', () => {
         seenOn: [relay],
       },
     }) as unknown as MarketListingsResult['products'][number];
-  const eden = sold('eden', 'wss://relay.weeksfamily.me');
+  const eden = sold('eden', 'wss://relay.family.example');
   const shop = sold('shop', 'wss://example.com');
 
   it("keeps a seller whose relay didn't answer the refresh, then drops them once it answers without them", async () => {
@@ -396,7 +396,7 @@ describe('stale-while-revalidate across partial refreshes', () => {
       finish({
         products: [shop, eden],
         incomplete: false,
-        answeredRelays: ['wss://example.com', 'wss://relay.weeksfamily.me'],
+        answeredRelays: ['wss://example.com', 'wss://relay.family.example'],
       }),
     );
     const firstGeneration = h.result.current.generation;
@@ -417,7 +417,7 @@ describe('stale-while-revalidate across partial refreshes', () => {
       finish({
         products: [shop],
         incomplete: false,
-        answeredRelays: ['wss://example.com', 'wss://relay.weeksfamily.me'],
+        answeredRelays: ['wss://example.com', 'wss://relay.family.example'],
       }),
     );
     expect(h.result.current.products.map((p) => p.id)).toEqual(['shop']);

@@ -1,6 +1,6 @@
 # Private-backend repeat validation — 24 September 2026
 
-Real mainnet tests on Warmachine's `lightningpiggy_api34` Android API34 emulator (`emulator-5554`), using the configured private Boltz v2 backend. No public fallback. No simulator mocks or constructed screenshots. The private endpoint and credentials are omitted.
+Real mainnet tests on an Android API 34 emulator, using the configured private Boltz v2 backend. No public fallback. No simulator mocks or constructed screenshots. The private endpoint and credentials are omitted.
 
 | Run                  | Direction           |     Invoice | Outcome                                       |
 | -------------------- | ------------------- | ----------: | --------------------------------------------- |

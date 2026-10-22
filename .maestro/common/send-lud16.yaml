@@ -12,7 +12,7 @@ name: Subflow — send a lightning address into the open thread
 # (or similar) without a Pay button.
 #
 # Caller must already have the thread open. Suggested env:
-#   MY_LUD16 — e.g. little.piggy@bank.weeksfamily.me
+#   MY_LUD16 — e.g. little.piggy@lnbits.example.com
 #
 # The lightning: prefix is mandatory — without it MessageBubble's
 # extractLightningAddress regex won't match and the message renders

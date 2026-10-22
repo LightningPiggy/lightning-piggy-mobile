@@ -390,7 +390,10 @@ describe('displaced seller write relays', () => {
       }),
     ).resolves.toMatchObject({ event: shop });
     const leases = (acquireMarketListingsPool as jest.Mock).mock.calls.map((call) => call[0]);
-    expect(leases).toContainEqual([...MARKET_RELAYS, ...writeRelays.slice(0, 4)]);
+    expect(leases).toContainEqual([
+      ...MARKET_RELAYS,
+      ...writeRelays.slice(0, 8 - MARKET_RELAYS.length),
+    ]);
     expect(leases).toContainEqual(displacedRelays);
     for (const relays of leases) expect(relays.length).toBeLessThanOrEqual(8);
   });

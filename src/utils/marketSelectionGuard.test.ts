@@ -12,7 +12,7 @@ import {
 } from './marketSelectionGuard';
 
 const EDEN = 'e'.repeat(64);
-const EDEN_RELAY = 'wss://relay.weeksfamily.me';
+const EDEN_RELAY = 'wss://relay.family.example';
 const MARKET_RELAY = 'wss://relay.plebeian.market';
 const edenOption: MarketMerchant = { id: EDEN, label: 'Eden', count: 3, curated: false };
 
@@ -137,7 +137,7 @@ it("collects the relays that served a merchant's listings", () => {
       [listing(EDEN, [EDEN_RELAY]), listing(EDEN, [MARKET_RELAY]), listing('f'.repeat(64), ['x'])],
       EDEN,
     ),
-  ).toEqual([MARKET_RELAY, EDEN_RELAY]);
+  ).toEqual([MARKET_RELAY, EDEN_RELAY].sort());
 });
 
 it('keeps a chosen chip rendered while it has nothing in the catalogue', () => {

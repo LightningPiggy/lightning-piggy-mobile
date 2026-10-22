@@ -421,7 +421,7 @@ eas env:list --environment production
 *Fix in environment:* confirm the relay is actually reachable from the host (`curl -sI https://<relay-host>`, or a websocket probe); if it's only reachable over a VPN, bring the tunnel up (see the WireGuard entry below). A reachable relay answers fast and the churn never starts.
 
 | After bringing up WireGuard (`wg0`) the host loses internet — public sites, the public relay, and Claude Code's API all stop
-| `wg0.conf` has `AllowedIPs = 0.0.0.0/0` (full-tunnel): *every* packet is routed into the tunnel, so if the tunnel endpoint or its upstream is down, all host traffic dies — including the API connection of any Claude Code session running on the host. The self-hosted relay `bank.weeksfamily.me` is **public** and reachable without the VPN, so the tunnel isn't needed to reach it. +
+| `wg0.conf` has `AllowedIPs = 0.0.0.0/0` (full-tunnel): *every* packet is routed into the tunnel, so if the tunnel endpoint or its upstream is down, all host traffic dies — including the API connection of any Claude Code session running on the host. The self-hosted relay is **public** and reachable without the VPN, so the tunnel isn't needed to reach it. +
 *Fix:* use **split-tunnel** — set `AllowedIPs` to only the private subnets that genuinely need the VPN (e.g. `10.x.x.x/24`), leaving public traffic on the normal route. +
 *If a test genuinely needs `wg0`:* make it a single atomic command — `sudo wg-quick up wg0 && <do the thing> && sudo wg-quick down wg0` — so a full-tunnel config can't strand the host (and the agent's own API link) with the tunnel left up.
 

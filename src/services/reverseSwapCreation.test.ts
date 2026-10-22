@@ -126,7 +126,7 @@ describe('creation before funding', () => {
   let fetchMock: jest.Mock;
   beforeEach(async () => {
     await AsyncStorage.clear();
-    await AsyncStorage.setItem('swap_backend_url_v1', 'https://swaps.example/v2');
+    await AsyncStorage.setItem('swap_backend_url_v1', 'https://lightning.example/v2');
     jest.clearAllMocks();
     jest.mocked(getBlockHeight).mockResolvedValue(HEIGHT);
     mutate = (s) => s;

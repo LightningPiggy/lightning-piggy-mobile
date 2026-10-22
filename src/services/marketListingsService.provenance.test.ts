@@ -21,7 +21,7 @@ jest.mock('./nostrCrypto', () => {
 const key = new Uint8Array(32).fill(7);
 const author = getPublicKey(key);
 const SHOP = 'wss://relay.plebeian.market';
-const FAMILY = 'wss://relay.weeksfamily.me';
+const FAMILY = 'wss://relay.family.example';
 const listing = (d: string, createdAt = 100): Event =>
   finalizeEvent(
     {

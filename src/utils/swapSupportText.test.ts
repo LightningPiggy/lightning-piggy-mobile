@@ -14,7 +14,7 @@ describe('swapSupportHint', () => {
   });
 
   it("points custom-backend swaps at that server's operator, not Boltz", async () => {
-    backendFor.mockResolvedValue('https://swaps.example.com/v2');
+    backendFor.mockResolvedValue('https://lightning.example.org/v2');
     expect(await swapSupportHint('abc')).toMatch(/swap server's operator/);
   });
 

@@ -60,10 +60,10 @@ afterAll(() => {
 });
 
 it.each([
-  ['https://SWAPS.example/', 'https://swaps.example/v2'],
-  [' https://swaps.example/v2/ ', 'https://swaps.example/v2'],
-  ['https://10.0.0.1:8443/boltz', 'https://10.0.0.1:8443/boltz/v2'],
-  ['https://[fd00::1]:8443/v2', 'https://[fd00::1]:8443/v2'],
+  ['https://LIGHTNING.example/', 'https://lightning.example/v2'],
+  [' https://lightning.example/v2/ ', 'https://lightning.example/v2'],
+  ['https://10.0.0.1:9443/boltz', 'https://10.0.0.1:9443/boltz/v2'],
+  ['https://[fd00::1]:9443/v2', 'https://[fd00::1]:9443/v2'],
 ])('normalizes %s', (input, expected) => {
   expect(normalizeSwapBackend(input)).toBe(expected);
 });
@@ -82,7 +82,7 @@ it.each([
   expect(() => normalizeSwapBackend(input)).toThrow();
 });
 it('derives the private WebSocket URL including proxy prefix', () => {
-  expect(swapWebSocketUrl('https://host:8443/boltz/v2')).toBe('wss://host:8443/boltz/v2/ws');
+  expect(swapWebSocketUrl('https://host:9443/boltz/v2')).toBe('wss://host:9443/boltz/v2/ws');
 });
 it('defaults only when no setting exists, and persists a checked server', async () => {
   expect(await getSwapBackend()).toBe(DEFAULT_SWAP_BACKEND);

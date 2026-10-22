@@ -6,7 +6,7 @@ describe('friendlyClaimError', () => {
 
   it.each([
     'no info event (kind 13194) returned from relay',
-    'connecting to wss://bank.weeksfamily.me... status 403',
+    'connecting to wss://lnbits.example.com... status 403',
     'could not connect to relay',
     'WebSocket connection failed',
     'request timed out',

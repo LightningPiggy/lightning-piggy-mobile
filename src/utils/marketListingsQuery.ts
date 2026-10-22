@@ -27,7 +27,6 @@ export const MARKET_LISTING_KINDS = [30018, 30402];
 export const MARKET_RELAYS = [
   'wss://relay.plebeian.market',
   'wss://relay.conduit.market',
-  'wss://relay.weeksfamily.me',
   'wss://nostr.mom',
 ];
 
