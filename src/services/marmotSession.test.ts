@@ -741,7 +741,9 @@ describe('MarmotSession (no WebCrypto)', () => {
       MarmotUnusableKeyPackageError,
     );
     expect(alice.session.listGroups()).toEqual([]);
-    expect(await alice.session.canMessage(bob.pubkey)).toBe(false);
+    await expect(alice.session.canMessage(bob.pubkey)).rejects.toBeInstanceOf(
+      MarmotUnusableKeyPackageError,
+    );
 
     // A good one alongside the broken one is used.
     relay.events.push(good);

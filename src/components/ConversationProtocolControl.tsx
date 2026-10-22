@@ -1,13 +1,22 @@
-import React, { useCallback, useState } from 'react';
-import { useNavigation } from '@react-navigation/native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../navigation/types';
 import DmProtocolTag from './DmProtocolTag';
 import DmProtocolPickerSheet from './DmProtocolPickerSheet';
 import { isDmProtocolAvailable, type DmProtocol } from '../utils/dmProtocol';
 
-export default function ConversationProtocolControl({ protocol }: { protocol: DmProtocol }) {
+export default function ConversationProtocolControl({
+  protocol,
+  name,
+}: {
+  protocol: DmProtocol;
+  /** The peer's display name, for the picker's Marmot availability line. */
+  name?: string;
+}) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { pubkey } = useRoute<RouteProp<RootStackParamList, 'Conversation'>>().params;
+  const peer = useMemo(() => ({ pubkey, name }), [pubkey, name]);
   const [visible, setVisible] = useState(false);
   const open = useCallback(() => setVisible(true), []);
   const close = useCallback(() => setVisible(false), []);
@@ -33,6 +42,7 @@ export default function ConversationProtocolControl({ protocol }: { protocol: Dm
         selected={protocol}
         onSelect={select}
         onClose={close}
+        peer={peer}
       />
     </>
   );

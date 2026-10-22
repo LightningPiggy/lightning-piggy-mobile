@@ -2856,6 +2856,15 @@
     "nip04": {
       "badge": "Régi",
       "description": "Régebbi formátum; az üzenet tartalma titkosított, de a relay-ek látják, kinek írsz. Azoknak az alkalmazásoknak, amelyek még nem támogatják a NIP-17-et."
+    },
+    "availability": {
+      "checking": "Ellenőrzés…",
+      "unavailable": "{{name}} még nem állította be a Marmotot. Kérd meg, hogy nyissa meg a Lightning Piggyt vagy a White Noise-t.",
+      "error": "Nem sikerült ellenőrizni — próbáld újra",
+      "someone": "Ez a kapcsolat",
+      "unavailableTitle": "A Marmot nem érhető el",
+      "useNip17": "Küldés inkább NIP-17-tel",
+      "cancel": "Mégse"
     }
   },
   "accountScreenLayout": {

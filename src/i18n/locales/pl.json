@@ -2874,6 +2874,15 @@
     "nip04": {
       "badge": "Starszy",
       "description": "Starszy format; treść wiadomości jest zaszyfrowana, ale przekaźniki widzą, do kogo piszesz. Dla aplikacji, które jeszcze nie obsługują NIP-17."
+    },
+    "availability": {
+      "checking": "Sprawdzanie…",
+      "unavailable": "{{name}} nie skonfigurował(a) jeszcze Marmot. Poproś, aby otworzył(a) Lightning Piggy lub White Noise.",
+      "error": "Nie udało się sprawdzić — spróbuj ponownie",
+      "someone": "Ten kontakt",
+      "unavailableTitle": "Marmot jest niedostępny",
+      "useNip17": "Wyślij przez NIP-17",
+      "cancel": "Anuluj"
     }
   },
   "accountScreenLayout": {
