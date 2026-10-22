@@ -10,6 +10,11 @@ export const lightPalette = {
   brandPinkLight: '#FFF0F5',
   white: '#FFFFFF',
   background: '#F5F5F5',
+  // Tap-to-load / retry media boxes and the file-type tile: pale pink with
+  // dark ink in light mode. In dark mode the pink tint reads as plum, so the
+  // box goes neutral and the action text carries the pink instead.
+  mediaBoxFill: '#FFF0F5',
+  mediaBoxAction: '#15171A',
   surface: '#FFFFFF',
   textHeader: '#15171A',
   textBody: '#333333',
@@ -74,6 +79,8 @@ export const darkPalette: typeof lightPalette = {
   brandPinkLight: '#3A1028',
   white: '#FFFFFF',
   background: '#0E1013',
+  mediaBoxFill: '#0E1013',
+  mediaBoxAction: '#EC008C',
   surface: '#1A1D21',
   textHeader: '#F5F6F7',
   textBody: '#D5D8DC',

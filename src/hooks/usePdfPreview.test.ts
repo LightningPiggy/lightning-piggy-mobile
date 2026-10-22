@@ -1,5 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
-import { captureDecryptedMediaSession } from '../services/decryptedMediaCache';
+import {
+  captureDecryptedMediaSession,
+  DecryptedMediaCancelledError,
+} from '../services/decryptedMediaCache';
 import { usePdfPreview } from './usePdfPreview';
 import { resolvePdfPreview } from '../services/pdfPreview';
 import type { FileAttachment } from '../utils/fileAttachment';
@@ -8,6 +11,7 @@ let mockOwner = 'alice';
 jest.mock('./useActivePubkey', () => ({ useActivePubkey: () => mockOwner }));
 jest.mock('../services/decryptedMediaCache', () => ({
   captureDecryptedMediaSession: jest.fn((owner = 'alice') => ({ owner, assertCurrent: jest.fn() })),
+  DecryptedMediaCancelledError: class DecryptedMediaCancelledError extends Error {},
 }));
 jest.mock('../services/pdfPreview', () => ({ resolvePdfPreview: jest.fn() }));
 const file = { url: 'https://example.com/file.pdf', mime: 'application/pdf' } as FileAttachment;
@@ -28,7 +32,7 @@ it('cancels the old deferred import and binds the new resolution to the current 
   const { result, rerender } = renderHook(() => usePdfPreview(file, true));
   mockOwner = 'bob';
   rerender({});
-  await waitFor(() => expect(result.current).toBe('file:///bob/preview.png'));
+  await waitFor(() => expect(result.current.uri).toBe('file:///bob/preview.png'));
   expect(resolvePdfPreview).toHaveBeenCalledTimes(1);
   expect(resolvePdfPreview).toHaveBeenCalledWith(
     file,
@@ -52,12 +56,12 @@ it('ignores a previous account preview that finishes after the switch', async ()
   await waitFor(() => expect(resolvePdfPreview).toHaveBeenCalledTimes(1));
   mockOwner = 'bob';
   rerender({});
-  expect(result.current).toBeNull();
-  await waitFor(() => expect(result.current).toBe('file:///bob/preview.png'));
+  expect(result.current.uri).toBeNull();
+  await waitFor(() => expect(result.current.uri).toBe('file:///bob/preview.png'));
   await act(async () => {
     finish('file:///alice/preview.png');
   });
-  expect(result.current).toBe('file:///bob/preview.png');
+  expect(result.current.uri).toBe('file:///bob/preview.png');
 });
 
 it('does not resolve after its session ends before the deferred import', async () => {
@@ -70,4 +74,37 @@ it('does not resolve after its session ends before the deferred import', async (
   renderHook(() => usePdfPreview(file, true));
   await act(async () => {});
   expect(resolvePdfPreview).not.toHaveBeenCalled();
+});
+
+it('reports a failed download and retries it', async () => {
+  jest
+    .mocked(resolvePdfPreview)
+    .mockRejectedValueOnce(new Error('404'))
+    .mockResolvedValueOnce('file:///alice/preview.png');
+  const { result } = renderHook(() => usePdfPreview(file, true));
+  expect(result.current.status).toBe('loading');
+  await waitFor(() => expect(result.current.status).toBe('failed'));
+  act(() => result.current.retry());
+  expect(result.current.status).toBe('loading');
+  await waitFor(() => expect(result.current.status).toBe('ready'));
+  expect(result.current.uri).toBe('file:///alice/preview.png');
+});
+
+it('reports none when there is nothing to preview, and idle when not enabled', async () => {
+  jest.mocked(resolvePdfPreview).mockResolvedValueOnce(null);
+  const { result } = renderHook(() => usePdfPreview(file, true));
+  await waitFor(() => expect(result.current.status).toBe('none'));
+  const idle = renderHook(() => usePdfPreview(file, false));
+  expect(idle.result.current.status).toBe('idle');
+});
+
+it('settles as none when the session ends before the preview starts', async () => {
+  jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
+    owner: 'alice',
+    assertCurrent: () => {
+      throw new DecryptedMediaCancelledError();
+    },
+  });
+  const { result } = renderHook(() => usePdfPreview(file, true));
+  await waitFor(() => expect(result.current.status).toBe('none'));
 });

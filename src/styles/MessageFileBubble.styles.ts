@@ -21,6 +21,32 @@ export const createMessageFileBubbleStyles = (colors: Palette, cardWidth = CHAT_
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.divider,
     },
+    // Tap-to-load / loading / retry box, the size of the first-page preview.
+    previewBox: {
+      width: 'auto',
+      alignSelf: 'stretch',
+      aspectRatio: 1 / Math.SQRT2,
+      margin: 8,
+      marginBottom: 0,
+    },
+    // One line: small shield + "Not end-to-end encrypted · Unverified".
+    notice: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+    noticeText: { flexShrink: 1, color: colors.textSupplementary, fontSize: 12 },
+    // File icon (with its short type) beside the name and size.
+    summary: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    typeTile: {
+      width: 40,
+      height: 44,
+      borderRadius: 8,
+      backgroundColor: colors.mediaBoxFill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 1,
+    },
+    typeTileLabel: { color: colors.brandPink, fontSize: 9, fontWeight: '800' },
+    summaryText: { flex: 1, gap: 2 },
+    summaryName: { color: colors.textBody, fontWeight: '600' },
+    summaryMeta: { color: colors.textSupplementary, fontSize: 12 },
     name: { color: colors.textBody, fontWeight: '600', marginTop: 6 },
     caption: { color: colors.textSupplementary, fontSize: 12, marginTop: 4 },
     actions: { flexDirection: 'row', gap: 8, marginTop: 12 },

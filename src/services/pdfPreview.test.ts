@@ -1,6 +1,7 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { resolvePdfPreview } from './pdfPreview';
 import {
+  DecryptedMediaCancelledError,
   captureDecryptedMediaSession,
   resolveDecryptedMedia,
   publishDecryptedPreview,
@@ -15,6 +16,7 @@ jest.mock('./decryptedMediaCache', () => ({
   resolveDecryptedMedia: jest.fn(),
   verifiedFileMetadata: jest.fn(),
   publishDecryptedPreview: jest.fn((_uri, render) => render()),
+  DecryptedMediaCancelledError: class DecryptedMediaCancelledError extends Error {},
 }));
 const file = {
   url: 'https://example.com/pdf',
@@ -43,14 +45,14 @@ it('skips declared oversized files before download and verified oversized files 
   expect(await resolvePdfPreview(file, 'alice')).toBeNull();
   expect(render).not.toHaveBeenCalled();
 });
-it('rejects a misleading PDF declaration and download failures silently', async () => {
+it('skips a misleading PDF declaration, but reports a failed download for a retry', async () => {
   jest
     .mocked(verifiedFileMetadata)
     .mockReturnValue({ size: 414, mime: 'application/octet-stream' });
   expect(await resolvePdfPreview(file, 'alice')).toBeNull();
   expect(render).not.toHaveBeenCalled();
   jest.mocked(resolveDecryptedMedia).mockRejectedValueOnce(new Error('verification failed'));
-  expect(await resolvePdfPreview(file, 'alice')).toBeNull();
+  await expect(resolvePdfPreview(file, 'alice')).rejects.toThrow('verification failed');
 });
 it('shares one in-flight render of the hash-keyed local file under the cleanup barrier', async () => {
   let finish!: (uri: string) => void;
@@ -81,7 +83,7 @@ it('discards a preview if the captured session ends during native rendering', as
   jest.mocked(captureDecryptedMediaSession).mockReturnValueOnce({
     owner: 'alice',
     assertCurrent: () => {
-      if (!current) throw new Error('cancelled');
+      if (!current) throw new DecryptedMediaCancelledError();
     },
   });
   render.mockImplementationOnce(async () => {
@@ -95,4 +97,14 @@ it('skips files of unknown size before fetching or rendering', async () => {
   expect(await resolvePdfPreview({ ...file, size: undefined }, 'alice')).toBeNull();
   expect(resolveDecryptedMedia).not.toHaveBeenCalled();
   expect(render).not.toHaveBeenCalled();
+});
+
+it('caps an unknown-size link at the preview limit and treats over-limit as no preview', async () => {
+  const link = { ...file, size: undefined, plainUrl: true };
+  jest.mocked(resolveDecryptedMedia).mockRejectedValueOnce(new Error('Remote body exceeds limit'));
+  expect(await resolvePdfPreview(link, 'alice')).toBeNull();
+  expect(resolveDecryptedMedia).toHaveBeenCalledWith(
+    { ...link, size: 10 * 1024 * 1024, kind: 'file' },
+    'alice',
+  );
 });

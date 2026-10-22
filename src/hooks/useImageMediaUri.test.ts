@@ -109,3 +109,21 @@ it('binds image resolution to the initiating owner and ignores a retired session
   expect(onResolved).not.toHaveBeenCalled();
   expect(result.current.uri).toBeNull();
 });
+
+it.each([false, true])(
+  'retries a failed load when attempt changes (%s encrypted)',
+  async (encrypted) => {
+    const resolver = jest.mocked(encrypted ? resolveDecryptedMedia : resolveRemoteMedia);
+    resolver.mockRejectedValueOnce(new Error('404')).mockResolvedValueOnce('file:///alice/image');
+    const { result, rerender } = renderHook(
+      ({ attempt }: { attempt: number }) =>
+        useImageMediaUri(ref, encrypted, true, undefined, attempt),
+      { initialProps: { attempt: 0 } },
+    );
+    await waitFor(() => expect(result.current.failed).toBe(true));
+    rerender({ attempt: 1 });
+    expect(result.current.failed).toBe(false);
+    await waitFor(() => expect(result.current.uri).toBe('file:///alice/image'));
+    expect(resolver).toHaveBeenCalledTimes(2);
+  },
+);

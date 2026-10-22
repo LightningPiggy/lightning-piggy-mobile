@@ -1,7 +1,7 @@
 import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
 import React, { useMemo } from 'react';
 import { Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
-import { ImageIcon, Link2, Link2Off } from 'lucide-react-native';
+import { FileText, ImageIcon, Link2, Link2Off } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import { createTapToLoadMediaStyles } from '../styles/TapToLoadMedia.styles';
@@ -17,8 +17,8 @@ export function displayHost(url: string): string {
 
 interface Props {
   /** `thumb` fills its parent (profile thumbnails / media tiles) and drops
-   *  the host line to fit. */
-  variant: 'image' | 'preview' | 'thumb';
+   *  the host line to fit. `pdf` is the image box for a PDF's first page. */
+  variant: 'image' | 'pdf' | 'preview' | 'thumb';
   url: string;
   fromMe: boolean;
   testID: string;
@@ -46,7 +46,7 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
     return (
       <View
         style={[
-          variant === 'image'
+          variant === 'image' || variant === 'pdf'
             ? styles.imageBox
             : variant === 'thumb'
               ? styles.thumbBox
@@ -77,12 +77,13 @@ const TapToLoadMedia: React.FC<Props> = ({ variant, url, fromMe, testID, onPress
     );
   }
 
-  if (variant === 'image') {
+  if (variant === 'image' || variant === 'pdf') {
+    const Icon = variant === 'pdf' ? FileText : ImageIcon;
     return (
       <View style={[styles.imageBox, style, styles.boxTint]} testID={testID}>
-        <ImageIcon size={28} color={colors.brandPink} />
-        <Text style={[styles.boxLabel, styles.labelCentered]}>
-          {t('messageBubble.tapToLoadImage')}
+        <Icon size={28} color={colors.brandPink} />
+        <Text style={[styles.boxAction, styles.labelCentered]}>
+          {t(variant === 'pdf' ? 'messageBubble.tapToLoadPdf' : 'messageBubble.tapToLoadImage')}
         </Text>
         <Text style={[styles.boxHost, styles.labelCentered]} numberOfLines={1}>
           {t('messageBubble.loadsFrom', { host })}

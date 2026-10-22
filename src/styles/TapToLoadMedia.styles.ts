@@ -49,13 +49,13 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
     },
     // Applied after the caller's style, which sets its own background.
     boxTint: {
-      backgroundColor: colors.brandPinkLight,
+      backgroundColor: colors.mediaBoxFill,
     },
     thumbLabel: {
       fontSize: 11,
       fontWeight: '600',
       textAlign: 'center',
-      color: colors.textHeader,
+      color: colors.mediaBoxAction,
     },
     textCol: {
       flexShrink: 1,
@@ -71,6 +71,13 @@ export const createTapToLoadMediaStyles = (colors: Palette, fromMe: boolean) =>
       fontSize: 14,
       fontWeight: '700',
       color: colors.textHeader,
+    },
+    // The action line ("Tap to load …", "Tap to retry"): dark ink on the
+    // pale pink box, brand pink on the neutral dark one.
+    boxAction: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.mediaBoxAction,
     },
     boxHost: {
       fontSize: 12,

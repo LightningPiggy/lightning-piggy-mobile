@@ -1,13 +1,13 @@
 import BrandedSpinner from './BrandedSpinner';
 import { Image } from 'expo-image';
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { View, Text } from 'react-native';
-import { AlertCircle } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { createDecryptedImageStyles } from '../styles/DecryptedImage.styles';
 import { useLocale } from '../contexts/LocaleContext';
 import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
 import { useImageMediaUri } from '../hooks/useImageMediaUri';
+import MediaStatusBox from './MediaStatusBox';
 import type { MarmotImageParams } from '../utils/messageContent';
 
 /**
@@ -47,6 +47,10 @@ interface Props {
    *  image rather than the ciphertext blob URL. */
   onResolved?: (uri: string) => void;
   onLoad?: React.ComponentProps<typeof Image>['onLoad'];
+  /** Bump to retry a failed load. */
+  attempt?: number;
+  /** Told when the load fails or recovers, so the parent's tap can retry. */
+  onFailedChange?: (failed: boolean) => void;
 }
 
 const DecryptedImage: React.FC<Props> = ({
@@ -62,6 +66,8 @@ const DecryptedImage: React.FC<Props> = ({
   accessibilityLabel,
   onResolved,
   onLoad,
+  attempt = 0,
+  onFailedChange,
 }) => {
   const colors = useThemeColors();
   const { t } = useLocale();
@@ -73,7 +79,9 @@ const DecryptedImage: React.FC<Props> = ({
     encrypted,
     !blocked,
     onResolved,
+    attempt,
   );
+  useEffect(() => onFailedChange?.(failed), [failed, onFailedChange]);
 
   if (blocked)
     return (
@@ -84,9 +92,7 @@ const DecryptedImage: React.FC<Props> = ({
 
   if (failed) {
     return (
-      <View style={[style, styles.center]}>
-        <AlertCircle size={28} color={colors.textSupplementary} />
-      </View>
+      <MediaStatusBox status="failed" label={t('messageBubble.imageLoadFailed')} style={style} />
     );
   }
 

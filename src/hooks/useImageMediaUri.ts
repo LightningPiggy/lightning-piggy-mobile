@@ -10,12 +10,14 @@ import {
 import { resolveRemoteMedia } from '../services/remoteMediaCache';
 import { checkRemoteUrl } from '../utils/remoteUrlPolicy';
 
-/** Image resolution shared by chat bubbles and attachment thumbnails. */
+/** Image resolution shared by chat bubbles and attachment thumbnails.
+ * Bumping `attempt` re-runs a failed load (failures are never cached). */
 export function useImageMediaUri(
   ref: EncryptedMediaRef,
   encrypted: boolean,
   enabled = true,
   onResolved?: (uri: string) => void,
+  attempt = 0,
 ) {
   const owner = useActivePubkey();
   const identity = JSON.stringify([owner, ref, encrypted]);
@@ -65,7 +67,7 @@ export function useImageMediaUri(
     return () => {
       cancelled = true;
     };
-  }, [owner, identity, allowed, encrypted, onResolved]);
+  }, [owner, identity, allowed, encrypted, onResolved, attempt]);
   // Hide the old account's URI during render, before effect cleanup runs.
   return state.identity === identity && allowed
     ? { uri: state.uri, failed: state.failed }
