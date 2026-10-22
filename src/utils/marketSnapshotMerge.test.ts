@@ -2,7 +2,7 @@ import type { MarketProduct } from '../data/marketProducts';
 import type { MarketListingsResult } from '../services/marketListingsService';
 import { carriedListingEvents, MARKET_MERGE_CAP, mergeMarketSnapshot } from './marketSnapshotMerge';
 
-const EDEN_RELAY = 'wss://relay.weeksfamily.me';
+const EDEN_RELAY = 'wss://relay.family.example';
 const MARKET_RELAY = 'wss://relay.plebeian.market';
 
 const product = (id: string, createdAt: number, seenOn?: string[]): MarketProduct =>

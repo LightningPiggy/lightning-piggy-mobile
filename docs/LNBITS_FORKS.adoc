@@ -1,6 +1,6 @@
 == LNbits Weeks-family forks
 
-Lightning Piggy's production server `bank.weeksfamily.me` runs three LNbits extensions in patched form, served from forks under https://github.com/BenGWeeks[BenGWeeks]. This document explains why each fork exists, what's patched, how the LNbits server is configured to install from them, and how to maintain them as upstream evolves.
+Lightning Piggy's production LNbits server runs three LNbits extensions in patched form, served from forks under https://github.com/BenGWeeks[BenGWeeks]. This document explains why each fork exists, what's patched, how the LNbits server is configured to install from them, and how to maintain them as upstream evolves.
 
 === What's patched, per fork
 
@@ -92,7 +92,7 @@ The display name in each fork's `config.json` is suffixed with ` (Weeks)` (e.g. 
 
 === LNbits configuration
 
-Server `bank.weeksfamily.me`'s Extensions panel lists five sources, _in this order_:
+The server's Extensions panel lists five sources, _in this order_:
 
 . `https://raw.githubusercontent.com/BenGWeeks/lnurlp/weeks-family/extensions.json`
 . `https://raw.githubusercontent.com/BenGWeeks/nostrclient/weeks-family/extensions.json`
@@ -114,7 +114,7 @@ The chip UI doesn't support drag-reordering — to change order, remove all entr
 . Tag (e.g. `git tag v1.3.0-wf3 && git push origin v1.3.0-wf3`).
 . Update the entry in `extensions.json` at the branch root: bump `version`, `archive` URL, and `hash` (the SHA-256 of the new tag's archive).
 . Push the branch.
-. Restart `bank.weeksfamily.me` (or wait up to an hour for the manifest cache to expire), then upgrade the extension in the UI.
+. Restart the LNbits server (or wait up to an hour for the manifest cache to expire), then upgrade the extension in the UI.
 
 The SHA is computed from the tag's archive:
 
@@ -139,7 +139,7 @@ Drop a patch from `weeks-family` once the equivalent upstream PR merges into a r
 * *DB schema*: every patch currently in `weeks-family` is logic-only — none touch `migrations.py`, `db.py`, or model fields. The patched build is byte-compatible with vanilla. If a future patch needs schema changes, document the migration on the fork's release notes.
 * *Cache lag*: LNbits caches the manifest list for one hour. Allow time after publishing a manifest update or restart the server to bust the cache.
 * *Operator hygiene*: the burden moves from "patch script every restart" to "rebase quarterly". Subscribe to upstream releases on each fork so the rebase queue stays visible.
-* *Maintainer trust*: anyone with write access to `BenGWeeks/<fork>` can ship code into bank.weeksfamily.me through the manifest. Branch protection on `weeks-family` is the recommended mitigation.
+* *Maintainer trust*: anyone with write access to `BenGWeeks/<fork>` can ship code into the production LNbits server through the manifest. Branch protection on `weeks-family` is the recommended mitigation.
 
 === Patch scripts (deprecated)
 

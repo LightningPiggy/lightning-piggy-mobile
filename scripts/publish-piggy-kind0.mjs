@@ -32,7 +32,8 @@ const BRANCH = env.BRANCH || 'main';
 const RAW_BASE = `https://raw.githubusercontent.com/LightningPiggy/lightning-piggy-mobile/${BRANCH}/.maestro/fixtures`;
 
 // Each Piggy maps to (env var, fixture filename, friendly label, lud16).
-// `lud16` resolves to a dedicated LNbits wallet on bank.weeksfamily.me
+// `lud16` resolves to a dedicated LNbits wallet on the LNbits server named
+// by PIGGY_LUD16_DOMAIN in .env (kept out of the repo)
 // so each Piggy is independently payable in test flows and the per-
 // wallet balance is observable in isolation. Evil Piggy keeps the
 // shared fallback because it doesn't need its own wallet for the
@@ -50,7 +51,7 @@ const PIGGIES = [
     envVar: 'MAESTRO_NSEC_BIG',
     file: 'big-piggy-profile.png',
     label: 'Big Piggy',
-    lud16: 'big.piggy@bank.weeksfamily.me',
+    lud16User: 'big.piggy',
     about: 'The biggest of the Piggies. Saves more than she spends.',
     bannerUrl:
       'https://blossom.primal.net/e4541a2c43c067cbe8977a5a986cc507c19674b555cc3ce1a359c15453424348.jpg',
@@ -59,7 +60,7 @@ const PIGGIES = [
     envVar: 'MAESTRO_NSEC_LITTLE',
     file: 'little-piggy-profile.png',
     label: 'Little Piggy',
-    lud16: 'little.piggy@bank.weeksfamily.me',
+    lud16User: 'little.piggy',
     about: 'The littlest Piggy. Just learning about sats and zaps.',
     bannerUrl:
       'https://blossom.primal.net/78768018cf54486a7750ca8b16f49fc9a2ce69994b210938083ce37c99ab53ae.jpg',
@@ -68,7 +69,7 @@ const PIGGIES = [
     envVar: 'MAESTRO_NSEC_MIDDLE',
     file: 'middle-piggy-profile.png',
     label: 'Middle Piggy',
-    lud16: 'middle.piggy@bank.weeksfamily.me',
+    lud16User: 'middle.piggy',
     about: 'The middle Piggy. Splits the difference between Big and Little.',
     bannerUrl:
       'https://blossom.primal.net/611658ea525b4484dd4e1a9fef5e86161b56f60bcb62d85965be58491e0d8bf6.jpg',
@@ -77,7 +78,7 @@ const PIGGIES = [
     envVar: 'MAESTRO_NSEC_EVIL',
     file: 'evil-piggy-profile.png',
     label: 'Evil Piggy',
-    lud16: 'ben.weeks@bank.weeksfamily.me',
+    lud16User: 'ben.weeks',
     about: 'A mysterious unfriended Piggy. Used in test flows for the unfollowed-sender path.',
     bannerUrl:
       'https://blossom.primal.net/ad9421cf466eeaa51df1f084b0babe4318ebe0970efd6dfd8c3ddcf83ac12ef0.jpg',
@@ -89,6 +90,15 @@ if (!existsSync('.env')) {
   exit(1);
 }
 const envText = readFileSync('.env', 'utf8');
+const LUD16_DOMAIN = envText
+  .split('\n')
+  .find((l) => l.startsWith('PIGGY_LUD16_DOMAIN='))
+  ?.slice('PIGGY_LUD16_DOMAIN='.length)
+  .trim();
+if (!LUD16_DOMAIN) {
+  console.error('Set PIGGY_LUD16_DOMAIN in .env (the LNbits host behind the Piggy lud16s).');
+  exit(1);
+}
 function nsecFor(envVar) {
   const line = envText.split('\n').find((l) => l.startsWith(`${envVar}=`));
   if (!line) return null;
@@ -144,7 +154,8 @@ function parseContent(content) {
 let exitCode = 0;
 
 for (const piggy of targets) {
-  const { envVar, file, label, lud16, about, bannerUrl } = piggy;
+  const { envVar, file, label, lud16User, about, bannerUrl } = piggy;
+  const lud16 = `${lud16User}@${LUD16_DOMAIN}`;
   console.log(`\n=== ${label} (${envVar}) ===`);
   const nsec = nsecFor(envVar);
   if (!nsec) {

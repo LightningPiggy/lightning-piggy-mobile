@@ -352,7 +352,7 @@ it('preserves restored WoT filters until they are missing from two completed loa
 
 describe('a chosen merchant across partial refreshes', () => {
   const EDEN = 'e'.repeat(64);
-  const EDEN_RELAY = 'wss://relay.weeksfamily.me';
+  const EDEN_RELAY = 'wss://relay.family.example';
   const MARKET_RELAY = 'wss://relay.plebeian.market';
   const listed = (id: string, pubkey: string, sellerName: string, relay: string) => ({
     ...MARKET_PRODUCTS[0],

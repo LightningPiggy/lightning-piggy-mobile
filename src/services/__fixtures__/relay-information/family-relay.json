@@ -1,0 +1,11 @@
+{
+  "contact": "operator@relay.family.example",
+  "description": "A family's own Nostr relay, so their shops' products and posts never vanish. Anyone can read. Writes are limited to family accounts, plus DMs, zaps, reactions, comments and reposts addressed to them, and reviews of their shop listings.",
+  "limitation": { "max_limit": 500, "max_message_length": 262144, "max_subscriptions": 200 },
+  "name": "Family Relay",
+  "negentropy": 1,
+  "pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+  "software": "git+https://github.com/hoytech/strfry.git",
+  "supported_nips": [1, 2, 4, 9, 11, 28, 40, 42, 45, 59, 70, 77],
+  "version": "1.1.2-148-g4cd3cf6"
+}

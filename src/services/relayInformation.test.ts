@@ -102,13 +102,15 @@ it('aborts the HTTP request after five seconds', async () => {
   await expect(request).resolves.toBeNull();
 });
 
-it('parses real Damus and Weeks Family NIP-11 fixtures without confusing self and operator', () => {
+it('parses real Damus and a family-relay NIP-11 fixture without confusing self and operator', () => {
   const damus = parseRelayInformation(require('./__fixtures__/relay-information/damus.json'));
-  const weeks = parseRelayInformation(require('./__fixtures__/relay-information/weeksfamily.json'));
+  const family = parseRelayInformation(
+    require('./__fixtures__/relay-information/family-relay.json'),
+  );
   expect(damus).toMatchObject({ name: 'damus.io', contact: 'jb55@jb55.com' });
-  expect(weeks).toMatchObject({
-    name: 'Weeks Family Relay',
-    pubkey: '971615b70ad9ec896f8d5ba0f2d01652f1dfe5f9ced81ac9469ca7facefad68b',
+  expect(family).toMatchObject({
+    name: 'Family Relay',
+    pubkey: '3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d',
   });
   const selfOnly = parseRelayInformation({ self: 'b'.repeat(64) });
   expect(selfOnly.self).toBe('b'.repeat(64));
