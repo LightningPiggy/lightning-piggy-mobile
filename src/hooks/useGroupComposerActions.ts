@@ -170,9 +170,9 @@ export function useGroupComposerActions(params: {
   }, []);
 
   // Remove a previously-appended optimistic row on a complete send failure.
-  // Only called when the relay send itself failed (not the local-storage path),
-  // so the message truly never went out. Updates in-memory state directly via
-  // the filter above (never from removeGroupMessage's return value — see that
+  // Also used after a successful re-publish to retire the original failed row.
+  // The row being removed is always from a failed send. Updates in-memory
+  // state directly via the filter below (never from removeGroupMessage's return value — see that
   // function's doc: it rejects on a storage error rather than returning `[]`,
   // specifically so a transient AsyncStorage blip can't be mistaken for "the
   // thread is now empty"). A storage-write failure here just means the
@@ -214,10 +214,10 @@ export function useGroupComposerActions(params: {
     [group, myPubkey, setMessages],
   );
 
-  const sendText = useCallback(
-    async (text: string, parent?: string): Promise<boolean> => {
+  const sendTextResult = useCallback(
+    async (text: string, parent?: string): Promise<{ accepted: boolean; success: boolean }> => {
       const { group, myPubkey } = latestRef.current;
-      if (!group || !myPubkey) return false;
+      if (!group || !myPubkey) return { accepted: false, success: false };
 
       // Optimistic bubble: painted synchronously from onRumorReady, before any
       // signing — the row id is captured synchronously (a `.current` box, not
@@ -255,7 +255,7 @@ export function useGroupComposerActions(params: {
       if (!result.success) {
         if (!optimistic.current) {
           Alert.alert('Send failed', result.error ?? 'Unknown error');
-          return false;
+          return { accepted: false, success: false };
         }
         // The bubble stays, marked failed, with Re-publish in its info sheet.
         // Mark it once the storage write has settled, so that write's trailing
@@ -264,20 +264,20 @@ export function useGroupComposerActions(params: {
         // Replies need their parent restored; hidden vote rows must leave the tally.
         if (parent || parseVote(text)) {
           await removeOptimisticRow(optimistic.current.row.id, group);
-          return false;
+          return { accepted: false, success: false };
         }
         await markOptimisticFailed(optimistic.current.row.id, group);
-        return true;
+        return { accepted: true, success: false };
       }
-      // Sent, but not saved locally: keep the draft (return false) so the user
+      // Sent, but not saved locally: keep the draft so the user
       // can retry/refresh — pre-#1033 semantics.
       if (optimistic.current && !(await optimistic.current.persisted)) {
         alertSavedOnRelayOnly();
-        return false;
+        return { accepted: false, success: false };
       }
       if (optimistic.current)
         await adoptRumorId(optimistic.current.row.id, result.rumorId, group, myPubkey);
-      return true;
+      return { accepted: true, success: true };
     },
     [
       sendGroupMessage,
@@ -288,6 +288,23 @@ export function useGroupComposerActions(params: {
       alertSavedOnRelayOnly,
       adoptRumorId,
     ],
+  );
+
+  // The composer can clear a draft held by a failed bubble; a re-publish
+  // needs confirmed success before it can replace the original failed row.
+  const sendText = useCallback(
+    async (text: string, parent?: string): Promise<boolean> =>
+      (await sendTextResult(text, parent)).accepted,
+    [sendTextResult],
+  );
+  const resendText = useCallback(
+    async (text: string, failedRowId?: string): Promise<boolean> => {
+      const { group } = latestRef.current;
+      const result = await sendTextResult(text);
+      if (result.success && failedRowId) await removeOptimisticRow(failedRowId, group);
+      return result.success;
+    },
+    [sendTextResult, removeOptimisticRow],
   );
 
   const sendFile = useCallback(
@@ -541,9 +558,8 @@ export function useGroupComposerActions(params: {
 
   // `sendText` is also exposed so poll-share / poll-vote can post arbitrary
   // serialised bodies through the same optimistic-append path as the composer.
-  // It's additionally re-exposed as `resendText` for the message-info sheet's
-  // Re-publish (#856), mirroring the 1:1 hook — a re-publish is a fresh group
-  // send (publish + optimistic row).
+  // `resendText` separately reports confirmed success and replaces a failed
+  // original only after its fresh group send has succeeded.
   const fileComposer = useNip17FileComposer(
     isMarmot ? 'marmot' : 'nip17',
     sendFile,
@@ -557,6 +573,6 @@ export function useGroupComposerActions(params: {
     uploadingImage: actions.uploadingImage || fileComposer.uploading,
     sendText,
     handleSendInvoiceToGroup,
-    resendText: sendText,
+    resendText,
   };
 }

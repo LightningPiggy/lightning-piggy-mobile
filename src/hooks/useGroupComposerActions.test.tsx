@@ -604,3 +604,71 @@ it.each([true, false])(
     expect(getGroupDeliveryStatus(rowIdOf())).toMatchObject({ ...final, sendFailed: true });
   },
 );
+
+describe('group Re-publish replaces a failed original only after confirmed success', () => {
+  it('waits for both relay success and local persistence before removing the original', async () => {
+    let finish!: (result: { success: boolean }) => void;
+    let persist!: (rows: unknown[]) => void;
+    mockAppendGroupMessage.mockImplementation(() => new Promise((resolve) => (persist = resolve)));
+    mockSendGroupMessage.mockImplementation((_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return new Promise((resolve) => (finish = resolve));
+    });
+    const { result, setMessages } = setup();
+    let retry!: Promise<boolean>;
+    act(() => {
+      retry = result.current.resendText('hello', 'failed-original');
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    await act(async () => finish({ success: true }));
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    await act(async () => {
+      persist([mockAppendGroupMessage.mock.calls[0][2]]);
+      expect(await retry).toBe(true);
+    });
+    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(MY_PUBKEY, GROUP_ID, 'failed-original');
+    const remove = setMessages.mock.calls.at(-1)![0];
+    expect(remove([{ id: 'echo', localId: 'failed-original' }, { id: rowIdOf() }])).toEqual([
+      { id: rowIdOf() },
+    ]);
+  });
+
+  it('reports a failed retry truthfully and keeps the original available', async () => {
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return { success: false };
+    });
+    const { result } = setup();
+    await act(async () => {
+      expect(await result.current.resendText('hello', 'failed-original')).toBe(false);
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    expect(mockMarkGroupMessageSendFailed).toHaveBeenCalledWith(MY_PUBKEY, GROUP_ID, rowIdOf());
+  });
+
+  it('keeps the original when the retry succeeds on relays but cannot be persisted', async () => {
+    mockAppendGroupMessage.mockRejectedValue(new Error('storage unavailable'));
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return { success: true };
+    });
+    const { result } = setup();
+    await act(async () => {
+      expect(await result.current.resendText('hello', 'failed-original')).toBe(false);
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    expect(mockAlert).toHaveBeenCalled();
+  });
+
+  it('leaves a successfully sent original alone when re-publishing it', async () => {
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return { success: true };
+    });
+    const { result } = setup();
+    await act(async () => {
+      expect(await result.current.resendText('hello')).toBe(true);
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+  });
+});

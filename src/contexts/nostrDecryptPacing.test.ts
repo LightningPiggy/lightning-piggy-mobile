@@ -21,7 +21,7 @@ import {
 // RAF is not available in the Jest / jsdom environment. Provide a
 // minimal implementation that records pending callbacks and lets tests
 // flush them on demand via `flushRaf()`.
-let rafCallbacks: Array<(ts: number) => void> = [];
+let rafCallbacks: ((ts: number) => void)[] = [];
 let rafHandle = 0;
 
 // Capture the real RAF globals (if any) up front so `afterEach` can restore

@@ -158,6 +158,24 @@ describe('useMessageInfoSheet', () => {
     expect(groupResend).toHaveBeenCalledWith('hi');
   });
 
+  it('passes the failed storage row id even when delivery has a different rumor id', () => {
+    const resend = jest.fn().mockResolvedValue(true);
+    const { result } = renderHook(() => useMessageInfoSheet(resend, 'nip17', undefined, resend));
+    act(() => {
+      result.current.showInfo({
+        fromMe: true,
+        eventId: 'local_original',
+        wireKind: 14,
+        deliveryStatus: { ...delivery, eventId: 'rumor-original', sendFailed: true },
+        resendText: 'retry me',
+      });
+    });
+    expect(result.current.info?.eventId).toBe('rumor-original');
+    act(() => result.current.resendFromInfo());
+    expect(resend).toHaveBeenCalledWith('retry me', 'local_original');
+    expect(result.current.info).toBeNull();
+  });
+
   it('a NIP-17 group message keeps NIP-17 (gift-wrapped)', () => {
     const { result } = renderHook(() =>
       useMessageInfoSheet(jest.fn().mockResolvedValue(true), 'nip17'),

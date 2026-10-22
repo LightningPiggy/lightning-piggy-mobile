@@ -294,9 +294,7 @@ const GroupConversationScreen: React.FC = () => {
     onReplySent: reactions.onReplySent,
   });
 
-  // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
-  // Group sends aren't per-relay tracked (no delivery store), so the sheet
-  // shows the protocol/kind/id metadata + a Re-publish for sent text.
+  // Group retries replace the failed row only after confirmed success.
   const {
     info: messageSheetInfo,
     sender: messageSheetSender,
@@ -305,7 +303,7 @@ const GroupConversationScreen: React.FC = () => {
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
     canResend: canResendFromInfo,
-  } = useMessageInfoSheet(resendText, marmotGroupId ? 'marmot' : 'nip17', senderOf);
+  } = useMessageInfoSheet(resendText, marmotGroupId ? 'marmot' : 'nip17', senderOf, resendText);
 
   const menu = useMessageActionsMenu({
     myPubkey,
