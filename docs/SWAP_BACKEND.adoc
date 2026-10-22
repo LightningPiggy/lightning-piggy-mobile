@@ -6,9 +6,9 @@ No swap server is selected by default. Without one, swap-based Send, Move,
 and Receive explain how to configure a server; new swaps cannot start.
 Direct sends from an on-chain hot wallet do not require a swap server.
 
-Enter an HTTPS server URL (for example `https://swaps.example.com`) or its v2
-API base (`https://swaps.example.com/v2`). Reverse-proxy prefixes and explicit
-ports are supported, for example `https://swaps.example.com:8443/boltz/v2`.
+Enter an HTTPS server URL (for example `https://lightning.example.org`) or its v2
+API base (`https://lightning.example.org/v2`). Reverse-proxy prefixes and explicit
+ports are supported, for example `https://lightning.example.org:9443/boltz/v2`.
 Select *Check and save*. The app checks both BTC/BTC swap-pair endpoints before
 saving; this checks basic API compatibility, not the operator's trustworthiness,
 liquidity, or full swap execution. Failures leave the saved setting unchanged.

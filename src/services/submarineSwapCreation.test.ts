@@ -151,7 +151,7 @@ describe('createSubmarineSwapForward', () => {
   let fetchMock: jest.Mock;
   let xOnlyResponse = false;
   beforeEach(async () => {
-    await AsyncStorage.setItem('swap_backend_url_v1', 'https://swaps.example/v2');
+    await AsyncStorage.setItem('swap_backend_url_v1', 'https://lightning.example/v2');
     jest.mocked(getBlockHeight).mockResolvedValue(HEIGHT);
     mutate = (response) => response;
     xOnlyResponse = false;
