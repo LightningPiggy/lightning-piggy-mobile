@@ -301,17 +301,19 @@ export function useGroupComposerActions(params: {
     async (text: string, failedRowId?: string): Promise<boolean> => {
       const { group } = latestRef.current;
       const result = await sendTextResult(text);
-      // Unlike a failed send's cleanup, the original only leaves the screen
-      // once it has left storage: otherwise a reload would show both copies.
+      // The replacement is sent and saved: the original goes from storage, then
+      // the screen. If that delete fails it still leaves the screen, so its
+      // Re-publish can't be tapped again to send a duplicate (a reload could
+      // show it again, but only if storage failed right after a good write).
       if (result.success && failedRowId && group) {
         try {
           await removeGroupMessage(myPubkey, group.id, failedRowId);
-          setMessages((prev) =>
-            prev.filter((m) => m.id !== failedRowId && m.localId !== failedRowId),
-          );
         } catch (err) {
           if (__DEV__) console.warn('[GroupConversationScreen] removeGroupMessage failed:', err);
         }
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== failedRowId && m.localId !== failedRowId),
+        );
       }
       return result.success;
     },

@@ -660,22 +660,27 @@ describe('group Re-publish replaces a failed original only after confirmed succe
     expect(mockAlert).toHaveBeenCalled();
   });
 
-  it('keeps the original on screen when removing it from storage fails', async () => {
-    mockRemoveGroupMessage.mockRejectedValue(new Error('storage unavailable'));
+  it('removes the original from storage before the screen, and hides it even if that fails', async () => {
+    const order: string[] = [];
+    mockRemoveGroupMessage.mockImplementation(async () => {
+      order.push('storage');
+      throw new Error('storage unavailable');
+    });
     mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
       hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
       return { success: true };
     });
     const { result, setMessages } = setup();
+    setMessages.mockImplementation((update: unknown) => {
+      if (typeof update !== 'function') return;
+      const after = (update as (rows: unknown[]) => unknown[])([{ id: 'failed-original' }]);
+      if (after.length === 0) order.push('screen');
+    });
     await act(async () => {
       expect(await result.current.resendText('hello', 'failed-original')).toBe(true);
     });
-    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(MY_PUBKEY, GROUP_ID, 'failed-original');
-    // No update removes it: every state update still keeps the original row.
-    for (const [update] of setMessages.mock.calls) {
-      if (typeof update !== 'function') continue;
-      expect(update([{ id: 'failed-original' }])).toContainEqual({ id: 'failed-original' });
-    }
+    // Hidden even though the delete failed: no second Re-publish, no duplicate.
+    expect(order).toEqual(['storage', 'screen']);
   });
 
   it('leaves a successfully sent original alone when re-publishing it', async () => {
