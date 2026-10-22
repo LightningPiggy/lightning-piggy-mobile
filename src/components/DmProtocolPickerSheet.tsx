@@ -51,8 +51,10 @@ export default function DmProtocolPickerSheet({
       peer?.pubkey &&
       (availability === 'unavailable' || availability === 'error')
     ) {
-      AccessibilityInfo.announceForAccessibility(
+      // Queued, so it waits for VoiceOver to finish rather than cutting it off.
+      AccessibilityInfo.announceForAccessibilityWithOptions(
         t(`dmProtocol.availability.${availability}`, { name: peerName }),
+        { queue: true },
       );
     }
   }, [availability, peer?.pubkey, peerName, t, visible]);
