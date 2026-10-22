@@ -446,16 +446,20 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
     ): Promise<NostrEvent[]> {
       return new Promise((resolve, reject) => {
         const events: NostrEvent[] = [];
+        const timeoutMs = options.requireEose ? maxWait : maxWait + RELAY_CONNECT_TIMEOUT_MS;
         this.subscribeMap(
           urls.flatMap((url) => filters.map((filter) => ({ url, filter }))),
           {
-            // Strict recovery must expire before the SDK's synthetic timeout EOSE.
-            maxWait: options.requireEose ? maxWait + RELAY_CONNECT_TIMEOUT_MS : maxWait,
+            // Reads requiring a relay answer must expire before the SDK's synthetic EOSE.
+            maxWait:
+              options.requireEose || options.requireAnswer
+                ? timeoutMs + RELAY_CONNECT_TIMEOUT_MS
+                : maxWait,
             abort: options.abort,
             reqOptions: {
               mode: 'oneshot',
               label: reqLabel(filters, 'oneshot'),
-              timeoutMs: options.requireEose ? maxWait : maxWait + RELAY_CONNECT_TIMEOUT_MS,
+              timeoutMs,
             },
             onevent: (event) => events.push(event),
             onclose: (reasons) => {

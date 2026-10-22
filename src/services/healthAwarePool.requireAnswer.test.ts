@@ -21,12 +21,11 @@ jest.mock('./relayHealth', () => ({
 
 type Relay = Awaited<ReturnType<AbstractSimplePool['ensureRelay']>>;
 type Params = Parameters<Relay['subscribe']>[1];
-type Behaviour = 'down' | 'eose' | 'event-then-drop';
+type Behaviour = 'down' | 'eose' | 'event-then-drop' | 'silent' | 'event-then-silent';
 
 const EVENT = { id: 'kp', kind: 30443, pubkey: 'p', created_at: 1 } as Event;
 
-/** Each relay URL behaves as configured: unreachable, empty EOSE, or one
- * event followed by a dropped socket (no EOSE). */
+/** Model both wire responses and the SDK EOSE timeout on connected relays. */
 function makePool(behaviour: Record<string, Behaviour>) {
   class FakePool {
     relays = new Map();
@@ -39,14 +38,18 @@ function makePool(behaviour: Record<string, Behaviour>) {
         url: key,
         connected: true,
         subscribe: (_filters: unknown, params: Params) => {
+          const timer = setTimeout(() => params.oneose?.(), params.eoseTimeout);
           queueMicrotask(() => {
-            if (mode === 'eose') params.oneose?.();
-            else {
+            if (mode === 'eose') {
+              clearTimeout(timer);
+              params.oneose?.();
+            } else if (mode === 'event-then-drop') {
+              clearTimeout(timer);
               params.onevent?.(EVENT);
               params.onclose?.('relay connection closed');
-            }
+            } else if (mode === 'event-then-silent') params.onevent?.(EVENT);
           });
-          return { close: () => undefined };
+          return { close: () => clearTimeout(timer) };
         },
       };
       this.relays.set(key, relay);
@@ -73,6 +76,46 @@ const A = 'wss://a.example/';
 const B = 'wss://b.example/';
 
 describe('querySyncFilters requireAnswer', () => {
+  beforeEach(() => jest.useFakeTimers({ doNotFake: ['queueMicrotask'] }));
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it('rejects a connected silent relay at the REQ deadline, before synthetic EOSE', async () => {
+    const pool = makePool({ [A]: 'silent' });
+    const settled = jest.fn();
+    const read = pool.querySyncFilters([A], [FILTER], 6000, { requireAnswer: true });
+    void read.then(settled, settled);
+    const result = expect(read).rejects.toThrow(/No relay answered: query deadline/);
+    await jest.advanceTimersByTimeAsync(6000);
+    expect(settled).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(5000);
+    await result;
+    expect(settled).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('keeps partial events from a connected relay that never sends EOSE', async () => {
+    const pool = makePool({ [A]: 'event-then-silent' });
+    const settled = jest.fn();
+    const read = pool.querySyncFilters([A], [FILTER], 6000, { requireAnswer: true });
+    void read.then(settled, settled);
+    await jest.advanceTimersByTimeAsync(6000);
+    expect(settled).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(5000);
+    await expect(read).resolves.toEqual([EVENT]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('preserves the SDK timeout for callers that do not require an answer', async () => {
+    const pool = makePool({ [A]: 'silent' });
+    const read = pool.querySyncFilters([A], [FILTER], 6000);
+    await jest.advanceTimersByTimeAsync(6000);
+    await expect(read).resolves.toEqual([]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
   it('rejects when every relay failed and nothing arrived', async () => {
     const pool = makePool({ [A]: 'down', [B]: 'down' });
     await expect(

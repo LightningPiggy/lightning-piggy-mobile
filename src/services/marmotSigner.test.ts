@@ -1,3 +1,10 @@
+import { AmberSignerError } from './amberErrors';
+import {
+  AMBER_REQUEST_TIMEOUT_MS,
+  amberRequestOpenSince,
+  createMarmotSigner,
+} from './marmotSigner';
+
 const mockAmberSign = jest.fn();
 const mockBunkerSign = jest.fn();
 
@@ -12,13 +19,6 @@ jest.mock('./nostrConnectService', () => ({
 }));
 jest.mock('./nostrService', () => ({}));
 jest.mock('./nostrCrypto', () => ({}));
-
-import { AmberSignerError } from './amberErrors';
-import {
-  AMBER_REQUEST_TIMEOUT_MS,
-  amberRequestOpenSince,
-  createMarmotSigner,
-} from './marmotSigner';
 
 const PK = 'a'.repeat(64);
 const draft = { kind: 13, created_at: 1, tags: [], content: 'x' };
