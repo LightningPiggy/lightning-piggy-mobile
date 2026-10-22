@@ -48,7 +48,6 @@ function plan(overrides: Partial<DmDevicePlanInput>) {
       { pubkey: PEER, key: 'peer-phone' },
     ],
     fresh: new Map(),
-    peerOnWhiteNoise: false,
     invitedSlots: new Set(),
     signatureKeyOf: (e) => e.content,
     ...overrides,
@@ -84,16 +83,14 @@ describe('planDmDeviceAdds', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const fresh = new Map([[PEER, [kp(PEER, slot(1), 'peer-rotated', 'White Noise Android')]]]);
-      expect(
-        plan({ fresh, peerOnWhiteNoise: true, invitedSlots: new Set([`${PEER}:${slot(1)}`]) }).size,
-      ).toBe(0);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('White Noise invited slot'));
+      expect(plan({ fresh, invitedSlots: new Set([`${PEER}:${slot(1)}`]) }).size).toBe(0);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('invited slot changed signing key'),
+      );
       // Normal replenishment preserves the signing key and needs no warning.
       warn.mockClear();
       fresh.set(PEER, [kp(PEER, slot(1), 'peer-phone', 'White Noise Android')]);
-      expect(
-        plan({ fresh, peerOnWhiteNoise: true, invitedSlots: new Set([`${PEER}:${slot(1)}`]) }).size,
-      ).toBe(0);
+      expect(plan({ fresh, invitedSlots: new Set([`${PEER}:${slot(1)}`]) }).size).toBe(0);
       expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
@@ -112,7 +109,7 @@ describe('planDmDeviceAdds', () => {
     expect(added[0].content).toBe('peer-0'); // newest first
   });
 
-  it('a White Noise contact gets their newest White Noise install only, and none of ours', () => {
+  it("adds every one of a White Noise contact's installs, across apps, and none of ours (#1663)", () => {
     const fresh = new Map([
       [
         PEER,
@@ -124,10 +121,13 @@ describe('planDmDeviceAdds', () => {
       ],
       [ME, [kp(ME, slot(5), 'me-tablet')]],
     ]);
-    expect(ids(plan({ fresh, peerOnWhiteNoise: true }))).toEqual({ b: ['peer-wn-new'] });
-    // White Noise but no fresh White Noise key: nothing (not their other apps).
-    const lpOnly = new Map([[PEER, [kp(PEER, slot(1), 'peer-lp')]]]);
-    expect(plan({ fresh: lpOnly, peerOnWhiteNoise: true }).size).toBe(0);
+    // A chat created with only their newest White Noise install (the old
+    // 1:1 rule) is topped up with the rest on the next send.
+    const leaves = [
+      { pubkey: ME, key: 'me-here' },
+      { pubkey: PEER, key: 'peer-wn-new' },
+    ];
+    expect(ids(plan({ fresh, leaves }))).toEqual({ b: ['peer-lp', 'peer-wn-old'] });
   });
 
   it('only adds the peer when both people publish fresh devices', () => {
@@ -383,7 +383,9 @@ describe('MarmotDmDeviceSync scheduling', () => {
       tick(DM_DEVICE_SYNC_COOLDOWN_MS + 1);
       await sync.sync('g1', PEER, 'send');
       expect(invite).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('White Noise invited slot'));
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('invited slot changed signing key'),
+      );
     } finally {
       selected.mockRestore();
       signature.mockRestore();

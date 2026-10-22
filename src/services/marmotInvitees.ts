@@ -13,7 +13,10 @@ import { enabledAppRelays } from './appRelayPrefs';
 // every app event's `pubkey` to its sender leaf's account.
 //
 // Only the PEER's devices: our own other installs are never invited into a
-// new chat. One exception for 1:1s with White Noise users — see devicesForDm.
+// new chat (groups and 1:1s alike; that needs device linking). 1:1s get every
+// device too, across apps — White Noise and Lightning Piggy installs alike.
+// Current MDK classifies a chat as direct by its roster of distinct accounts,
+// so several leaves per person keep an unnamed two-person chat a DM there.
 // The peer's devices installed after a 1:1 began are added later by
 // marmotDmDeviceSync (#1559), through inviteDevices' `partial` mode.
 
@@ -282,21 +285,6 @@ export async function fetchDevices(
 }
 
 /**
- * The devices to put in a 1:1. White Noise (MDK 0.12) decides "is this a DM"
- * by counting LEAVES — an unnamed group with exactly two — so a DM holding
- * two of a White Noise user's devices would show up there as a group, and
- * White Noise's own "message" button would start a second chat. White Noise
- * is also single-device by design and invites one key package per person,
- * preferring its own newest. So for a contact with a White Noise install we
- * do the same: their newest White Noise key package only. Contacts on other
- * clients (Lightning Piggy on two phones) get every device. Groups always do.
- */
-export function devicesForDm(devices: NostrEvent[]): NostrEvent[] {
-  const whiteNoise = devices.find(isWhiteNoise);
-  return whiteNoise ? [whiteNoise] : devices;
-}
-
-/**
  * Every invitee's devices, keyed by account. Peers only — our own pubkey is
  * dropped (never invite our other installs). Throws for anyone with none.
  */
@@ -305,7 +293,6 @@ export async function resolveInvitees(
   lookupRelays: string[],
   self: string,
   members: string[],
-  opts: { dm?: boolean } = {},
 ): Promise<Map<string, NostrEvent[]>> {
   const me = self.toLowerCase();
   const peers = [...new Set(members.map((m) => m.toLowerCase()))].filter((m) => m !== me);
@@ -313,7 +300,7 @@ export async function resolveInvitees(
   peers.forEach((p, i) => {
     if (lists[i].length === 0) throw new MarmotNoKeyPackageError(p);
   });
-  return new Map(peers.map((p, i) => [p, opts.dm ? devicesForDm(lists[i]) : lists[i]]));
+  return new Map(peers.map((p, i) => [p, lists[i]]));
 }
 
 export interface InviteResult {

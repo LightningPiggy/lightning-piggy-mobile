@@ -17,9 +17,10 @@
 // covers older installs that rotated their signing key.
 //
 // Only the contact's devices are added; adding our own other installs would
-// require device linking, which is outside this feature's scope.
-// White Noise contacts get only their newest White Noise install, as for a
-// new chat (devicesForDm): released White Noise counts leaves to detect DMs.
+// require device linking, which is outside this feature's scope. Every app
+// counts: White Noise installs are added alongside Lightning Piggy ones, as
+// for a new chat (marmotInvitees). This also tops up chats that were created
+// with a White Noise contact's single newest install.
 //
 // Bounds (CLAUDE.md performance rules): at most one check per chat every
 // 10 minutes (1 minute after a failure), one key-package lookup per person
@@ -37,12 +38,7 @@ import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { amberFailureKind } from './amberErrors';
 import { NostrConnectError } from './signerErrors';
 import { keyPackageSignatureKey, readGroupLeaves, type GroupLeaf } from './marmotDevices';
-import {
-  devicesForDm,
-  isWhiteNoise,
-  MAX_DEVICES_PER_PERSON,
-  selectDeviceKeyPackages,
-} from './marmotInvitees';
+import { MAX_DEVICES_PER_PERSON, selectDeviceKeyPackages } from './marmotInvitees';
 import type { MarmotKvBackend } from './marmotStore';
 
 /** A chat is checked at most this often after a successful check. */
@@ -64,8 +60,6 @@ export interface DmDevicePlanInput {
   leaves: readonly Pick<GroupLeaf, 'pubkey' | 'key'>[];
   /** Person → their fresh devices, newest first (selectDeviceKeyPackages). */
   fresh: ReadonlyMap<string, NostrEvent[]>;
-  /** The contact runs White Noise (any current key package says so). */
-  peerOnWhiteNoise: boolean;
   /** `pubkey:slot` already invited into this group. */
   invitedSlots: ReadonlySet<string>;
   /** Test seam: a key package's leaf signature key. */
@@ -90,18 +84,14 @@ export function planDmDeviceAdds(input: DmDevicePlanInput): Map<string, NostrEve
   const keys = new Set<string>();
   const add: NostrEvent[] = [];
   const fresh = input.fresh.get(person) ?? [];
-  // A White Noise contact: their newest White Noise install or nothing.
-  const candidates = input.peerOnWhiteNoise
-    ? fresh.filter(isWhiteNoise).slice(0, 1)
-    : devicesForDm(fresh);
-  for (const kp of candidates) {
+  for (const kp of fresh) {
     if (add.length >= room) break;
     const slot = slotOf(kp);
     if (!slot) continue;
     const key = sigKey(kp);
     if (input.invitedSlots.has(slotId(person, slot))) {
-      if (__DEV__ && input.peerOnWhiteNoise && key && !inTree.has(key)) {
-        console.warn('[Marmot] White Noise invited slot changed signing key; skipping device add');
+      if (__DEV__ && key && !inTree.has(key)) {
+        console.warn('[Marmot] invited slot changed signing key; skipping device add');
       }
       continue;
     }
@@ -276,7 +266,6 @@ export class MarmotDmDeviceSync {
     } finally {
       scheduler.dispose();
     }
-    const peerOnWhiteNoise = (fresh.get(peer) ?? []).some(isWhiteNoise);
     const leaves = readGroupLeaves(await this.opts.groupState(mlsId));
     // Chats created/joined before slot tracking can still identify an install
     // by its signing key. Remember that association before its key rotates.
@@ -294,7 +283,6 @@ export class MarmotDmDeviceSync {
       peer,
       leaves,
       fresh,
-      peerOnWhiteNoise,
       invitedSlots: new Set(await this.invitedSlots(mlsId)),
     });
     if (plan.size === 0 || this.opts.stopped()) return ok;

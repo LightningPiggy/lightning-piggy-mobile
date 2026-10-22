@@ -1123,9 +1123,10 @@ A Marmot invitation targets the private material belonging to one published
 invitation key, not every phone signed into the same Nostr account. Lightning
 Piggy invites every fresh, compatible kind-30443 key package of a contact (one
 per `d` slot, newest first, at most 10; White Noise slots up to 35 days old,
-others up to 14; each must advertise encrypted media v2, `0x800b`). For a 1:1
-with a White Noise user it invites only their newest White Noise key, because
-White Noise counts MLS leaves to decide what is a DM. A signed-out or unused
+others up to 14; each must advertise encrypted media v2, `0x800b`), in 1:1s and
+groups alike, across apps. A 1:1 started before that, holding only a White Noise
+user's newest White Noise key, gets their other installs added on the next send.
+A signed-out or unused
 installation can still attract invitations until its key is removed or expires.
 
 White Noise silently drops a Welcome whose group contains any member leaf
