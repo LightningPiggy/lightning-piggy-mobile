@@ -660,6 +660,24 @@ describe('group Re-publish replaces a failed original only after confirmed succe
     expect(mockAlert).toHaveBeenCalled();
   });
 
+  it('keeps the original on screen when removing it from storage fails', async () => {
+    mockRemoveGroupMessage.mockRejectedValue(new Error('storage unavailable'));
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return { success: true };
+    });
+    const { result, setMessages } = setup();
+    await act(async () => {
+      expect(await result.current.resendText('hello', 'failed-original')).toBe(true);
+    });
+    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(MY_PUBKEY, GROUP_ID, 'failed-original');
+    // No update removes it: every state update still keeps the original row.
+    for (const [update] of setMessages.mock.calls) {
+      if (typeof update !== 'function') continue;
+      expect(update([{ id: 'failed-original' }])).toContainEqual({ id: 'failed-original' });
+    }
+  });
+
   it('leaves a successfully sent original alone when re-publishing it', async () => {
     mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
       hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });

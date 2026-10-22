@@ -301,10 +301,21 @@ export function useGroupComposerActions(params: {
     async (text: string, failedRowId?: string): Promise<boolean> => {
       const { group } = latestRef.current;
       const result = await sendTextResult(text);
-      if (result.success && failedRowId) await removeOptimisticRow(failedRowId, group);
+      // Unlike a failed send's cleanup, the original only leaves the screen
+      // once it has left storage: otherwise a reload would show both copies.
+      if (result.success && failedRowId && group) {
+        try {
+          await removeGroupMessage(myPubkey, group.id, failedRowId);
+          setMessages((prev) =>
+            prev.filter((m) => m.id !== failedRowId && m.localId !== failedRowId),
+          );
+        } catch (err) {
+          if (__DEV__) console.warn('[GroupConversationScreen] removeGroupMessage failed:', err);
+        }
+      }
       return result.success;
     },
-    [sendTextResult, removeOptimisticRow],
+    [sendTextResult, myPubkey, setMessages],
   );
 
   const sendFile = useCallback(
