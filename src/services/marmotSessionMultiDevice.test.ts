@@ -3,6 +3,7 @@
 // delivery tracked per person with retry from the outbox. Real MLS crypto,
 // WebCrypto removed (Hermes has none).
 import type { Event as NostrEvent } from 'nostr-tools';
+import { finalizeEvent } from 'nostr-tools';
 
 import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import * as pushWake from './marmotPushWake';
@@ -47,6 +48,20 @@ describe('MarmotSession multi-device invites (no WebCrypto)', () => {
     await Promise.all([big, bigOtherPhone, phone, tablet].map((p) => p.session.start()));
     const kps = (pk: string) => relay.events.filter((e) => e.kind === 30443 && e.pubkey === pk);
     await waitFor(() => kps(littleId.pubkey).length === 2 && kps(big.pubkey).length === 2);
+    // Model a contact using both apps, retaining the real MLS key material
+    // and signing the changed client tag so validation exercises the DM path.
+    const [lpPackage, tabletPackage] = kps(littleId.pubkey);
+    const wnPackage = finalizeEvent(
+      {
+        kind: tabletPackage.kind,
+        content: tabletPackage.content,
+        created_at: tabletPackage.created_at,
+        tags: [...tabletPackage.tags.filter((t) => t[0] !== 'client'), ['client', 'White Noise']],
+      },
+      littleId.sk,
+    );
+    expect(lpPackage.tags).toContainEqual(['client', 'Lightning Piggy']);
+    relay.events[relay.events.indexOf(tabletPackage)] = wnPackage;
     // A third Little key package that can't be used (bad signature, new slot):
     // skipped, the two good devices still join.
     const broken = JSON.parse(JSON.stringify(kps(littleId.pubkey)[0])) as NostrEvent;
@@ -69,6 +84,9 @@ describe('MarmotSession multi-device invites (no WebCrypto)', () => {
     // MLS Welcome inside is identical (White Noise dedupes on it).
     const welcomes = unwrapWelcomes(relay, littleId);
     expect(welcomes).toHaveLength(2);
+    expect(welcomes.flatMap((w) => w.tags.filter((t) => t[0] === 'e').map((t) => t[1]))).toEqual(
+      expect.arrayContaining([lpPackage.id, wnPackage.id]),
+    );
     expect(welcomes[0].content).toBe(welcomes[1].content);
     for (const device of [phone, tablet]) {
       const joined = await device.session.acceptWelcome(welcomes[0]);
