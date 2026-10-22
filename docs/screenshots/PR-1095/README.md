@@ -1,6 +1,6 @@
 # Configurable swap backend screenshots
 
-Captured on 18 September 2026 from PR #1095 commit `58f60e652d62aebab95a11676df81032d892d30f`, using the `lightningpiggy_api34` Android emulator on warmachine. The installed development client loaded Metro from a separate checkout of that exact commit.
+Captured on 18 September 2026 from PR #1095 commit `58f60e652d62aebab95a11676df81032d892d30f`, using an Android API 34 emulator. The installed development client loaded Metro from a separate checkout of that exact commit.
 
 - `01-default-backend.png`: Account → On-chain, showing the default Boltz API URL and the new controls.
 - `03-https-validation.png`: Attempting to save an HTTP URL produces the HTTPS validation error before making a network request.
