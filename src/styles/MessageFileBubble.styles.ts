@@ -38,7 +38,7 @@ export const createMessageFileBubbleStyles = (colors: Palette, cardWidth = CHAT_
       width: 40,
       height: 44,
       borderRadius: 8,
-      backgroundColor: colors.brandPinkLight,
+      backgroundColor: colors.mediaBoxFill,
       alignItems: 'center',
       justifyContent: 'center',
       gap: 1,
