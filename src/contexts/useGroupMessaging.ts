@@ -5,10 +5,12 @@ import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import { getMemoisedSecretKey } from './nostrSecretKeyCache';
+import { paintOptimisticBubble } from './nostrDecryptPacing';
 import { createGroupFileRumor } from '../services/nostrFileMessage';
 import { directMessageRumorEventId } from '../services/dmRumorId';
 import type { EncryptedUpload } from '../services/imageUploadService';
 import type { RelayConfig, SignerType } from '../types/nostr';
+import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { isNip171GroupId } from '../utils/nip171';
 import { nip171Outgoing } from '../services/nip171Groups';
 import { isMarmotGroupId } from '../services/marmotSession';
@@ -33,19 +35,13 @@ export interface UseGroupMessagingOptions {
 // can paint the pending bubble keyed by it — parity with the 1:1 path's
 // `SendHooks.onRumorReady` in `useMessageSend.ts`.
 //
-// Failure semantics (group vs 1:1):
-//   1:1 — the delivery-status store keeps the bubble alive even on failure;
-//     the user sees a red tick + Re-publish button (per-relay breakdown).
-//   Group — there is no per-relay delivery store for group messages today, so
-//     we cannot keep a persistent failed-tick bubble. Instead, on failure we:
-//     (a) show a BrandedAlert (existing behaviour, unchanged), AND
-//     (b) remove the just-appended optimistic row from storage + state so a
-//         never-published message doesn't linger in the thread.
-//   The 'Saved on relay, not on device' path (appendGroupMessage throws) is
-//   unchanged: the relay send already succeeded at that point, so the row is
-//   kept and the existing alert fires — we only remove on outright send failure.
+// Like a 1:1 send, the bubble then shows pending → sent / failed from the
+// result's per-relay `delivery` (session-scoped group delivery store); a
+// failed send keeps its bubble, with Re-publish in the message-info sheet.
+// `relays`: the send's target relays (a Marmot group's are its own, omitted).
 export interface GroupSendHooks {
-  onRumorReady?: (meta: { rumorId: string; kind: number }) => void;
+  onDeliveryFinalized?: (delivery: DeliveryStatus) => void;
+  onRumorReady?: (meta: { rumorId: string; kind: number; relays?: string[] }) => void;
 }
 
 /** A group send's outcome. `rumorId`: the sent Marmot event's id (Marmot
@@ -55,6 +51,8 @@ export interface GroupSendResult {
   wrapsPublished?: number;
   error?: string;
   rumorId?: string;
+  /** Per-relay publish outcome, when the send reached the publish stage. */
+  delivery?: DeliveryStatus;
 }
 
 /**
@@ -180,7 +178,12 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
         // its content fields alone). Fire onRumorReady synchronously so the
         // caller can paint the optimistic bubble before any async work (#1033).
         const rumorId = directMessageRumorEventId(rumor);
-        hooks?.onRumorReady?.({ rumorId, kind: rumor.kind });
+        hooks?.onRumorReady?.({
+          rumorId,
+          kind: rumor.kind,
+          ...(isMarmotGroupId(input.groupId) ? {} : { relays: sendRelays }),
+        });
+        await paintOptimisticBubble(hooks);
 
         // Marmot group: the same rumor rides the group's MLS session instead
         // of a per-member gift-wrap fan-out (no per-recipient signer prompts).
@@ -197,9 +200,14 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
           });
           if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+            return {
+              success: false,
+              error: result.errors[0] ?? 'No wraps published',
+              delivery: result.delivery,
+            };
           }
           // Partial send — some recipients got the message, others didn't
           // (typically the user cancelled an Amber prompt mid-loop, or
@@ -212,9 +220,14 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
               success: false,
               wrapsPublished: result.wrapsPublished,
               error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
+              delivery: result.delivery,
             };
           }
-          return { success: true, wrapsPublished: result.wrapsPublished };
+          return {
+            success: true,
+            wrapsPublished: result.wrapsPublished,
+            delivery: result.delivery,
+          };
         }
 
         if (signerType === 'amber') {
@@ -225,6 +238,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               amberService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
             signerSignSeal: async (unsignedSeal) => {
@@ -241,7 +255,11 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             },
           });
           if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+            return {
+              success: false,
+              error: result.errors[0] ?? 'No wraps published',
+              delivery: result.delivery,
+            };
           }
           // Partial send — some recipients got the message, others didn't
           // (typically the user cancelled an Amber prompt mid-loop, or
@@ -254,9 +272,14 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
               success: false,
               wrapsPublished: result.wrapsPublished,
               error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
+              delivery: result.delivery,
             };
           }
-          return { success: true, wrapsPublished: result.wrapsPublished };
+          return {
+            success: true,
+            wrapsPublished: result.wrapsPublished,
+            delivery: result.delivery,
+          };
         }
 
         if (signerType === 'nip46') {
@@ -273,6 +296,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               nostrConnectService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
             signerSignSeal: async (unsignedSeal) => {
@@ -288,7 +312,11 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             },
           });
           if (result.wrapsPublished === 0) {
-            return { success: false, error: result.errors[0] ?? 'No wraps published' };
+            return {
+              success: false,
+              error: result.errors[0] ?? 'No wraps published',
+              delivery: result.delivery,
+            };
           }
           if (result.errors.length > 0) {
             const intended = result.wrapsPublished + result.errors.length;
@@ -296,9 +324,14 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
               success: false,
               wrapsPublished: result.wrapsPublished,
               error: `Sent to ${result.wrapsPublished} of ${intended} members. ${result.errors[0]}`,
+              delivery: result.delivery,
             };
           }
-          return { success: true, wrapsPublished: result.wrapsPublished };
+          return {
+            success: true,
+            wrapsPublished: result.wrapsPublished,
+            delivery: result.delivery,
+          };
         }
 
         return { success: false, error: 'Unsupported signer type' };

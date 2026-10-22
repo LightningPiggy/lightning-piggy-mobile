@@ -28,6 +28,15 @@ export function yieldToEventLoop(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+/** After a send's `onRumorReady` has queued the optimistic bubble, give React
+ * one frame to paint it before the send's signing / gift-wrap crypto (pure JS,
+ * hundreds of ms) holds the JS thread. Without this the bubble — and the
+ * cleared composer — only appeared once the send was done. No-op when nobody
+ * painted anything (no hook). */
+export async function paintOptimisticBubble(hooks?: { onRumorReady?: unknown }): Promise<void> {
+  if (hooks?.onRumorReady) await yieldToEventLoop();
+}
+
 /** No frames are drawn while the app is backgrounded, so a RAF never fires
  * there: a loop yielding on it parks until the user reopens the app. Seen with
  * a live-location end marker sent from the background (#1300) — the NIP-17

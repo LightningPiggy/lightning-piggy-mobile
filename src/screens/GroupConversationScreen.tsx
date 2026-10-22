@@ -9,6 +9,7 @@ import { useAccountState } from '../contexts/useAccountState';
 import { useLiveMessageIndicator } from '../hooks/useLiveMessageIndicator';
 import NewMessagesPill from '../components/NewMessagesPill';
 import ChatJumpButtons from '../components/ChatJumpButtons';
+import { groupRowDelivery, useGroupDeliveryStatuses } from '../utils/groupDeliveryStore';
 import UnreadDivider from '../components/UnreadDivider';
 import MentionPicker from '../components/MentionPicker';
 import { useChatReadPosition } from '../hooks/useChatReadPosition';
@@ -92,6 +93,7 @@ const EMPTY_PUBKEYS: string[] = [];
 const EMPTY_MESSAGES: GroupMessage[] = [];
 const groupMessageId = (m: GroupMessage) => m.id;
 const timelineRowId = (row: GroupTimelineRow) => row.id;
+const GROUP_LIST_ANCHOR = { minIndexForVisible: 0 };
 
 const GroupConversationScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
@@ -252,7 +254,9 @@ const GroupConversationScreen: React.FC = () => {
   });
   const actioned = reactions.actionsForMessage;
   const closeActions = reactions.closeMessageActions;
-  const { replyTo, cancelReply, startReply, replyQuote } = reactions;
+  // Destructured: `reactions` itself is a new object every render, so a
+  // renderItem depending on it re-rendered every row on screen each time.
+  const { replyTo, cancelReply, startReply, replyQuote, propsForMessage } = reactions;
 
   // Send / upload / share orchestration + in-flight flags live in the
   // useGroupComposerActions hook (parallel to the 1:1 screen's
@@ -279,7 +283,8 @@ const GroupConversationScreen: React.FC = () => {
     draft,
     setDraft,
     setMessages,
-    scrollToEnd: () => listRef.current?.scrollToEnd({ animated: true }),
+    // Same as the arrow: keeps re-aiming until the list really is at the end.
+    scrollToEnd: live.jumpToLatest,
     setAttachPanelOpen,
     setGifPickerOpen,
     setContactPickerOpen,
@@ -289,9 +294,7 @@ const GroupConversationScreen: React.FC = () => {
     onReplySent: reactions.onReplySent,
   });
 
-  // Tap a group bubble → the same message-info sheet 1:1 chats use (#856).
-  // Group sends aren't per-relay tracked (no delivery store), so the sheet
-  // shows the protocol/kind/id metadata + a Re-publish for sent text.
+  // Group retries replace the failed row only after confirmed success.
   const {
     info: messageSheetInfo,
     sender: messageSheetSender,
@@ -300,7 +303,7 @@ const GroupConversationScreen: React.FC = () => {
     closeInfo: closeMessageInfo,
     resendFromInfo: handleResendFromInfo,
     canResend: canResendFromInfo,
-  } = useMessageInfoSheet(resendText, marmotGroupId ? 'marmot' : 'nip17', senderOf);
+  } = useMessageInfoSheet(resendText, marmotGroupId ? 'marmot' : 'nip17', senderOf, resendText);
 
   const menu = useMessageActionsMenu({
     myPubkey,
@@ -478,6 +481,8 @@ const GroupConversationScreen: React.FC = () => {
     [memberByPubkey, contacts, presentContactSheet],
   );
 
+  // This session's group send ticks (pending → sent / failed).
+  const deliveries = useGroupDeliveryStatuses();
   const renderMessage = useCallback(
     ({ item }: { item: GroupTimelineRow }) => {
       if (isDeviceNoticeRow(item)) {
@@ -533,14 +538,14 @@ const GroupConversationScreen: React.FC = () => {
           // Stored kind: 14 chat or 15 encrypted file (voice/image) — a Marmot
           // group's kind-9 rumors are stored the same way. The info sheet reads this,
           // so pass the per-message wireKind derived above rather than a hard
-          // 14. Group sends aren't per-relay tracked, so no deliveryStatus (the
-          // sheet shows "Not tracked").
+          // 14. Sends from this session carry their pending → sent / failed tick.
           wireKind={item.wireKind}
+          deliveryStatus={fromMe ? groupRowDelivery(item, deliveries) : undefined}
           onShowInfo={handleShowInfo}
           quote={item.quote}
           edited={item.editedAt !== undefined}
           autoLoadMedia={canAutoLoadMedia(fromMe, item.senderPubkey, followed)}
-          {...reactions.propsForMessage(item)}
+          {...propsForMessage(item)}
           testIdPrefix="group-conversation"
         />
       );
@@ -561,7 +566,7 @@ const GroupConversationScreen: React.FC = () => {
       openSender,
       followed,
       read.dividerId,
-      reactions,
+      propsForMessage,
       myPubkey,
       memberNameByPubkey,
       sharedProfiles,
@@ -577,6 +582,7 @@ const GroupConversationScreen: React.FC = () => {
       handleToggleSecretMode,
       isInvoicePaid,
       handleShowInfo,
+      deliveries,
     ],
   );
 
@@ -640,7 +646,11 @@ const GroupConversationScreen: React.FC = () => {
                 contentContainerStyle={styles.messagesList}
                 testID="group-messages-list"
                 onScroll={live.onScroll}
+                onScrollBeginDrag={live.onScrollBeginDrag}
                 scrollEventThrottle={100}
+                // Keep the rows on screen still when rows above them change
+                // height (re-mounted while scrolling back, history landing).
+                maintainVisibleContentPosition={GROUP_LIST_ANCHOR}
                 onContentSizeChange={live.onContentSizeChange}
                 viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}
                 onScrollToIndexFailed={onScrollToIndexFailed}
@@ -661,7 +671,6 @@ const GroupConversationScreen: React.FC = () => {
                 mentionCount={read.pendingMentions.length}
                 onJumpToMention={read.jumpToNextMention}
                 showLatest={!live.atEdge && !live.hasNewMessages}
-                hasNewMessages={live.hasNewMessages}
                 unreadCount={read.unread}
                 onJumpToLatest={live.jumpToLatest}
                 testIDs={{ mention: 'group-jump-to-mention', latest: 'group-jump-to-latest' }}

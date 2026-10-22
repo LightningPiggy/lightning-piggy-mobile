@@ -8,6 +8,7 @@ import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import { getMemoisedSecretKey } from './nostrSecretKeyCache';
+import { paintOptimisticBubble } from './nostrDecryptPacing';
 import { createFileMessageRumor } from '../services/nostrFileMessage';
 import { directMessageRumorEventId } from '../services/dmRumorId';
 import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/nwcShareMessage';
@@ -146,6 +147,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         // settled after, surviving the local- → echo id swap (#857).
         const eventId = directMessageRumorEventId(rumor);
         hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
+        await paintOptimisticBubble(hooks);
 
         if (signerType === 'nsec') {
           const secretKey = await getMemoisedSecretKey(pubkey);
@@ -279,6 +281,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       try {
         const eventId = directMessageRumorEventId(rumor);
         hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
+        await paintOptimisticBubble(hooks);
 
         if (signerType === 'nsec') {
           const secretKey = await getMemoisedSecretKey(pubkey);

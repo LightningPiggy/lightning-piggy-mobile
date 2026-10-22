@@ -73,6 +73,7 @@ import type { ConversationMessageInput, Item } from '../utils/conversationItems'
 import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
 import { useStartLiveLocationShare } from '../hooks/useStartLiveLocationShare';
 import { useConversationReactions } from '../hooks/useConversationReactions';
+import { useItemHandlers } from '../hooks/useItemHandlers';
 import { useThreadReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
@@ -482,6 +483,8 @@ const ConversationScreen: React.FC = () => {
     ...reactionBackend,
     onZapMessage: () => setSendSheetOpen(true),
   });
+  // Stable per-row callbacks, so a bubble's React.memo isn't defeated.
+  const handlersFor = useItemHandlers(buildOnLongPress, buildOnToggleReaction);
 
   // Copy text, plus Edit / Delete for everyone on your own messages in a
   // Marmot chat (#1237) — sheet + composer props.
@@ -506,6 +509,7 @@ const ConversationScreen: React.FC = () => {
   const askForInvite = useCallback(() => setDraft(t('marmotInviteFailed.askDraft')), [t]);
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
+      const handlers = handlersFor(item);
       const row = (
         <ConversationMessageRow
           item={item}
@@ -532,9 +536,9 @@ const ConversationScreen: React.FC = () => {
           peerAvatarUri={picture ?? null}
           onOpenMap={onOpenMap}
           onShowInfo={handleShowInfo}
-          onLongPress={buildOnLongPress(item)}
+          onLongPress={handlers.onLongPress}
           reactions={reactionsForItem(item)}
-          onToggleReaction={buildOnToggleReaction(item)}
+          onToggleReaction={handlers.onToggleReaction}
           onAddNwc={addSharedWallet}
           peerName={name}
           peerPubkey={pubkey}
@@ -579,8 +583,7 @@ const ConversationScreen: React.FC = () => {
       styles,
       colors,
       reactionsForItem,
-      buildOnLongPress,
-      buildOnToggleReaction,
+      handlersFor,
       askForInvite,
     ],
   );
@@ -655,13 +658,11 @@ const ConversationScreen: React.FC = () => {
                 inverted
                 // Keep the visible history row anchored when live messages prepend.
                 maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-                // Window the list so a thread with hundreds of messages
-                // doesn't mount every row up front — first-frame work goes
-                // from "render all N bubbles + avatars" to "render the
-                // 20 newest then lazy-mount as the user scrolls". These
-                // defaults are chosen for chat-style threads: one screen
-                // fits ~8-10 bubbles, so 20 covers the visible viewport
-                // plus one screen of pre-roll for smooth momentum scrolls.
+                // Window the list: mount the 20 newest up front, the rest as
+                // the user scrolls. windowSize stays at RN's default 21
+                // (10 screens kept either side): a smaller window unmounted
+                // rows a few screens back, so scrolling back showed blank
+                // space until they re-rendered.
                 //
                 // NOTE: `removeClippedSubviews` is deliberately OFF. It's
                 // broken with `inverted` on Android — breaks the contentOffset
@@ -670,7 +671,7 @@ const ConversationScreen: React.FC = () => {
                 // show spuriously. See facebook/react-native#30521 / #26061.
                 initialNumToRender={20}
                 maxToRenderPerBatch={10}
-                windowSize={10}
+                windowSize={21}
                 ListEmptyComponent={
                   <View style={styles.empty}>
                     <Text style={styles.emptyTitle}>{t('conversationScreen.noMessages')}</Text>
@@ -685,6 +686,7 @@ const ConversationScreen: React.FC = () => {
                   <BrandedRefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
                 }
                 onScroll={live.onScroll}
+                onScrollBeginDrag={live.onScrollBeginDrag}
                 onContentSizeChange={live.onContentSizeChange}
                 scrollEventThrottle={100}
                 viewabilityConfigCallbackPairs={read.viewabilityConfigCallbackPairs}

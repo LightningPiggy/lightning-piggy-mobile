@@ -23,6 +23,8 @@ export interface DeliveryStatus {
   // success signal, so the tick shows for exactly the sends that already
   // count as "sent" today.
   delivered: boolean;
+  // Group fan-out failed even though some wraps reached relays.
+  sendFailed?: boolean;
   relayResults: Record<string, RelayDeliveryResult>;
   // How many relays the send ATTEMPTED — the full target set, not just the
   // relays that have settled so far (#857). The early/optimistic snapshot only
@@ -208,7 +210,7 @@ export function deliverySheetTitle(
   if (status.pending) {
     return total > 0 ? { key: 'sendingToRelays', total } : { key: 'sending' };
   }
-  if (total === 0) return { key: 'sendFailed' };
+  if (status.sendFailed || total === 0) return { key: 'sendFailed' };
   return { key: 'sentToRelays', ok, total };
 }
 

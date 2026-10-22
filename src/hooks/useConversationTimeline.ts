@@ -7,13 +7,16 @@ import {
   buildZapItems,
   type ConversationMessageInput,
   type DeviceNoticeInput,
+  type Item,
 } from '../utils/conversationItems';
 import { useResolvedDmDeliveries } from './useDmDeliveryStatuses';
+import { useStableRows } from './useStableRows';
 import { useOutgoingOrderHistory } from './useOutgoingOrderHistory';
 import { useFailedMarmotInvites } from './useFailedMarmotInvites';
 import { failedInvitesFrom } from '../utils/marmotInviteRows';
 
 const NO_NOTICES: readonly DeviceNoticeInput[] = [];
+const itemKey = (item: Item) => item.id;
 
 /** Assemble the thread timeline with delivery ticks and verified payment amounts. */
 export function useConversationTimeline(
@@ -41,7 +44,7 @@ export function useConversationTimeline(
     () => failedInvitesFrom(failedInvites, partner),
     [failedInvites, partner],
   );
-  return useMemo(
+  const items = useMemo(
     () =>
       buildConversationItems(
         resolvedMessages,
@@ -62,4 +65,6 @@ export function useConversationTimeline(
       clearBoundary,
     ],
   );
+  // Unchanged rows keep their identity, so the memoised bubbles skip re-rendering.
+  return useStableRows(items, itemKey);
 }

@@ -5,8 +5,8 @@
  * Key assertions:
  *  1. `onRumorReady` fires (and the bubble is appended) BEFORE any signing —
  *     verified by passing a signer that never resolves; the row still appears.
- *  2. Failure path removes the optimistic row from state + storage so a
- *     never-published message doesn't linger in the thread.
+ *  2. A failed text send keeps its bubble, marked failed (state + storage),
+ *     with pending → failed / sent ticks in the group delivery store.
  *  3. The 'Saved on relay, not on device' case (appendGroupMessage throws after
  *     a successful relay send) does NOT remove the row.
  */
@@ -17,6 +17,7 @@ import { renderHook, act } from '@testing-library/react-native';
 import { useGroupComposerActions } from './useGroupComposerActions';
 import type { GroupSendHooks } from '../contexts/useGroupMessaging';
 import type { Group } from '../types/groups';
+import { __resetGroupDeliveryStore, getGroupDeliveryStatus } from '../utils/groupDeliveryStore';
 
 // ---------------------------------------------------------------------------
 // Mocks — note: jest.mock factories are hoisted to module top and cannot
@@ -59,10 +60,12 @@ jest.mock('../services/documentMetadata', () => ({
 // Storage mock: track calls and control return values per-test.
 const mockAppendGroupMessage = jest.fn();
 const mockRemoveGroupMessage = jest.fn();
+const mockMarkGroupMessageSendFailed = jest.fn();
 
 jest.mock('../services/groupMessagesStorageService', () => ({
   appendGroupMessage: (...args: unknown[]) => mockAppendGroupMessage(...args),
   removeGroupMessage: (...args: unknown[]) => mockRemoveGroupMessage(...args),
+  markGroupMessageSendFailed: (...args: unknown[]) => mockMarkGroupMessageSendFailed(...args),
 }));
 
 const mockAlert = jest.fn();
@@ -150,6 +153,9 @@ beforeEach(() => {
     { id: 'local_stub', senderPubkey: MY_PUBKEY, text: 'hello', createdAt: 1700000001 },
   ]);
   mockRemoveGroupMessage.mockResolvedValue([]);
+  mockMarkGroupMessageSendFailed.mockResolvedValue([
+    { id: 'local_stub', senderPubkey: MY_PUBKEY, text: 'hello', createdAt: 1, sendFailed: true },
+  ]);
 });
 
 // ---------------------------------------------------------------------------
@@ -220,40 +226,52 @@ describe('useGroupComposerActions — successful send appends the optimistic row
 });
 
 // ---------------------------------------------------------------------------
-// Test 3: failure path removes the optimistic row
+// Test 3: a failed text send keeps its bubble, marked failed
 // ---------------------------------------------------------------------------
 
-describe('useGroupComposerActions — failure path removes the optimistic row (#1033)', () => {
-  it('removes the just-appended row from storage when the send fails', async () => {
-    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
-      hooks?.onRumorReady?.({ rumorId: 'rumor-fail', kind: 14 });
-      return { success: false, error: 'all relays rejected' };
+const rowIdOf = () => (mockAppendGroupMessage.mock.calls[0][2] as { id: string }).id;
+
+describe('useGroupComposerActions — a failed text send keeps its bubble, marked failed', () => {
+  beforeEach(() => __resetGroupDeliveryStore());
+
+  it('shows the row pending, then marks it failed (state + storage) without an alert', async () => {
+    let finish: (r: unknown) => void = () => undefined;
+    mockSendGroupMessage.mockImplementation((_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'rumor-fail', kind: 14, relays: ['wss://a', 'wss://b'] });
+      return new Promise((resolve) => (finish = resolve));
     });
 
     const { result, setMessages } = setup();
-    await act(async () => {
-      await result.current.sendText('hello');
+    let sent: Promise<boolean> = Promise.resolve(false);
+    act(() => {
+      sent = result.current.sendText('hello');
+    });
+    expect(getGroupDeliveryStatus(rowIdOf())).toMatchObject({
+      pending: true,
+      eventId: 'rumor-fail',
     });
 
-    // BrandedAlert shown for the failure.
-    expect(mockAlert).toHaveBeenCalledWith('Send failed', expect.any(String));
+    await act(async () => {
+      finish({ success: false, error: 'all relays rejected' });
+      expect(await sent).toBe(true); // the bubble holds it: no draft restore
+    });
 
-    // setMessages called at least once for the optimistic row.
-    expect(setMessages).toHaveBeenCalled();
-
-    // removeGroupMessage called with the owner + group id so the row is retracted.
-    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(mockMyPubkey, GROUP_ID, expect.any(String));
+    expect(mockAlert).not.toHaveBeenCalled();
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    expect(mockMarkGroupMessageSendFailed).toHaveBeenCalledWith(mockMyPubkey, GROUP_ID, rowIdOf());
+    const status = getGroupDeliveryStatus(rowIdOf());
+    expect(status?.pending).toBeFalsy();
+    expect(Object.values(status?.relayResults ?? {})).toEqual(['failed', 'failed']);
+    // The in-memory row is marked too, before storage answers.
+    const updaters = setMessages.mock.calls.map((c) => c[0]).filter((a) => typeof a === 'function');
+    const marked = updaters
+      .map((fn) => fn([{ id: rowIdOf(), senderPubkey: MY_PUBKEY, text: 'hello', createdAt: 1 }]))
+      .find((rows: { sendFailed?: boolean }[]) => rows[0]?.sendFailed);
+    expect(marked).toBeDefined();
   });
 
-  it('does not wipe the visible thread when removeGroupMessage rejects on a transient storage error', async () => {
-    // removeGroupMessage now rejects (rather than resolving to []) on a
-    // storage write failure — see groupMessagesStorageService.ts. This test
-    // pins the caller-side half of that contract: removeOptimisticRow must
-    // never let a rejected/empty result reach setMessages, since doing so
-    // would wipe the entire visible thread on a transient blip that never
-    // touched the persisted data.
-    mockRemoveGroupMessage.mockRejectedValue(new Error('transient storage error'));
-
+  it('does not wipe the visible thread when marking the row rejects on a storage error', async () => {
+    mockMarkGroupMessageSendFailed.mockRejectedValue(new Error('transient storage error'));
     mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
       hooks?.onRumorReady?.({ rumorId: 'rumor-fail-storage', kind: 14 });
       return { success: false, error: 'all relays rejected' };
@@ -264,31 +282,21 @@ describe('useGroupComposerActions — failure path removes the optimistic row (#
       await result.current.sendText('hello');
     });
 
-    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(mockMyPubkey, GROUP_ID, expect.any(String));
-
-    // The regression this guards against: a caller that did
-    // `setMessages(await removeGroupMessage(...))` and treated a rejection
-    // (or the old `[]`-on-error contract) as "the thread is now empty" would
-    // show up here as a bare `[]` reaching setMessages. This hook never does
-    // that — removeOptimisticRow only ever removes one specific row via the
-    // functional-updater form, and the rejected removeGroupMessage call is
-    // caught and ignored, so no setMessages call should ever be a plain
-    // (non-function) empty array.
+    expect(mockMarkGroupMessageSendFailed).toHaveBeenCalled();
     for (const call of setMessages.mock.calls) {
       const arg = call[0];
-      if (Array.isArray(arg)) {
-        expect(arg.length).toBeGreaterThan(0);
-      }
+      if (Array.isArray(arg)) expect(arg.length).toBeGreaterThan(0);
     }
   });
 
-  it('shows a BrandedAlert and removes the row on a partial send failure', async () => {
+  it('counts a partial send (not every member got it) as failed, even if relays took some wraps', async () => {
     mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
-      hooks?.onRumorReady?.({ rumorId: 'rumor-partial', kind: 14 });
+      hooks?.onRumorReady?.({ rumorId: 'rumor-partial', kind: 14, relays: ['wss://a'] });
       return {
         success: false,
         wrapsPublished: 2,
         error: 'Sent to 2 of 5 members. Relay refused wrap for member 3.',
+        delivery: { delivered: true, relayResults: { 'wss://a': 'ok' }, targetRelayCount: 1 },
       };
     });
 
@@ -297,8 +305,46 @@ describe('useGroupComposerActions — failure path removes the optimistic row (#
       await result.current.sendText('hello');
     });
 
-    expect(mockAlert).toHaveBeenCalled();
-    expect(mockRemoveGroupMessage).toHaveBeenCalled();
+    expect(getGroupDeliveryStatus(rowIdOf())?.relayResults).toEqual({ 'wss://a': 'ok' });
+    expect(mockMarkGroupMessageSendFailed).toHaveBeenCalled();
+  });
+
+  it('settles a successful send to its per-relay result', async () => {
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'rumor-ok', kind: 14, relays: ['wss://a', 'wss://b'] });
+      return {
+        success: true,
+        wrapsPublished: 3,
+        delivery: {
+          delivered: true,
+          relayResults: { 'wss://a': 'ok', 'wss://b': 'failed' },
+          targetRelayCount: 2,
+          pending: true,
+        },
+      };
+    });
+
+    const { result } = setup();
+    await act(async () => {
+      await result.current.sendText('hello');
+    });
+
+    expect(getGroupDeliveryStatus(rowIdOf())).toMatchObject({
+      delivered: true,
+      relayResults: { 'wss://a': 'ok', 'wss://b': 'failed' },
+      eventId: 'rumor-ok',
+      pending: undefined,
+    });
+    expect(mockMarkGroupMessageSendFailed).not.toHaveBeenCalled();
+  });
+
+  it('still alerts when the send failed before any bubble was painted', async () => {
+    mockSendGroupMessage.mockResolvedValue({ success: false, error: 'Not logged in' });
+    const { result } = setup();
+    await act(async () => {
+      expect(await result.current.sendText('hello')).toBe(false);
+    });
+    expect(mockAlert).toHaveBeenCalledWith('Send failed', 'Not logged in');
   });
 });
 
@@ -484,4 +530,168 @@ it('excludes a member removed while the document upload is pending', async () =>
     expect.objectContaining({ memberPubkeys: [MY_PUBKEY, MEMBER_1] }),
     expect.anything(),
   );
+});
+
+it('retains the visible failed row when append fails and marking returns an empty log', async () => {
+  mockAppendGroupMessage.mockRejectedValue(new Error('storage unavailable'));
+  mockMarkGroupMessageSendFailed.mockResolvedValue([]);
+  mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+    hooks?.onRumorReady?.({ rumorId: 'failed', kind: 14 });
+    return { success: false };
+  });
+  const { result, setMessages } = setup();
+  await act(async () => {
+    expect(await result.current.sendText('hello')).toBe(true);
+  });
+  const echoed = { id: 'echo', localId: rowIdOf(), text: 'hello' };
+  const lastUpdate = setMessages.mock.calls.at(-1)![0];
+  expect(lastUpdate([echoed])).toEqual([{ ...echoed, sendFailed: true }]);
+  expect(setMessages.mock.calls.every(([update]) => typeof update === 'function')).toBe(true);
+});
+
+it.each(['reply', 'vote'])(
+  'rolls back a failed %s after persistence and reports failure',
+  async (type) => {
+    let persist!: (rows: unknown[]) => void;
+    mockAppendGroupMessage.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          persist = resolve;
+        }),
+    );
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'failed', kind: 14 });
+      return { success: false };
+    });
+    const clearReply = jest.fn();
+    const { result, setMessages } = setup(type === 'reply' ? 'parent' : undefined, clearReply);
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending =
+        type === 'reply'
+          ? result.current.handleSend()
+          : result.current.sendText('[POLL_VOTE] poll-id 1');
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    await act(async () => {
+      persist([mockAppendGroupMessage.mock.calls[0][2]]);
+      expect(await pending).toBe(false);
+    });
+    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(MY_PUBKEY, GROUP_ID, rowIdOf());
+    expect(clearReply).not.toHaveBeenCalled();
+    expect(mockMarkGroupMessageSendFailed).not.toHaveBeenCalled();
+    const remove = setMessages.mock.calls.at(-1)![0];
+    expect(remove([{ id: 'echo', localId: rowIdOf() }, { id: 'keep' }])).toEqual([{ id: 'keep' }]);
+  },
+);
+
+it.each([true, false])(
+  'wires final delivery to the composer store (final first: %s)',
+  async (finalFirst) => {
+    let finalize!: NonNullable<GroupSendHooks['onDeliveryFinalized']>;
+    const final = { delivered: true, relayResults: { a: 'ok' as const, b: 'ok' as const } };
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'rumor', kind: 14 });
+      finalize = hooks!.onDeliveryFinalized!;
+      if (finalFirst) finalize(final);
+      return { success: false, delivery: { delivered: true, relayResults: { a: 'ok' } } };
+    });
+    const { result } = setup();
+    await act(async () => {
+      await result.current.sendText('hello');
+    });
+    if (!finalFirst) finalize(final);
+    expect(getGroupDeliveryStatus(rowIdOf())).toMatchObject({ ...final, sendFailed: true });
+  },
+);
+
+describe('group Re-publish replaces a failed original only after confirmed success', () => {
+  it('waits for both relay success and local persistence before removing the original', async () => {
+    let finish!: (result: { success: boolean }) => void;
+    let persist!: (rows: unknown[]) => void;
+    mockAppendGroupMessage.mockImplementation(() => new Promise((resolve) => (persist = resolve)));
+    mockSendGroupMessage.mockImplementation((_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return new Promise((resolve) => (finish = resolve));
+    });
+    const { result, setMessages } = setup();
+    let retry!: Promise<boolean>;
+    act(() => {
+      retry = result.current.resendText('hello', 'failed-original');
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    await act(async () => finish({ success: true }));
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    await act(async () => {
+      persist([mockAppendGroupMessage.mock.calls[0][2]]);
+      expect(await retry).toBe(true);
+    });
+    expect(mockRemoveGroupMessage).toHaveBeenCalledWith(MY_PUBKEY, GROUP_ID, 'failed-original');
+    const remove = setMessages.mock.calls.at(-1)![0];
+    expect(remove([{ id: 'echo', localId: 'failed-original' }, { id: rowIdOf() }])).toEqual([
+      { id: rowIdOf() },
+    ]);
+  });
+
+  it('reports a failed retry truthfully and keeps the original available', async () => {
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return { success: false };
+    });
+    const { result } = setup();
+    await act(async () => {
+      expect(await result.current.resendText('hello', 'failed-original')).toBe(false);
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    expect(mockMarkGroupMessageSendFailed).toHaveBeenCalledWith(MY_PUBKEY, GROUP_ID, rowIdOf());
+  });
+
+  it('keeps the original when the retry succeeds on relays but cannot be persisted', async () => {
+    mockAppendGroupMessage.mockRejectedValue(new Error('storage unavailable'));
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return { success: true };
+    });
+    const { result } = setup();
+    await act(async () => {
+      expect(await result.current.resendText('hello', 'failed-original')).toBe(false);
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+    expect(mockAlert).toHaveBeenCalled();
+  });
+
+  it('removes the original from storage before the screen, and hides it even if that fails', async () => {
+    const order: string[] = [];
+    mockRemoveGroupMessage.mockImplementation(async () => {
+      order.push('storage');
+      throw new Error('storage unavailable');
+    });
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return { success: true };
+    });
+    const { result, setMessages } = setup();
+    setMessages.mockImplementation((update: unknown) => {
+      if (typeof update !== 'function') return;
+      const after = (update as (rows: unknown[]) => unknown[])([{ id: 'failed-original' }]);
+      if (after.length === 0) order.push('screen');
+    });
+    await act(async () => {
+      expect(await result.current.resendText('hello', 'failed-original')).toBe(true);
+    });
+    // Hidden even though the delete failed: no second Re-publish, no duplicate.
+    expect(order).toEqual(['storage', 'screen']);
+  });
+
+  it('leaves a successfully sent original alone when re-publishing it', async () => {
+    mockSendGroupMessage.mockImplementation(async (_input: unknown, hooks?: GroupSendHooks) => {
+      hooks?.onRumorReady?.({ rumorId: 'retry-rumor', kind: 14 });
+      return { success: true };
+    });
+    const { result } = setup();
+    await act(async () => {
+      expect(await result.current.resendText('hello')).toBe(true);
+    });
+    expect(mockRemoveGroupMessage).not.toHaveBeenCalled();
+  });
 });

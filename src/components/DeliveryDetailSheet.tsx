@@ -101,7 +101,7 @@ export default function DeliveryDetailSheet({
       : tr('deliveryDetailSheet.statusReceived')
     : status.pending
       ? tr('deliveryDetailSheet.statusSending')
-      : ok === 0
+      : status.sendFailed || ok === 0
         ? tr('deliveryDetailSheet.statusFailed')
         : ok < total
           ? tr('deliveryDetailSheet.statusPartiallyDelivered')

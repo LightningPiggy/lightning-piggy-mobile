@@ -34,11 +34,14 @@ export function useMessageInfoSheet(
   // Who sent the tapped bubble — the sheet's Marmot device rows need it
   // (#1267). 1:1: us or the peer; group: looked up by row id.
   senderOf?: (rowId: string, fromMe: boolean) => string | null,
+  /** Group retries replace a failed storage row after a successful send. */
+  resendFailedText?: (text: string, rowId: string) => Promise<boolean>,
 ) {
   const [messageInfo, setMessageInfo] = useState<{
     info: MessageInfo;
     canResend: boolean;
     sender: string | null;
+    failedRowId?: string;
     sentAt?: number;
   } | null>(null);
 
@@ -56,6 +59,8 @@ export function useMessageInfoSheet(
         }),
         sender: senderOf?.(args.eventId, args.fromMe) ?? null,
         sentAt: args.createdAt,
+        // Keep the storage row id: info.eventId can be a different rumor id.
+        failedRowId: args.deliveryStatus?.sendFailed ? args.eventId : undefined,
       });
     },
     [protocol, senderOf],
@@ -66,8 +71,12 @@ export function useMessageInfoSheet(
   const resendFromInfo = useCallback(() => {
     const text = messageInfo?.canResend ? messageInfo.info.resendText : undefined;
     setMessageInfo(null);
-    if (text) void resendText(text);
-  }, [messageInfo, resendText]);
+    if (text) {
+      if (messageInfo?.failedRowId && resendFailedText)
+        void resendFailedText(text, messageInfo.failedRowId);
+      else void resendText(text);
+    }
+  }, [messageInfo, resendText, resendFailedText]);
 
   return {
     info: messageInfo?.info ?? null,

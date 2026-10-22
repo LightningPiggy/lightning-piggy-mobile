@@ -18,12 +18,14 @@ import {
   listPersistedGroupWrapIds,
   reviveGroupHistoryOwner,
   rekeyGroupMessage,
+  markGroupMessageSendFailed,
   type GroupMessage,
 } from './groupMessagesStorageService';
 import { resetGroupMessagesMigrationForTests } from './groupMessagesMigration';
 import { groupMessagesKey, legacyGroupMessagesKey } from './groupMessagesKeys';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Jest mock factory loads the official storage mock.
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
@@ -766,4 +768,52 @@ it('does not repair metadata from a different sender or timestamp, or overwrite 
   await appendGroupMessage(OWNER, GROUP, { ...message, wireKind: 14 });
   await appendGroupMessage(OWNER, GROUP, { ...message, wireKind: 1234 });
   expect(await loadGroupMessages(OWNER, GROUP)).toEqual([{ ...message, wireKind: 14 }]);
+});
+
+describe('markGroupMessageSendFailed', () => {
+  const local = (id: string, text = 'hi'): GroupMessage => ({
+    id,
+    senderPubkey: SENDER,
+    text,
+    createdAt: 10,
+  });
+  it('marks only that row failed, on disk', async () => {
+    await appendGroupMessage(OWNER, GROUP, local('local_1_a'));
+    await appendGroupMessage(OWNER, GROUP, local('local_2_b', 'other'));
+    const next = await markGroupMessageSendFailed(OWNER, GROUP, 'local_1_a');
+    expect(next.find((m) => m.id === 'local_1_a')?.sendFailed).toBe(true);
+    expect(next.find((m) => m.id === 'local_2_b')?.sendFailed).toBeUndefined();
+    const loaded = await loadGroupMessages(OWNER, GROUP);
+    expect(loaded.find((m) => m.id === 'local_1_a')?.sendFailed).toBe(true);
+  });
+  it('leaves storage untouched for an unknown or already-failed row', async () => {
+    await appendGroupMessage(OWNER, GROUP, local('local_1_a'));
+    const marked = await markGroupMessageSendFailed(OWNER, GROUP, 'local_1_a');
+    expect(await markGroupMessageSendFailed(OWNER, GROUP, 'local_1_a')).toEqual(marked);
+    expect(await markGroupMessageSendFailed(OWNER, GROUP, 'missing')).toEqual(marked);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual(marked);
+  });
+});
+
+it.each([true, false])(
+  'persists send failure across echo replacement (echo first: %s)',
+  async (echoFirst) => {
+    await appendGroupMessage(OWNER, GROUP, local('local_failed', 'hello', 100));
+    const echo = () => appendGroupMessage(OWNER, GROUP, local('real_echo', 'hello', 100));
+    if (echoFirst) await echo();
+    await markGroupMessageSendFailed(OWNER, GROUP, 'local_failed');
+    if (!echoFirst) await echo();
+    // A later metadata repair must also retain the local failure flag.
+    await appendGroupMessage(OWNER, GROUP, local('real_echo', 'hello', 101));
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual([
+      expect.objectContaining({ id: 'real_echo', localId: 'local_failed', sendFailed: true }),
+    ]);
+  },
+);
+
+it('removes a failed hidden vote even after a self-echo changes its id', async () => {
+  await appendGroupMessage(OWNER, GROUP, local('local_vote', 'vote', 100));
+  await appendGroupMessage(OWNER, GROUP, local('echo_vote', 'vote', 100));
+  await removeGroupMessage(OWNER, GROUP, 'local_vote');
+  expect(await loadGroupMessages(OWNER, GROUP)).toEqual([]);
 });

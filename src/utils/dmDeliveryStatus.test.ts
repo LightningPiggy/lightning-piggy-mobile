@@ -225,3 +225,12 @@ describe('deliverySheetTitle', () => {
     expect(deliverySheetTitle('sent', status)).toEqual({ key: 'sentToRelays', ok: 1, total: 2 });
   });
 });
+
+it('labels failed group fan-out separately from accepted relay outcomes', () => {
+  const status = {
+    ...aggregateRelayResults([{ relay: 'wss://accepted', ok: true }]),
+    sendFailed: true,
+  };
+  expect(deliverySheetTitle('sent', status)).toEqual({ key: 'sendFailed' });
+  expect(summariseDelivery(status)).toEqual({ ok: 1, total: 1 });
+});

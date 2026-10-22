@@ -7,6 +7,7 @@
 import { Buffer } from 'buffer';
 import type { SendHooks, SendResult } from '../contexts/useMessageSend';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
+import { paintOptimisticBubble } from '../contexts/nostrDecryptPacing';
 import { encodeMarmotMediaUrl } from '../utils/encryptedFileUrl';
 import { uploadEncryptedBlobToBlossom, type BlossomSigner } from './blossomService';
 import { marmotKindForAppKind } from './marmotInbox';
@@ -153,8 +154,6 @@ export async function sendMarmotDm(
   try {
     const session = requireMarmotSession(pubkey);
     const dm = await getOrCreateDmWithin(session, recipient);
-    // Devices the peer installed since the chat began (#1559): short wait.
-    await session.syncDmDevices(dm.id).catch(() => undefined);
     const rumor = buildMarmotRumor(pubkey, {
       kind: marmotKindForAppKind(draft.kind),
       content: draft.content,
@@ -163,7 +162,11 @@ export async function sendMarmotDm(
     });
     // The app keys bubbles by its own kind (14 = text), not Marmot's 9.
     const meta = { eventId: rumor.id, kind: draft.kind };
+    // Paint the bubble before the device sync's relay round trip, not after.
     hooks?.onRumorReady?.({ ...meta, relays: dm.relays });
+    await paintOptimisticBubble(hooks);
+    // Devices the peer installed since the chat began (#1559): short wait.
+    await session.syncDmDevices(dm.id).catch(() => undefined);
     const delivery = marmotDelivery(await session.sendRumor(dm.id, rumor), meta);
     hooks?.onDeliveryFinalized?.(delivery);
     return delivery.delivered
@@ -181,7 +184,13 @@ export async function sendMarmotGroupRumor(
   pubkey: string,
   appGroupId: string,
   draft: MarmotDraft,
-): Promise<{ success: boolean; wrapsPublished?: number; error?: string; rumorId?: string }> {
+): Promise<{
+  success: boolean;
+  wrapsPublished?: number;
+  error?: string;
+  rumorId?: string;
+  delivery?: DeliveryStatus;
+}> {
   try {
     const session = requireMarmotSession(pubkey);
     const rumor = buildMarmotRumor(pubkey, {
@@ -192,10 +201,11 @@ export async function sendMarmotGroupRumor(
     });
     const byRelay = await session.sendRumor(appGroupId, rumor);
     const accepted = Object.values(byRelay).filter(Boolean).length;
+    const delivery = marmotDelivery(byRelay, { eventId: rumor.id, kind: draft.kind });
     // The Marmot id (not the app rumor's): what edits / deletes must target.
     return accepted > 0
-      ? { success: true, wrapsPublished: accepted, rumorId: rumor.id }
-      : { success: false, error: 'No relay accepted the message' };
+      ? { success: true, wrapsPublished: accepted, rumorId: rumor.id, delivery }
+      : { success: false, error: 'No relay accepted the message', delivery };
   } catch (e) {
     return { success: false, error: marmotSendError(e) };
   }

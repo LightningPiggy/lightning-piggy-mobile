@@ -229,6 +229,22 @@ describe('sendMarmotDm', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('paints the bubble before its one device sync, not after', async () => {
+    const order: string[] = [];
+    fakeSession({
+      syncDmDevices: jest.fn(async () => {
+        order.push('sync');
+      }),
+    });
+    await sendMarmotDm(
+      ME,
+      PEER,
+      { kind: 14, content: 'hi' },
+      { onRumorReady: () => order.push('bubble') },
+    );
+    expect(order).toEqual(['bubble', 'sync']);
+  });
+
   it('fails cleanly before the session has started', async () => {
     const result = await sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
     expect(result.success).toBe(false);

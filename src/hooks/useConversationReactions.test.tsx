@@ -71,9 +71,10 @@ jest.mock('../components/BrandedAlert', () => ({
 // passthrough so tests stay context-free (return the key, interpolating params).
 jest.mock('../contexts/LocaleContext', () =>
   (() => {
+    const translate = (key: string) => key;
     const context = {
       __esModule: true,
-      useTranslation: () => (key: string) => key,
+      useTranslation: () => translate,
     };
     return {
       ...context,
@@ -343,7 +344,6 @@ describe('useConversationReactions — duplicate own votes', () => {
         }
         return false;
       });
-      // A reconciliation can still read stale successful deletions from history.
       const fetchReactionsForMessages = jest.fn(async () => [...own, ...other]);
       const params = makeParams({
         messages: [{ id: 'message', fromMe: true, text: 'hi', createdAt: 1, rumorId: TARGET }],
@@ -351,12 +351,14 @@ describe('useConversationReactions — duplicate own votes', () => {
         deleteReaction,
       });
       const { result } = renderHook(() => useConversationReactions(params));
+      const builder = result.current.buildOnToggleReaction;
       await waitFor(() =>
         expect(result.current.reactionsByTarget.get(TARGET)?.myReactions['👍']).toBe('new'),
       );
       await act(async () => {
         result.current.buildOnToggleReaction(sentItem)!('👍', 'new');
       });
+      expect(result.current.buildOnToggleReaction).toBe(builder);
       expect(deleteReaction.mock.calls.map((c) => c[0]).sort()).toEqual(['new', 'old']);
       await waitFor(() =>
         expect(result.current.reactionsByTarget.get(TARGET)?.myReactions['👍']).toBe(

@@ -9,6 +9,7 @@ import {
 } from '../utils/messageContent';
 import { indexMessagesById, resolveQuote, type MessageQuote } from '../utils/messageQuote';
 import { sanitizeDisplayText } from '../utils/sanitizeDisplayText';
+import { useStableRows } from './useStableRows';
 
 /** A group message, classified once (not in the hot renderItem path). */
 export type ClassifiedMessage = GroupMessage & {
@@ -28,6 +29,8 @@ export interface GroupDeviceNoticeRow {
 }
 
 export type GroupTimelineRow = ClassifiedMessage | GroupDeviceNoticeRow;
+
+const rowKey = (row: GroupTimelineRow) => row.id;
 
 export const isDeviceNoticeRow = (row: GroupTimelineRow): row is GroupDeviceNoticeRow =>
   'deviceNotice' in row;
@@ -121,7 +124,7 @@ export function useGroupTimeline({
       .filter((m) => m.content.kind !== 'pollVote');
   }, [messages, myPubkey, memberNameByPubkey, formatLocale]);
 
-  const rows = useMemo(
+  const merged = useMemo(
     () =>
       // Messages already passed the history hook's timestamp and cleared-ID
       // checks; same-second arrivals survive. Notices still need the cutoff.
@@ -131,6 +134,8 @@ export function useGroupTimeline({
       ),
     [classified, deviceNotices, clearBoundary],
   );
+  // Unchanged rows keep their identity, so the memoised bubbles skip re-rendering.
+  const rows = useStableRows(merged, rowKey);
 
   const senderById = useMemo(
     () => new Map(messages.map((m) => [m.id, m.senderPubkey.toLowerCase()])),
