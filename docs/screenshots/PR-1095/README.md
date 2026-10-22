@@ -5,7 +5,7 @@ Captured on 18 September 2026 from PR #1095 commit `58f60e652d62aebab95a11676df8
 - `01-default-backend.png`: Account → On-chain, showing the default Boltz API URL and the new controls.
 - `03-https-validation.png`: Attempting to save an HTTP URL produces the HTTPS validation error before making a network request.
 
-These are unedited emulator captures. Only reserved `example.com` addresses are used for the custom URL; no family endpoint or wallet credentials are displayed. The input was reset to the default after capture. No swap was created and no funds were moved for these three settings captures.
+These are unedited emulator captures. Only reserved `example.com` addresses are used for the custom URL; no family endpoint or wallet credentials are displayed. The input was reset to the default after capture. No swap was created and no funds were moved for these two settings captures.
 
 ## Live Bitcoin-to-Lightning swap — 20 September 2026
 
