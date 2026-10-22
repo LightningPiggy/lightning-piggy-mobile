@@ -117,6 +117,10 @@ export default React.memo(function MessageFileBubble({
     formattedSize && size !== undefined && size < 1000
       ? t('messageBubble.fileBytes', { size: formattedSize })
       : formattedSize;
+  // Short types (PDF, ZIP, DOCX) ride on the file icon; a longer one joins
+  // the size line instead, so the card needs one line, two at most.
+  const badgeType = friendlyType.length <= 4 ? friendlyType : '';
+  const meta = [badgeType ? '' : friendlyType, sizeLabel].filter(Boolean).join(' · ');
   const shortId = id.replace(/^dm-/, '').slice(0, 8);
   return (
     <View style={[styles.row, fromMe && styles.sent]}>
@@ -170,18 +174,28 @@ export default React.memo(function MessageFileBubble({
         )}
         <View style={styles.body}>
           {header}
-          {file.plainUrl ? (
-            <ShieldOff size={24} color={colors.textSupplementary} />
-          ) : !preview && !previewBox ? (
-            <FileText size={24} color={colors.textSupplementary} />
-          ) : null}
-          {file.plainUrl && <Text style={styles.caption}>{t('messageBubble.filePlainUrl')}</Text>}
-          <Text style={styles.name} numberOfLines={1} ellipsizeMode="middle">
-            {file.name || t('messageBubble.file')}
-          </Text>
-          <Text style={styles.caption}>
-            {[friendlyType, sizeLabel].filter(Boolean).join(' · ')}
-          </Text>
+          {file.plainUrl && (
+            <View style={styles.notice}>
+              <ShieldOff size={14} color={colors.textSupplementary} />
+              <Text style={styles.noticeText}>{t('messageBubble.filePlainUrl')}</Text>
+            </View>
+          )}
+          <View style={styles.summary}>
+            <View style={styles.typeTile}>
+              <FileText size={20} color={colors.brandPink} />
+              {badgeType ? (
+                <Text style={styles.typeTileLabel} numberOfLines={1}>
+                  {badgeType}
+                </Text>
+              ) : null}
+            </View>
+            <View style={styles.summaryText}>
+              <Text style={styles.summaryName} numberOfLines={1} ellipsizeMode="middle">
+                {file.name || t('messageBubble.file')}
+              </Text>
+              {meta ? <Text style={styles.summaryMeta}>{meta}</Text> : null}
+            </View>
+          </View>
           {isPdf && safe && !allowed && !previewBox && (
             <TouchableOpacity
               onPress={reveal}

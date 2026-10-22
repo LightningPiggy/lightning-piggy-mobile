@@ -73,7 +73,9 @@ it('shows type mismatch and replaces declared MIME with the verified type', asyn
   const ui = bubble(file('invoice.exe'));
   expect(ui.getByText('messageBubble.fileTypeMismatch')).toBeTruthy();
   fireEvent.press(ui.getByTestId('file-share-file'));
-  await waitFor(() => expect(ui.getByText('EXE · messageBubble.fileBytes')).toBeTruthy());
+  // A short type rides on the file icon; the size line stands alone.
+  await waitFor(() => expect(ui.getByText('messageBubble.fileBytes')).toBeTruthy());
+  expect(ui.getByText('EXE')).toBeTruthy();
   expect(ui.queryByText('application/pdf')).toBeNull();
 });
 
@@ -164,4 +166,9 @@ it('keeps the text link for a PDF too big to preview', () => {
   const ui = bubble(big);
   expect(ui.queryByTestId('chat-file-placeholder-file')).toBeNull();
   expect(ui.getByText('chatMenu.loadMedia')).toBeTruthy();
+});
+
+it('puts a long type on the size line instead of the icon', () => {
+  const ui = bubble(file('notes.txt', 'text/plain'));
+  expect(ui.getByText('messageBubble.fileLabelText · messageBubble.fileBytes')).toBeTruthy();
 });
