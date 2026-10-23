@@ -50,6 +50,7 @@ import {
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 
 import { lazyScreen } from './lazyScreen';
+import { isArkEnabled } from '../services/arkConfig';
 import { RelayListEditorProvider } from '../contexts/RelayListEditorContext';
 
 // Tab-root + drawer-chrome screens stay EAGER — they must render instantly on
@@ -128,6 +129,8 @@ const MessageSettingsScreen = lazyScreen(() => import('../screens/account/Messag
 const NostrScreen = lazyScreen(() => import('../screens/account/NostrScreen'));
 const RelayDetailsScreen = lazyScreen(() => import('../screens/account/RelayDetailsScreen'));
 const OnChainScreen = lazyScreen(() => import('../screens/account/OnChainScreen'));
+// Experimental Ark wallet (signet); only registered in EXPO_PUBLIC_ENABLE_ARK=1 builds.
+const ArkWalletScreen = lazyScreen(() => import('../screens/account/ArkWalletScreen'));
 const DisplayLanguageScreen = lazyScreen(() => import('../screens/account/DisplayLanguageScreen'));
 const PickerScreen = lazyScreen(() => import('../screens/account/PickerScreen'));
 const DisplayScreen = lazyScreen(() => import('../screens/account/DisplayScreen'));
@@ -736,6 +739,7 @@ function MainDrawer() {
         <AccountDrawer.Screen name="AccountNostr" component={RelaySettingsNavigator} />
         <AccountDrawer.Screen name="AccountInvitationKeys" component={InvitationKeysScreen} />
         <AccountDrawer.Screen name="AccountOnChain" component={OnChainScreen} />
+        {isArkEnabled() && <AccountDrawer.Screen name="AccountArk" component={ArkWalletScreen} />}
         <AccountDrawer.Screen name="AccountDisplayLanguage" component={DisplayLanguageScreen} />
         <AccountDrawer.Screen name="AccountCurrency" component={DisplayScreen} />
         <AccountDrawer.Screen name="AccountShopAlerts" component={ShopAlertsScreen} />
