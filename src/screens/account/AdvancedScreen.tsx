@@ -1,7 +1,7 @@
 import React from 'react';
 import { View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Bitcoin, FlaskConical, Gauge, MessageCircle, Radio } from 'lucide-react-native';
+import { Bitcoin, FlaskConical, Gauge, MessageCircle, Radio, Ship } from 'lucide-react-native';
 import AccountScreenLayout from './AccountScreenLayout';
 import { Alert } from '../../components/BrandedAlert';
 import SettingsSection from '../../components/SettingsSection';
@@ -11,6 +11,7 @@ import DeviceNoticesSection from '../../components/DeviceNoticesSection';
 import { useGroups } from '../../contexts/GroupsContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
+import { isArkEnabled } from '../../services/arkConfig';
 import type { AccountDrawerNavigation } from '../../navigation/types';
 
 /** Advanced settings, grouped by where preferences are stored. */
@@ -65,6 +66,16 @@ const AdvancedScreen: React.FC = () => {
           testID="advanced-bitcoin-network"
           onPress={() => navigation.navigate('AccountOnChain')}
         />
+        {isArkEnabled() && (
+          <SettingsRow
+            kind="navigate"
+            icon={Ship}
+            title={t('arkWallet.title')}
+            subtitle={t('arkWallet.settingsSubtitle')}
+            testID="advanced-ark-wallet"
+            onPress={() => navigation.navigate('AccountArk')}
+          />
+        )}
         <NativeCryptoSection />
         <DeviceNoticesSection />
         {__DEV__ && (
