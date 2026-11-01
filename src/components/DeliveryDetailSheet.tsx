@@ -210,7 +210,7 @@ export default function DeliveryDetailSheet({
               <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.status')}</Text>
               <Text style={styles.metaValue}>{statusLabel}</Text>
             </View>
-            {status?.error && !status.delivered && !status.pending ? (
+            {status?.error && !status.pending ? (
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>{tr('deliveryDetailSheet.reason')}</Text>
                 <Text style={styles.metaValue} testID="dm-delivery-reason">

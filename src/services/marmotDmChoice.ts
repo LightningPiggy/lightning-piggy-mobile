@@ -1,17 +1,22 @@
 // Which 1:1 group a chat uses, and which relays a chat's group lives on.
 //
 // Two Marmot DM groups for one pair of people happen: two installs of one
-// account (or both people) start the chat at once, or a Welcome lands late.
-// Each install used to pick the group IT saw last (local create / join time),
-// so the two sides could settle on different groups — and an install that
-// isn't in the other side's group never sees their messages, while its own
-// go to a group they no longer read (a 1.6.0 chat split exactly like that).
-// Rank by relay activity instead: the newest kind-445 on a group's relays is
-// the same for every member, so everyone in both groups agrees, and a later
-// join of a stale group can't flip the choice. A group with no traffic seen
-// yet ranks by when we made or joined it, so a freshly (re)started chat still
-// takes over from a dead one — and the peer's device sync adds any of our
-// installs it lacks, after which those agree too.
+// account (or both people) start the chat at once, a create whose Welcome
+// went unacknowledged is retried, or a Welcome lands late. Each install used
+// to pick the group IT saw last (local create / join time), so the two sides
+// could settle on different groups — and an install that isn't in the other
+// side's group never sees their messages, while its own go to a group they
+// no longer read (a 1.6.0 chat split exactly like that).
+//
+// Rank by authenticated activity instead: the newest MLS message decrypted
+// in the group (or sent / created there by us). Members of both groups see
+// the same messages, so they agree; equal times break by group id, never by
+// a local join order. Relay `created_at` alone is not used — anyone can post
+// a kind-445 with a group's public `h` tag. A group with no activity yet
+// (just joined, or a Welcome that landed late) never outranks one that has
+// some: it takes over once a message is sent in it — the next message after
+// a Repair or a retried create. Only when no group has activity does local
+// create / join time decide.
 //
 // Relays: a group used to get only its creator's NIP-65 write relays, so an
 // account writing to one relay made single-relay chats: one dropped or
@@ -31,26 +36,48 @@ export interface DmCandidate {
   id: string;
   /** When this install made or joined the group (ms). */
   createdAt: number;
-  /** Newest kind-445 seen on the group's relays (ms), if any. */
+  /** Newest authenticated activity in the group (ms), if any (GroupActivity). */
   activityAt?: number;
 }
 
+const byId = (a: DmCandidate, b: DmCandidate) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
 /** The 1:1 group to use among several with the same person (see above). */
 export function pickDm<T extends DmCandidate>(dms: readonly T[]): T | undefined {
-  const rank = (g: T) => g.activityAt ?? g.createdAt;
-  return [...dms].sort(
-    (a, b) =>
-      rank(b) - rank(a) || b.createdAt - a.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  )[0];
+  return [...dms].sort((a, b) => {
+    if (a.activityAt === undefined && b.activityAt === undefined)
+      return b.createdAt - a.createdAt || byId(a, b);
+    if (a.activityAt === undefined) return 1;
+    if (b.activityAt === undefined) return -1;
+    return b.activityAt - a.activityAt || byId(a, b);
+  })[0];
 }
 
-/** A group's relay activity in ms, from the per-`h` kind-445 watermarks (seconds). */
-export function groupActivityMs(
-  watermarks: ReadonlyMap<string, number>,
-  h: string | undefined,
-): number | undefined {
-  const secs = h ? watermarks.get(h) : undefined;
-  return secs ? secs * 1000 : undefined;
+/** Sender-controlled times are trusted at most this far ahead of our clock. */
+export const MAX_ACTIVITY_SKEW_MS = 5 * 60_000;
+
+/**
+ * Newest authenticated activity per MLS group (ms): messages that decrypted,
+ * and our own sends and creates. Only moves forward; `persist` stores each
+ * advance (load it back into `map` on start).
+ */
+export class GroupActivity {
+  readonly map = new Map<string, number>();
+  constructor(
+    private readonly persist: (idStr: string, ms: number) => void,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  get(idStr: string): number | undefined {
+    return this.map.get(idStr);
+  }
+
+  note(idStr: string, ms: number): void {
+    const at = Math.min(ms, this.now() + MAX_ACTIVITY_SKEW_MS);
+    if (!Number.isFinite(at) || at <= (this.map.get(idStr) ?? 0)) return;
+    this.map.set(idStr, at);
+    this.persist(idStr, at);
+  }
 }
 
 /** Relays to fill a group up with, best first. Test accounts get the test relay only. */
@@ -87,4 +114,12 @@ export function relayTopUp(current: readonly string[], fallbacks: readonly strin
   const extra = uniqueRelays(fallbacks, MAX_GROUP_RELAYS).filter((r) => !have.has(r));
   const added = extra.slice(0, MIN_GROUP_RELAYS - current.length);
   return added.length > 0 ? [...current, ...added] : null;
+}
+
+/** Thrown inside a top-up commit's builder when the group already has enough relays. */
+export class RelaysAlreadyTopped extends Error {
+  constructor() {
+    super('marmot: group already has enough relays');
+    this.name = 'RelaysAlreadyTopped';
+  }
 }

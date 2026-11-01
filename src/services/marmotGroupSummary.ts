@@ -2,9 +2,6 @@
 // hook and the 1:1 choice (marmotDmChoice) read. Pure over the group's state.
 
 import { getGroupMembers, type MarmotGroup } from '@internet-privacy/marmot-ts';
-import { bytesToHex } from '@noble/hashes/utils.js';
-
-import { groupActivityMs } from './marmotDmChoice';
 
 export interface MarmotGroupSummary {
   /** App group id: `marmot:<mls group id hex>`. */
@@ -20,7 +17,7 @@ export interface MarmotGroupSummary {
   relays: string[];
   /** When this device first saw the group (ms) — MLS carries no creation time. */
   createdAt: number;
-  /** Newest kind-445 seen on its relays (ms), if any — ranks 1:1s (marmotDmChoice). */
+  /** Newest authenticated activity (ms), if any — ranks 1:1s (marmotDmChoice). */
   activityAt?: number;
 }
 
@@ -33,8 +30,8 @@ export function summariseGroup(
     id: string;
     viewer: string;
     firstSeen: ReadonlyMap<string, number>;
-    /** Newest kind-445 per nostr group id `h` (seconds). */
-    watermarks: ReadonlyMap<string, number>;
+    /** Newest authenticated activity per MLS group id (ms) — GroupActivity. */
+    activity: ReadonlyMap<string, number>;
   },
 ): MarmotGroupSummary {
   const view = g.groupData;
@@ -54,9 +51,6 @@ export function summariseGroup(
     isDm: name === '' && members.length <= 2,
     relays: g.relays ?? [],
     createdAt: ctx.firstSeen.get(g.idStr) ?? Date.now(),
-    activityAt: groupActivityMs(
-      ctx.watermarks,
-      view?.nostrGroupId ? bytesToHex(view.nostrGroupId) : undefined,
-    ),
+    activityAt: ctx.activity.get(g.idStr),
   };
 }

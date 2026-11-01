@@ -180,6 +180,10 @@ export class MarmotSession {
   private readonly firstSeen = new Map<string, number>();
   private readonly creatingDms = new Map<string, Promise<MarmotGroupSummary>>();
   private readonly relayTopUps = new Set<string>();
+  // Authenticated per-group activity: which 1:1 group is "the" chat (marmotDmChoice).
+  private readonly activity = new dmChoice.GroupActivity(
+    (id, ms) => void this.backend.set('dmActivity', id, String(ms)),
+  );
   private readonly welcomeJoins: MarmotWelcomeJoin;
   private readonly deliveredRumors = new Set<string>();
   private readonly push: MarmotPushNotifier;
@@ -347,6 +351,7 @@ export class MarmotSession {
       // every send/join awaiting it would hang instead of erroring.
       await loadNumberMap(this.backend, 'watermark', this.watermarks);
       await loadNumberMap(this.backend, 'firstSeen', this.firstSeen);
+      await loadNumberMap(this.backend, 'dmActivity', this.activity.map);
       const loaded = await groups.loadAll();
       loaded.forEach((g) => this.wireGroup(g));
       for (const g of loaded) {
@@ -558,6 +563,7 @@ export class MarmotSession {
       const { undelivered } = await this.inviteAll(group.idStr, devices);
       // Nobody can join: drop it so a retry starts clean (no queued Welcomes).
       if (undelivered.length === devices.size) throw new MarmotWelcomeDeliveryError(undelivered);
+      this.activity.note(group.idStr, Date.now()); // we just made it: it's the live one here
       return { ...this.summarise(group), undelivered };
     } catch (e) {
       // Don't leave an empty, invisible group (and its relay sub) behind —
@@ -619,12 +625,20 @@ export class MarmotSession {
     }
     await this.dmDevices.sync(mlsId, dm.memberPubkeys[0], reason);
     // A 1:1 on too few relays gets more — one commit, once a session (marmotDmChoice).
-    const relays = dmChoice.relayTopUp(dm.relays, dmChoice.groupRelayFallbacks(this.pubkey));
-    if (!relays || !active || this.relayTopUps.has(mlsId)) return;
+    // Built from the routing current when the commit is made, so a concurrent
+    // change by the other admin is kept, not overwritten (as setAdmins).
+    const fallbacks = dmChoice.groupRelayFallbacks(this.pubkey);
+    if (!dmChoice.relayTopUp(dm.relays, fallbacks) || !active || this.relayTopUps.has(mlsId))
+      return;
     this.relayTopUps.add(mlsId);
-    void this.commit(mlsId, spreadProposals(Proposals.proposeUpdateMetadata({ relays }), 1)).then(
+    const topUp = spreadProposals(async (ctx) => {
+      const relays = dmChoice.relayTopUp(ctx.groupData.relays, fallbacks);
+      if (!relays) throw new dmChoice.RelaysAlreadyTopped();
+      return Proposals.proposeUpdateMetadata({ relays })(ctx);
+    }, 1);
+    void this.commit(mlsId, topUp).then(
       () => this.emitGroupsChanged(),
-      () => this.relayTopUps.delete(mlsId),
+      (e) => e instanceof dmChoice.RelaysAlreadyTopped || this.relayTopUps.delete(mlsId),
     );
   }
 
@@ -749,6 +763,7 @@ export class MarmotSession {
       for (const [url, res] of Object.entries(r.response)) byRelay[url] = byRelay[url] || res.ok;
     }
     const ok = Object.values(byRelay).filter(Boolean).length;
+    if (ok > 0) this.activity.note(toMlsGroupId(appGroupId), Date.now());
     if (__DEV__)
       console.log(`[Marmot] sent kind ${rumor.kind}: ${ok}/${Object.keys(byRelay).length}`);
     // MIP-05: wake the other members' devices (best-effort, off the send path).
@@ -811,7 +826,7 @@ export class MarmotSession {
   }
 
   private summarise(g: SessionGroup): MarmotGroupSummary {
-    const ctx = { viewer: this.pubkey, firstSeen: this.firstSeen, watermarks: this.watermarks };
+    const ctx = { viewer: this.pubkey, firstSeen: this.firstSeen, activity: this.activity.map };
     return summariseGroup(g, { ...ctx, id: toAppGroupId(g.idStr) });
   }
 
@@ -840,6 +855,7 @@ export class MarmotSession {
         if (__DEV__) console.warn('[Marmot] undecodable app payload:', e);
         return;
       }
+      this.activity.note(g.idStr, rumor.created_at * 1000); // it decrypted: a member sent it
       this.deliver(g, rumor);
     });
   }

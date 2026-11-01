@@ -1,7 +1,8 @@
 import {
+  GroupActivity,
+  MAX_ACTIVITY_SKEW_MS,
   MAX_GROUP_RELAYS,
   MIN_GROUP_RELAYS,
-  groupActivityMs,
   groupRelaysFor,
   pickDm,
   relayTopUp,
@@ -16,7 +17,7 @@ const FALLBACKS = [
 ];
 
 describe('pickDm', () => {
-  it('prefers the group with the newest relay activity over the one joined last', () => {
+  it('prefers the group with the newest activity over the one joined last', () => {
     // The field split: the old rule took the group THIS install joined last.
     const active = { id: 'marmot:bb', createdAt: 1_000, activityAt: 9_000 };
     const staleButJoinedLater = { id: 'marmot:aa', createdAt: 5_000, activityAt: 2_000 };
@@ -24,18 +25,31 @@ describe('pickDm', () => {
     expect(pickDm([active, staleButJoinedLater])).toBe(active);
   });
 
-  it('a group with no traffic seen yet ranks by when we made or joined it', () => {
-    // A just-(re)started chat takes over from a dead one.
-    const old = { id: 'marmot:aa', createdAt: 1_000, activityAt: 2_000 };
-    const fresh = { id: 'marmot:bb', createdAt: 3_000 };
-    expect(pickDm([old, fresh])).toBe(fresh);
+  it('a group with no activity never outranks one that has some', () => {
+    // A late Welcome for a stale group (no history readable) must not take over.
+    const live = { id: 'marmot:aa', createdAt: 1_000, activityAt: 2_000 };
+    const lateJoin = { id: 'marmot:bb', createdAt: 9_000 };
+    expect(pickDm([lateJoin, live])).toBe(live);
   });
 
-  it('breaks ties the same way on every install', () => {
-    const a = { id: 'marmot:aa', createdAt: 1_000, activityAt: 5_000 };
-    const b = { id: 'marmot:bb', createdAt: 1_000, activityAt: 5_000 };
-    expect(pickDm([b, a])).toBe(a);
-    expect(pickDm([a, b])).toBe(a);
+  it('only when no group has activity does local create/join time decide', () => {
+    const older = { id: 'marmot:aa', createdAt: 1_000 };
+    const newer = { id: 'marmot:bb', createdAt: 3_000 };
+    expect(pickDm([older, newer])).toBe(newer);
+  });
+
+  it('equal activity breaks by group id, whatever order each install joined in', () => {
+    // Two phones, opposite join orders, same messages seen: same pick.
+    const phoneA = [
+      { id: 'marmot:bb', createdAt: 1_000, activityAt: 5_000 },
+      { id: 'marmot:aa', createdAt: 2_000, activityAt: 5_000 },
+    ];
+    const phoneB = [
+      { id: 'marmot:bb', createdAt: 2_000, activityAt: 5_000 },
+      { id: 'marmot:aa', createdAt: 1_000, activityAt: 5_000 },
+    ];
+    expect(pickDm(phoneA)?.id).toBe('marmot:aa');
+    expect(pickDm(phoneB)?.id).toBe('marmot:aa');
   });
 
   it('returns undefined when there is no 1:1', () => {
@@ -43,12 +57,21 @@ describe('pickDm', () => {
   });
 });
 
-describe('groupActivityMs', () => {
-  it('reads the seconds watermark for the group h id as ms', () => {
-    const marks = new Map([['ab', 1_700_000_000]]);
-    expect(groupActivityMs(marks, 'ab')).toBe(1_700_000_000_000);
-    expect(groupActivityMs(marks, 'cd')).toBeUndefined();
-    expect(groupActivityMs(marks, undefined)).toBeUndefined();
+describe('GroupActivity', () => {
+  it('only moves forward, and persists each advance', () => {
+    const persist = jest.fn();
+    const activity = new GroupActivity(persist, () => 10_000);
+    activity.note('g', 5_000);
+    activity.note('g', 4_000);
+    activity.note('g', 5_000);
+    expect(activity.get('g')).toBe(5_000);
+    expect(persist.mock.calls).toEqual([['g', 5_000]]);
+  });
+
+  it("caps a sender's future-dated time at our clock plus the skew", () => {
+    const activity = new GroupActivity(jest.fn(), () => 10_000);
+    activity.note('g', 10_000 + 365 * 24 * 3_600_000);
+    expect(activity.get('g')).toBe(10_000 + MAX_ACTIVITY_SKEW_MS);
   });
 });
 

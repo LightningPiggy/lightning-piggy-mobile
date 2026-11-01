@@ -112,7 +112,6 @@ describe('MarmotSession: a split 1:1 converges (no WebCrypto)', () => {
       // which Ben-B isn't in. Relay activity keeps her where the chat is.
       later();
       expect(await emily.session.acceptWelcome(welcomeG1)).toMatchObject({ id: g1.id });
-      await waitFor(() => activityOf(emily.session, g1.id) !== undefined);
       expect(emily.session.findDm(benA.pubkey)?.id).toBe(g2.id);
       later();
       await say(emily, benA.pubkey, 'Hello 1');
@@ -161,8 +160,11 @@ describe('MarmotSession: a split 1:1 converges (no WebCrypto)', () => {
       expect(await emily.session.acceptWelcome(welcomes[welcomes.length - 1])).toMatchObject({
         id: second.id,
       });
-      // Its creation is newer than anything in the dropped group: both use it.
-      await waitFor(() => activityOf(emily.session, second.id) !== undefined);
+      // The retry was for a send: that message is newer than anything in the
+      // dropped group, so once Emily reads it both sides use the new group.
+      later();
+      await say(ben, emily.pubkey, 'retry message');
+      await waitFor(() => got(emily, 'retry message'));
       expect(emily.session.findDm(ben.pubkey)?.id).toBe(second.id);
       later();
       await say(emily, ben.pubkey, 'after retry');
@@ -190,8 +192,13 @@ describe('MarmotSession: a split 1:1 converges (no WebCrypto)', () => {
       expect(fresh.id).not.toBe(old.id);
       expect(fresh.relays.length).toBeGreaterThanOrEqual(dmChoice.MIN_GROUP_RELAYS);
       expect(ben.session.findDm(emily.pubkey)?.id).toBe(fresh.id);
+      // Ben's next message goes into the fresh chat; once Emily accepts the
+      // invitation and reads it, she's there too.
+      later();
+      await say(ben, emily.pubkey, 'repaired');
       const [, welcome] = unwrapWelcomes(relay, emily);
       expect(await emily.session.acceptWelcome(welcome)).toMatchObject({ id: fresh.id });
+      await waitFor(() => got(emily, 'repaired'));
       expect(emily.session.findDm(ben.pubkey)?.id).toBe(fresh.id);
 
       later();
