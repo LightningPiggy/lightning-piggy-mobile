@@ -5,6 +5,7 @@
 // ranking / relay rules are unit-tested in marmotDmChoice.test.ts.
 import * as dmChoice from './marmotDmChoice';
 import { DM_DEVICE_SYNC_COOLDOWN_MS } from './marmotDmDeviceSync';
+import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import { buildMarmotRumor, MARMOT_CHAT_KIND, type MarmotSession } from './marmotSession';
 import {
   RELAY,
@@ -120,6 +121,54 @@ describe('MarmotSession: a split 1:1 converges (no WebCrypto)', () => {
       expect(unwrapWelcomes(relay, benA)).toHaveLength(toBenA.length);
     } finally {
       all.forEach((d) => d.session.stop());
+    }
+  }, 180_000);
+
+  it('a create retried after its Welcome went unacknowledged still converges', async () => {
+    // Relays reachable one way only (flaky mobile data / VPN): the Welcome is
+    // stored, but no relay acknowledges it. The sender drops that group and
+    // creates another on retry — while the peer did join the first.
+    const relay = makeRelay();
+    const publish = relay.network.publish;
+    let acklessWraps = false;
+    relay.network.publish = async (relays, event) => {
+      const result = await publish(relays, event);
+      if (event.kind !== 1059 || !acklessWraps) return result;
+      return Object.fromEntries(relays.map((r) => [r, { from: r, ok: false, message: 'timeout' }]));
+    };
+    const ben = makeSession(relay, undefined, 'nsec', OPTS);
+    const emily = makeSession(relay, undefined, 'nsec', OPTS);
+    try {
+      await Promise.all([ben.session.start(), emily.session.start()]);
+      await waitFor(() => slots(relay, emily.pubkey) === 1 && slots(relay, ben.pubkey) === 1);
+      acklessWraps = true;
+      await expect(ben.session.getOrCreateDm(emily.pubkey)).rejects.toBeInstanceOf(
+        MarmotWelcomeDeliveryError,
+      );
+      expect(ben.session.findDm(emily.pubkey)).toBeUndefined();
+      // ...but Emily got that Welcome, joined, and even wrote into it.
+      const first = await emily.session.acceptWelcome(unwrapWelcomes(relay, emily)[0]);
+      expect(first).not.toBeNull();
+      later();
+      await say(emily, ben.pubkey, 'into the dropped group');
+
+      // Connection back: Ben's retry makes a second group; Emily joins it too.
+      acklessWraps = false;
+      later();
+      const second = await ben.session.getOrCreateDm(emily.pubkey);
+      expect(second.id).not.toBe(first!.id);
+      const welcomes = unwrapWelcomes(relay, emily);
+      expect(await emily.session.acceptWelcome(welcomes[welcomes.length - 1])).toMatchObject({
+        id: second.id,
+      });
+      // Its creation is newer than anything in the dropped group: both use it.
+      await waitFor(() => activityOf(emily.session, second.id) !== undefined);
+      expect(emily.session.findDm(ben.pubkey)?.id).toBe(second.id);
+      later();
+      await say(emily, ben.pubkey, 'after retry');
+      await waitFor(() => got(ben, 'after retry'));
+    } finally {
+      [ben, emily].forEach((d) => d.session.stop());
     }
   }, 180_000);
 

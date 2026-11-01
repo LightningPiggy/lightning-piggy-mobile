@@ -11,7 +11,9 @@ import {
 } from './marmotSession';
 import {
   DM_SETUP_TIMEOUT_MS,
+  isRelayUnreachableError,
   marmotDelivery,
+  marmotSendError,
   sendMarmotDm,
   sendMarmotGroupRumor,
 } from './marmotSend';
@@ -306,3 +308,30 @@ it.each([14, NWC_SHARE_KIND])(
     }
   },
 );
+
+describe('marmotSendError', () => {
+  it('says "no relay reachable" for marmot-ts publish failures, not a chat error', () => {
+    // What a send on a dead connection (offline / blocking VPN) throws.
+    const offline = new Error(
+      'Failed to publish application message: Error: connection failure: connection failed',
+    );
+    expect(isRelayUnreachableError(offline)).toBe(true);
+    expect(marmotSendError(offline)).toMatch(/Couldn't reach any relay/);
+    expect(marmotSendError(new Error('Failed to publish commit: no relay acknowledged'))).toMatch(
+      /Couldn't reach any relay/,
+    );
+    expect(marmotSendError(new Error('Group has no relays available to send messages.'))).toMatch(
+      /Couldn't reach any relay/,
+    );
+    // The network adapter's own failure, rethrown unprefixed.
+    expect(marmotSendError(new Error('connection failure: connection failed'))).toMatch(
+      /Couldn't reach any relay/,
+    );
+  });
+
+  it('labels anything else as a secure-chat (MLS) error and keeps the detail', () => {
+    const mls = new Error('Cannot encrypt: epoch 3 is not the current epoch');
+    expect(isRelayUnreachableError(mls)).toBe(false);
+    expect(marmotSendError(mls)).toMatch(/^Secure chat error, so nothing was sent: Cannot encrypt/);
+  });
+});

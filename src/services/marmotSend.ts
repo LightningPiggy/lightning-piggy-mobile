@@ -108,6 +108,15 @@ export function getOrCreateDmWithin(
     .finally(() => clearTimeout(timer));
 }
 
+// marmot-ts's group publish throws these when no relay acknowledged
+// (group-runtime: "Failed to publish <what>: …"), the group has no relays,
+// or the network adapter itself failed (rethrown as-is): a connectivity
+// problem (offline, VPN, relays down), not an MLS one.
+const NO_RELAY_ERROR =
+  /^(Failed to publish |Group has no relays available)|connection fail|network request failed/i;
+export const isRelayUnreachableError = (e: unknown) =>
+  e instanceof Error && NO_RELAY_ERROR.test(e.message);
+
 /** A user-facing reason a Marmot send couldn't start. */
 export function marmotSendError(e: unknown): string {
   const reason = marmotUnreachableReason(e);
@@ -117,7 +126,9 @@ export function marmotSendError(e: unknown): string {
     return t(e.waitingForAmber ? 'marmotSend.waitingForAmber' : 'marmotSend.chatSetupTimedOut');
   if (e instanceof MarmotWelcomeDeliveryError) return t('marmotSend.inviteNotDelivered');
   if (e instanceof MarmotGroupNotReadyError) return t('marmotSend.chatNotReady');
-  return (e as Error)?.message || 'Marmot send failed';
+  if (isRelayUnreachableError(e)) return t('marmotSend.relaysUnreachable');
+  // Anything else is the secure chat itself (MLS / group state), not the network.
+  return t('marmotSend.groupError', { detail: (e as Error)?.message || 'unknown' });
 }
 
 /** A failed send's result: the user-facing reason, plus why the peer can't be
@@ -171,7 +182,7 @@ export async function sendMarmotDm(
     hooks?.onDeliveryFinalized?.(delivery);
     return delivery.delivered
       ? { success: true, delivery, rumorCreatedAt: rumor.created_at }
-      : { success: false, delivery, error: 'No relay accepted the message' };
+      : { success: false, delivery, error: t('marmotSend.relaysUnreachable') };
   } catch (e) {
     return marmotFailure(e);
   }
@@ -205,7 +216,7 @@ export async function sendMarmotGroupRumor(
     // The Marmot id (not the app rumor's): what edits / deletes must target.
     return accepted > 0
       ? { success: true, wrapsPublished: accepted, rumorId: rumor.id, delivery }
-      : { success: false, error: 'No relay accepted the message', delivery };
+      : { success: false, error: t('marmotSend.relaysUnreachable'), delivery };
   } catch (e) {
     return { success: false, error: marmotSendError(e) };
   }
