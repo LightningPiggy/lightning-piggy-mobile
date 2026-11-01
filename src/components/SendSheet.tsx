@@ -643,7 +643,9 @@ const SendSheet: React.FC<Props> = ({
       // User-initiated cancel via PaymentProgressOverlay's Cancel button:
       // the overlay has already been hidden by handleCancelPayment, so
       // just let the send complete silently without surfacing an error.
-      if ((error as Error)?.name === 'AbortError' || signal.aborted) {
+      // Only THIS send's signal proves a cancel — an internal timeout abort
+      // must fall through to an error, or the overlay spins forever.
+      if (signal.aborted) {
         return;
       }
       // A relay/transport connectivity failure (relay unreachable, publish

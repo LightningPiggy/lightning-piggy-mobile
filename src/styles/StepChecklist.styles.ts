@@ -29,7 +29,10 @@ export const createStepChecklistStyles = (colors: Palette) =>
       fontSize: 15,
       color: colors.textBody,
       fontWeight: '600',
-      flex: 1,
+      // Grow into the row and wrap within it; flexShrink (not flex: 1's zero
+      // basis) keeps the measured height of a wrapped label correct.
+      flexGrow: 1,
+      flexShrink: 1,
     },
     stepLabelPending: {
       color: colors.textSupplementary,
