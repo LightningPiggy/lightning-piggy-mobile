@@ -149,7 +149,8 @@ it.each(Array.from({ length: Number(process.env.MARMOT_PERF_SAMPLES ?? 1) }, (_,
           `[PerfBlock] marmotResume groups=1 messages=505 olderCommits=1 activeToLive=${(performance.now() - resumeStartedAt).toFixed(2)}ms backfillToLive=${(performance.now() - resetStartedAt).toFixed(2)}ms\n`,
         );
       }
-      expect(mockResetTransports).toHaveBeenCalledWith([RELAY]);
+      // The group's relays: ours plus the Marmot relays every new chat now gets.
+      expect(mockResetTransports).toHaveBeenCalledWith(expect.arrayContaining([RELAY]));
       const live = buildMarmotRumor(alice.pubkey, { kind: 9, content: 'live after catch-up' });
       await alice.session.sendRumor(group.id, live);
       await waitFor(() => inbox.includes(live.id));

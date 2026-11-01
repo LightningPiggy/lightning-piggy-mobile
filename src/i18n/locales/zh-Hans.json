@@ -447,7 +447,8 @@
     "republish": "重新发布",
     "republishAccessibility": "重新发布消息",
     "done": "完成",
-    "closeAccessibility": "关闭"
+    "closeAccessibility": "关闭",
+    "reason": "原因"
   },
   "displayScreen": {
     "currency": "货币",
@@ -3382,7 +3383,13 @@
     "empty": "此标签页中没有内容",
     "voice": "语音消息",
     "openMedia": "打开媒体",
-    "loadMedia": "点按加载媒体"
+    "loadMedia": "点按加载媒体",
+    "repair": "修复安全聊天",
+    "repairing": "正在修复…",
+    "repairTitle": "修复安全聊天？",
+    "repairMessage": "如果你的消息发送失败，或不再收到 {{name}} 的消息，请使用此功能。将与 {{name}} 的设备开始一个新的安全聊天，新消息会发到那里。你在这里的消息会保留。",
+    "repairDone": "已开始新的安全聊天",
+    "repairFailed": "无法修复聊天"
   },
   "settingsRows": {
     "experimentalSubtitle": "仍在测试中的功能",

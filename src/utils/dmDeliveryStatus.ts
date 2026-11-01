@@ -44,6 +44,9 @@ export interface DeliveryStatus {
   // all-failed send (which also has zero `ok` relays, but renders the red
   // AlertCircle). Cleared once the publish resolves.
   pending?: boolean;
+  // Why a send failed, in the user's language, when the sender said (a Marmot
+  // send that couldn't reach the group). Shown in the message-info sheet.
+  error?: string;
 }
 
 // Build the seed `relayResults` for a not-yet-settled send from the target relay
@@ -87,6 +90,7 @@ export function failedDelivery(meta?: {
   eventId?: string;
   kind?: number;
   relays?: string[];
+  error?: string;
 }): DeliveryStatus {
   const { relays, ...rest } = meta ?? {};
   return {

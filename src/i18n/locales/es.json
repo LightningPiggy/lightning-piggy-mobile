@@ -447,7 +447,8 @@
     "republish": "Volver a publicar",
     "republishAccessibility": "Volver a publicar el mensaje",
     "done": "Listo",
-    "closeAccessibility": "Cerrar"
+    "closeAccessibility": "Cerrar",
+    "reason": "Motivo"
   },
   "displayScreen": {
     "currency": "Moneda",
@@ -3382,7 +3383,13 @@
     "empty": "No hay elementos en esta pestaña",
     "voice": "Nota de voz",
     "openMedia": "Abrir contenido multimedia",
-    "loadMedia": "Toca para cargar el contenido"
+    "loadMedia": "Toca para cargar el contenido",
+    "repair": "Reparar chat seguro",
+    "repairing": "Reparando…",
+    "repairTitle": "¿Reparar chat seguro?",
+    "repairMessage": "Úsalo si tus mensajes fallan o los de {{name}} dejan de llegar. Se inicia un chat seguro nuevo con los dispositivos de {{name}} y los mensajes nuevos van allí. Tus mensajes aquí se conservan.",
+    "repairDone": "Nuevo chat seguro iniciado",
+    "repairFailed": "No se pudo reparar el chat"
   },
   "settingsRows": {
     "experimentalSubtitle": "Funciones aún en pruebas",

@@ -15,6 +15,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { createChatToolsStyles } from '../styles/ChatTools.styles';
 import { useChatInfoContact } from '../hooks/useChatInfoContact';
 import { useChatInfoMembers } from '../hooks/useChatInfoMembers';
+import { useRepairMarmotDm } from '../hooks/useRepairMarmotDm';
 import { canManageGroup } from '../utils/groupAdmins';
 import GroupMembersSheet from '../components/GroupMembersSheet';
 import DmMembersSheet from '../components/DmMembersSheet';
@@ -36,6 +37,8 @@ export default function ChatInfoScreen() {
   const [membersOpen, setMembersOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const counts = useMemo(() => new Map(params.deviceCounts), [params.deviceCounts]);
+  const dmPeer = params.groupId ? undefined : (params.contact?.pubkey ?? undefined);
+  const { repair, repairing } = useRepairMarmotDm(pubkey, dmPeer, params.name);
   const npub = useMemo(() => {
     try {
       return params.contact?.pubkey ? nip19.npubEncode(params.contact.pubkey) : null;
@@ -177,6 +180,19 @@ export default function ChatInfoScreen() {
               ) : (
                 <Text style={styles.muted}>{t('chatMenu.noRelays')}</Text>
               )}
+              {dmPeer ? (
+                <TouchableOpacity
+                  style={styles.button}
+                  onPress={repair}
+                  disabled={repairing}
+                  testID="chat-info-repair-marmot"
+                  accessibilityLabel={t('chatMenu.repair')}
+                >
+                  <Text style={styles.action}>
+                    {t(repairing ? 'chatMenu.repairing' : 'chatMenu.repair')}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </>
           ) : null}
         </View>

@@ -447,7 +447,8 @@
     "republish": "Re-publish",
     "republishAccessibility": "Re-publish message",
     "done": "Done",
-    "closeAccessibility": "Close"
+    "closeAccessibility": "Close",
+    "reason": "Reason"
   },
   "displayScreen": {
     "currency": "Currency",
@@ -3382,7 +3383,13 @@
     "empty": "No items in this tab",
     "voice": "Voice note",
     "openMedia": "Open media",
-    "loadMedia": "Tap to load media"
+    "loadMedia": "Tap to load media",
+    "repair": "Repair secure chat",
+    "repairing": "Repairing…",
+    "repairTitle": "Repair secure chat?",
+    "repairMessage": "Use this if your messages fail or {{name}}'s stop arriving. A fresh secure chat is started with {{name}}'s devices and new messages go there. Your messages here stay.",
+    "repairDone": "Fresh secure chat started",
+    "repairFailed": "Couldn't repair the chat"
   },
   "settingsRows": {
     "experimentalSubtitle": "Features still being tested",

@@ -447,7 +447,8 @@
     "republish": "Erneut senden",
     "republishAccessibility": "Nachricht erneut veröffentlichen",
     "done": "Fertig",
-    "closeAccessibility": "Schließen"
+    "closeAccessibility": "Schließen",
+    "reason": "Grund"
   },
   "displayScreen": {
     "currency": "Währung",
@@ -3382,7 +3383,13 @@
     "empty": "Keine Einträge in diesem Tab",
     "voice": "Sprachnachricht",
     "openMedia": "Medien öffnen",
-    "loadMedia": "Tippen, um Medien zu laden"
+    "loadMedia": "Tippen, um Medien zu laden",
+    "repair": "Sicheren Chat reparieren",
+    "repairing": "Wird repariert…",
+    "repairTitle": "Sicheren Chat reparieren?",
+    "repairMessage": "Nutze das, wenn deine Nachrichten fehlschlagen oder die von {{name}} nicht mehr ankommen. Ein neuer sicherer Chat mit den Geräten von {{name}} wird gestartet, neue Nachrichten gehen dorthin. Deine Nachrichten hier bleiben erhalten.",
+    "repairDone": "Neuer sicherer Chat gestartet",
+    "repairFailed": "Chat konnte nicht repariert werden"
   },
   "settingsRows": {
     "experimentalSubtitle": "Funktionen, die noch getestet werden",

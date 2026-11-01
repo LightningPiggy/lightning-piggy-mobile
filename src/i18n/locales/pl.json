@@ -447,7 +447,8 @@
     "republish": "Opublikuj ponownie",
     "republishAccessibility": "Opublikuj wiadomość ponownie",
     "done": "Gotowe",
-    "closeAccessibility": "Zamknij"
+    "closeAccessibility": "Zamknij",
+    "reason": "Powód"
   },
   "displayScreen": {
     "currency": "Waluta",
@@ -3438,7 +3439,13 @@
     "empty": "Brak elementów na tej karcie",
     "voice": "Wiadomość głosowa",
     "openMedia": "Otwórz multimedia",
-    "loadMedia": "Dotknij, aby załadować multimedia"
+    "loadMedia": "Dotknij, aby załadować multimedia",
+    "repair": "Napraw bezpieczny czat",
+    "repairing": "Naprawianie…",
+    "repairTitle": "Naprawić bezpieczny czat?",
+    "repairMessage": "Użyj tego, jeśli twoje wiadomości się nie wysyłają lub wiadomości od {{name}} przestały docierać. Zostanie rozpoczęty nowy bezpieczny czat z urządzeniami {{name}}, a nowe wiadomości trafią tam. Twoje wiadomości tutaj zostaną.",
+    "repairDone": "Rozpoczęto nowy bezpieczny czat",
+    "repairFailed": "Nie udało się naprawić czatu"
   },
   "settingsRows": {
     "experimentalSubtitle": "Funkcje nadal w fazie testów",
