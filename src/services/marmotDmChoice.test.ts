@@ -1,5 +1,7 @@
 import {
   GroupActivity,
+  noteRumor,
+  seedActivity,
   MAX_ACTIVITY_SKEW_MS,
   MAX_GROUP_RELAYS,
   MIN_GROUP_RELAYS,
@@ -72,6 +74,36 @@ describe('GroupActivity', () => {
     const activity = new GroupActivity(jest.fn(), () => 10_000);
     activity.note('g', 10_000 + 365 * 24 * 3_600_000);
     expect(activity.get('g')).toBe(10_000 + MAX_ACTIVITY_SKEW_MS);
+  });
+});
+
+describe('noteRumor / seedActivity', () => {
+  const me = 'a'.repeat(64);
+  const ben = 'b'.repeat(64);
+
+  it('counts chat messages at their own time, never push tokens or reactions', () => {
+    const activity = new GroupActivity(jest.fn(), () => 10_000_000);
+    noteRumor(activity, 'g', { kind: 447, created_at: 9_000 }); // push token
+    noteRumor(activity, 'g', { kind: 7, created_at: 9_000 }); // reaction
+    expect(activity.get('g')).toBeUndefined();
+    noteRumor(activity, 'g', { kind: 9, created_at: 5_000 });
+    expect(activity.get('g')).toBe(5_000_000);
+  });
+
+  it("seeds from others' stored messages only — our own may be failed sends", () => {
+    const activity = new GroupActivity(jest.fn(), () => 10_000_000);
+    seedActivity(
+      activity,
+      'g',
+      [
+        { pubkey: ben, kind: 9, created_at: 3_000 },
+        { pubkey: me.toUpperCase(), kind: 9, created_at: 8_000 }, // ours: unknown outcome
+        { pubkey: ben, kind: 448, created_at: 9_000 }, // control
+        { pubkey: ben, kind: 9, created_at: 4_000 },
+      ],
+      me,
+    );
+    expect(activity.get('g')).toBe(4_000_000);
   });
 });
 

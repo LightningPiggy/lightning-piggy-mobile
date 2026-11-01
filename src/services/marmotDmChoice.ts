@@ -26,6 +26,7 @@
 // every relay it already has, so members on older versions still hear it.
 
 import { enabledAppRelays } from './appRelayPrefs';
+import { isMarmotMessageKind } from './marmotKinds';
 import { MARMOT_KEY_PACKAGE_RELAYS } from './marmotKeyPackageRelays';
 import { DEFAULT_RELAYS } from './nostrRelayDefaults';
 
@@ -77,6 +78,34 @@ export class GroupActivity {
     if (!Number.isFinite(at) || at <= (this.map.get(idStr) ?? 0)) return;
     this.map.set(idStr, at);
     this.persist(idStr, at);
+  }
+}
+
+/** Only chat messages count — never push tokens, reactions, edits, deletes or
+ *  live-location ticks, which clients also send into superseded groups. */
+export function noteRumor(
+  activity: GroupActivity,
+  idStr: string,
+  rumor: { kind: number; created_at: number },
+): void {
+  if (isMarmotMessageKind(rumor.kind)) activity.note(idStr, rumor.created_at * 1000);
+}
+
+/**
+ * First start with activity tracking (or a group with none yet): seed it from
+ * the stored history. Only messages FROM others — they decrypted, so a member
+ * sent them; our own are stored before publishing, so a failed send would
+ * look like activity.
+ */
+export function seedActivity(
+  activity: GroupActivity,
+  idStr: string,
+  stored: readonly { pubkey: string; kind: number; created_at: number }[],
+  me: string,
+): void {
+  const self = me.toLowerCase();
+  for (const rumor of stored) {
+    if (rumor.pubkey.toLowerCase() !== self) noteRumor(activity, idStr, rumor);
   }
 }
 

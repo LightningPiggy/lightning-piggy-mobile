@@ -763,7 +763,9 @@ export class MarmotSession {
       for (const [url, res] of Object.entries(r.response)) byRelay[url] = byRelay[url] || res.ok;
     }
     const ok = Object.values(byRelay).filter(Boolean).length;
-    if (ok > 0) this.activity.note(toMlsGroupId(appGroupId), Date.now());
+    // The rumor's own time, as recipients record it (marmotDmChoice): equal
+    // times then break by group id the same way on both sides.
+    if (ok > 0) dmChoice.noteRumor(this.activity, toMlsGroupId(appGroupId), rumor);
     if (__DEV__)
       console.log(`[Marmot] sent kind ${rumor.kind}: ${ok}/${Object.keys(byRelay).length}`);
     // MIP-05: wake the other members' devices (best-effort, off the send path).
@@ -855,7 +857,7 @@ export class MarmotSession {
         if (__DEV__) console.warn('[Marmot] undecodable app payload:', e);
         return;
       }
-      this.activity.note(g.idStr, rumor.created_at * 1000); // it decrypted: a member sent it
+      dmChoice.noteRumor(this.activity, g.idStr, rumor); // it decrypted: a member sent it
       this.deliver(g, rumor);
     });
   }
@@ -918,6 +920,11 @@ export class MarmotSession {
    */
   private async replayHistory(g: SessionGroup): Promise<void> {
     if (!g.history) return;
+    // Upgrade / no activity yet: seed from stored history (marmotDmChoice).
+    if (this.activity.get(g.idStr) === undefined) {
+      const stored = (await g.history.queryRumors({})) as MarmotRumor[];
+      dmChoice.seedActivity(this.activity, g.idStr, stored, this.pubkey);
+    }
     const since = Math.floor(Date.now() / 1000) - HISTORY_REPLAY_SECS;
     const recent = (await g.history.queryRumors({ since })) as MarmotRumor[];
     recent.sort((a, b) => a.created_at - b.created_at).forEach((r) => this.deliver(g, r));
