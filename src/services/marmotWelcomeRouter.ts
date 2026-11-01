@@ -10,6 +10,7 @@ import { createStopGate, fenceBackend, trackStoppedSession } from './marmotSessi
 import { fireMessageNotification } from './notificationService';
 import { invitationAlert } from './marmotInvitationKind';
 import * as zapSenderProfileStorage from './zapSenderProfileStorage';
+import { getLockScreenContentEnabled } from './notificationContentPreference';
 import { claimWrapNotification } from './dmWrapNotificationDedupe';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
 
@@ -54,15 +55,18 @@ function controller(owner: string): MarmotPendingInvitations {
       () => (controllers.get(owner) === c ? changed(owner) : undefined),
       (record) => {
         if (!claimWrapNotification(record.id) && !record.replacesContentlessAlert) return;
-        void senderName(record.rumor.pubkey)
-          .then((name) =>
-            fireMessageNotification({
+        void Promise.all([senderName(record.rumor.pubkey), getLockScreenContentEnabled()])
+          .then(([name, showContent]) => {
+            // The lookups awaited: an account switch / sign-out may have
+            // retired this controller meanwhile — never alert the old account.
+            if (controllers.get(owner) !== c || gate.stopped) return;
+            return fireMessageNotification({
               owner,
-              ...invitationAlert(record.direct === true, name),
+              ...invitationAlert(record.direct === true, name, showContent),
               threadId: `invite:${record.id}`,
               data: { groupInvitation: true, senderPubkey: record.rumor.pubkey },
-            }),
-          )
+            });
+          })
           .catch(reportFailure);
       },
     );

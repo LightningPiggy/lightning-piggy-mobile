@@ -33,6 +33,10 @@ jest.mock('./marmotSession', () => ({
 }));
 jest.mock('./localDb', () => ({ getLocalDb: jest.fn() }));
 const mockProfile = jest.fn().mockResolvedValue(null);
+const mockShowContent = jest.fn().mockResolvedValue(true);
+jest.mock('./notificationContentPreference', () => ({
+  getLockScreenContentEnabled: () => mockShowContent(),
+}));
 jest.mock('./zapSenderProfileStorage', () => ({ get: (pk: string) => mockProfile(pk) }));
 jest.mock('./marmotStore', () => {
   const actual = jest.requireActual('./marmotStore');
