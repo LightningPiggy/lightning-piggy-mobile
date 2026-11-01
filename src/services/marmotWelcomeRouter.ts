@@ -1,7 +1,6 @@
 // The DM unwrap engine is the sole owner of kind-1059 inbox subscriptions.
 // Route kind-444 BEFORE its DM follow gate; consent lives in encrypted MLS KV.
 import { getEventHash } from 'nostr-tools';
-import { t } from '../i18n';
 import { MARMOT_WELCOME_KIND } from '../utils/dmProtocol';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 import { getMarmotSession, subscribeMarmotSession, type MarmotRumor } from './marmotSession';
@@ -9,6 +8,8 @@ import { MarmotPendingInvitations, type PendingMarmotInvitation } from './marmot
 import { createSqliteMarmotBackend } from './marmotStore';
 import { createStopGate, fenceBackend, trackStoppedSession } from './marmotSessionFence';
 import { fireMessageNotification } from './notificationService';
+import { invitationAlert } from './marmotInvitationKind';
+import * as zapSenderProfileStorage from './zapSenderProfileStorage';
 import { claimWrapNotification } from './dmWrapNotificationDedupe';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
 
@@ -53,19 +54,26 @@ function controller(owner: string): MarmotPendingInvitations {
       () => (controllers.get(owner) === c ? changed(owner) : undefined),
       (record) => {
         if (!claimWrapNotification(record.id) && !record.replacesContentlessAlert) return;
-        void fireMessageNotification({
-          owner,
-          kind: 'group',
-          threadId: `invite:${record.id}`,
-          title: t('marmotInvitation.notification'),
-          body: t('marmotInvitation.notification'),
-          data: { groupInvitation: true, senderPubkey: record.rumor.pubkey },
-        }).catch(reportFailure);
+        void senderName(record.rumor.pubkey)
+          .then((name) =>
+            fireMessageNotification({
+              owner,
+              ...invitationAlert(record.direct === true, name),
+              threadId: `invite:${record.id}`,
+              data: { groupInvitation: true, senderPubkey: record.rumor.pubkey },
+            }),
+          )
+          .catch(reportFailure);
       },
     );
     controllers.set(owner, c);
   }
   return c;
+}
+/** A cached profile name (no relay lookup on the alert path), else a short key. */
+async function senderName(pubkey: string): Promise<string> {
+  const cached = await zapSenderProfileStorage.get(pubkey).catch(() => null);
+  return cached?.displayName || cached?.name || `${pubkey.slice(0, 8)}…`;
 }
 function reportFailure(error: unknown) {
   if (__DEV__) console.warn('[Marmot] invitation processing failed:', error);

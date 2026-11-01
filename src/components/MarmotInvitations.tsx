@@ -65,7 +65,9 @@ const InvitationRow = React.memo(function InvitationRow({
             {name}
           </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {invitation.groupName || t('marmotInvitation.group')}
+            {invitation.direct
+              ? t('marmotInvitation.direct')
+              : invitation.groupName || t('marmotInvitation.group')}
           </Text>
         </View>
       </View>

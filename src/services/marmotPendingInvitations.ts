@@ -4,6 +4,7 @@ import { createYieldScheduler, type YieldScheduler } from '../contexts/nostrDecr
 import type { MarmotGroupSummary, MarmotRumor } from './marmotSession';
 import type { MarmotKvBackend } from './marmotStore';
 import { WELCOME_OUTCOMES_NS, type WelcomeOutcome } from './marmotWelcomeOutcomes';
+import { isDirectInvite, type InvitedGroup } from './marmotInvitationKind';
 
 const NS = 'welcomeInvitations';
 const RUMOR_WRAPS_NS = 'welcomeInvitationRumorWraps';
@@ -13,6 +14,8 @@ export interface PendingMarmotInvitation {
   rumor: MarmotRumor;
   groupName?: string;
   groupId?: string;
+  /** A 1:1 with the sender, not a group (marmotInvitationKind). */
+  direct?: boolean;
   error?: boolean;
   replacesContentlessAlert?: boolean;
 }
@@ -24,12 +27,14 @@ type Record =
   | InvitationRecord
   | { id: string; status: 'joined' | 'declined' | 'skipped'; groupId?: string };
 export interface InvitationSession {
+  /** Our account — tells a 1:1's admins (us + sender) from a group's. */
+  readonly pubkey?: string;
   getGroup(appGroupId: string): MarmotGroupSummary | undefined;
   acceptWelcome(rumor: MarmotRumor): Promise<MarmotGroupSummary | null>;
   previewWelcome(rumor: MarmotRumor): Promise<{
     forThisDevice: boolean;
     groupId?: string;
-    group: { name: string } | null;
+    group: InvitedGroup | null;
   }>;
 }
 const newestFirst = (a: PendingMarmotInvitation, b: PendingMarmotInvitation) =>
@@ -187,7 +192,12 @@ export class MarmotPendingInvitations {
       }
       const alreadyVisible = visibleGroups.has(preview.groupId);
       visibleGroups.add(preview.groupId);
-      const validated = { ...record, groupId: preview.groupId, groupName: preview.group?.name };
+      const validated = {
+        ...record,
+        groupId: preview.groupId,
+        groupName: preview.group?.name,
+        direct: isDirectInvite(preview.group, record.rumor.pubkey, session.pubkey),
+      };
       await this.write(validated);
       if (!alreadyVisible && record.status === 'pending' && record.fresh) this.pending(validated);
     }

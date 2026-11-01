@@ -32,6 +32,8 @@ jest.mock('./marmotSession', () => ({
   },
 }));
 jest.mock('./localDb', () => ({ getLocalDb: jest.fn() }));
+const mockProfile = jest.fn().mockResolvedValue(null);
+jest.mock('./zapSenderProfileStorage', () => ({ get: (pk: string) => mockProfile(pk) }));
 jest.mock('./marmotStore', () => {
   const actual = jest.requireActual('./marmotStore');
   return {
@@ -70,6 +72,40 @@ beforeEach(() => {
   mockSessionChanged(null);
 });
 
+it('alerts a 1:1 invitation as a message from that person, not a group (multi-device contact)', async () => {
+  // A contact's other device adding our install to a 1:1, or a fresh 1:1:
+  // unnamed, admins = the two people. Their device count doesn't matter.
+  // Its own account: the stores dedupe Welcomes by rumor id per owner.
+  const owner = '7'.repeat(64);
+  mockProfile.mockResolvedValueOnce({ name: 'Ben' });
+  mockPreview.mockResolvedValueOnce({
+    forThisDevice: true,
+    groupId: 'mls-dm',
+    group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+  });
+  await routeMarmotWelcome(rumor, owner, 'dm-wrap', false, true);
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({
+      owner,
+      kind: 'dm',
+      title: 'Ben',
+      body: 'Invited you to a secure chat. Tap to accept.',
+      data: { groupInvitation: true, senderPubkey: rumor.pubkey },
+    }),
+  );
+  expect(await mockBackends.get(owner)!.get('welcomeInvitations', 'dm-wrap')).toContain(
+    '"direct":true',
+  );
+});
+
 it('stores a cold-start stranger durably, then previews without joining when Marmot starts', async () => {
   const owner = 'a'.repeat(64);
   await routeMarmotWelcome(rumor, owner, 'cold-wrap', false, true);
@@ -89,6 +125,7 @@ it('stores a cold-start stranger durably, then previews without joining when Mar
   expect(fireMessageNotification).toHaveBeenCalledWith(
     expect.objectContaining({
       owner,
+      kind: 'group',
       title: 'New group invitation',
       body: 'New group invitation',
       data: { groupInvitation: true, senderPubkey: rumor.pubkey },

@@ -3539,7 +3539,9 @@
     "notification": "Új csoportmeghívás",
     "retry": "Meghívás elfogadva. Az alkalmazás újraindításakor újra megpróbálunk csatlakozni.",
     "error": "Nem sikerült frissíteni a meghívást. Próbáld újra.",
-    "unavailable": "Ez a meghívás már nem fogadható el."
+    "unavailable": "Ez a meghívás már nem fogadható el.",
+    "direct": "Meghívás biztonságos csevegésre",
+    "directNotification": "Meghívott egy biztonságos csevegésre. Koppints az elfogadáshoz."
   },
   "settingsScreens": {
     "on": "Be",
