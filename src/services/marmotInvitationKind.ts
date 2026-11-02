@@ -30,6 +30,9 @@ export function isDirectInvite(
   if (!group || !me || group.name.trim() !== '') return false;
   const admins = new Set((group.adminPubkeys ?? []).map((p) => p.toLowerCase()));
   const pair = new Set([sender.toLowerCase(), me.toLowerCase()]);
+  // An unnamed group with exactly {creator, me} as admins but other non-admin
+  // members is a false positive. No cheaper pre-join signal exists:
+  // WelcomePreview.recipientCount counts devices, not members; isDm corrects it after join.
   return pair.size === 2 && admins.size === 2 && [...pair].every((p) => admins.has(p));
 }
 
@@ -44,7 +47,9 @@ export function invitationAlert(direct: boolean, senderName: string, showContent
     ? {
         kind: 'dm' as const,
         title: showContent ? senderName : t('marmotInvitation.direct'),
-        body: t('marmotInvitation.directNotification'),
+        body: showContent
+          ? t('marmotInvitation.directNotification')
+          : t('marmotInvitation.tapToAccept'),
       }
     : {
         kind: 'group' as const,

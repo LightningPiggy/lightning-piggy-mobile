@@ -3541,7 +3541,8 @@
     "error": "Die Einladung konnte nicht aktualisiert werden. Bitte versuche es erneut.",
     "unavailable": "Diese Einladung kann nicht mehr angenommen werden.",
     "direct": "Einladung zum sicheren Chat",
-    "directNotification": "Hat dich zu einem sicheren Chat eingeladen. Tippe zum Annehmen."
+    "directNotification": "Hat dich zu einem sicheren Chat eingeladen. Tippe zum Annehmen.",
+    "tapToAccept": "Tippe zum Annehmen."
   },
   "settingsScreens": {
     "on": "An",

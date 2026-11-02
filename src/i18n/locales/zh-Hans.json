@@ -3541,7 +3541,8 @@
     "error": "无法更新邀请，请重试。",
     "unavailable": "此邀请已无法接受。",
     "direct": "安全聊天邀请",
-    "directNotification": "邀请你加入安全聊天。点按即可接受。"
+    "directNotification": "邀请你加入安全聊天。点按即可接受。",
+    "tapToAccept": "点按即可接受。"
   },
   "settingsScreens": {
     "on": "开启",

@@ -43,7 +43,7 @@ describe('invitationAlert', () => {
     expect(invitationAlert(true, 'Ben', false)).toEqual({
       kind: 'dm',
       title: 'Secure chat invitation',
-      body: 'Invited you to a secure chat. Tap to accept.',
+      body: 'Tap to accept.',
     });
   });
 

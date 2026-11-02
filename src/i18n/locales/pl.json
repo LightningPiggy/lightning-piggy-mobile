@@ -3597,7 +3597,8 @@
     "error": "Nie udało się zaktualizować zaproszenia. Spróbuj ponownie.",
     "unavailable": "Tego zaproszenia nie można już zaakceptować.",
     "direct": "Zaproszenie do bezpiecznego czatu",
-    "directNotification": "Zaprasza cię do bezpiecznego czatu. Stuknij, aby zaakceptować."
+    "directNotification": "Zaprosił(a) cię do bezpiecznego czatu. Stuknij, aby zaakceptować.",
+    "tapToAccept": "Stuknij, aby zaakceptować."
   },
   "settingsScreens": {
     "on": "Włączone",

@@ -153,7 +153,7 @@ export class MarmotPendingInvitations {
     const visibleGroups = new Set(records.map((r) => r.groupId).filter(Boolean));
     for (const record of records) {
       if (!isCurrent()) return;
-      if (record.groupId) continue;
+      if (record.groupId && record.direct !== undefined) continue;
       await pacing.maybeYield();
       if (!isCurrent()) return;
       let preview: Awaited<ReturnType<InvitationSession['previewWelcome']>>;
@@ -168,7 +168,11 @@ export class MarmotPendingInvitations {
         } catch {
           await this.write({ id: record.id, status: 'skipped' });
           await this.backend.remove('pendingWelcomes', record.rumor.id);
+          continue;
         }
+        // A pre-upgrade record already validated: try the 1:1 backfill once,
+        // then keep the group wording rather than re-preview every pass.
+        if (record.groupId) await this.write({ ...record, direct: false });
         continue;
       }
       if (!isCurrent()) return;
