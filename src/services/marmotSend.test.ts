@@ -16,6 +16,8 @@ import {
   isRelayUnreachableError,
   marmotDelivery,
   marmotSendError,
+  MarmotUserFacingError,
+  requireMarmotSession,
   sendMarmotDm,
   sendMarmotGroupRumor,
 } from './marmotSend';
@@ -337,6 +339,13 @@ describe('marmotSendError', () => {
     expect(marmotSendError(mls)).toMatch(/Repair secure chat/);
     expect(marmotSendError(new Error('MLS epoch key: secret'))).not.toContain('secret');
   });
+});
+
+it('shows an app-authored, localised reason as-is', () => {
+  expect(marmotSendError(new MarmotUserFacingError('You can only edit your own messages.'))).toBe(
+    'You can only edit your own messages.',
+  );
+  expect(() => requireMarmotSession('f'.repeat(64))).toThrow(MarmotUserFacingError);
 });
 
 it.each([

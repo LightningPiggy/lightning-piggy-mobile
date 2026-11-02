@@ -15,8 +15,8 @@
 // a kind-445 with a group's public `h` tag. A group with no activity yet
 // (just joined, or a Welcome that landed late) never outranks one that has
 // some: it takes over once a message is sent in it — the next message after
-// a Repair or a retried create. Only when no group has activity does local
-// create / join time decide.
+// a Repair or a retried create. When no group has activity, the group id
+// decides — never local create / join time, which differs per install.
 //
 // Relays: a group used to get only its creator's NIP-65 write relays, so an
 // account writing to one relay made single-relay chats: one dropped or
@@ -51,8 +51,8 @@ export function pickDm<T extends DmCandidate>(
 ): T | undefined {
   const current = dms.filter((g) => !superseded(g.id));
   return [...(current.length ? current : dms)].sort((a, b) => {
-    if (a.activityAt === undefined && b.activityAt === undefined)
-      return b.createdAt - a.createdAt || byId(a, b);
+    // createdAt is each install's own first-seen time, so it can't break this tie.
+    if (a.activityAt === undefined && b.activityAt === undefined) return byId(a, b);
     if (a.activityAt === undefined) return 1;
     if (b.activityAt === undefined) return -1;
     return b.activityAt - a.activityAt || byId(a, b);

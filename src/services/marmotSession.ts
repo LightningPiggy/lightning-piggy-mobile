@@ -185,6 +185,7 @@ export class MarmotSession {
   private readonly relayTopUps = new MarmotDmRelayTopUp(
     (id, proposals) => this.commit(id, proposals),
     () => this.emitGroupsChanged(),
+    () => this.opts.dmDeviceSyncWaitMs,
   );
   // Authenticated per-group activity: which 1:1 group is "the" chat (marmotDmChoice).
   private readonly activity = new dmChoice.GroupActivity(

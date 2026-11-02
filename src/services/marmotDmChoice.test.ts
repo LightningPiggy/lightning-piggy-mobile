@@ -36,10 +36,17 @@ describe('pickDm', () => {
     expect(pickDm([lateJoin, live])).toBe(live);
   });
 
-  it('only when no group has activity does local create/join time decide', () => {
-    const older = { id: 'marmot:aa', createdAt: 1_000 };
-    const newer = { id: 'marmot:bb', createdAt: 3_000 };
-    expect(pickDm([older, newer])).toBe(newer);
+  it('with no activity anywhere, the group id decides, not local create/join time', () => {
+    // Two installs saw the groups in opposite orders: they must still agree.
+    const a = { id: 'marmot:aa', createdAt: 1_000 };
+    const b = { id: 'marmot:bb', createdAt: 3_000 };
+    expect(pickDm([a, b])).toBe(a);
+    expect(
+      pickDm([
+        { ...b, createdAt: 1_000 },
+        { ...a, createdAt: 3_000 },
+      ])?.id,
+    ).toBe(a.id);
   });
 
   it('equal activity breaks by group id, whatever order each install joined in', () => {

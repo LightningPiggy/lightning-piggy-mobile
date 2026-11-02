@@ -4,6 +4,7 @@
 import { Proposals } from '@internet-privacy/marmot-ts';
 import { spreadProposals } from './marmotProposals';
 import { relayTopUp, RelaysAlreadyTopped } from './marmotDmChoice';
+import { DM_DEVICE_SYNC_SEND_WAIT_MS } from './marmotDmDeviceSync';
 
 type CommitProposals = ReturnType<typeof spreadProposals>;
 
@@ -14,15 +15,26 @@ export class MarmotDmRelayTopUp {
   constructor(
     private readonly commit: (id: string, proposals: CommitProposals) => Promise<void>,
     private readonly changed: () => void,
+    private readonly waitMs: () => number | undefined = () => undefined,
   ) {}
 
+  /** Waits at most the device sync's send wait; a slower commit carries
+   * on in the background and is still not retried this session. */
   async sync(id: string, current: string[], fallbacks: string[]): Promise<void> {
-    const pending = this.pending.get(id);
-    if (pending) return pending;
-    if (this.done.has(id) || !relayTopUp(current, fallbacks)) return;
-    const run = this.run(id, fallbacks).finally(() => this.pending.delete(id));
-    this.pending.set(id, run);
-    return run;
+    let run = this.pending.get(id);
+    if (!run) {
+      if (this.done.has(id) || !relayTopUp(current, fallbacks)) return;
+      run = this.run(id, fallbacks).finally(() => this.pending.delete(id));
+      this.pending.set(id, run);
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      run,
+      new Promise<void>(
+        (resolve) => (timer = setTimeout(resolve, this.waitMs() ?? DM_DEVICE_SYNC_SEND_WAIT_MS)),
+      ),
+    ]);
+    clearTimeout(timer);
   }
 
   private async run(id: string, fallbacks: string[]): Promise<void> {

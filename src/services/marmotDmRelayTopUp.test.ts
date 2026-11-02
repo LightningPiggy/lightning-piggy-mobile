@@ -35,3 +35,22 @@ it('logs a failed top-up, allows the send, and does not retry this session', asy
     warn.mockRestore();
   }
 });
+
+it('bounds the wait: a slow top-up lets the send go and is not retried', async () => {
+  jest.useFakeTimers();
+  try {
+    const commit = jest.fn(() => new Promise<void>(() => undefined));
+    const topUp = new MarmotDmRelayTopUp(commit, jest.fn(), () => 1_000);
+    const sent = jest.fn();
+    void topUp.sync('g', ['wss://one'], ['wss://two']).then(sent);
+    await jest.advanceTimersByTimeAsync(999);
+    expect(sent).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    expect(sent).toHaveBeenCalled();
+    void topUp.sync('g', ['wss://one'], ['wss://two']);
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(commit).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
+});

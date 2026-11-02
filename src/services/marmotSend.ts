@@ -135,7 +135,16 @@ export const isRelayUnreachableError = (e: unknown) =>
   e instanceof Error && NO_RELAY_ERROR.test(e.message);
 
 /** A user-facing reason a Marmot send couldn't start. */
+/** An app-authored, already-localised reason that is safe to show as-is. */
+export class MarmotUserFacingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MarmotUserFacingError';
+  }
+}
+
 export function marmotSendError(e: unknown): string {
+  if (e instanceof MarmotUserFacingError) return e.message;
   const reason = marmotUnreachableReason(e);
   if (reason) return t(`marmotSend.${reason}`);
   if (e instanceof MarmotKeyPackageLookupError) return t('marmotSend.keyPackageLookupFailed');
@@ -170,7 +179,7 @@ function marmotFailure(e: unknown): SendResult {
 export function requireMarmotSession(pubkey: string): MarmotSession {
   const session = getMarmotSession();
   if (!session || session.pubkey !== pubkey) {
-    throw new Error('Marmot is still starting up — try again in a moment.');
+    throw new MarmotUserFacingError('Marmot is still starting up — try again in a moment.');
   }
   return session;
 }
