@@ -33,6 +33,7 @@ jest.mock('./bolt11', () => ({
 }));
 import {
   executeReverseSwap,
+  isSwapCreateTimeout,
   isSwapSettlingError,
   SwapCreateTimeoutError,
   SwapSettlingError,
@@ -336,5 +337,16 @@ describe('executeReverseSwap — bounded create stage (2026-11-01 stuck swap)', 
     expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
     expect(swapRecoveryService.registerPendingSwap).not.toHaveBeenCalled();
     expect(payInvoice).not.toHaveBeenCalled();
+  });
+});
+
+describe('isSwapCreateTimeout', () => {
+  it('recognises both timeout errors and nothing else', () => {
+    expect(isSwapCreateTimeout(new SwapCreateTimeoutError())).toBe(true);
+    expect(
+      isSwapCreateTimeout(Object.assign(new Error('x'), { name: 'SwapServerTimeoutError' })),
+    ).toBe(true);
+    expect(isSwapCreateTimeout(new Error('boom'))).toBe(false);
+    expect(isSwapCreateTimeout(undefined)).toBe(false);
   });
 });

@@ -44,6 +44,11 @@ export class SwapCreateTimeoutError extends Error {
   }
 }
 
+/** The swap server never finished creating the swap: nothing was sent. */
+export function isSwapCreateTimeout(error: unknown): boolean {
+  return error instanceof SwapCreateTimeoutError || isSwapServerTimeoutError(error);
+}
+
 /**
  * Run `create` with a deadline and the caller's cancel. If either fires first
  * we reject and never return the swap, so the caller can't go on to pay it —

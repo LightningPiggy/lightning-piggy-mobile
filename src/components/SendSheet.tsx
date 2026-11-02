@@ -45,6 +45,7 @@ import {
   executeReverseSwap,
   isSwapSettlingError,
   type ReverseSwapReceipt,
+  isSwapCreateTimeout,
 } from '../utils/reverseSwapSend';
 import { quoteExactRecipient, formatRecipientFee } from '../utils/reverseSwapAmounts';
 import { reverseSwapAmountBounds, shortOnchainAddress } from '../utils/onchainSwapSend';
@@ -680,8 +681,7 @@ const SendSheet: React.FC<Props> = ({
           })
         : swapNotPaid
           ? t('paymentProgressOverlay.swapNotPaid')
-          : error instanceof Error &&
-              ['SwapCreateTimeoutError', 'SwapServerTimeoutError'].includes(error.name)
+          : isSwapCreateTimeout(error)
             ? t('paymentProgressOverlay.swapServerTimeout')
             : error instanceof Error
               ? error.message
