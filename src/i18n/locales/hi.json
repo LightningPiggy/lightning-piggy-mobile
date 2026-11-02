@@ -1680,7 +1680,8 @@
     "swapStepPay": "Lightning पेमेंट भेज रहे हैं",
     "swapStepLockup": "Boltz के ऑन-चेन रकम लॉक करने का इंतज़ार है",
     "swapStepClaim": "आपके ऐड्रेस पर रकम हासिल कर रहे हैं",
-    "swapNotPaid": "कुछ भी नहीं भेजा गया — Boltz को Lightning पेमेंट नहीं हो सका, इसलिए आपके वॉलेट से कोई sats नहीं निकले। आप फिर से कोशिश कर सकते हैं।"
+    "swapNotPaid": "कुछ भी नहीं भेजा गया — Boltz को Lightning पेमेंट नहीं हो सका, इसलिए आपके वॉलेट से कोई sats नहीं निकले। आप फिर से कोशिश कर सकते हैं।",
+    "swapServerTimeout": "स्वैप सर्वर समय पर स्वैप तैयार नहीं कर पाया। कुछ भी नहीं भेजा गया।"
   },
   "placeDetailScreen": {
     "viewOnBtcMap": "BTC Map पर देखें",

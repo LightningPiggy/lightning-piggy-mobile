@@ -1680,7 +1680,8 @@
     "swapStepPay": "A Lightning-fizetés küldése",
     "swapStepLockup": "Várakozás, hogy a Boltz on-chain zárolja az összeget",
     "swapStepClaim": "Beváltás a címedre",
-    "swapNotPaid": "Semmi sem ment el – a Boltznak szánt Lightning-fizetés nem sikerült, így egy sats sem hagyta el a pénztárcádat. Próbáld újra."
+    "swapNotPaid": "Semmi sem ment el – a Boltznak szánt Lightning-fizetés nem sikerült, így egy sats sem hagyta el a pénztárcádat. Próbáld újra.",
+    "swapServerTimeout": "A swapszerver nem fejezte be időben az átváltás előkészítését. Semmi sem lett elküldve."
   },
   "placeDetailScreen": {
     "viewOnBtcMap": "Megtekintés a BTC Mapen",

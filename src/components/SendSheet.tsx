@@ -680,9 +680,12 @@ const SendSheet: React.FC<Props> = ({
           })
         : swapNotPaid
           ? t('paymentProgressOverlay.swapNotPaid')
-          : error instanceof Error
-            ? error.message
-            : t('sendSheet.paymentFailed');
+          : error instanceof Error &&
+              ['SwapCreateTimeoutError', 'SwapServerTimeoutError'].includes(error.name)
+            ? t('paymentProgressOverlay.swapServerTimeout')
+            : error instanceof Error
+              ? error.message
+              : t('sendSheet.paymentFailed');
       if (quoteChanged) onchainQuote.adopt(quoteChanged);
       showOutcome(send, 'error', message);
     } finally {

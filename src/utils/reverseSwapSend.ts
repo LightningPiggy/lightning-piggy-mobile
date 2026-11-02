@@ -1,6 +1,6 @@
 import * as boltzService from '../services/boltzService';
 import { isSwapServerTimeoutError } from '../services/boltzApi';
-import { createAbortError } from '../services/nwcErrors';
+import { createAbortError, throwIfAborted } from '../services/nwcErrors';
 import { paymentHashFromBolt11 } from './bolt11';
 import {
   payAndClaimReverseSwap,
@@ -47,13 +47,16 @@ export class SwapCreateTimeoutError extends Error {
 /**
  * Run `create` with a deadline and the caller's cancel. If either fires first
  * we reject and never return the swap, so the caller can't go on to pay it —
- * even when `create` settles later (its late result is dropped).
+ * even when `create` settles later. The inner signal also prevents a late
+ * result from being persisted.
  */
 function withCreateDeadline<T>(
-  create: () => Promise<T>,
+  create: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<T> {
+  if (signal.aborted) return Promise.reject(createAbortError());
+  const controller = new AbortController();
   return new Promise<T>((resolve, reject) => {
     let done = false;
     const finish = (settle: () => void) => {
@@ -63,11 +66,19 @@ function withCreateDeadline<T>(
       signal.removeEventListener('abort', onAbort);
       settle();
     };
-    const onAbort = () => finish(() => reject(createAbortError()));
-    const timer = setTimeout(() => finish(() => reject(new SwapCreateTimeoutError())), timeoutMs);
+    const cancel = (error: Error) =>
+      finish(() => {
+        controller.abort();
+        reject(error);
+      });
+    const onAbort = () => cancel(createAbortError());
+    const timer = setTimeout(() => cancel(new SwapCreateTimeoutError()), timeoutMs);
     signal.addEventListener('abort', onAbort, { once: true });
-    if (signal.aborted) onAbort();
-    create().then(
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    create(controller.signal).then(
       (value) => finish(() => resolve(value)),
       (error: unknown) => finish(() => reject(error)),
     );
@@ -103,18 +114,19 @@ export async function executeReverseSwap(params: ReverseSwapParams): Promise<Rev
   // a timeout is a clean pre-commit failure; a swap Boltz created anyway just
   // expires unpaid.
   const persisted = await withCreateDeadline(
-    async () => {
+    async (createSignal) => {
       const swap = await boltzService
         .createReverseSwap(
           destinationAddress,
           recipientSats,
           params.approvedQuote,
           'recipient',
-          signal,
+          createSignal,
         )
         .catch((error: unknown) => {
           throw isSwapServerTimeoutError(error) ? new SwapCreateTimeoutError() : error;
         });
+      throwIfAborted(createSignal);
       return persistReverseSwap(swap, destinationAddress);
     },
     params.createTimeoutMs ?? REVERSE_SWAP_CREATE_STAGE_TIMEOUT_MS,
