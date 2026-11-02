@@ -1,7 +1,9 @@
+import { createMemoryMarmotBackend } from './marmotStore';
 import {
   GroupActivity,
   noteRumor,
   seedActivity,
+  seedActivityOnce,
   MAX_ACTIVITY_SKEW_MS,
   MAX_GROUP_RELAYS,
   MIN_GROUP_RELAYS,
@@ -159,4 +161,26 @@ describe('relayTopUp', () => {
     expect(relayTopUp(FALLBACKS.slice(0, MIN_GROUP_RELAYS), FALLBACKS)).toBeNull();
     expect(relayTopUp(['wss://nos.lol'], ['wss://nos.lol'])).toBeNull();
   });
+});
+
+it('seeds own-message-only history once, including across restarts', async () => {
+  const backend = createMemoryMarmotBackend();
+  const queryRumors = jest.fn(async () => [{ pubkey: 'me', kind: 9, created_at: 123 }]);
+  const group = { idStr: 'g', history: { queryRumors } };
+  await seedActivityOnce(backend, new GroupActivity(jest.fn()), group, 'me');
+  await seedActivityOnce(backend, new GroupActivity(jest.fn()), group, 'me');
+  expect(queryRumors).toHaveBeenCalledTimes(1);
+});
+
+it('retries history seeding if the history read failed', async () => {
+  const backend = createMemoryMarmotBackend();
+  const queryRumors = jest
+    .fn()
+    .mockRejectedValueOnce(new Error('read failed'))
+    .mockResolvedValue([]);
+  const group = { idStr: 'g', history: { queryRumors } };
+  const activity = new GroupActivity(jest.fn());
+  await expect(seedActivityOnce(backend, activity, group, 'me')).rejects.toThrow('read failed');
+  await seedActivityOnce(backend, activity, group, 'me');
+  expect(queryRumors).toHaveBeenCalledTimes(2);
 });

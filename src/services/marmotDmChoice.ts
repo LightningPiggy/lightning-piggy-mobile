@@ -26,6 +26,7 @@
 // every relay it already has, so members on older versions still hear it.
 
 import { enabledAppRelays } from './appRelayPrefs';
+import type { MarmotKvBackend } from './marmotStore';
 import { isMarmotMessageKind } from './marmotKinds';
 import { MARMOT_KEY_PACKAGE_RELAYS } from './marmotKeyPackageRelays';
 import { DEFAULT_RELAYS } from './nostrRelayDefaults';
@@ -43,9 +44,13 @@ export interface DmCandidate {
 
 const byId = (a: DmCandidate, b: DmCandidate) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-/** The 1:1 group to use among several with the same person (see above). */
-export function pickDm<T extends DmCandidate>(dms: readonly T[]): T | undefined {
-  return [...dms].sort((a, b) => {
+/** Prefer groups not superseded by Repair, then rank by activity (see above). */
+export function pickDm<T extends DmCandidate>(
+  dms: readonly T[],
+  superseded: (id: string) => boolean = () => false,
+): T | undefined {
+  const current = dms.filter((g) => !superseded(g.id));
+  return [...(current.length ? current : dms)].sort((a, b) => {
     if (a.activityAt === undefined && b.activityAt === undefined)
       return b.createdAt - a.createdAt || byId(a, b);
     if (a.activityAt === undefined) return 1;
@@ -151,4 +156,28 @@ export class RelaysAlreadyTopped extends Error {
     super('marmot: group already has enough relays');
     this.name = 'RelaysAlreadyTopped';
   }
+}
+
+/** Persist completion even when history contains only our own messages. */
+export async function seedActivityOnce(
+  backend: MarmotKvBackend,
+  activity: GroupActivity,
+  group: {
+    idStr: string;
+    history: {
+      queryRumors: (
+        filter: Record<string, never>,
+      ) => Promise<readonly { pubkey: string; kind: number; created_at: number }[]>;
+    };
+  },
+  me: string,
+): Promise<void> {
+  if (
+    activity.get(group.idStr) !== undefined ||
+    (await backend.get('dmActivitySeeded', group.idStr))
+  )
+    return;
+  const stored = await group.history.queryRumors({});
+  seedActivity(activity, group.idStr, stored, me);
+  await backend.set('dmActivitySeeded', group.idStr, '1');
 }

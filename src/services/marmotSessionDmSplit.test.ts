@@ -192,6 +192,13 @@ describe('MarmotSession: a split 1:1 converges (no WebCrypto)', () => {
       expect(fresh.id).not.toBe(old.id);
       expect(fresh.relays.length).toBeGreaterThanOrEqual(dmChoice.MIN_GROUP_RELAYS);
       expect(ben.session.findDm(emily.pubkey)?.id).toBe(fresh.id);
+      // Emily has not accepted Repair yet: her first message still uses G1.
+      later();
+      await say(emily, ben.pubkey, 'peer sends before accepting repair');
+      await waitFor(() => got(ben, 'peer sends before accepting repair'));
+      expect(activityOf(ben.session, old.id)).toBeGreaterThan(activityOf(ben.session, fresh.id)!);
+      expect(ben.session.findDm(emily.pubkey)?.id).toBe(fresh.id);
+      expect(await ben.backend.get('dmSuperseded', old.id)).toBe('1');
       // Ben's next message goes into the fresh chat; once Emily accepts the
       // invitation and reads it, she's there too.
       later();

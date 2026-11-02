@@ -3000,7 +3000,8 @@
     "chatSetupTimedOut": "Configurar este chat seguro está tardando demasiado, así que no se envió nada. Revisa tu conexión (y tu app de firma, si usas una) e inténtalo de nuevo.",
     "waitingForAmber": "Esperando la aprobación de Amber, así que aún no se envió nada. Abre Amber, permite la solicitud de Lightning Piggy y vuelve a intentarlo.",
     "relaysUnreachable": "No se pudo conectar con ningún relay, así que no se envió nada. Revisa tu conexión (datos móviles, Wi-Fi o VPN) e inténtalo de nuevo.",
-    "groupError": "Error del chat seguro, así que no se envió nada: {{detail}}. Si sigue pasando, usa «Reparar chat seguro» en la información del chat."
+    "groupStateError": "Error del chat seguro, así que no se envió nada. Si sigue pasando, usa «Reparar chat seguro» en la información del chat.",
+    "sendFailed": "No se pudo enviar el mensaje. Inténtalo de nuevo."
   },
   "signOutPrompt": {
     "walletsRemoved": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta, incluidas las frases de recuperación guardadas aquí. Guarda sus frases de recuperación y datos de conexión por separado antes de cerrar sesión.",

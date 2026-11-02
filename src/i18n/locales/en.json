@@ -3000,7 +3000,8 @@
     "chatSetupTimedOut": "Setting up this secure chat is taking too long, so nothing was sent. Check your connection (and your signer app, if you use one) and try again.",
     "waitingForAmber": "Waiting for Amber to approve, so nothing was sent yet. Open Amber, allow Lightning Piggy's request, then try again.",
     "relaysUnreachable": "Couldn't reach any relay, so nothing was sent. Check your connection (mobile data, Wi-Fi or VPN) and try again.",
-    "groupError": "Secure chat error, so nothing was sent: {{detail}}. If this keeps happening, use Repair secure chat in the chat info."
+    "groupStateError": "Secure chat error, so nothing was sent. If this keeps happening, use Repair secure chat in the chat info.",
+    "sendFailed": "Could not send the message. Please try again."
   },
   "signOutPrompt": {
     "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",

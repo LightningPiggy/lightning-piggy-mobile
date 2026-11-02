@@ -1,3 +1,5 @@
+import { MarmotDmRelayTopUp } from './marmotDmRelayTopUp';
+import { DmSuperseded } from './marmotDmSuperseded';
 import { maintainDiscoverableKeyPackage } from './marmotKeyPackageDiscovery';
 import { previewInvitationWelcome } from './marmotInvitationPreview';
 // One Marmot (MLS-over-Nostr) client per signed-in account.
@@ -179,7 +181,11 @@ export class MarmotSession {
   private readonly watermarks = new Map<string, number>();
   private readonly firstSeen = new Map<string, number>();
   private readonly creatingDms = new Map<string, Promise<MarmotGroupSummary>>();
-  private readonly relayTopUps = new Set<string>();
+  private readonly superseded: DmSuperseded;
+  private readonly relayTopUps = new MarmotDmRelayTopUp(
+    (id, proposals) => this.commit(id, proposals),
+    () => this.emitGroupsChanged(),
+  );
   // Authenticated per-group activity: which 1:1 group is "the" chat (marmotDmChoice).
   private readonly activity = new dmChoice.GroupActivity(
     (id, ms) => void this.backend.set('dmActivity', id, String(ms)),
@@ -223,6 +229,7 @@ export class MarmotSession {
     this.pubkey = opts.pubkey;
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
+    this.superseded = new DmSuperseded(this.backend);
 
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
@@ -352,6 +359,7 @@ export class MarmotSession {
       await loadNumberMap(this.backend, 'watermark', this.watermarks);
       await loadNumberMap(this.backend, 'firstSeen', this.firstSeen);
       await loadNumberMap(this.backend, 'dmActivity', this.activity.map);
+      await this.superseded.load();
       const loaded = await groups.loadAll();
       loaded.forEach((g) => this.wireGroup(g));
       for (const g of loaded) {
@@ -504,10 +512,13 @@ export class MarmotSession {
     return this.listGroups().find((g) => g.id === appGroupId);
   }
 
-  /** The DM group with `peer`, if one exists: the most active one (marmotDmChoice). */
+  /** The DM with `peer`: prefer Repair, then authenticated activity (marmotDmChoice). */
   findDm(peer: string): MarmotGroupSummary | undefined {
     const p = peer.toLowerCase();
-    return dmChoice.pickDm(this.listGroups().filter((g) => g.isDm && g.memberPubkeys[0] === p));
+    return dmChoice.pickDm(
+      this.listGroups().filter((g) => g.isDm && g.memberPubkeys[0] === p),
+      (id) => this.superseded.has(id),
+    );
   }
 
   /** Whether `peer` has a key package to invite; throws on a failed lookup / only unusable keys. */
@@ -530,9 +541,15 @@ export class MarmotSession {
     // trips, and a second quick send must not create a second DM group.
     const inFlight = this.creatingDms.get(p);
     if (inFlight) return inFlight;
-    const creating = this.createGroup('', [p], { adminPubkeys: [this.pubkey, p] }).finally(() =>
-      this.creatingDms.delete(p),
-    );
+    const creating = (async () => {
+      await this.ready;
+      const fresh = await this.superseded.restart(
+        this.listGroups().filter((g) => g.isDm && g.memberPubkeys[0] === p),
+        () => this.createGroup('', [p], { adminPubkeys: [this.pubkey, p] }),
+      );
+      this.emitGroupsChanged();
+      return fresh;
+    })().finally(() => this.creatingDms.delete(p));
     this.creatingDms.set(p, creating);
     return creating;
   }
@@ -624,22 +641,8 @@ export class MarmotSession {
       void this.welcomePayloads.flush(mlsId).catch(() => undefined);
     }
     await this.dmDevices.sync(mlsId, dm.memberPubkeys[0], reason);
-    // A 1:1 on too few relays gets more — one commit, once a session (marmotDmChoice).
-    // Built from the routing current when the commit is made, so a concurrent
-    // change by the other admin is kept, not overwritten (as setAdmins).
-    const fallbacks = dmChoice.groupRelayFallbacks(this.pubkey);
-    if (!dmChoice.relayTopUp(dm.relays, fallbacks) || !active || this.relayTopUps.has(mlsId))
-      return;
-    this.relayTopUps.add(mlsId);
-    const topUp = spreadProposals(async (ctx) => {
-      const relays = dmChoice.relayTopUp(ctx.groupData.relays, fallbacks);
-      if (!relays) throw new dmChoice.RelaysAlreadyTopped();
-      return Proposals.proposeUpdateMetadata({ relays })(ctx);
-    }, 1);
-    void this.commit(mlsId, topUp).then(
-      () => this.emitGroupsChanged(),
-      (e) => e instanceof dmChoice.RelaysAlreadyTopped || this.relayTopUps.delete(mlsId),
-    );
+    if (active)
+      await this.relayTopUps.sync(mlsId, dm.relays, dmChoice.groupRelayFallbacks(this.pubkey));
   }
 
   /** Every outbound group intent goes through here: never queued inside
@@ -920,11 +923,7 @@ export class MarmotSession {
    */
   private async replayHistory(g: SessionGroup): Promise<void> {
     if (!g.history) return;
-    // Upgrade / no activity yet: seed from stored history (marmotDmChoice).
-    if (this.activity.get(g.idStr) === undefined) {
-      const stored = (await g.history.queryRumors({})) as MarmotRumor[];
-      dmChoice.seedActivity(this.activity, g.idStr, stored, this.pubkey);
-    }
+    await dmChoice.seedActivityOnce(this.backend, this.activity, g, this.pubkey);
     const since = Math.floor(Date.now() / 1000) - HISTORY_REPLAY_SECS;
     const recent = (await g.history.queryRumors({ since })) as MarmotRumor[];
     recent.sort((a, b) => a.created_at - b.created_at).forEach((r) => this.deliver(g, r));

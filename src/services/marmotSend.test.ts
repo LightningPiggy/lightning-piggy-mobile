@@ -11,6 +11,8 @@ import {
 } from './marmotSession';
 import {
   DM_SETUP_TIMEOUT_MS,
+  restartDmWithin,
+  MarmotDmSetupTimeoutError,
   isRelayUnreachableError,
   marmotDelivery,
   marmotSendError,
@@ -329,9 +331,38 @@ describe('marmotSendError', () => {
     );
   });
 
-  it('labels anything else as a secure-chat (MLS) error and keeps the detail', () => {
+  it('suggests Repair only for MLS state errors without exposing raw details', () => {
     const mls = new Error('Cannot encrypt: epoch 3 is not the current epoch');
     expect(isRelayUnreachableError(mls)).toBe(false);
-    expect(marmotSendError(mls)).toMatch(/^Secure chat error, so nothing was sent: Cannot encrypt/);
+    expect(marmotSendError(mls)).toMatch(/Repair secure chat/);
+    expect(marmotSendError(new Error('MLS epoch key: secret'))).not.toContain('secret');
   });
+});
+
+it.each([
+  'Marmot is still starting up',
+  'Signer rejected',
+  'MLS signer rejected',
+  'NIP-46 timeout',
+  'Amber timed out',
+  'nsec1secret',
+])('does not suggest Repair or expose details for %s', (message) => {
+  const result = marmotSendError(new Error(message));
+  expect(result).toBe('Could not send the message. Please try again.');
+});
+
+it.each([false, true])('bounds Repair and preserves Amber guidance (open=%s)', async (open) => {
+  jest.useFakeTimers();
+  const amber = jest.spyOn(marmotSigner, 'amberRequestOpenSince').mockReturnValue(open ? 1 : null);
+  try {
+    const pending = restartDmWithin({ restartDm: () => new Promise(() => undefined) }, PEER);
+    const failed = pending.catch((e: unknown) => e);
+    await jest.advanceTimersByTimeAsync(DM_SETUP_TIMEOUT_MS);
+    const error = await failed;
+    expect(error).toBeInstanceOf(MarmotDmSetupTimeoutError);
+    expect(marmotSendError(error)).toMatch(open ? /Open Amber/ : /taking too long/);
+  } finally {
+    amber.mockRestore();
+    jest.useRealTimers();
+  }
 });

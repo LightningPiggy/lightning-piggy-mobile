@@ -3000,7 +3000,8 @@
     "chatSetupTimedOut": "A biztonságos csevegés beállítása túl sokáig tart, így semmi sem lett elküldve. Ellenőrizd a kapcsolatot (és az aláíró alkalmazásodat, ha használsz ilyet), és próbáld újra.",
     "waitingForAmber": "Az Amber jóváhagyására várunk, ezért még semmi sem lett elküldve. Nyisd meg az Ambert, engedélyezd a Lightning Piggy kérését, majd próbáld újra.",
     "relaysUnreachable": "Egyik relay sem érhető el, ezért semmi sem ment el. Ellenőrizd a kapcsolatot (mobiladat, Wi-Fi vagy VPN), és próbáld újra.",
-    "groupError": "Hiba a biztonságos csevegésben, ezért semmi sem ment el: {{detail}}. Ha ismétlődik, használd a „Biztonságos csevegés javítása” lehetőséget a csevegés adatainál."
+    "groupStateError": "Hiba a biztonságos csevegésben, ezért semmi sem ment el. Ha ismétlődik, használd a „Biztonságos csevegés javítása” lehetőséget a csevegés adatainál.",
+    "sendFailed": "Nem sikerült elküldeni az üzenetet. Próbáld újra."
   },
   "signOutPrompt": {
     "walletsRemoved": "A fiókhoz csatlakoztatott pénztárcák, az itt tárolt helyreállító kifejezésekkel együtt, szintén el lesznek távolítva erről a telefonról. Kijelentkezés előtt külön mentsd el a helyreállító kifejezéseiket és a kapcsolati adataikat.",
