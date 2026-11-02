@@ -1,3 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { perAccountKey } from './perAccountStorage';
+import { PROFILES_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
 import type { MarmotKvBackend } from './marmotStore';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 import { getPendingMarmotInvitations, routeMarmotWelcome } from './marmotWelcomeRouter';
@@ -107,6 +110,32 @@ it('alerts a 1:1 invitation as a message from that person, not a group (multi-de
   );
   expect(await mockBackends.get(owner)!.get('welcomeInvitations', 'dm-wrap')).toContain(
     '"direct":true',
+  );
+});
+
+it("names a followed contact from the account's contact cache", async () => {
+  const owner = '6'.repeat(64);
+  await AsyncStorage.setItem(
+    perAccountKey(PROFILES_CACHE_KEY_BASE, owner),
+    JSON.stringify({ [rumor.pubkey]: { npub: 'npub1x', name: 'Emily', displayName: null } }),
+  );
+  mockPreview.mockResolvedValueOnce({
+    forThisDevice: true,
+    groupId: 'mls-dm-contact',
+    group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+  });
+  await routeMarmotWelcome(rumor, owner, 'contact-wrap', false, true);
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(mockProfile).not.toHaveBeenCalled();
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ owner, kind: 'dm', title: 'Emily' }),
   );
 });
 
