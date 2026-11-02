@@ -182,7 +182,11 @@ export class MarmotPendingInvitations {
           console.log(`[Marmot] welcome ${record.id.slice(0, 8)} for another device, skipped`);
         continue;
       }
-      if (!preview.groupId) continue; // Incomplete preview remains hidden and retryable.
+      if (!preview.groupId) {
+        // Incomplete preview remains hidden and retryable; a backfill tries once.
+        if (record.groupId) await this.write({ ...record, direct: false });
+        continue;
+      }
       if (await this.backend.get(DECLINED_GROUPS_NS, preview.groupId)) {
         await this.write({ id: record.id, status: 'declined', groupId: preview.groupId });
         await this.backend.remove('pendingWelcomes', record.rumor.id);

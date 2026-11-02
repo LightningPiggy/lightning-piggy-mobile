@@ -85,7 +85,10 @@ it.each([true, false])('backfills direct=%s on an old invitation only once', asy
   expect(notify).not.toHaveBeenCalled();
 });
 
-it('a failed backfill keeps the old invitation and does not retry it', async () => {
+it.each([
+  ['throws', (m: jest.Mock) => m.mockRejectedValue(new Error('key package gone'))],
+  ['is incomplete', (m: jest.Mock) => m.mockResolvedValue({ forThisDevice: true })],
+])('a backfill whose preview %s keeps the invitation and does not retry', async (_, fail) => {
   const { backend, session } = setup();
   const invitations = new MarmotPendingInvitations(backend, jest.fn(), jest.fn());
   await backend.set(
@@ -93,7 +96,7 @@ it('a failed backfill keeps the old invitation and does not retry it', async () 
     'wrap',
     JSON.stringify({ id: 'wrap', rumor, groupId: 'mls-group', status: 'pending', fresh: true }),
   );
-  session.previewWelcome.mockRejectedValue(new Error('key package gone'));
+  fail(session.previewWelcome);
   await invitations.resume(session, () => true);
   await invitations.resume(session, () => true);
   expect(session.previewWelcome).toHaveBeenCalledTimes(1);
