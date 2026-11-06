@@ -1680,7 +1680,8 @@
     "swapStepPay": "Lightning-Zahlung wird gesendet",
     "swapStepLockup": "Warte, bis Boltz das Guthaben On-Chain sperrt",
     "swapStepClaim": "Guthaben wird an deine Adresse ausgezahlt",
-    "swapNotPaid": "Es wurde nichts gesendet – die Lightning-Zahlung an Boltz ist nicht durchgegangen, daher haben keine sats deine Wallet verlassen. Du kannst es erneut versuchen."
+    "swapNotPaid": "Es wurde nichts gesendet – die Lightning-Zahlung an Boltz ist nicht durchgegangen, daher haben keine sats deine Wallet verlassen. Du kannst es erneut versuchen.",
+    "swapServerTimeout": "Der Swap-Server hat den Tausch nicht rechtzeitig vorbereitet. Es wurde nichts gesendet."
   },
   "placeDetailScreen": {
     "viewOnBtcMap": "Auf BTC Map ansehen",

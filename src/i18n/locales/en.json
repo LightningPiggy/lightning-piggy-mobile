@@ -1680,7 +1680,8 @@
     "swapStepPay": "Sending the Lightning payment",
     "swapStepLockup": "Waiting for Boltz to lock funds on-chain",
     "swapStepClaim": "Claiming to your address",
-    "swapNotPaid": "Nothing was sent — the Lightning payment to Boltz didn't go through, so no sats left your wallet. You can try again."
+    "swapNotPaid": "Nothing was sent — the Lightning payment to Boltz didn't go through, so no sats left your wallet. You can try again.",
+    "swapServerTimeout": "The swap server didn't finish setting up the swap in time. Nothing was sent."
   },
   "placeDetailScreen": {
     "viewOnBtcMap": "View on BTC Map",

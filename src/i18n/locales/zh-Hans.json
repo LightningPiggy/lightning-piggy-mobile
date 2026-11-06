@@ -1680,7 +1680,8 @@
     "swapStepPay": "正在发送Lightning付款",
     "swapStepLockup": "正在等待Boltz在链上锁定资金",
     "swapStepClaim": "正在将资金领取至你的地址",
-    "swapNotPaid": "未发送任何款项——发给Boltz的Lightning付款没有成功，所以没有sats离开你的钱包。你可以重试。"
+    "swapNotPaid": "未发送任何款项——发给Boltz的Lightning付款没有成功，所以没有sats离开你的钱包。你可以重试。",
+    "swapServerTimeout": "兑换服务器未能及时完成兑换准备。未发送任何款项。"
   },
   "placeDetailScreen": {
     "viewOnBtcMap": "在 BTC Map 上查看",

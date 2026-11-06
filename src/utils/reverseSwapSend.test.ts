@@ -31,7 +31,14 @@ jest.mock('expo-secure-store', () => ({
 jest.mock('./bolt11', () => ({
   paymentHashFromBolt11: (invoice: string) => (invoice === 'lnbc30u1p...' ? 'hash-sw1' : null),
 }));
-import { executeReverseSwap, isSwapSettlingError, SwapSettlingError } from './reverseSwapSend';
+import {
+  executeReverseSwap,
+  isSwapCreateTimeout,
+  isSwapSettlingError,
+  SwapCreateTimeoutError,
+  SwapSettlingError,
+} from './reverseSwapSend';
+import { SwapServerTimeoutError } from '../services/boltzApi';
 import * as boltzService from '../services/boltzService';
 import * as SecureStore from 'expo-secure-store';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -200,6 +207,7 @@ describe('executeReverseSwap — hold invoice', () => {
       30000,
       quote,
       'recipient',
+      expect.any(Object),
     );
     const persistAt = (SecureStore.setItemAsync as jest.Mock).mock.invocationCallOrder[0];
     const indexAt = (swapRecoveryService.registerPendingSwap as jest.Mock).mock
@@ -236,5 +244,109 @@ describe('executeReverseSwap — hold invoice', () => {
     expect(payInvoice).toHaveBeenCalledTimes(1);
     expect(swapRecoveryService.recoverPendingSwaps).not.toHaveBeenCalled();
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('boltz_swap_sw1');
+  });
+});
+
+describe('executeReverseSwap — bounded create stage (2026-11-01 stuck swap)', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('passes an inner signal to createReverseSwap', async () => {
+    const controller = new AbortController();
+    await executeReverseSwap(params({ signal: controller.signal }));
+    const createSignal = (boltzService.createReverseSwap as jest.Mock).mock.calls[0][4];
+    expect(createSignal).not.toBe(controller.signal);
+    expect(createSignal.aborted).toBe(false);
+  });
+
+  it('fails visibly at the deadline, and never persists or pays the late swap', async () => {
+    jest.useFakeTimers();
+    let resolveCreate!: (swap: typeof SWAP) => void;
+    (boltzService.createReverseSwap as jest.Mock).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const payInvoice = jest.fn();
+    const sending = executeReverseSwap(params({ payInvoice, createTimeoutMs: 1000 }));
+    const rejected = expect(sending).rejects.toBeInstanceOf(SwapCreateTimeoutError);
+    jest.advanceTimersByTime(1000);
+    await rejected;
+    expect((boltzService.createReverseSwap as jest.Mock).mock.calls[0][4].aborted).toBe(true);
+    // Boltz answers after we gave up: the swap must NOT be paid (no double
+    // or surprise payment) — it simply expires unpaid server-side.
+    resolveCreate(SWAP);
+    await jest.runAllTimersAsync();
+    expect(payInvoice).not.toHaveBeenCalled();
+    expect(boltzService.waitForLockup).not.toHaveBeenCalled();
+    expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
+    expect(swapRecoveryService.registerPendingSwap).not.toHaveBeenCalled();
+  });
+
+  it('fails visibly when persisting the swap hangs, without paying', async () => {
+    jest.useFakeTimers();
+    (swapRecoveryService.registerPendingSwap as jest.Mock).mockReturnValueOnce(
+      new Promise(() => undefined),
+    );
+    const payInvoice = jest.fn();
+    const sending = executeReverseSwap(params({ payInvoice, createTimeoutMs: 1000 }));
+    const rejected = expect(sending).rejects.toBeInstanceOf(SwapCreateTimeoutError);
+    await jest.advanceTimersByTimeAsync(1000);
+    await rejected;
+    expect(payInvoice).not.toHaveBeenCalled();
+  });
+
+  it("maps the create request's own timeout to a clear nothing-was-sent error", async () => {
+    (boltzService.createReverseSwap as jest.Mock).mockRejectedValueOnce(
+      new SwapServerTimeoutError(30_000),
+    );
+    const payInvoice = jest.fn();
+    const error = await executeReverseSwap(params({ payInvoice })).catch((e) => e);
+    expect(error).toBeInstanceOf(SwapCreateTimeoutError);
+    expect((error as Error).name).not.toBe('AbortError');
+    expect((error as Error).message).toMatch(/Nothing was sent/);
+    expect(payInvoice).not.toHaveBeenCalled();
+  });
+
+  it('never creates a swap when the caller signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(executeReverseSwap(params({ signal: controller.signal }))).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(boltzService.createReverseSwap).not.toHaveBeenCalled();
+    expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
+    expect(swapRecoveryService.registerPendingSwap).not.toHaveBeenCalled();
+  });
+
+  it('rejects on cancellation and never persists or pays a late result', async () => {
+    jest.useFakeTimers();
+    let resolveCreate!: (swap: typeof SWAP) => void;
+    (boltzService.createReverseSwap as jest.Mock).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    const controller = new AbortController();
+    const payInvoice = jest.fn();
+    const sending = executeReverseSwap(params({ payInvoice, signal: controller.signal }));
+    controller.abort();
+    await expect(sending).rejects.toMatchObject({ name: 'AbortError' });
+    expect((boltzService.createReverseSwap as jest.Mock).mock.calls[0][4].aborted).toBe(true);
+    resolveCreate(SWAP);
+    await jest.runAllTimersAsync();
+    expect(SecureStore.setItemAsync).not.toHaveBeenCalled();
+    expect(swapRecoveryService.registerPendingSwap).not.toHaveBeenCalled();
+    expect(payInvoice).not.toHaveBeenCalled();
+  });
+});
+
+describe('isSwapCreateTimeout', () => {
+  it('recognises both timeout errors and nothing else', () => {
+    expect(isSwapCreateTimeout(new SwapCreateTimeoutError())).toBe(true);
+    expect(
+      isSwapCreateTimeout(Object.assign(new Error('x'), { name: 'SwapServerTimeoutError' })),
+    ).toBe(true);
+    expect(isSwapCreateTimeout(new Error('boom'))).toBe(false);
+    expect(isSwapCreateTimeout(undefined)).toBe(false);
   });
 });

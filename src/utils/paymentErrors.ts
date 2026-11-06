@@ -71,7 +71,7 @@ export function humanizePaymentError(raw: string | undefined | null): HumanizedP
   // see internal event hashes even on the fallback path. `cleaned` is
   // what we display; `trimmed` is kept as the raw detail for support.
   const cleaned = trimmed.replace(/[0-9a-f]{64}/gi, '').trim();
-  const looksTechnical = cleaned.length < 4 || /^[^a-zA-Z]+$/.test(cleaned);
+  const looksTechnical = cleaned.length < 4 || /^[^\p{L}]+$/u.test(cleaned);
   return {
     message: looksTechnical ? 'Payment failed. Please try again.' : cleaned,
     detail: trimmed,

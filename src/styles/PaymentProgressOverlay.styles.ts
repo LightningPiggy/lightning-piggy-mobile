@@ -28,7 +28,12 @@ export const createPaymentProgressOverlayStyles = (colors: Palette) =>
       borderRadius: 28,
       paddingVertical: 32,
       paddingHorizontal: 28,
-      minWidth: 260,
+      // A definite width (not content-sized via minWidth): with only
+      // min/max, Yoga sized the card around the swap checklist's flex:1
+      // labels, squeezing them into a narrow column whose wrapped height
+      // was under-measured on iOS — "Claiming to your address" was drawn
+      // over the Cancel button (2026-11-01).
+      width: '100%',
       maxWidth: 340,
       alignItems: 'center',
       gap: 14,

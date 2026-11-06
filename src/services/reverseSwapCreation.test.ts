@@ -4,7 +4,12 @@ import { ripemd160 } from '@noble/hashes/legacy.js';
 import { p2tr, Script } from '@scure/btc-signer';
 import { keyAggregate, keyAggExport } from '@scure/btc-signer/musig2.js';
 import * as bitcoin from 'bitcoinjs-lib';
-import { createReverseSwap, claimSwap, getReverseSwapFees } from './boltzService';
+import {
+  createReverseSwap,
+  claimSwap,
+  getReverseSwapFees,
+  REVERSE_SWAP_CREATE_TIMEOUT_MS,
+} from './boltzService';
 import { getBlockHeight, broadcastRawTx, getClaimFeeEstimate, isTxKnown } from './onchainService';
 import { verifyReverseSwap, verifyReverseLockup } from '../utils/reverseSwapVerify';
 import { CLAIM_TX_MAX_VSIZE } from '../utils/reverseSwapAmounts';
@@ -170,6 +175,43 @@ describe('creation before funding', () => {
     );
     expect(body.pairHash).toBe('reverse-quote');
     expect(body).not.toHaveProperty('referralId');
+  });
+  it('lets the caller cancel the create request (Cancel no longer spins forever)', async () => {
+    const controller = new AbortController();
+    const quoteFetch = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) => {
+      if (init?.method !== 'POST') return quoteFetch(url, init);
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () =>
+          reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })),
+        );
+        controller.abort();
+      });
+    });
+    await expect(
+      createReverseSwap(fixture().lockupAddress, 100000, undefined, 'invoice', controller.signal),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+  it('reports a create that outlives its budget as a server timeout, not a cancel', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      const quoteFetch = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation(async (url, init) => {
+        if (init?.method !== 'POST') return quoteFetch(url, init);
+        // Boltz wrote the swap but never answers (family server, 2026-11-01).
+        return new Promise((_resolve, reject) =>
+          init.signal.addEventListener('abort', () =>
+            reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })),
+          ),
+        );
+      });
+      const creating = createReverseSwap(fixture().lockupAddress, 100000).catch((e) => e);
+      await jest.advanceTimersByTimeAsync(REVERSE_SWAP_CREATE_TIMEOUT_MS);
+      const error = await creating;
+      expect((error as Error).name).toBe('SwapServerTimeoutError');
+    } finally {
+      jest.useRealTimers();
+    }
   });
   it.each(['amount', 'address', 'script', 'timeout'])(
     'rejects %s before a caller can pay',

@@ -240,6 +240,10 @@ export function isQuoteChangedError(error: unknown): error is QuoteChangedError 
   return (error as Error)?.name === 'QuoteChangedError' && !!(error as QuoteChangedError).quote;
 }
 
+/** Creating a reverse swap makes Boltz mint a hold invoice on its node, which
+ *  is slower than a quote — allow more than the default 10 s request budget. */
+export const REVERSE_SWAP_CREATE_TIMEOUT_MS = 30_000;
+
 /** Which side of a reverse swap the caller's amount fixes. */
 export type ReverseSwapAmountSide = 'invoice' | 'recipient';
 
@@ -260,6 +264,7 @@ export async function createReverseSwap(
   amountSats: number,
   approvedQuote?: SwapFees,
   amountIs: ReverseSwapAmountSide = 'invoice',
+  signal?: AbortSignal,
 ): Promise<ReverseSwapResult> {
   const backend = await requireSwapBackend();
   console.log(
@@ -315,28 +320,33 @@ export async function createReverseSwap(
   const claimKeys = generateClaimKeyPair();
   const claimPublicKey = toHex(claimKeys.publicKey);
 
-  const res = await fetchWithTimeout(`${backend}/swap/reverse`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: 'BTC',
-      to: 'BTC',
-      preimageHash,
-      claimPublicKey,
-      claimAddress: onchainAddress,
-      ...(recipientQuote
-        ? { onchainAmount: recipientQuote.lockupSats }
-        : { invoiceAmount: amountSats }),
-      pairHash: fees.pairHash,
-    }),
-  });
-
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Boltz swap creation failed: ${errBody}`);
-  }
-
-  const data: unknown = await res.json();
+  // The caller's signal lets Cancel abort the request; the deadline covers
+  // the body read too. A timeout or cancel here is pre-commit: nothing has
+  // been paid, and any swap Boltz created anyway just expires unpaid.
+  const data: unknown = await fetchWithTimeout(
+    `${backend}/swap/reverse`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: 'BTC',
+        to: 'BTC',
+        preimageHash,
+        claimPublicKey,
+        claimAddress: onchainAddress,
+        ...(recipientQuote
+          ? { onchainAmount: recipientQuote.lockupSats }
+          : { invoiceAmount: amountSats }),
+        pairHash: fees.pairHash,
+      }),
+      signal,
+    },
+    REVERSE_SWAP_CREATE_TIMEOUT_MS,
+    async (res) => {
+      if (!res.ok) throw new Error(`Boltz swap creation failed: ${await res.text()}`);
+      return res.json();
+    },
+  );
   // Boltz only echoes `onchainAmount` when we fixed the invoice; when we fixed
   // the lockup it is ours by definition. A present-but-different value still
   // fails verification, and the lockup tx itself is later checked against it.

@@ -1680,7 +1680,8 @@
     "swapStepPay": "Enviando el pago Lightning",
     "swapStepLockup": "Esperando a que Boltz bloquee los fondos on-chain",
     "swapStepClaim": "Reclamando a tu dirección",
-    "swapNotPaid": "No se envió nada: el pago Lightning a Boltz no se completó, así que ningún sat salió de tu cartera. Puedes intentarlo de nuevo."
+    "swapNotPaid": "No se envió nada: el pago Lightning a Boltz no se completó, así que ningún sat salió de tu cartera. Puedes intentarlo de nuevo.",
+    "swapServerTimeout": "El servidor de intercambios no terminó de preparar el intercambio a tiempo. No se envió nada."
   },
   "placeDetailScreen": {
     "viewOnBtcMap": "Ver en BTC Map",

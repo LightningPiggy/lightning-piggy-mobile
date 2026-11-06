@@ -36,6 +36,8 @@ import {
 import * as boltzService from '../services/boltzService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as SecureStore from 'expo-secure-store';
+import { SwapServerTimeoutError } from '../services/boltzApi';
+import { isSwapCreateTimeout } from './reverseSwapSend';
 
 const CLAIM = { txId: 'claim-tx', outputSats: 28500 };
 const SWAP = {
@@ -245,6 +247,21 @@ describe('payAndClaimReverseSwap — hold invoice', () => {
     state.settlePayment('preimage-hex');
     await expect(done).rejects.toBeInstanceOf(SwapSettlingError);
     expect(claimSwap).not.toHaveBeenCalled();
+    expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
+  });
+
+  it('a swap-server timeout after the payment committed is a SwapSettlingError, never a create timeout', async () => {
+    // SendSheet labels any SwapServerTimeoutError "Nothing was sent". Once the
+    // payment is committed, a status poll timing out must not surface as one.
+    const { state, payInvoice } = holdInvoiceSwap();
+    const done = run({ payInvoice });
+    await flush();
+    state.failLockup(new SwapServerTimeoutError(30_000));
+    await flush();
+    state.settlePayment('preimage-hex');
+    const error = await done.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SwapSettlingError);
+    expect(isSwapCreateTimeout(error)).toBe(false);
     expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
   });
 
