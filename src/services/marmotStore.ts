@@ -44,6 +44,18 @@ export interface MarmotKvBackend {
   keys(namespace: string): Promise<string[]>;
 }
 
+/** Read every finite number stored under `namespace` into `into`. */
+export async function loadNumberMap(
+  backend: Pick<MarmotKvBackend, 'get' | 'keys'>,
+  namespace: string,
+  into: Map<string, number>,
+): Promise<void> {
+  for (const key of await backend.keys(namespace)) {
+    const v = Number(await backend.get(namespace, key));
+    if (Number.isFinite(v)) into.set(key, v);
+  }
+}
+
 export function createSqliteMarmotBackend(owner: string): MarmotKvBackend {
   return {
     owner,

@@ -150,6 +150,9 @@ export function useConversationComposerActions(params: {
       // hangs and never settles) — without this a pending/hung send showed an
       // empty relay breakdown (the missing-relays bug).
       let targetRelays: string[] = [];
+      // The send's failure reason, kept on the bubble even if slow relays
+      // finalize its delivery afterwards.
+      let sendError: string | undefined;
       // Watchdog: if the send hasn't settled the bubble within the window,
       // flip the pending Clock to the red failed tick (#857). This is the
       // authoritative settle guarantee — the underlying publish can hang in
@@ -192,16 +195,25 @@ export function useConversationComposerActions(params: {
           },
           onDeliveryFinalized: (delivery) => {
             // Slow relays settled — upgrade the tick (e.g. single → double).
-            if (eventId) setDmDeliveryStatus(eventId, delivery);
+            if (eventId)
+              setDmDeliveryStatus(
+                eventId,
+                sendError ? { ...delivery, error: sendError } : delivery,
+              );
           },
         });
         // Settle the bubble. `delivery` is present for any send that reached
         // the publish stage; a hard pre-publish error (not logged in, signer
         // cancelled) has none → mark failed so the bubble shows a red tick.
         if (eventId) {
+          // Keep the send's reason on a failed bubble — the info sheet shows it.
+          const error = result.success ? undefined : result.error;
+          sendError = error;
           setDmDeliveryStatus(
             eventId,
-            result.delivery ?? failedDelivery({ eventId, relays: targetRelays }),
+            result.delivery
+              ? { ...result.delivery, ...(error ? { error } : {}) }
+              : failedDelivery({ eventId, relays: targetRelays, error }),
           );
         } else if (!result.success) {
           if (result.marmotUnreachable && fallback) return fallback(result.marmotUnreachable);

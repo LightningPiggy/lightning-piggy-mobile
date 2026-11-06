@@ -11,7 +11,13 @@ import {
 } from './marmotSession';
 import {
   DM_SETUP_TIMEOUT_MS,
+  restartDmWithin,
+  MarmotDmSetupTimeoutError,
+  isRelayUnreachableError,
   marmotDelivery,
+  marmotSendError,
+  MarmotUserFacingError,
+  requireMarmotSession,
   sendMarmotDm,
   sendMarmotGroupRumor,
 } from './marmotSend';
@@ -306,3 +312,66 @@ it.each([14, NWC_SHARE_KIND])(
     }
   },
 );
+
+describe('marmotSendError', () => {
+  it('says "no relay reachable" for marmot-ts publish failures, not a chat error', () => {
+    // What a send on a dead connection (offline / blocking VPN) throws.
+    const offline = new Error(
+      'Failed to publish application message: Error: connection failure: connection failed',
+    );
+    expect(isRelayUnreachableError(offline)).toBe(true);
+    expect(marmotSendError(offline)).toMatch(/Couldn't reach any relay/);
+    expect(marmotSendError(new Error('Failed to publish commit: no relay acknowledged'))).toMatch(
+      /Couldn't reach any relay/,
+    );
+    expect(marmotSendError(new Error('Group has no relays available to send messages.'))).toMatch(
+      /Couldn't reach any relay/,
+    );
+    // The network adapter's own failure, rethrown unprefixed.
+    expect(marmotSendError(new Error('connection failure: connection failed'))).toMatch(
+      /Couldn't reach any relay/,
+    );
+  });
+
+  it('suggests Repair only for MLS state errors without exposing raw details', () => {
+    const mls = new Error('Cannot encrypt: epoch 3 is not the current epoch');
+    expect(isRelayUnreachableError(mls)).toBe(false);
+    expect(marmotSendError(mls)).toMatch(/Repair secure chat/);
+    expect(marmotSendError(new Error('MLS epoch key: secret'))).not.toContain('secret');
+  });
+});
+
+it('shows an app-authored, localised reason as-is', () => {
+  expect(marmotSendError(new MarmotUserFacingError('You can only edit your own messages.'))).toBe(
+    'You can only edit your own messages.',
+  );
+  expect(() => requireMarmotSession('f'.repeat(64))).toThrow(MarmotUserFacingError);
+});
+
+it.each([
+  'Marmot is still starting up',
+  'Signer rejected',
+  'MLS signer rejected',
+  'NIP-46 timeout',
+  'Amber timed out',
+  'nsec1secret',
+])('does not suggest Repair or expose details for %s', (message) => {
+  const result = marmotSendError(new Error(message));
+  expect(result).toBe('Could not send the message. Please try again.');
+});
+
+it.each([false, true])('bounds Repair and preserves Amber guidance (open=%s)', async (open) => {
+  jest.useFakeTimers();
+  const amber = jest.spyOn(marmotSigner, 'amberRequestOpenSince').mockReturnValue(open ? 1 : null);
+  try {
+    const pending = restartDmWithin({ restartDm: () => new Promise(() => undefined) }, PEER);
+    const failed = pending.catch((e: unknown) => e);
+    await jest.advanceTimersByTimeAsync(DM_SETUP_TIMEOUT_MS);
+    const error = await failed;
+    expect(error).toBeInstanceOf(MarmotDmSetupTimeoutError);
+    expect(marmotSendError(error)).toMatch(open ? /Open Amber/ : /taking too long/);
+  } finally {
+    amber.mockRestore();
+    jest.useRealTimers();
+  }
+});

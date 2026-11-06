@@ -26,7 +26,12 @@ import {
 } from './marmotSession';
 import { MARMOT_ADMIN_REMOVE_KIND, MARMOT_DELETE_KIND } from './marmotDeletions';
 import { MARMOT_EDIT_KIND } from './marmotEdits';
-import { marmotSendError, requireMarmotSession, type MarmotDraft } from './marmotSend';
+import {
+  marmotSendError,
+  MarmotUserFacingError,
+  requireMarmotSession,
+  type MarmotDraft,
+} from './marmotSend';
 import { t } from '../i18n';
 
 /** Where the message lives: a 1:1 chat with `peer`, or a Marmot group. */
@@ -79,7 +84,7 @@ async function groupHolding(
 ): Promise<{ groupId: string; targetRumor?: MarmotRumor }> {
   const candidates =
     'groupId' in target ? [target.groupId] : await session.dmGroupIdsWith(target.peer);
-  if (candidates.length === 0) throw new Error(t('messageEdit.noChat'));
+  if (candidates.length === 0) throw new MarmotUserFacingError(t('messageEdit.noChat'));
   const id = targetId.toLowerCase();
   for (const groupId of candidates) {
     const targetRumor = (await session.queryHistory(groupId)).find((r) => r.id === id);
@@ -106,12 +111,12 @@ export async function sendMarmotMessageAction(
     const { groupId, targetRumor } = await groupHolding(session, target, targetId);
     // Own messages only — never send a retraction for someone else's.
     if (targetRumor && targetRumor.pubkey.toLowerCase() !== myPubkey.toLowerCase()) {
-      throw new Error(t('messageEdit.notYours'));
+      throw new MarmotUserFacingError(t('messageEdit.notYours'));
     }
     let draft: MarmotDraft | null;
     if (action.type === 'edit') {
       draft = marmotEditDraft(targetId, action.text, action.previousEditedAt);
-      if (!draft) throw new Error(t('messageEdit.emptyEdit'));
+      if (!draft) throw new MarmotUserFacingError(t('messageEdit.emptyEdit'));
     } else {
       const me = myPubkey.toLowerCase();
       const isAdmin = !!session.getGroup(groupId)?.adminPubkeys.some((a) => a === me);
@@ -120,7 +125,8 @@ export async function sendMarmotMessageAction(
     const rumor = buildMarmotRumor(myPubkey, draft);
     sent = { groupId, rumor };
     const byRelay = await session.sendRumor(groupId, rumor);
-    if (!Object.values(byRelay).some(Boolean)) throw new Error(t('messageEdit.noRelay'));
+    if (!Object.values(byRelay).some(Boolean))
+      throw new MarmotUserFacingError(t('messageEdit.noRelay'));
     session.deliverOwn(groupId, rumor);
     return { success: true };
   } catch (e) {

@@ -110,8 +110,10 @@ export function useMarmotChatDevices(
             ? `${session.devices.groupCount()}|${session.devices.epochOf(chatId)}`
             : session.devices.epochsKey();
         const update = () => {
-          if (last && keyFor(last.chatId) === last.key) return;
+          // A 1:1's chosen group can change without a commit (marmotDmChoice
+          // ranks by message activity), so re-pick it before the epoch check.
           const chatId = chatIdFor(session, { groupId, peer });
+          if (last && last.chatId === chatId && keyFor(chatId) === last.key) return;
           last = { chatId, key: keyFor(chatId) };
           // Same epoch → the tracker hands back the same Map: no re-render.
           const counts = chatId ? session.devices.counts(chatId) : null;

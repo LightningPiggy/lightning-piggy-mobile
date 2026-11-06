@@ -447,7 +447,8 @@
     "republish": "Re-publish",
     "republishAccessibility": "Re-publish message",
     "done": "Done",
-    "closeAccessibility": "Close"
+    "closeAccessibility": "Close",
+    "reason": "Reason"
   },
   "displayScreen": {
     "currency": "Currency",
@@ -2998,7 +2999,10 @@
     "chatNotReady": "This chat is still catching up on a recent change, so that didn't go through. Try again in a moment.",
     "keyPackageLookupFailed": "We couldn't reach any relay to look up this person's Marmot key, so nothing was sent. Check your connection and try again.",
     "chatSetupTimedOut": "Setting up this secure chat is taking too long, so nothing was sent. Check your connection (and your signer app, if you use one) and try again.",
-    "waitingForAmber": "Waiting for Amber to approve, so nothing was sent yet. Open Amber, allow Lightning Piggy's request, then try again."
+    "waitingForAmber": "Waiting for Amber to approve, so nothing was sent yet. Open Amber, allow Lightning Piggy's request, then try again.",
+    "relaysUnreachable": "Couldn't reach any relay, so nothing was sent. Check your connection (mobile data, Wi-Fi or VPN) and try again.",
+    "groupStateError": "Secure chat error, so nothing was sent. If this keeps happening, use Repair secure chat in the chat info.",
+    "sendFailed": "Could not send the message. Please try again."
   },
   "signOutPrompt": {
     "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",
@@ -3383,7 +3387,13 @@
     "empty": "No items in this tab",
     "voice": "Voice note",
     "openMedia": "Open media",
-    "loadMedia": "Tap to load media"
+    "loadMedia": "Tap to load media",
+    "repair": "Repair secure chat",
+    "repairing": "Repairing…",
+    "repairTitle": "Repair secure chat?",
+    "repairMessage": "Use this if your messages fail or {{name}}'s stop arriving. A fresh secure chat is started with {{name}}'s devices and new messages go there. Your messages here stay.",
+    "repairDone": "Fresh secure chat started",
+    "repairFailed": "Couldn't repair the chat"
   },
   "settingsRows": {
     "experimentalSubtitle": "Features still being tested",

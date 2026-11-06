@@ -1,3 +1,5 @@
+import { MarmotDmRelayTopUp } from './marmotDmRelayTopUp';
+import { DmSuperseded } from './marmotDmSuperseded';
 import { maintainDiscoverableKeyPackage } from './marmotKeyPackageDiscovery';
 import { previewInvitationWelcome } from './marmotInvitationPreview';
 // One Marmot (MLS-over-Nostr) client per signed-in account.
@@ -52,6 +54,8 @@ import { startPendingWelcomeRetries } from './marmotPendingWelcomes';
 import { retryPendingRetirement } from './marmotKeyPackageRetire';
 import { MarmotDeviceTracker } from './marmotDeviceTracker';
 import { MarmotDmDeviceSync } from './marmotDmDeviceSync';
+import * as dmChoice from './marmotDmChoice';
+import { summariseGroup, type MarmotGroupSummary } from './marmotGroupSummary';
 import { installMarmotSameClientRule } from './marmotSameClient';
 import {
   fetchDevices,
@@ -93,6 +97,7 @@ import { clearFailedMarmotInvites, publishFailedMarmotInvites } from './marmotFa
 import {
   createMarmotKvStore,
   createSqliteMarmotBackend,
+  loadNumberMap,
   type MarmotKvBackend,
 } from './marmotStore';
 import { isTransientMarmotKind, transientFreeHistoryFactory } from './marmotTransientRumors';
@@ -127,21 +132,7 @@ export interface MarmotRumor {
   content: string;
 }
 
-export interface MarmotGroupSummary {
-  /** App group id: `marmot:<mls group id hex>`. */
-  id: string;
-  name: string;
-  description: string;
-  /** Members other than the viewer. */
-  memberPubkeys: string[];
-  adminPubkeys: string[];
-  /** White Noise DM convention: two members, empty name. */
-  isDm: boolean;
-  /** Relays the group's kind-445 traffic is published to. */
-  relays: string[];
-  /** When this device first saw the group (ms) — MLS carries no creation time. */
-  createdAt: number;
-}
+export type { MarmotGroupSummary } from './marmotGroupSummary';
 
 export interface MarmotMessageEvent {
   group: MarmotGroupSummary;
@@ -190,6 +181,16 @@ export class MarmotSession {
   private readonly watermarks = new Map<string, number>();
   private readonly firstSeen = new Map<string, number>();
   private readonly creatingDms = new Map<string, Promise<MarmotGroupSummary>>();
+  private readonly superseded: DmSuperseded;
+  private readonly relayTopUps = new MarmotDmRelayTopUp(
+    (id, proposals) => this.commit(id, proposals),
+    () => this.emitGroupsChanged(),
+    () => this.opts.dmDeviceSyncWaitMs,
+  );
+  // Authenticated per-group activity: which 1:1 group is "the" chat (marmotDmChoice).
+  private readonly activity = new dmChoice.GroupActivity(
+    (id, ms) => void this.backend.set('dmActivity', id, String(ms)),
+  );
   private readonly welcomeJoins: MarmotWelcomeJoin;
   private readonly deliveredRumors = new Set<string>();
   private readonly push: MarmotPushNotifier;
@@ -229,6 +230,7 @@ export class MarmotSession {
     this.pubkey = opts.pubkey;
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
+    this.superseded = new DmSuperseded(this.backend);
 
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
@@ -355,7 +357,10 @@ export class MarmotSession {
     try {
       // Inside the try: a store failure must still open the `ready` gate, or
       // every send/join awaiting it would hang instead of erroring.
-      await this.loadWatermarks();
+      await loadNumberMap(this.backend, 'watermark', this.watermarks);
+      await loadNumberMap(this.backend, 'firstSeen', this.firstSeen);
+      await loadNumberMap(this.backend, 'dmActivity', this.activity.map);
+      await this.superseded.load();
       const loaded = await groups.loadAll();
       loaded.forEach((g) => this.wireGroup(g));
       for (const g of loaded) {
@@ -508,14 +513,13 @@ export class MarmotSession {
     return this.listGroups().find((g) => g.id === appGroupId);
   }
 
-  /** The DM group with `peer`, if one exists. */
+  /** The DM with `peer`: prefer Repair, then authenticated activity (marmotDmChoice). */
   findDm(peer: string): MarmotGroupSummary | undefined {
     const p = peer.toLowerCase();
-    // Newest wins: if the peer lost their MLS state (reinstall, new device)
-    // and started a fresh DM, the old group is a dead end they can't read.
-    return this.listGroups()
-      .filter((g) => g.isDm && g.memberPubkeys[0] === p)
-      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    return dmChoice.pickDm(
+      this.listGroups().filter((g) => g.isDm && g.memberPubkeys[0] === p),
+      (id) => this.superseded.has(id),
+    );
   }
 
   /** Whether `peer` has a key package to invite; throws on a failed lookup / only unusable keys. */
@@ -528,16 +532,25 @@ export class MarmotSession {
     // Stored groups must be loaded first, or an existing DM is missed and a
     // duplicate MLS group gets created for the same peer.
     await this.ready;
+    return this.findDm(peer) ?? this.restartDm(peer, false);
+  }
+
+  /** A fresh 1:1 with `peer` ("Repair secure chat"); first use (`repair` false) marks nothing. */
+  restartDm(peer: string, repair = true): Promise<MarmotGroupSummary> {
     const p = peer.toLowerCase();
-    const existing = this.findDm(p);
-    if (existing) return existing;
     // Single-flight per peer: creating + inviting takes several relay round
     // trips, and a second quick send must not create a second DM group.
     const inFlight = this.creatingDms.get(p);
     if (inFlight) return inFlight;
-    const creating = this.createGroup('', [p], { adminPubkeys: [this.pubkey, p] }).finally(() =>
-      this.creatingDms.delete(p),
-    );
+    const creating = (async () => {
+      await this.ready;
+      const fresh = await this.superseded.restart(
+        repair ? this.listGroups().filter((g) => g.isDm && g.memberPubkeys[0] === p) : [],
+        () => this.createGroup('', [p], { adminPubkeys: [this.pubkey, p] }),
+      );
+      this.emitGroupsChanged();
+      return fresh;
+    })().finally(() => this.creatingDms.delete(p));
     this.creatingDms.set(p, creating);
     return creating;
   }
@@ -558,13 +571,17 @@ export class MarmotSession {
     const devices = await this.invitees(members);
     const group = await this.client.groups.create(name, {
       description: opts.description ?? '',
-      relays: this.writeRelays(),
+      relays: dmChoice.groupRelaysFor(
+        this.writeRelays(),
+        dmChoice.groupRelayFallbacks(this.pubkey),
+      ),
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
     try {
       const { undelivered } = await this.inviteAll(group.idStr, devices);
       // Nobody can join: drop it so a retry starts clean (no queued Welcomes).
       if (undelivered.length === devices.size) throw new MarmotWelcomeDeliveryError(undelivered);
+      this.activity.note(group.idStr, Date.now()); // we just made it: it's the live one here
       return { ...this.summarise(group), undelivered };
     } catch (e) {
       // Don't leave an empty, invisible group (and its relay sub) behind —
@@ -618,11 +635,15 @@ export class MarmotSession {
     // Adds are admin-only; in a DM both people are admins.
     if (!dm?.isDm || !dm.memberPubkeys[0] || !dm.adminPubkeys.includes(this.pubkey.toLowerCase()))
       return;
-    if (reason === 'send' || this.opts.signerType === 'nsec') {
+    const mlsId = toMlsGroupId(appGroupId);
+    const active = reason === 'send' || this.opts.signerType === 'nsec';
+    if (active) {
       void this.outbox.flush().catch(() => undefined);
-      void this.welcomePayloads.flush(toMlsGroupId(appGroupId)).catch(() => undefined);
+      void this.welcomePayloads.flush(mlsId).catch(() => undefined);
     }
-    await this.dmDevices.sync(toMlsGroupId(appGroupId), dm.memberPubkeys[0], reason);
+    await this.dmDevices.sync(mlsId, dm.memberPubkeys[0], reason);
+    if (active)
+      await this.relayTopUps.sync(mlsId, dm.relays, dmChoice.groupRelayFallbacks(this.pubkey));
   }
 
   /** Every outbound group intent goes through here: never queued inside
@@ -746,6 +767,9 @@ export class MarmotSession {
       for (const [url, res] of Object.entries(r.response)) byRelay[url] = byRelay[url] || res.ok;
     }
     const ok = Object.values(byRelay).filter(Boolean).length;
+    // The rumor's own time, as recipients record it (marmotDmChoice): equal
+    // times then break by group id the same way on both sides.
+    if (ok > 0) dmChoice.noteRumor(this.activity, toMlsGroupId(appGroupId), rumor);
     if (__DEV__)
       console.log(`[Marmot] sent kind ${rumor.kind}: ${ok}/${Object.keys(byRelay).length}`);
     // MIP-05: wake the other members' devices (best-effort, off the send path).
@@ -782,6 +806,8 @@ export class MarmotSession {
   async acceptWelcome(welcomeRumor: MarmotRumor): Promise<MarmotGroupSummary | null> {
     await this.ready;
     const group = await this.welcomeJoins.accept(welcomeRumor);
+    // Its Welcome time, as the creator noted at creation: else two message-less 1:1s tie on id.
+    if (group) this.activity.note(group.idStr, welcomeRumor.created_at * 1000);
     return group ? this.summarise(group) : null;
   }
 
@@ -808,25 +834,8 @@ export class MarmotSession {
   }
 
   private summarise(g: SessionGroup): MarmotGroupSummary {
-    const view = g.groupData;
-    const me = this.pubkey.toLowerCase();
-    const members = getGroupMembers(g.state).map((p) => p.toLowerCase());
-    const others = members.filter((p) => p !== me);
-    const name = view?.name ?? '';
-    return {
-      id: toAppGroupId(g.idStr),
-      name,
-      description: view?.description ?? '',
-      memberPubkeys: others,
-      adminPubkeys: (view?.adminPubkeys ?? []).map((p) => p.toLowerCase()),
-      // White Noise DM: unnamed, two ACCOUNTS — `members` is distinct pubkeys,
-      // so a contact on several devices (3+ leaves) is still a DM. ≤2 so a DM
-      // mid-creation (just us, invite not yet committed) never flashes up as
-      // a 1-member group.
-      isDm: name === '' && members.length <= 2,
-      relays: g.relays ?? [],
-      createdAt: this.firstSeen.get(g.idStr) ?? Date.now(),
-    };
+    const ctx = { viewer: this.pubkey, firstSeen: this.firstSeen, activity: this.activity.map };
+    return summariseGroup(g, { ...ctx, id: toAppGroupId(g.idStr) });
   }
 
   private wireGroup(g: SessionGroup): void {
@@ -854,6 +863,7 @@ export class MarmotSession {
         if (__DEV__) console.warn('[Marmot] undecodable app payload:', e);
         return;
       }
+      dmChoice.noteRumor(this.activity, g.idStr, rumor); // it decrypted: a member sent it
       this.deliver(g, rumor);
     });
   }
@@ -916,6 +926,7 @@ export class MarmotSession {
    */
   private async replayHistory(g: SessionGroup): Promise<void> {
     if (!g.history) return;
+    await dmChoice.seedActivityOnce(this.backend, this.activity, g, this.pubkey);
     const since = Math.floor(Date.now() / 1000) - HISTORY_REPLAY_SECS;
     const recent = (await g.history.queryRumors({ since })) as MarmotRumor[];
     recent.sort((a, b) => a.created_at - b.created_at).forEach((r) => this.deliver(g, r));
@@ -941,18 +952,6 @@ export class MarmotSession {
     this.pushRegistration.schedule();
     const groups = this.listGroups();
     for (const l of this.listeners) l.onGroupsChanged?.(groups);
-  }
-
-  private async loadWatermarks(): Promise<void> {
-    for (const [ns, map] of [
-      ['watermark', this.watermarks],
-      ['firstSeen', this.firstSeen],
-    ] as const) {
-      for (const key of await this.backend.keys(ns)) {
-        const v = Number(await this.backend.get(ns, key));
-        if (Number.isFinite(v)) map.set(key, v);
-      }
-    }
   }
 }
 

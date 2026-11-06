@@ -217,7 +217,10 @@ describe('sendMarmotMessageAction', () => {
     const result = await sendMarmotMessageAction(ME, { groupId: 'marmot:g' }, MSG, {
       type: 'delete',
     });
-    expect(result).toEqual({ success: false, error: 'relay pool down' });
+    expect(result).toEqual({
+      success: false,
+      error: 'Could not send the message. Please try again.',
+    });
     expect(calls.delivered).toEqual([]);
     expect(calls.forgotten).toHaveLength(1);
   });

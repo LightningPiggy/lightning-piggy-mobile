@@ -87,6 +87,23 @@ export function getOrCreateDmWithin(
   peer: string,
   timeoutMs = DM_SETUP_TIMEOUT_MS,
 ): ReturnType<MarmotSession['getOrCreateDm']> {
+  return dmSetupWithin(() => session.getOrCreateDm(peer), peer, timeoutMs);
+}
+
+/** Repair shares the send setup deadline and Amber guidance. */
+export function restartDmWithin(
+  session: Pick<MarmotSession, 'restartDm'>,
+  peer: string,
+  timeoutMs = DM_SETUP_TIMEOUT_MS,
+): ReturnType<MarmotSession['restartDm']> {
+  return dmSetupWithin(() => session.restartDm(peer), peer, timeoutMs);
+}
+
+async function dmSetupWithin(
+  setup: () => ReturnType<MarmotSession['getOrCreateDm']>,
+  peer: string,
+  timeoutMs: number,
+): ReturnType<MarmotSession['getOrCreateDm']> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -95,7 +112,7 @@ export function getOrCreateDmWithin(
     );
   });
   const trace = beginDmSetupTrace(peer);
-  return Promise.race([session.getOrCreateDm(peer), deadline])
+  return Promise.race([Promise.resolve().then(setup), deadline])
     .then(
       (dm) => (trace.end('ok'), dm),
       (e: unknown) => {
@@ -108,8 +125,26 @@ export function getOrCreateDmWithin(
     .finally(() => clearTimeout(timer));
 }
 
+// marmot-ts's group publish throws these when no relay acknowledged
+// (group-runtime: "Failed to publish <what>: …"), the group has no relays,
+// or the network adapter itself failed (rethrown as-is): a connectivity
+// problem (offline, VPN, relays down), not an MLS one.
+const NO_RELAY_ERROR =
+  /^(Failed to publish |Group has no relays available)|connection fail|network request failed/i;
+export const isRelayUnreachableError = (e: unknown) =>
+  e instanceof Error && NO_RELAY_ERROR.test(e.message);
+
 /** A user-facing reason a Marmot send couldn't start. */
+/** An app-authored, already-localised reason that is safe to show as-is. */
+export class MarmotUserFacingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MarmotUserFacingError';
+  }
+}
+
 export function marmotSendError(e: unknown): string {
+  if (e instanceof MarmotUserFacingError) return e.message;
   const reason = marmotUnreachableReason(e);
   if (reason) return t(`marmotSend.${reason}`);
   if (e instanceof MarmotKeyPackageLookupError) return t('marmotSend.keyPackageLookupFailed');
@@ -117,7 +152,17 @@ export function marmotSendError(e: unknown): string {
     return t(e.waitingForAmber ? 'marmotSend.waitingForAmber' : 'marmotSend.chatSetupTimedOut');
   if (e instanceof MarmotWelcomeDeliveryError) return t('marmotSend.inviteNotDelivered');
   if (e instanceof MarmotGroupNotReadyError) return t('marmotSend.chatNotReady');
-  return (e as Error)?.message || 'Marmot send failed';
+  if (isRelayUnreachableError(e)) return t('marmotSend.relaysUnreachable');
+  // Only recognizable MLS state failures warrant Repair. Never display raw
+  // exceptions: signer/library errors may contain keys or event payloads.
+  if (
+    e instanceof Error &&
+    /\b(epoch|group state|MLS (state|group|encrypt|decrypt)|group(?: [a-f0-9:]+)? not found|unknown group)\b/i.test(
+      e.message,
+    )
+  )
+    return t('marmotSend.groupStateError');
+  return t('marmotSend.sendFailed');
 }
 
 /** A failed send's result: the user-facing reason, plus why the peer can't be
@@ -134,7 +179,7 @@ function marmotFailure(e: unknown): SendResult {
 export function requireMarmotSession(pubkey: string): MarmotSession {
   const session = getMarmotSession();
   if (!session || session.pubkey !== pubkey) {
-    throw new Error('Marmot is still starting up — try again in a moment.');
+    throw new MarmotUserFacingError('Marmot is still starting up — try again in a moment.');
   }
   return session;
 }
@@ -171,7 +216,7 @@ export async function sendMarmotDm(
     hooks?.onDeliveryFinalized?.(delivery);
     return delivery.delivered
       ? { success: true, delivery, rumorCreatedAt: rumor.created_at }
-      : { success: false, delivery, error: 'No relay accepted the message' };
+      : { success: false, delivery, error: t('marmotSend.relaysUnreachable') };
   } catch (e) {
     return marmotFailure(e);
   }
@@ -205,7 +250,7 @@ export async function sendMarmotGroupRumor(
     // The Marmot id (not the app rumor's): what edits / deletes must target.
     return accepted > 0
       ? { success: true, wrapsPublished: accepted, rumorId: rumor.id, delivery }
-      : { success: false, error: 'No relay accepted the message', delivery };
+      : { success: false, error: t('marmotSend.relaysUnreachable'), delivery };
   } catch (e) {
     return { success: false, error: marmotSendError(e) };
   }

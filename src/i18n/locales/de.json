@@ -447,7 +447,8 @@
     "republish": "Erneut senden",
     "republishAccessibility": "Nachricht erneut veröffentlichen",
     "done": "Fertig",
-    "closeAccessibility": "Schließen"
+    "closeAccessibility": "Schließen",
+    "reason": "Grund"
   },
   "displayScreen": {
     "currency": "Währung",
@@ -2998,7 +2999,10 @@
     "chatNotReady": "Dieser Chat holt gerade noch eine kürzliche Änderung nach, daher ist das nicht durchgegangen. Versuche es gleich noch einmal.",
     "keyPackageLookupFailed": "Wir konnten kein Relay erreichen, um den Marmot-Schlüssel dieser Person abzurufen, daher wurde nichts gesendet. Prüfe deine Verbindung und versuche es erneut.",
     "chatSetupTimedOut": "Die Einrichtung dieses sicheren Chats dauert zu lange, daher wurde nichts gesendet. Prüfe deine Verbindung (und deine Signer-App, falls du eine nutzt) und versuche es erneut.",
-    "waitingForAmber": "Warte auf die Freigabe in Amber, daher wurde noch nichts gesendet. Öffne Amber, erlaube die Anfrage von Lightning Piggy und versuche es dann erneut."
+    "waitingForAmber": "Warte auf die Freigabe in Amber, daher wurde noch nichts gesendet. Öffne Amber, erlaube die Anfrage von Lightning Piggy und versuche es dann erneut.",
+    "relaysUnreachable": "Kein Relay erreichbar, daher wurde nichts gesendet. Prüfe deine Verbindung (mobile Daten, WLAN oder VPN) und versuche es erneut.",
+    "groupStateError": "Fehler im sicheren Chat, daher wurde nichts gesendet. Wenn das wieder passiert, nutze „Sicheren Chat reparieren“ in den Chat-Infos.",
+    "sendFailed": "Die Nachricht konnte nicht gesendet werden. Bitte versuche es erneut."
   },
   "signOutPrompt": {
     "walletsRemoved": "Alle mit diesem Konto verbundenen Wallets, einschließlich hier gespeicherter Wiederherstellungsphrasen, werden ebenfalls von diesem Handy entfernt. Sichere ihre Wiederherstellungsphrasen und Verbindungsdaten separat, bevor du dich abmeldest.",
@@ -3383,7 +3387,13 @@
     "empty": "Keine Einträge in diesem Tab",
     "voice": "Sprachnachricht",
     "openMedia": "Medien öffnen",
-    "loadMedia": "Tippen, um Medien zu laden"
+    "loadMedia": "Tippen, um Medien zu laden",
+    "repair": "Sicheren Chat reparieren",
+    "repairing": "Wird repariert…",
+    "repairTitle": "Sicheren Chat reparieren?",
+    "repairMessage": "Nutze das, wenn deine Nachrichten fehlschlagen oder die von {{name}} nicht mehr ankommen. Ein neuer sicherer Chat mit den Geräten von {{name}} wird gestartet, neue Nachrichten gehen dorthin. Deine Nachrichten hier bleiben erhalten.",
+    "repairDone": "Neuer sicherer Chat gestartet",
+    "repairFailed": "Chat konnte nicht repariert werden"
   },
   "settingsRows": {
     "experimentalSubtitle": "Funktionen, die noch getestet werden",
