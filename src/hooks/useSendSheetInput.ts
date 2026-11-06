@@ -9,7 +9,6 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
-import { confirmLinkAction } from '../utils/confirmLinkAction';
 import { parseBip21 } from '../utils/bip21';
 import {
   type DecodedInvoice,
@@ -58,7 +57,6 @@ export function useSendSheetInput(opts: {
   setSatsValue: (v: string) => void;
 }): {
   processInput: (data: string) => void;
-  acceptVettedInput: (data: string) => void;
   resetInputForOpen: () => void;
   handleBarCodeScanned: (e: { data: string }) => void;
   handleNfcContent: (content: NfcTagContent) => void;
@@ -79,12 +77,10 @@ export function useSendSheetInput(opts: {
   } = opts;
   const t = useTranslation();
   const invalidInvoiceAlertVisible = useRef(false);
-  const linkConfirmationVisible = useRef(false);
   const sessionRef = useRef(0);
   useLayoutEffect(() => {
     sessionRef.current += 1;
     invalidInvoiceAlertVisible.current = false;
-    linkConfirmationVisible.current = false;
     return () => {
       sessionRef.current += 1;
     };
@@ -95,7 +91,6 @@ export function useSendSheetInput(opts: {
   const resetInputForOpen = useCallback(() => {
     sessionRef.current += 1;
     invalidInvoiceAlertVisible.current = false;
-    linkConfirmationVisible.current = false;
   }, []);
 
   const rejectInvoiceInput = (input: string, titleKey: string, bodyKey: string) => {
@@ -190,43 +185,15 @@ export function useSendSheetInput(opts: {
     }
   };
 
-  // Caller-vetted targets skip the consent sheet: an in-app contact's address
-  // (Friends / zap / conversation send) or a deep link that App.tsx has ALREADY
-  // confirmed with the user. Prompting again would be pure friction and would
-  // make the consent sheet feel like noise. Scan / NFC / paste never use this —
-  // they go through `processInput`, which confirms first (#1500).
-  const acceptVettedInput = (data: string) => {
-    if (opts.visible === false) return;
-    acceptInput(data);
-  };
-
+  // No link-consent sheet here: the user opened Send and chose to scan, paste
+  // or tap this target, and the details step names the recipient before any
+  // payment. Links arriving from outside the app (deep links, the global NFC
+  // reader) and the Add Friend scanner still confirm first (#1500).
   const processInput = (data: string) => {
-    if (
-      opts.visible === false ||
-      linkConfirmationVisible.current ||
-      invalidInvoiceAlertVisible.current
-    )
-      return;
-    // Reject malformed invoices locally without presenting an action confirmation.
-    const input = stripLightningPrefix(data);
-    if (/^ln/i.test(input) && !isLnurlString(input) && !decodeInvoice(input)) {
-      acceptInput(data);
-      return;
-    }
-    const session = sessionRef.current;
-    linkConfirmationVisible.current = true;
-    confirmLinkAction(
-      data,
-      () => {
-        if (session !== sessionRef.current) return;
-        linkConfirmationVisible.current = false;
-        acceptInput(data);
-      },
-      () => {
-        if (session !== sessionRef.current) return;
-        linkConfirmationVisible.current = false;
-      },
-    );
+    // One invalid-invoice alert at a time: the camera can deliver the same
+    // bad QR on every frame.
+    if (opts.visible === false || invalidInvoiceAlertVisible.current) return;
+    acceptInput(data);
   };
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
@@ -277,7 +244,6 @@ export function useSendSheetInput(opts: {
 
   return {
     processInput,
-    acceptVettedInput,
     resetInputForOpen,
     handleBarCodeScanned,
     handleNfcContent,

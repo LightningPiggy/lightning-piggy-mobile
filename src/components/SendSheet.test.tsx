@@ -172,9 +172,6 @@ jest.mock('../hooks/useSendSheetInput', () => ({
     mockInputArgs = args;
     return {
       processInput: mockProcessInput,
-      // The prefill path is caller-vetted; the legacy assertions below still
-      // observe it through mockProcessInput.
-      acceptVettedInput: mockProcessInput,
       resetInputForOpen: mockResetInputForOpen,
       handleBarCodeScanned: jest.fn(),
       handleNfcContent: jest.fn(),
@@ -402,36 +399,20 @@ it('returns a rejected QR to Paste so the camera stops until deliberately select
   expect(selectedTab('send-tab-scan')).toBe(true);
 });
 
-it.each(['confirm', 'cancel'])(
-  'preserves Send and its intake session when consent is stacked: %s',
-  (choice) => {
-    mockRealInput = true;
-    render(
-      <>
-        <SendSheet visible onClose={onClose} />
-        <LinkActionSheetHost />
-      </>,
-    );
-    fireEvent.changeText(screen.getByTestId('send-paste-input'), INVOICE_WITH_AMOUNT);
-    fireEvent.press(screen.getByTestId('send-paste-go'));
-    expect(onClose).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('mock-send-amount')).toBeNull();
-    fireEvent.press(
-      screen.getByTestId(choice === 'confirm' ? 'link-action-confirm' : 'link-action-button-0'),
-    );
-    expect(onClose).not.toHaveBeenCalled();
-    if (choice === 'confirm') {
-      expect(screen.getByTestId('mock-send-amount')).toBeTruthy();
-      expect(screen.queryByTestId('send-paste-input')).toBeNull();
-    } else {
-      expect(screen.getByTestId('send-paste-input')).toBeTruthy();
-      // Cancelling frees the intake guard for the next attempt.
-      fireEvent.press(screen.getByTestId('send-paste-go'));
-      fireEvent.press(screen.getByTestId('link-action-confirm'));
-      expect(screen.getByTestId('mock-send-amount')).toBeTruthy();
-    }
-  },
-);
+it('goes straight from a pasted invoice to the amount step with no link-consent sheet', () => {
+  mockRealInput = true;
+  render(
+    <>
+      <SendSheet visible onClose={onClose} />
+      <LinkActionSheetHost />
+    </>,
+  );
+  fireEvent.changeText(screen.getByTestId('send-paste-input'), INVOICE_WITH_AMOUNT);
+  fireEvent.press(screen.getByTestId('send-paste-go'));
+  expect(screen.queryByTestId('link-action-confirm')).toBeNull();
+  expect(onClose).not.toHaveBeenCalled();
+  expect(screen.getByTestId('mock-send-amount')).toBeTruthy();
+});
 
 it('clears a friend identity after Edit address replaces the destination with an unrelated invoice', async () => {
   mockRealInput = true;
@@ -448,14 +429,12 @@ it('clears a friend identity after Edit address replaces the destination with an
     </>,
   );
   act(() => jest.runOnlyPendingTimers());
-  // An in-app recipient (Friends / zap / conversation) is vetted by the caller:
-  // no consent sheet, straight to the amount step.
+  // A prefilled in-app recipient goes straight to the amount step.
   expect(screen.queryByTestId('link-action-confirm')).toBeNull();
   expect(screen.getByTestId('mock-send-amount')).toBeTruthy();
   fireEvent.press(screen.getByTestId('sendsheet-edit-address'));
   fireEvent.changeText(screen.getByTestId('send-paste-input'), INVOICE_WITH_AMOUNT);
   fireEvent.press(screen.getByTestId('send-paste-go'));
-  fireEvent.press(screen.getByTestId('link-action-confirm'));
   await act(async () => fireEvent.press(screen.getByTestId('sendsheet-send-button')));
   expect(mockConfirmLargeSend).toHaveBeenCalledWith(
     expect.objectContaining({

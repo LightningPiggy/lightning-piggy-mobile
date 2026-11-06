@@ -256,7 +256,7 @@ const SendSheet: React.FC<Props> = ({
   );
 
   const {
-    acceptVettedInput,
+    processInput,
     resetInputForOpen,
     handleBarCodeScanned,
     handleNfcContent,
@@ -314,11 +314,11 @@ const SendSheet: React.FC<Props> = ({
       bottomSheetRef.current?.present();
       if (initialAddress) {
         // Deferred past the state reset; cleanup + session check drop a stale
-        // prefill on close/reopen. Vetted: the target is an in-app contact or a
-        // deep link App.tsx already confirmed, so no consent sheet here (#1500).
+        // prefill on close/reopen. Deep links reaching here were already
+        // confirmed by App.tsx (#1500).
         const session = openSessionRef.current;
         const prefill = setTimeout(() => {
-          if (openSessionRef.current === session) acceptVettedInput(initialAddress);
+          if (openSessionRef.current === session) processInput(initialAddress);
         }, 0);
         return () => clearTimeout(prefill);
       }
