@@ -142,6 +142,10 @@ export function guardRelay<R extends GuardableRelay>(relay: R): R {
     const wasConnecting = ws?.readyState === CONNECTING;
     close.call(relay);
     if (!ws || !wasConnecting) return;
+    // close() has already told the pool. The pool has dropped this relay, so
+    // any later onclose (from a late failure, or a late open below) could only
+    // evict a replacement (the SDK pools delete by URL): drop it now.
+    relay.onclose = null;
     // Closed mid-connect: let the late open settle the pending connect() as
     // before (rejecting instead would make the SDK pool delete the URL, which
     // may hold a replacement by now), then close the socket and reset the

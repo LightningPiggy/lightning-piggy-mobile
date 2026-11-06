@@ -145,6 +145,39 @@ describe('waitForSwapStatus abort behaviour', () => {
     expect(ws.closed).toBe(true);
   });
 
+  it('closes a socket that opens only after the watch was cancelled, without subscribing', async () => {
+    // React Native ignores close() while a WebSocket is still CONNECTING and
+    // then delivers `open` anyway; that socket must not stay open (it would
+    // hold one of OkHttp's per-host slots that the Boltz host's fetches share).
+    class ConnectingSocket extends FakeWebSocket {
+      readyState = 0;
+      close() {
+        if (this.readyState === 0) {
+          this.readyState = 2; // JS-side CLOSING only; the native socket keeps connecting
+          return;
+        }
+        this.closed = true;
+        this.readyState = 3;
+      }
+      emitOpen() {
+        this.readyState = 1;
+        super.emitOpen();
+      }
+    }
+    (global as { WebSocket?: unknown }).WebSocket = ConnectingSocket as unknown;
+    const controller = new AbortController();
+    const promise = waitForSwapStatus('swap-slow', isTerminal, 10_000, controller.signal);
+    await Promise.resolve();
+    await Promise.resolve();
+    const ws = FakeWebSocket.instances[0] as ConnectingSocket;
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    expect(ws.closed).toBe(false); // still connecting natively
+    ws.emitOpen();
+    expect(ws.closed).toBe(true);
+    expect(ws.sent).toEqual([]);
+  });
+
   it('resolves with the raw data and tears the socket down on a terminal status', async () => {
     const promise = waitForSwapStatus('swap3', isTerminal, 10_000);
 
