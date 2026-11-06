@@ -1,4 +1,5 @@
 import type { NostrWebLNProvider } from '@getalby/sdk';
+import { guardPool } from './relaySocketGuard';
 
 /**
  * Patch an NWC provider's relay pool so `publish` resolves as soon as the
@@ -24,6 +25,8 @@ export function patchRelayPublish(
   try {
     const pool = (provider as any).client?.pool;
     if (!pool) return;
+    // The SDK bundles its own nostr-tools: close the sockets it abandons too.
+    guardPool(pool);
     const origEnsureRelay = pool.ensureRelay.bind(pool);
     pool.ensureRelay = async (url: string, opts?: any) => {
       const relay = await origEnsureRelay(url, opts);

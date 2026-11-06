@@ -35,9 +35,17 @@ import { pool } from './nostrPool';
  *   and prompt the user to re-pair with broader perms.
  */
 import { BunkerSigner, createNostrConnectURI, type BunkerPointer } from 'nostr-tools/nip46';
+import { SimplePool } from 'nostr-tools/pool';
+import { guardPool } from './relaySocketGuard';
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js';
 import type { Nip46Connection } from '../types/nostr';
 import { NostrConnectError, isCiphertextDecryptError } from './signerErrors';
+
+/** Release builds give each signer its own pool, as BunkerSigner's default
+ *  does, but guarded so it closes the sockets it abandons (./relaySocketGuard). */
+function signerParams() {
+  return { pool: __DEV__ ? pool : guardPool(new SimplePool()) };
+}
 
 /** Lazily-constructed BunkerSigner. Re-created when the active
  *  connection changes (login / logout / re-pair). */
@@ -149,11 +157,7 @@ async function getSigner(): Promise<BunkerSigner> {
       secret: null,
     };
     const clientSecretKey = hexToBytes(connection.clientSecretKeyHex);
-    const signer = BunkerSigner.fromBunker(
-      clientSecretKey,
-      pointer,
-      __DEV__ ? { pool } : undefined,
-    );
+    const signer = BunkerSigner.fromBunker(clientSecretKey, pointer, signerParams());
     // `connect()` is the explicit handshake — it sends a `connect`
     // request through the relay so the bunker registers this session
     // before we start firing signEvent / nip44_encrypt at it. Subsequent
@@ -435,12 +439,7 @@ export async function awaitBunkerPair(input: {
   // BunkerSigner.fromURI has no AbortSignal input of its own, so race the
   // pairing promise against the abort. On abort we reject immediately and,
   // if the bunker acks late, close the orphaned signer rather than leak it.
-  const pairPromise = BunkerSigner.fromURI(
-    input.clientSecretKey,
-    uri,
-    __DEV__ ? { pool } : undefined,
-    maxWait,
-  );
+  const pairPromise = BunkerSigner.fromURI(input.clientSecretKey, uri, signerParams(), maxWait);
   const signer = await raceAbort(pairPromise, signal, (late) => {
     late.close().catch(() => {});
   });

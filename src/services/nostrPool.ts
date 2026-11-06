@@ -11,6 +11,7 @@ import { normalizeURL } from 'nostr-tools/utils';
 import { withRelayHealth } from './healthAwarePool';
 import { hydrateRelayHealth } from './relayHealth';
 import { withResumableSubscriptions } from './resumablePool';
+import { guardPool } from './relaySocketGuard';
 import { assertNotWrapOnlyKind } from '../utils/wrapOnlyKinds';
 
 /** `SimplePool` that skips relays known to be dead (#1326, see ./healthAwarePool). */
@@ -116,7 +117,8 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
  * `nostrService` imports this same instance, applies its custom fast-path
  * `pool.verifyEvent`, and re-exports `pool` / `trackRelays` for back-compat.
  */
-export const pool = new HealthAwarePool();
+// Closes the sockets nostr-tools abandons mid-connect (see ./relaySocketGuard).
+export const pool = guardPool(new HealthAwarePool());
 watchTestRelayLockdown(() => {
   pool.destroy();
   connectedRelays.clear();
