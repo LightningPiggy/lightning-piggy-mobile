@@ -1,3 +1,4 @@
+import { NostrWebLNProvider } from '@getalby/sdk';
 import { patchRelayPublish } from './nwcRelayPublishPatch';
 
 function fakeProvider() {
@@ -37,4 +38,20 @@ it('patches each relay once, even when ensureRelay returns it again', async () =
 it('is a no-op for a provider without a relay pool', () => {
   expect(() => patchRelayPublish({ client: {} } as any, () => {})).not.toThrow();
   expect(() => patchRelayPublish({} as any, () => {})).not.toThrow();
+});
+
+it("guards the Alby SDK's own bundled relay pool", () => {
+  const provider = new NostrWebLNProvider({
+    nostrWalletConnectUrl:
+      'nostr+walletconnect://' +
+      'b'.repeat(64) +
+      '?relay=wss%3A%2F%2Frelay.example.com&secret=' +
+      'c'.repeat(64),
+  });
+  patchRelayPublish(provider, () => {});
+  const pool = (provider as unknown as { client: { pool: { relays: Map<string, unknown> } } })
+    .client.pool;
+  const descriptor = Object.getOwnPropertyDescriptor(pool, 'relays');
+  // guardPool turns `relays` into an accessor so it can guard every relay added.
+  expect(typeof descriptor?.get).toBe('function');
 });

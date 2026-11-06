@@ -3,6 +3,7 @@ import { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import { validateEvent, type Event, type VerifiedEvent } from 'nostr-tools/pure';
 import { withRelayHealth } from './healthAwarePool';
 import { withResumableSubscriptions } from './resumablePool';
+import { guardPool } from './relaySocketGuard';
 
 /** Feeds and honours the shared relay-health state (#1326). */
 // Reuse the shared generation guard: destroy invalidates pending connects,
@@ -29,12 +30,14 @@ class HealthAwareMarketPool extends withResumableSubscriptions(
  * Connections are opened per snapshot and closed when the last running
  * snapshot finishes, so this never keeps duplicate sockets open.
  */
-const pool: AbstractSimplePool = new HealthAwareMarketPool({
-  verifyEvent: (event: Event): event is VerifiedEvent => validateEvent(event),
-  // Same transport as the shared SimplePool (the global WebSocket).
-  websocketImplementation: WebSocket,
-  maxWaitForConnection: 3000,
-});
+const pool: AbstractSimplePool = guardPool(
+  new HealthAwareMarketPool({
+    verifyEvent: (event: Event): event is VerifiedEvent => validateEvent(event),
+    // Same transport as the shared SimplePool (the global WebSocket).
+    websocketImplementation: WebSocket,
+    maxWaitForConnection: 3000,
+  }),
+);
 
 watchTestRelayLockdown(() => pool.destroy());
 

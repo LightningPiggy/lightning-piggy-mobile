@@ -35,9 +35,33 @@ import { pool } from './nostrPool';
  *   and prompt the user to re-pair with broader perms.
  */
 import { BunkerSigner, createNostrConnectURI, type BunkerPointer } from 'nostr-tools/nip46';
+import { SimplePool } from 'nostr-tools/pool';
+import { guardPool } from './relaySocketGuard';
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js';
 import type { Nip46Connection } from '../types/nostr';
 import { NostrConnectError, isCiphertextDecryptError } from './signerErrors';
+
+/** Release builds give each signer its own pool, as BunkerSigner's default
+ *  does, but guarded so it closes the sockets it abandons (./relaySocketGuard). */
+function signerParams() {
+  return { pool: __DEV__ ? pool : guardPool(new SimplePool()) };
+}
+
+/** BunkerSigner.close() only ends its subscription, never its pool's sockets.
+ *  Make closing a signer also destroy the pool it owns (never the shared one),
+ *  so every place that discards a signer releases its relay connections. */
+function ownPool(signer: BunkerSigner, params: ReturnType<typeof signerParams>): BunkerSigner {
+  if (params.pool === pool) return signer;
+  const close = signer.close.bind(signer);
+  signer.close = async () => {
+    try {
+      await close();
+    } finally {
+      params.pool.destroy();
+    }
+  };
+  return signer;
+}
 
 /** Lazily-constructed BunkerSigner. Re-created when the active
  *  connection changes (login / logout / re-pair). */
@@ -149,11 +173,8 @@ async function getSigner(): Promise<BunkerSigner> {
       secret: null,
     };
     const clientSecretKey = hexToBytes(connection.clientSecretKeyHex);
-    const signer = BunkerSigner.fromBunker(
-      clientSecretKey,
-      pointer,
-      __DEV__ ? { pool } : undefined,
-    );
+    const params = signerParams();
+    const signer = ownPool(BunkerSigner.fromBunker(clientSecretKey, pointer, params), params);
     // `connect()` is the explicit handshake — it sends a `connect`
     // request through the relay so the bunker registers this session
     // before we start firing signEvent / nip44_encrypt at it. Subsequent
@@ -171,6 +192,8 @@ async function getSigner(): Promise<BunkerSigner> {
         await signer.connect();
       }
     } catch (e) {
+      // This signer is discarded: release its relay connections too.
+      void signer.close().catch(() => {});
       // If the bunker can't be reached (relay down, bunker app closed,
       // user revoked the connection) surface a clear error rather than
       // letting per-method calls each fail with their own opaque message.
@@ -435,11 +458,14 @@ export async function awaitBunkerPair(input: {
   // BunkerSigner.fromURI has no AbortSignal input of its own, so race the
   // pairing promise against the abort. On abort we reject immediately and,
   // if the bunker acks late, close the orphaned signer rather than leak it.
-  const pairPromise = BunkerSigner.fromURI(
-    input.clientSecretKey,
-    uri,
-    __DEV__ ? { pool } : undefined,
-    maxWait,
+  const params = signerParams();
+  const pairPromise = BunkerSigner.fromURI(input.clientSecretKey, uri, params, maxWait).then(
+    (signer) => ownPool(signer, params),
+    (error: unknown) => {
+      // No signer surfaced (timeout, bad ack): release the pool it was using.
+      if (params.pool !== pool) params.pool.destroy();
+      throw error;
+    },
   );
   const signer = await raceAbort(pairPromise, signal, (late) => {
     late.close().catch(() => {});

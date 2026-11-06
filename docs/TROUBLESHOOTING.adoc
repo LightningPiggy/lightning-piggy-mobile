@@ -1855,3 +1855,43 @@ unavailable state.
 Apply `unexpiredMarketProducts` before checking cached listing ownership in
 `useKnownOwnListings`, as other cache consumers do. Regression coverage in
 `useKnownOwnListings.test.tsx` checks expired, active and non-expiring listings.
+
+== Android app stops reaching relays after running for days, while the phone's network works
+
+*Symptom:* after the app process has been alive for a day or more (the
+background DM foreground service keeps it running), relays show as not
+connected in Settings, NWC wallets stall and DMs stop arriving. The phone
+itself reaches the same relays (browser, `adb shell ping`), another device on
+the same Wi-Fi is fine, and force-stopping the app fixes it until it happens
+again. Relays drop out one host at a time, then all at once.
+
+*Diagnose (read-only, production build):*
+
+----
+adb shell ps -o PID,ELAPSED,NAME | grep lightningpiggy      # process age
+adb shell dumpsys package com.lightningpiggy.app | grep -m1 appId   # app uid
+adb shell "cat /proc/net/tcp /proc/net/tcp6" | awk '$8==<uid> {print $3, $4}' | sort | uniq -c | sort -rn
+----
+
+State `01` is ESTABLISHED. Several established sockets to the same relay IP
+(the remote address is little-endian hex: `46CE848E` is 142.132.206.70), and
+60 or more in total, is this bug.
+
+*Cause:* nostr-tools' `AbstractRelay` gives up on a socket without closing it
+when `connect()` times out or is aborted, and its `close()` only closes OPEN
+sockets. On React Native a socket still CONNECTING then opens late and stays
+open, untracked, for the life of the process. Every React Native WebSocket
+shares the OkHttp Dispatcher with `fetch`, and OkHttp holds one Dispatcher
+slot per open WebSocket (64 in total, 5 per host). So the leaked sockets
+ratchet up: after 5 to one host, that relay can never connect again; after 64,
+no relay connection or HTTP request starts at all.
+
+*Fix:* `src/services/relaySocketGuard.ts` closes an abandoned socket,
+immediately or as soon as it opens. Each nostr-tools entry point and the Alby
+SDK bundle their own `AbstractRelay` copy, so it guards *pools*, not the class:
+`guardPool` wraps every relay a pool adds to its `relays` map. The shared pool,
+the Market pool, NWC providers (`patchRelayPublish`) and NIP-46 signers are
+guarded. A new pool or SDK must be wrapped with `guardPool` too.
+Code that owns a raw `WebSocket` must not just call `close()` on a CONNECTING
+socket either: use `closeSocketNowOrOnOpen` (the relay reachability probe does).
+Release-build NIP-46 signers own their pool, and closing the signer destroys it.

@@ -11,6 +11,19 @@
 import { fetchWithTimeout } from './boltzApi';
 import { getSwapBackendForId, swapWebSocketUrl } from './swapBackendService';
 import { abortableSleep, createAbortError, throwIfAborted } from './nwcErrors';
+import { closeSocketNowOrOnOpen } from './relaySocketGuard';
+
+/**
+ * End a swap-status socket we're done with. Detach its handlers first (a late
+ * open must not send the subscribe or settle anything), then close it now or,
+ * while it is still CONNECTING, as soon as it opens: React Native ignores
+ * close() during the handshake, and an orphaned open socket holds one of
+ * OkHttp's per-host slots, which the Boltz host's fetches share.
+ */
+function endSocket(ws: WebSocket): void {
+  ws.onmessage = ws.onerror = ws.onclose = null;
+  closeSocketNowOrOnOpen(ws);
+}
 
 /**
  * Subscribe to swap status updates via WebSocket, falling back to polling.
@@ -50,9 +63,7 @@ export async function waitForSwapStatus(
     const teardown = () => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
-      try {
-        activeWs?.close();
-      } catch {}
+      if (activeWs) endSocket(activeWs);
       activeWs = undefined;
     };
 
@@ -89,9 +100,7 @@ export async function waitForSwapStatus(
       // the now-dead socket, but keep the abort listener so a cancel mid-poll
       // still rejects promptly.
       clearTimeout(timer);
-      try {
-        ws?.close();
-      } catch {}
+      if (ws) endSocket(ws);
       activeWs = undefined;
       pollSwapStatus(swapId, isTerminal, remaining(), backend, signal)
         .then((data) => {
