@@ -532,11 +532,11 @@ export class MarmotSession {
     // Stored groups must be loaded first, or an existing DM is missed and a
     // duplicate MLS group gets created for the same peer.
     await this.ready;
-    return this.findDm(peer) ?? this.restartDm(peer);
+    return this.findDm(peer) ?? this.restartDm(peer, false);
   }
 
-  /** A fresh 1:1 with `peer` ("Repair secure chat"): it takes over as findDm's pick. */
-  restartDm(peer: string): Promise<MarmotGroupSummary> {
+  /** A fresh 1:1 with `peer` ("Repair secure chat"); first use (`repair` false) marks nothing. */
+  restartDm(peer: string, repair = true): Promise<MarmotGroupSummary> {
     const p = peer.toLowerCase();
     // Single-flight per peer: creating + inviting takes several relay round
     // trips, and a second quick send must not create a second DM group.
@@ -545,7 +545,7 @@ export class MarmotSession {
     const creating = (async () => {
       await this.ready;
       const fresh = await this.superseded.restart(
-        this.listGroups().filter((g) => g.isDm && g.memberPubkeys[0] === p),
+        repair ? this.listGroups().filter((g) => g.isDm && g.memberPubkeys[0] === p) : [],
         () => this.createGroup('', [p], { adminPubkeys: [this.pubkey, p] }),
       );
       this.emitGroupsChanged();

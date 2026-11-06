@@ -1,4 +1,5 @@
 import { MarmotDmRelayTopUp } from './marmotDmRelayTopUp';
+import { MarmotGroupNotReadyError } from './marmotSendGate';
 
 it('waits for the top-up commit, including concurrent sends, then tops up only once', async () => {
   let finish!: () => void;
@@ -52,5 +53,26 @@ it('bounds the wait: a slow top-up lets the send go and is not retried', async (
     expect(commit).toHaveBeenCalledTimes(1);
   } finally {
     jest.useRealTimers();
+  }
+});
+
+it('retries on the next send when the group was still applying a change, without warning', async () => {
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  try {
+    const commit = jest
+      .fn()
+      .mockRejectedValueOnce(new MarmotGroupNotReadyError())
+      .mockResolvedValue(undefined);
+    const changed = jest.fn();
+    const topUp = new MarmotDmRelayTopUp(commit, changed);
+    await expect(topUp.sync('g', ['wss://one'], ['wss://two'])).resolves.toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+    await topUp.sync('g', ['wss://one'], ['wss://two']);
+    expect(commit).toHaveBeenCalledTimes(2);
+    expect(changed).toHaveBeenCalledTimes(1);
+    await topUp.sync('g', ['wss://one'], ['wss://two']);
+    expect(commit).toHaveBeenCalledTimes(2);
+  } finally {
+    warn.mockRestore();
   }
 });

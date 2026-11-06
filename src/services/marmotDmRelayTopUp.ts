@@ -5,6 +5,7 @@ import { Proposals } from '@internet-privacy/marmot-ts';
 import { spreadProposals } from './marmotProposals';
 import { relayTopUp, RelaysAlreadyTopped } from './marmotDmChoice';
 import { DM_DEVICE_SYNC_SEND_WAIT_MS } from './marmotDmDeviceSync';
+import { MarmotGroupNotReadyError } from './marmotSendGate';
 
 type CommitProposals = ReturnType<typeof spreadProposals>;
 
@@ -48,7 +49,10 @@ export class MarmotDmRelayTopUp {
       await this.commit(id, topUp);
       this.changed();
     } catch (e) {
-      if (!(e instanceof RelaysAlreadyTopped)) console.warn('[Marmot] relay top-up failed');
+      // A group still applying a change (e.g. a device-sync Add) isn't a
+      // failed attempt: leave it eligible so the next send tries again.
+      if (e instanceof MarmotGroupNotReadyError) this.done.delete(id);
+      else if (!(e instanceof RelaysAlreadyTopped)) console.warn('[Marmot] relay top-up failed');
     }
   }
 }

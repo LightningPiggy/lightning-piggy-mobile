@@ -217,6 +217,25 @@ describe('MarmotSession: a split 1:1 converges (no WebCrypto)', () => {
     }
   }, 180_000);
 
+  it('first-use creation never marks an existing 1:1 superseded (only Repair does)', async () => {
+    const relay = makeRelay();
+    const ben = makeSession(relay, undefined, 'nsec', OPTS);
+    const emily = makeSession(relay, undefined, 'nsec', OPTS);
+    try {
+      await Promise.all([ben.session.start(), emily.session.start()]);
+      await waitFor(() => slots(relay, emily.pubkey) === 1 && slots(relay, ben.pubkey) === 1);
+      const existing = await ben.session.getOrCreateDm(emily.pubkey);
+      // The create path getOrCreateDm takes when findDm misses (e.g. a Welcome
+      // joined in the gap): the group that's already there must stay unmarked.
+      later();
+      const created = await ben.session.restartDm(emily.pubkey, false);
+      expect(created.id).not.toBe(existing.id);
+      expect(await ben.backend.get('dmSuperseded', existing.id)).toBeFalsy();
+    } finally {
+      [ben, emily].forEach((d) => d.session.stop());
+    }
+  }, 120_000);
+
   it('tops a single-relay 1:1 up to more relays, for both members', async () => {
     const relay = makeRelay();
     const ben = makeSession(relay, undefined, 'nsec', OPTS);
