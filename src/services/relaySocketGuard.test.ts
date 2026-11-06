@@ -117,7 +117,7 @@ it('closes a socket that opens after the relay was closed mid-connect', async ()
   ws.open();
   // The pending connect settles as before rather than hanging...
   await expect(connecting).resolves.toBeUndefined();
-  // ...and the socket is then closed instead of staying open untracked.
+  // ...and the socket is closed instead of staying open untracked.
   expect(ws.closedNatively).toBe(true);
   expect(r.connected).toBe(false);
 });
@@ -284,4 +284,18 @@ describe("a late old socket never evicts the SDK pool's replacement relay", () =
     p.destroy();
     expect(replacementSocket.closedNatively).toBe(true);
   });
+});
+
+it("drops a mid-connect-closed relay's onclose so a later ping timeout can't evict a replacement", async () => {
+  const r = relay();
+  const onclose = jest.fn();
+  r.onclose = onclose;
+  const connecting = r.connect();
+  const ws = latest();
+  r.close();
+  onclose.mockClear();
+  ws.open();
+  await connecting;
+  expect(r.onclose).toBeNull();
+  expect(onclose).not.toHaveBeenCalled();
 });

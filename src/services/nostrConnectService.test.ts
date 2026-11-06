@@ -413,3 +413,50 @@ describe('pairing relay lockdown', () => {
     expect(svc.pairingRelays(['wss://public.example'])).toEqual(['wss://public.example']);
   });
 });
+
+describe('release builds: each signer owns a pool that is closed with it', () => {
+  // jest.requireActual: the real (unmocked) SimplePool the service constructs.
+  const { SimplePool } = jest.requireActual<typeof import('nostr-tools/pool')>('nostr-tools/pool');
+  const globals = globalThis as unknown as { __DEV__: boolean };
+  let dev: boolean;
+  beforeEach(() => {
+    dev = globals.__DEV__;
+    globals.__DEV__ = false;
+  });
+  afterEach(() => {
+    globals.__DEV__ = dev;
+    jest.restoreAllMocks();
+  });
+
+  it("destroys a signer's own pool when its handshake fails", async () => {
+    const destroy = jest.spyOn(SimplePool.prototype, 'destroy');
+    const close = jest.fn().mockResolvedValue(undefined);
+    const signer = {
+      ...mockSigner,
+      close,
+      sendRequest: jest.fn().mockRejectedValue(new Error('revoked')),
+    };
+    mockFromBunker.mockReturnValueOnce(signer);
+    await svc.setActiveConnection(conn());
+    await expect(svc.requestPublicKey()).rejects.toBeInstanceOf(NostrConnectError);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(close).toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('destroys the pairing pool when no signer surfaces', async () => {
+    const destroy = jest.spyOn(SimplePool.prototype, 'destroy');
+    mockFromURI.mockRejectedValueOnce(new Error('timed out'));
+    await expect(
+      svc.awaitBunkerPair({
+        clientSecretKey: new Uint8Array(32),
+        clientPubkey: 'clientpubkeyhex',
+        relays: ['wss://relay.example'],
+        secret: 's',
+        perms: [],
+        name: 'Lightning Piggy',
+      }),
+    ).rejects.toThrow('timed out');
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+});

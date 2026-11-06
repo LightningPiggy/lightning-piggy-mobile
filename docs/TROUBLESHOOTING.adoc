@@ -1892,3 +1892,6 @@ SDK bundle their own `AbstractRelay` copy, so it guards *pools*, not the class:
 `guardPool` wraps every relay a pool adds to its `relays` map. The shared pool,
 the Market pool, NWC providers (`patchRelayPublish`) and NIP-46 signers are
 guarded. A new pool or SDK must be wrapped with `guardPool` too.
+Code that owns a raw `WebSocket` must not just call `close()` on a CONNECTING
+socket either: use `closeSocketNowOrOnOpen` (the relay reachability probe does).
+Release-build NIP-46 signers own their pool, and closing the signer destroys it.

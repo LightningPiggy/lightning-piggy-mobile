@@ -49,6 +49,25 @@ const socketOf = (relay: GuardableRelay): Socket | undefined =>
   (relay as unknown as { ws?: Socket }).ws;
 
 /**
+ * Close a WebSocket now, or as soon as it opens if it is still CONNECTING.
+ * React Native ignores close() while CONNECTING and then still delivers
+ * `open`, so a plain close() there leaks an open socket. For callers that own
+ * a raw socket and are done with it (handlers should already be detached).
+ */
+export function closeSocketNowOrOnOpen(ws: {
+  readyState: number;
+  close: () => void;
+  onopen: ((ev: never) => unknown) | null;
+}): void {
+  ws.onopen = ws.readyState === CONNECTING ? () => ws.close() : null;
+  try {
+    ws.close();
+  } catch {
+    // Some native transports throw while connecting; the onopen still ends it.
+  }
+}
+
+/**
  * Run one of nostr-tools' socket handlers so the relay resets its own state,
  * without its `onclose` callback. That callback already ran when the pool
  * dropped the relay, and the SDK pool's version deletes the relay's URL from
@@ -123,9 +142,12 @@ export function guardRelay<R extends GuardableRelay>(relay: R): R {
     const wasConnecting = ws?.readyState === CONNECTING;
     close.call(relay);
     if (!ws || !wasConnecting) return;
-    // Closed mid-connect: let the open settle the pending connect() as before,
-    // then reset the relay to closed and end the socket. If the relay has
-    // started a newer socket meanwhile, just retire this one.
+    // Closed mid-connect: let the late open settle the pending connect() as
+    // before (rejecting instead would make the SDK pool delete the URL, which
+    // may hold a replacement by now), then close the socket and reset the
+    // relay quietly. The pool dropped this relay when it was closed, so drop
+    // its onclose for good: a later one (an Alby ping timeout, say) could only
+    // evict a replacement. If the relay has a newer socket, just retire this.
     const opened = ws.onopen;
     ws.onopen = (ev: unknown) => {
       if (socketOf(relay) !== ws) {
@@ -136,7 +158,8 @@ export function guardRelay<R extends GuardableRelay>(relay: R): R {
       const closed = ws.onclose;
       retireSocket(relay, ws);
       // nostr-tools reads `.message` from the close event it is handed.
-      resetQuietly(relay, closed, { code: 1000, reason: 'closed by us' });
+      resetQuietly(relay, closed, { message: 'relay connection closed by us' });
+      relay.onclose = null;
     };
   };
   return relay;

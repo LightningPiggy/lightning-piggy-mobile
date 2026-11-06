@@ -1,4 +1,5 @@
 import { activeAccountRelays, watchTestRelayLockdown } from './testRelayRouting';
+import { closeSocketNowOrOnOpen } from './relaySocketGuard';
 import {
   createProbeCache,
   finishProbe,
@@ -10,7 +11,10 @@ import {
 const activeSockets = new Set<WebSocket>();
 const activeRelayHttpProbes = new Set<AbortController>();
 watchTestRelayLockdown(() => {
-  for (const socket of activeSockets) socket.close();
+  for (const socket of activeSockets) {
+    socket.onmessage = socket.onerror = socket.onclose = null;
+    closeSocketNowOrOnOpen(socket);
+  }
   activeSockets.clear();
   for (const controller of activeRelayHttpProbes) controller.abort();
   activeRelayHttpProbes.clear();
@@ -35,12 +39,10 @@ function socketProbe(url: string, signal: AbortSignal): Promise<ProbeResult | un
       signal.removeEventListener('abort', cancel);
       if (socket) {
         activeSockets.delete(socket);
-        socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null;
-        try {
-          socket.close();
-        } catch {
-          /* Some native transports throw while connecting. */
-        }
+        socket.onmessage = socket.onerror = socket.onclose = null;
+        // A slow relay may still be CONNECTING here (the 6 s timeout, or the
+        // screen losing focus); it must not open later and stay open.
+        closeSocketNowOrOnOpen(socket);
       }
       resolve(event ? finishProbe(undefined, event, Date.now(), message) : undefined);
     };
