@@ -59,6 +59,53 @@ it('persists a stranger as pending across restart and previews without joining o
   await invitations.resume(session, () => true);
   expect(session.acceptWelcome).not.toHaveBeenCalled();
 });
+it.each([true, false])('backfills direct=%s on an old invitation only once', async (direct) => {
+  const { backend, session } = setup();
+  const notify = jest.fn();
+  const invitations = new MarmotPendingInvitations(backend, jest.fn(), notify);
+  const pubkey = 'a'.repeat(64);
+  await backend.set(
+    'welcomeInvitations',
+    'wrap',
+    JSON.stringify({ id: 'wrap', rumor, groupId: 'mls-group', status: 'pending', fresh: true }),
+  );
+  session.previewWelcome.mockResolvedValue({
+    forThisDevice: true,
+    groupId: 'mls-group',
+    group: { name: direct ? '' : 'Family', adminPubkeys: [rumor.pubkey, pubkey] },
+    memberCount: 2,
+  });
+  await invitations.resume({ ...session, pubkey }, () => true);
+  const restarted = new MarmotPendingInvitations(backend, jest.fn(), notify);
+  expect(await restarted.list()).toEqual([
+    expect.objectContaining({ id: 'wrap', groupId: 'mls-group', direct }),
+  ]);
+  await restarted.resume({ ...session, pubkey }, () => true);
+  expect(session.previewWelcome).toHaveBeenCalledTimes(1);
+  expect(session.acceptWelcome).not.toHaveBeenCalled();
+  expect(notify).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['throws', (m: jest.Mock) => m.mockRejectedValue(new Error('key package gone'))],
+  ['is incomplete', (m: jest.Mock) => m.mockResolvedValue({ forThisDevice: true })],
+])('a backfill whose preview %s keeps the invitation and does not retry', async (_, fail) => {
+  const { backend, session } = setup();
+  const invitations = new MarmotPendingInvitations(backend, jest.fn(), jest.fn());
+  await backend.set(
+    'welcomeInvitations',
+    'wrap',
+    JSON.stringify({ id: 'wrap', rumor, groupId: 'mls-group', status: 'pending', fresh: true }),
+  );
+  fail(session.previewWelcome);
+  await invitations.resume(session, () => true);
+  await invitations.resume(session, () => true);
+  expect(session.previewWelcome).toHaveBeenCalledTimes(1);
+  expect(await invitations.list()).toEqual([
+    expect.objectContaining({ id: 'wrap', groupId: 'mls-group', direct: false }),
+  ]);
+});
+
 it('waits for consent even from someone the user follows (as White Noise does)', async () => {
   const { invitations, session } = setup();
   expect(await invitations.receive('wrap', rumor)).toBe(true);

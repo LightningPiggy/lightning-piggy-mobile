@@ -4,6 +4,7 @@ import { createYieldScheduler, type YieldScheduler } from '../contexts/nostrDecr
 import type { MarmotGroupSummary, MarmotRumor } from './marmotSession';
 import type { MarmotKvBackend } from './marmotStore';
 import { WELCOME_OUTCOMES_NS, type WelcomeOutcome } from './marmotWelcomeOutcomes';
+import { isDirectInvite, type InvitedGroup } from './marmotInvitationKind';
 
 const NS = 'welcomeInvitations';
 const RUMOR_WRAPS_NS = 'welcomeInvitationRumorWraps';
@@ -13,6 +14,8 @@ export interface PendingMarmotInvitation {
   rumor: MarmotRumor;
   groupName?: string;
   groupId?: string;
+  /** A 1:1 with the sender, not a group (marmotInvitationKind). */
+  direct?: boolean;
   error?: boolean;
   replacesContentlessAlert?: boolean;
 }
@@ -24,12 +27,16 @@ type Record =
   | InvitationRecord
   | { id: string; status: 'joined' | 'declined' | 'skipped'; groupId?: string };
 export interface InvitationSession {
+  /** Our account — tells a 1:1's admins (us + sender) from a group's. */
+  readonly pubkey?: string;
   getGroup(appGroupId: string): MarmotGroupSummary | undefined;
   acceptWelcome(rumor: MarmotRumor): Promise<MarmotGroupSummary | null>;
   previewWelcome(rumor: MarmotRumor): Promise<{
     forThisDevice: boolean;
     groupId?: string;
-    group: { name: string } | null;
+    group: InvitedGroup | null;
+    /** Member accounts in the invited group, read before joining. */
+    memberCount?: number;
   }>;
 }
 const newestFirst = (a: PendingMarmotInvitation, b: PendingMarmotInvitation) =>
@@ -148,7 +155,7 @@ export class MarmotPendingInvitations {
     const visibleGroups = new Set(records.map((r) => r.groupId).filter(Boolean));
     for (const record of records) {
       if (!isCurrent()) return;
-      if (record.groupId) continue;
+      if (record.groupId && record.direct !== undefined) continue;
       await pacing.maybeYield();
       if (!isCurrent()) return;
       let preview: Awaited<ReturnType<InvitationSession['previewWelcome']>>;
@@ -163,7 +170,11 @@ export class MarmotPendingInvitations {
         } catch {
           await this.write({ id: record.id, status: 'skipped' });
           await this.backend.remove('pendingWelcomes', record.rumor.id);
+          continue;
         }
+        // A pre-upgrade record already validated: try the 1:1 backfill once,
+        // then keep the group wording rather than re-preview every pass.
+        if (record.groupId) await this.write({ ...record, direct: false });
         continue;
       }
       if (!isCurrent()) return;
@@ -173,7 +184,11 @@ export class MarmotPendingInvitations {
           console.log(`[Marmot] welcome ${record.id.slice(0, 8)} for another device, skipped`);
         continue;
       }
-      if (!preview.groupId) continue; // Incomplete preview remains hidden and retryable.
+      if (!preview.groupId) {
+        // Incomplete preview remains hidden and retryable; a backfill tries once.
+        if (record.groupId) await this.write({ ...record, direct: false });
+        continue;
+      }
       if (await this.backend.get(DECLINED_GROUPS_NS, preview.groupId)) {
         await this.write({ id: record.id, status: 'declined', groupId: preview.groupId });
         await this.backend.remove('pendingWelcomes', record.rumor.id);
@@ -187,7 +202,17 @@ export class MarmotPendingInvitations {
       }
       const alreadyVisible = visibleGroups.has(preview.groupId);
       visibleGroups.add(preview.groupId);
-      const validated = { ...record, groupId: preview.groupId, groupName: preview.group?.name };
+      const validated = {
+        ...record,
+        groupId: preview.groupId,
+        groupName: preview.group?.name,
+        direct: isDirectInvite(
+          preview.group,
+          record.rumor.pubkey,
+          session.pubkey,
+          preview.memberCount,
+        ),
+      };
       await this.write(validated);
       if (!alreadyVisible && record.status === 'pending' && record.fresh) this.pending(validated);
     }

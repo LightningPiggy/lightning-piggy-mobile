@@ -1,3 +1,6 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { perAccountKey } from './perAccountStorage';
+import { PROFILES_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
 import type { MarmotKvBackend } from './marmotStore';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 import { getPendingMarmotInvitations, routeMarmotWelcome } from './marmotWelcomeRouter';
@@ -32,6 +35,12 @@ jest.mock('./marmotSession', () => ({
   },
 }));
 jest.mock('./localDb', () => ({ getLocalDb: jest.fn() }));
+const mockProfile = jest.fn().mockResolvedValue(null);
+const mockShowContent = jest.fn().mockResolvedValue(true);
+jest.mock('./notificationContentPreference', () => ({
+  getLockScreenContentEnabled: () => mockShowContent(),
+}));
+jest.mock('./zapSenderProfileStorage', () => ({ get: (pk: string) => mockProfile(pk) }));
 jest.mock('./marmotStore', () => {
   const actual = jest.requireActual('./marmotStore');
   return {
@@ -70,6 +79,122 @@ beforeEach(() => {
   mockSessionChanged(null);
 });
 
+it('alerts a 1:1 invitation as a message from that person, not a group (multi-device contact)', async () => {
+  // A contact's other device adding our install to a 1:1, or a fresh 1:1:
+  // unnamed, admins = the two people. Their device count doesn't matter.
+  // Its own account: the stores dedupe Welcomes by rumor id per owner.
+  const owner = '7'.repeat(64);
+  mockProfile.mockResolvedValueOnce({ name: 'Ben' });
+  mockPreview.mockResolvedValueOnce({
+    forThisDevice: true,
+    groupId: 'mls-dm',
+    group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+    memberCount: 2,
+  });
+  await routeMarmotWelcome(rumor, owner, 'dm-wrap', false, true);
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({
+      owner,
+      kind: 'dm',
+      title: 'Ben',
+      body: 'Invited you to a secure chat. Tap to accept.',
+      data: { groupInvitation: true, senderPubkey: rumor.pubkey },
+    }),
+  );
+  expect(await mockBackends.get(owner)!.get('welcomeInvitations', 'dm-wrap')).toContain(
+    '"direct":true',
+  );
+});
+
+it('alerts an unnamed two-admin group with extra members as a group invitation, not a 1:1', async () => {
+  // A sender makes only {sender, me} admins and adds other people as ordinary
+  // members: it must not be announced as "invited you to a secure chat".
+  const owner = '5'.repeat(64);
+  mockPreview.mockResolvedValueOnce({
+    forThisDevice: true,
+    groupId: 'mls-disguised',
+    group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+    memberCount: 4,
+  });
+  await routeMarmotWelcome(rumor, owner, 'disguised-wrap', false, true);
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ owner, kind: 'group', title: 'New group invitation' }),
+  );
+  expect(await mockBackends.get(owner)!.get('welcomeInvitations', 'disguised-wrap')).toContain(
+    '"direct":false',
+  );
+});
+
+it('names a followed contact cached without a name from the shared profile cache', async () => {
+  const owner = '4'.repeat(64);
+  await AsyncStorage.setItem(
+    perAccountKey(PROFILES_CACHE_KEY_BASE, owner),
+    JSON.stringify({ [rumor.pubkey]: { npub: 'npub1x', name: null, displayName: null } }),
+  );
+  mockProfile.mockResolvedValueOnce({ displayName: 'Emily W' });
+  mockPreview.mockResolvedValueOnce({
+    forThisDevice: true,
+    groupId: 'mls-dm-nameless',
+    group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+    memberCount: 2,
+  });
+  await routeMarmotWelcome(rumor, owner, 'nameless-wrap', false, true);
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ owner, kind: 'dm', title: 'Emily W' }),
+  );
+});
+
+it("names a followed contact from the account's contact cache", async () => {
+  const owner = '6'.repeat(64);
+  await AsyncStorage.setItem(
+    perAccountKey(PROFILES_CACHE_KEY_BASE, owner),
+    JSON.stringify({ [rumor.pubkey]: { npub: 'npub1x', name: 'Emily', displayName: null } }),
+  );
+  mockPreview.mockResolvedValueOnce({
+    forThisDevice: true,
+    groupId: 'mls-dm-contact',
+    group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+    memberCount: 2,
+  });
+  await routeMarmotWelcome(rumor, owner, 'contact-wrap', false, true);
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(mockProfile).not.toHaveBeenCalled();
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ owner, kind: 'dm', title: 'Emily' }),
+  );
+});
+
 it('stores a cold-start stranger durably, then previews without joining when Marmot starts', async () => {
   const owner = 'a'.repeat(64);
   await routeMarmotWelcome(rumor, owner, 'cold-wrap', false, true);
@@ -89,6 +214,7 @@ it('stores a cold-start stranger durably, then previews without joining when Mar
   expect(fireMessageNotification).toHaveBeenCalledWith(
     expect.objectContaining({
       owner,
+      kind: 'group',
       title: 'New group invitation',
       body: 'New group invitation',
       data: { groupInvitation: true, senderPubkey: rumor.pubkey },

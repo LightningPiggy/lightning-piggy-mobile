@@ -3550,7 +3550,10 @@
     "notification": "New group invitation",
     "retry": "Invitation accepted. Joining will retry when the app restarts.",
     "error": "Could not update the invitation. Please try again.",
-    "unavailable": "This invitation can no longer be accepted."
+    "unavailable": "This invitation can no longer be accepted.",
+    "direct": "Secure chat invitation",
+    "directNotification": "Invited you to a secure chat. Tap to accept.",
+    "tapToAccept": "Tap to accept."
   },
   "settingsScreens": {
     "on": "On",

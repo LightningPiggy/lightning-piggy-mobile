@@ -1,7 +1,7 @@
 // The DM unwrap engine is the sole owner of kind-1059 inbox subscriptions.
 // Route kind-444 BEFORE its DM follow gate; consent lives in encrypted MLS KV.
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getEventHash } from 'nostr-tools';
-import { t } from '../i18n';
 import { MARMOT_WELCOME_KIND } from '../utils/dmProtocol';
 import type { DecodedRumor } from '../utils/nip17Unwrap';
 import { getMarmotSession, subscribeMarmotSession, type MarmotRumor } from './marmotSession';
@@ -9,6 +9,12 @@ import { MarmotPendingInvitations, type PendingMarmotInvitation } from './marmot
 import { createSqliteMarmotBackend } from './marmotStore';
 import { createStopGate, fenceBackend, trackStoppedSession } from './marmotSessionFence';
 import { fireMessageNotification } from './notificationService';
+import { invitationAlert } from './marmotInvitationKind';
+import * as zapSenderProfileStorage from './zapSenderProfileStorage';
+import { perAccountKey } from './perAccountStorage';
+import { PROFILES_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
+import type { NostrProfile } from '../types/nostr';
+import { getLockScreenContentEnabled } from './notificationContentPreference';
 import { claimWrapNotification } from './dmWrapNotificationDedupe';
 import { getActivePubkey, subscribeActivePubkey } from './walletStorageService';
 
@@ -53,19 +59,38 @@ function controller(owner: string): MarmotPendingInvitations {
       () => (controllers.get(owner) === c ? changed(owner) : undefined),
       (record) => {
         if (!claimWrapNotification(record.id) && !record.replacesContentlessAlert) return;
-        void fireMessageNotification({
-          owner,
-          kind: 'group',
-          threadId: `invite:${record.id}`,
-          title: t('marmotInvitation.notification'),
-          body: t('marmotInvitation.notification'),
-          data: { groupInvitation: true, senderPubkey: record.rumor.pubkey },
-        }).catch(reportFailure);
+        void Promise.all([senderName(owner, record.rumor.pubkey), getLockScreenContentEnabled()])
+          .then(([name, showContent]) => {
+            // The lookups awaited: an account switch / sign-out may have
+            // retired this controller meanwhile — never alert the old account.
+            if (controllers.get(owner) !== c || gate.stopped) return;
+            return fireMessageNotification({
+              owner,
+              ...invitationAlert(record.direct === true, name, showContent),
+              threadId: `invite:${record.id}`,
+              data: { groupInvitation: true, senderPubkey: record.rumor.pubkey },
+            });
+          })
+          .catch(reportFailure);
       },
     );
     controllers.set(owner, c);
   }
   return c;
+}
+/** A cached profile name — the account's followed contacts first, then the
+ *  shared sender cache (no relay lookup on the alert path) — else a short key. */
+async function senderName(owner: string, pubkey: string): Promise<string> {
+  const contact = await AsyncStorage.getItem(perAccountKey(PROFILES_CACHE_KEY_BASE, owner))
+    .then((raw) => (raw ? (JSON.parse(raw) as Record<string, NostrProfile>)[pubkey] : undefined))
+    .catch(() => undefined);
+  const named = (p?: Pick<NostrProfile, 'displayName' | 'name'> | null) =>
+    p?.displayName || p?.name;
+  // A followed contact cached without a name still falls back to the shared cache.
+  const shared = named(contact)
+    ? null
+    : await zapSenderProfileStorage.get(pubkey).catch(() => null);
+  return named(contact) || named(shared) || `${pubkey.slice(0, 8)}…`;
 }
 function reportFailure(error: unknown) {
   if (__DEV__) console.warn('[Marmot] invitation processing failed:', error);
