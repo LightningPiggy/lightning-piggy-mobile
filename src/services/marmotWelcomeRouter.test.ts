@@ -141,6 +141,33 @@ it('alerts an unnamed two-admin group with extra members as a group invitation, 
   );
 });
 
+it('names a followed contact cached without a name from the shared profile cache', async () => {
+  const owner = '4'.repeat(64);
+  await AsyncStorage.setItem(
+    perAccountKey(PROFILES_CACHE_KEY_BASE, owner),
+    JSON.stringify({ [rumor.pubkey]: { npub: 'npub1x', name: null, displayName: null } }),
+  );
+  mockProfile.mockResolvedValueOnce({ displayName: 'Emily W' });
+  mockPreview.mockResolvedValueOnce({
+    forThisDevice: true,
+    groupId: 'mls-dm-nameless',
+    group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+    memberCount: 2,
+  });
+  await routeMarmotWelcome(rumor, owner, 'nameless-wrap', false, true);
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ owner, kind: 'dm', title: 'Emily W' }),
+  );
+});
+
 it("names a followed contact from the account's contact cache", async () => {
   const owner = '6'.repeat(64);
   await AsyncStorage.setItem(

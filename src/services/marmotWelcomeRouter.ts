@@ -84,8 +84,13 @@ async function senderName(owner: string, pubkey: string): Promise<string> {
   const contact = await AsyncStorage.getItem(perAccountKey(PROFILES_CACHE_KEY_BASE, owner))
     .then((raw) => (raw ? (JSON.parse(raw) as Record<string, NostrProfile>)[pubkey] : undefined))
     .catch(() => undefined);
-  const cached = contact ?? (await zapSenderProfileStorage.get(pubkey).catch(() => null));
-  return cached?.displayName || cached?.name || `${pubkey.slice(0, 8)}…`;
+  const named = (p?: Pick<NostrProfile, 'displayName' | 'name'> | null) =>
+    p?.displayName || p?.name;
+  // A followed contact cached without a name still falls back to the shared cache.
+  const shared = named(contact)
+    ? null
+    : await zapSenderProfileStorage.get(pubkey).catch(() => null);
+  return named(contact) || named(shared) || `${pubkey.slice(0, 8)}…`;
 }
 function reportFailure(error: unknown) {
   if (__DEV__) console.warn('[Marmot] invitation processing failed:', error);
