@@ -52,8 +52,9 @@ export function isSwapCreateTimeout(error: unknown): boolean {
 /**
  * Run `create` with a deadline and the caller's cancel. If either fires first
  * we reject and never return the swap, so the caller can't go on to pay it —
- * even when `create` settles later. The inner signal also prevents a late
- * result from being persisted.
+ * even when `create` settles later. The inner signal stops a late result
+ * from STARTING to persist; a deadline that fires mid-persist can still leave
+ * a record, which is harmless: recovery never pays, and the swap expires.
  */
 function withCreateDeadline<T>(
   create: (signal: AbortSignal) => Promise<T>,
