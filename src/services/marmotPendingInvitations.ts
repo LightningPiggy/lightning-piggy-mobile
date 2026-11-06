@@ -35,6 +35,8 @@ export interface InvitationSession {
     forThisDevice: boolean;
     groupId?: string;
     group: InvitedGroup | null;
+    /** Member accounts in the invited group, read before joining. */
+    memberCount?: number;
   }>;
 }
 const newestFirst = (a: PendingMarmotInvitation, b: PendingMarmotInvitation) =>
@@ -204,7 +206,12 @@ export class MarmotPendingInvitations {
         ...record,
         groupId: preview.groupId,
         groupName: preview.group?.name,
-        direct: isDirectInvite(preview.group, record.rumor.pubkey, session.pubkey),
+        direct: isDirectInvite(
+          preview.group,
+          record.rumor.pubkey,
+          session.pubkey,
+          preview.memberCount,
+        ),
       };
       await this.write(validated);
       if (!alreadyVisible && record.status === 'pending' && record.fresh) this.pending(validated);

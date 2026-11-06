@@ -73,6 +73,7 @@ it.each([true, false])('backfills direct=%s on an old invitation only once', asy
     forThisDevice: true,
     groupId: 'mls-group',
     group: { name: direct ? '' : 'Family', adminPubkeys: [rumor.pubkey, pubkey] },
+    memberCount: 2,
   });
   await invitations.resume({ ...session, pubkey }, () => true);
   const restarted = new MarmotPendingInvitations(backend, jest.fn(), notify);

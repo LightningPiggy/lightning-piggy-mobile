@@ -89,6 +89,7 @@ it('alerts a 1:1 invitation as a message from that person, not a group (multi-de
     forThisDevice: true,
     groupId: 'mls-dm',
     group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+    memberCount: 2,
   });
   await routeMarmotWelcome(rumor, owner, 'dm-wrap', false, true);
   mockSession = {
@@ -113,6 +114,33 @@ it('alerts a 1:1 invitation as a message from that person, not a group (multi-de
   );
 });
 
+it('alerts an unnamed two-admin group with extra members as a group invitation, not a 1:1', async () => {
+  // A sender makes only {sender, me} admins and adds other people as ordinary
+  // members: it must not be announced as "invited you to a secure chat".
+  const owner = '5'.repeat(64);
+  mockPreview.mockResolvedValueOnce({
+    forThisDevice: true,
+    groupId: 'mls-disguised',
+    group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+    memberCount: 4,
+  });
+  await routeMarmotWelcome(rumor, owner, 'disguised-wrap', false, true);
+  mockSession = {
+    pubkey: owner,
+    acceptWelcome: mockAccept,
+    previewWelcome: mockPreview,
+    getGroup: () => undefined,
+  };
+  mockSessionChanged(mockSession);
+  await settle();
+  expect(fireMessageNotification).toHaveBeenCalledWith(
+    expect.objectContaining({ owner, kind: 'group', title: 'New group invitation' }),
+  );
+  expect(await mockBackends.get(owner)!.get('welcomeInvitations', 'disguised-wrap')).toContain(
+    '"direct":false',
+  );
+});
+
 it("names a followed contact from the account's contact cache", async () => {
   const owner = '6'.repeat(64);
   await AsyncStorage.setItem(
@@ -123,6 +151,7 @@ it("names a followed contact from the account's contact cache", async () => {
     forThisDevice: true,
     groupId: 'mls-dm-contact',
     group: { name: '', adminPubkeys: [rumor.pubkey, owner], relays: [], description: '' },
+    memberCount: 2,
   });
   await routeMarmotWelcome(rumor, owner, 'contact-wrap', false, true);
   mockSession = {

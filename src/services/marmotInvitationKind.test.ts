@@ -5,24 +5,37 @@ const me = 'a'.repeat(64);
 const carol = 'c'.repeat(64);
 
 describe('isDirectInvite', () => {
-  it('an unnamed group whose admins are the sender and me is a 1:1', () => {
-    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me] }, ben, me)).toBe(true);
-    expect(isDirectInvite({ name: '', adminPubkeys: [me, ben.toUpperCase()] }, ben, me)).toBe(true);
+  it('an unnamed group whose admins are the sender and me, with two member accounts, is a 1:1', () => {
+    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me] }, ben, me, 2)).toBe(true);
+    expect(isDirectInvite({ name: '', adminPubkeys: [me, ben.toUpperCase()] }, ben, me, 2)).toBe(
+      true,
+    );
+  });
+
+  it('extra non-admin members make it a group, however the admins look', () => {
+    // A sender can name no group and make only {sender, me} admins, then add
+    // Carol and Dave as ordinary members. That must not read as a 1:1.
+    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me] }, ben, me, 3)).toBe(false);
+    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me] }, ben, me, 4)).toBe(false);
+  });
+
+  it('an unknown member count is not called a 1:1', () => {
+    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me] }, ben, me)).toBe(false);
   });
 
   it('a named group, or one with another admin, is a group', () => {
-    expect(isDirectInvite({ name: 'Family', adminPubkeys: [ben, me] }, ben, me)).toBe(false);
-    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me, carol] }, ben, me)).toBe(false);
-    expect(isDirectInvite({ name: '', adminPubkeys: [carol] }, ben, me)).toBe(false);
+    expect(isDirectInvite({ name: 'Family', adminPubkeys: [ben, me] }, ben, me, 2)).toBe(false);
+    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me, carol] }, ben, me, 2)).toBe(false);
+    expect(isDirectInvite({ name: '', adminPubkeys: [carol] }, ben, me, 2)).toBe(false);
   });
 
   it("a creator-only-admin unnamed group isn't a 1:1 (it may have three accounts)", () => {
     // createGroup('', [me, carol]) makes the creator the sole admin.
-    expect(isDirectInvite({ name: '', adminPubkeys: [ben] }, ben, me)).toBe(false);
+    expect(isDirectInvite({ name: '', adminPubkeys: [ben] }, ben, me, 2)).toBe(false);
   });
 
   it('without our key, or with no preview, it stays a group', () => {
-    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me] }, ben)).toBe(false);
+    expect(isDirectInvite({ name: '', adminPubkeys: [ben, me] }, ben, undefined, 2)).toBe(false);
   });
 
   it('an unknown group (no preview) is not called a 1:1', () => {
