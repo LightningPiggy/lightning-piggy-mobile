@@ -806,6 +806,8 @@ export class MarmotSession {
   async acceptWelcome(welcomeRumor: MarmotRumor): Promise<MarmotGroupSummary | null> {
     await this.ready;
     const group = await this.welcomeJoins.accept(welcomeRumor);
+    // Its Welcome time, as the creator noted at creation: else two message-less 1:1s tie on id.
+    if (group) this.activity.note(group.idStr, welcomeRumor.created_at * 1000);
     return group ? this.summarise(group) : null;
   }
 

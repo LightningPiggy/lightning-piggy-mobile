@@ -651,8 +651,11 @@ describe('MarmotSession (no WebCrypto)', () => {
     const oldDm = await bobOld.getOrCreateDm(alice.pubkey);
     await alice.session.acceptWelcome(unwrapWelcomes(relay, alice).at(-1)!);
     bobOld.stop();
-    // Bob reinstalls (same keys, no MLS state) and starts a new DM.
-    await new Promise((r) => setTimeout(r, 5)); // distinct firstSeen
+    // Bob reinstalls (same keys, no MLS state) and starts a new DM. Alice ranks
+    // message-less 1:1s by their Welcome time (rumor created_at, whole seconds),
+    // so the reinstall must be at least a second later; a same-second tie falls
+    // back to the group id, which every install agrees on.
+    await new Promise((r) => setTimeout(r, 1_100));
     const bobNew = new MarmotSession(bobOpts(createMemoryMarmotBackend()));
     await bobNew.start();
     const newDm = await bobNew.getOrCreateDm(alice.pubkey);
