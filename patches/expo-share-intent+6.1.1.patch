@@ -42,7 +42,7 @@ index 0000000..782266a
 +}
 \ No newline at end of file
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89..9fabcc1 100644
+index 0153c89..cdf5a8d 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 @@ -13,6 +13,8 @@ import android.content.ContentResolver
@@ -54,19 +54,22 @@ index 0153c89..9fabcc1 100644
  import android.database.Cursor
  import android.graphics.BitmapFactory
  import android.media.MediaMetadataRetriever;
-@@ -31,7 +33,11 @@ import expo.modules.kotlin.modules.Module
+@@ -31,7 +33,14 @@ import expo.modules.kotlin.modules.Module
  import expo.modules.kotlin.modules.ModuleDefinition
  import java.io.File
  import java.io.FileOutputStream
 +import java.io.IOException
 +import java.util.UUID
  import java.util.Date
-+import java.util.concurrent.ExecutorService
-+import java.util.concurrent.Executors
++import java.util.concurrent.RejectedExecutionException
++import java.util.concurrent.SynchronousQueue
++import java.util.concurrent.ThreadPoolExecutor
++import java.util.concurrent.TimeUnit
++import java.util.concurrent.atomic.AtomicLong
  
  
  class ExpoShareIntentModule : Module() {
-@@ -41,38 +47,88 @@ class ExpoShareIntentModule : Module() {
+@@ -41,38 +50,102 @@ class ExpoShareIntentModule : Module() {
      private val currentActivity: Activity?
          get() = appContext.currentActivity
  
@@ -89,9 +92,23 @@ index 0153c89..9fabcc1 100644
 +
 +        private const val LP_GENERIC_ERROR = "could not read the shared content"
 +
-+        /** Share work (provider queries, copies) runs here, off the UI thread,
-+         *  one share at a time and in arrival order. */
-+        private val shareExecutor: ExecutorService = Executors.newSingleThreadExecutor()
++        /** Share work (provider queries, copies) runs here, off the UI thread.
++         *  A few workers, so a provider that never answers holds only its own
++         *  share; no queue, so stalled work can't pile up — once every worker
++         *  is stuck a new share fails with the generic error. */
++        private const val LP_SHARE_WORKERS = 3
++        private val shareExecutor = ThreadPoolExecutor(
++            0, LP_SHARE_WORKERS, 30L, TimeUnit.SECONDS, SynchronousQueue<Runnable>()
++        )
++
++        /** Latest share wins (as in the app's picker): work for an older share
++         *  that finishes later is dropped, copies and all, never emitted. */
++        private val shareGeneration = AtomicLong(0)
++        private fun isCurrent(generation: Long) = generation == shareGeneration.get()
++
++        private fun discardCopies(infos: List<Map<String, String?>>) {
++            for (info in infos) info["filePath"]?.let { File(it).delete() }
++        }
 +
 +        /** Only a `content://` URI served by another app's provider — never
 +         *  `file://` (could point into our private storage) nor one of our own
@@ -175,16 +192,21 @@ index 0153c89..9fabcc1 100644
  
              var mediaWidth: String? = null;
              var mediaHeight: String? = null;
-@@ -81,7 +137,7 @@ class ExpoShareIntentModule : Module() {
+@@ -81,7 +154,12 @@ class ExpoShareIntentModule : Module() {
                  val options = BitmapFactory.Options().apply {
                      inJustDecodeBounds = true
                  }
 -                BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
-+                File(filePath).inputStream().use { BitmapFactory.decodeStream(it, null, options) }
++                try {
++                    File(filePath).inputStream().use { BitmapFactory.decodeStream(it, null, options) }
++                } catch (e: Exception) {
++                    File(filePath).delete()  // don't leave a copy nobody will use
++                    throw e
++                }
                  mediaHeight = options.outHeight.toString()
                  mediaWidth = options.outWidth.toString()
              }
-@@ -101,7 +157,7 @@ class ExpoShareIntentModule : Module() {
+@@ -101,7 +179,7 @@ class ExpoShareIntentModule : Module() {
  
              return mapOf(
                      "contentUri" to uri.toString(),
@@ -193,7 +215,7 @@ index 0153c89..9fabcc1 100644
                      "fileName" to fileName,
                      "fileSize" to fileSize,
                      "mimeType" to mimeType,
-@@ -111,18 +167,73 @@ class ExpoShareIntentModule : Module() {
+@@ -111,19 +189,79 @@ class ExpoShareIntentModule : Module() {
              )
          }
  
@@ -251,39 +273,53 @@ index 0153c89..9fabcc1 100644
              }
 -            if (intent.type == null) return
 -            if (intent.type!!.startsWith("text/plain")) {
++            val generation = shareGeneration.incrementAndGet()
 +            try {
-+                shareExecutor.execute { processShareIntentSafely(work) }
++                shareExecutor.execute { processShareIntentSafely(work, generation) }
++            } catch (e: RejectedExecutionException) {
++                Log.w("ExpoShareIntent", "share workers busy")
++                notifyError(LP_GENERIC_ERROR)
 +            } catch (e: Exception) {
 +                notifyError(LP_GENERIC_ERROR)
 +            }
 +        }
 +
-+        private fun processShareIntentSafely(intent: Intent) {
++        private fun processShareIntentSafely(intent: Intent, generation: Long) {
 +            try {
-+                processShareIntent(intent)
++                processShareIntent(intent, generation)
 +            } catch (e: Exception) {
 +                // e.g. a malformed parcelable in the extras. The message stays
 +                // generic: no URI or file name leaves this module.
 +                Log.w("ExpoShareIntent", "could not read a share intent")
-+                notifyError(LP_GENERIC_ERROR)
++                if (isCurrent(generation)) notifyError(LP_GENERIC_ERROR)
 +            }
 +        }
 +
-+        private fun processShareIntent(intent: Intent) {
++        private fun processShareIntent(intent: Intent, generation: Long) {
 +            val type = intent.type ?: return
 +            if (type.startsWith("text/plain")) {
                  // text / urls
++                if (!isCurrent(generation)) return
                  if (intent.action == Intent.ACTION_SEND) {
                      notifyShareIntent(mapOf(
-@@ -141,15 +252,27 @@ class ExpoShareIntentModule : Module() {
+                         "text" to intent.getStringExtra(Intent.EXTRA_TEXT),
+@@ -139,17 +277,42 @@ class ExpoShareIntentModule : Module() {
+                 }
+             } else {
                  // files / medias
++                // A caption or link sent along with the images.
++                val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
                  if (intent.action == Intent.ACTION_SEND) {
                      val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
 -                    if (uri != null) {
 -                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
 +                    val info = uri?.let { safeFileInfo(it) }
++                    if (!isCurrent(generation)) {
++                        info?.let { discardCopies(listOf(it)) }
++                        return
++                    }
 +                    if (info != null) {
-+                        notifyShareIntent(mapOf( "files" to listOf(info), "type" to "file"))
++                        notifyShareIntent(mapOf( "files" to listOf(info), "type" to "file", "text" to text))
                      } else {
                          notifyError("empty uri for file sharing: " + intent.action)
                      }
@@ -292,9 +328,15 @@ index 0153c89..9fabcc1 100644
 -                    if (uris != null) {
 -                        notifyShareIntent(mapOf( "files" to uris.map { getFileInfo(it) }, "type" to "file"))
 +                    val uris: List<Uri> = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM).orEmpty()
-+                    val infos = uris
-+                        .take(LP_MAX_SHARED_FILES)
-+                        .mapNotNull { safeFileInfo(it) }
++                    val infos = mutableListOf<Map<String, String?>>()
++                    for (uri in uris.take(LP_MAX_SHARED_FILES)) {
++                        if (!isCurrent(generation)) break  // superseded: stop reading
++                        safeFileInfo(uri)?.let { infos.add(it) }
++                    }
++                    if (!isCurrent(generation)) {
++                        discardCopies(infos)
++                        return
++                    }
 +                    if (infos.isNotEmpty()) {
 +                        // `lpOfferedFileCount`: how many streams the sender
 +                        // offered, before the cap and the checks above dropped
@@ -303,12 +345,13 @@ index 0153c89..9fabcc1 100644
 +                        notifyShareIntent(mapOf(
 +                            "files" to infos,
 +                            "type" to "file",
++                            "text" to text,
 +                            "lpOfferedFileCount" to uris.size,
 +                        ))
                      } else {
                          notifyError("empty uris array for file sharing: " + intent.action)
                      }
-@@ -179,17 +302,23 @@ class ExpoShareIntentModule : Module() {
+@@ -179,17 +342,23 @@ class ExpoShareIntentModule : Module() {
  
          Events("onChange", "onStateChange", "onError")
  
@@ -339,7 +382,7 @@ index 0153c89..9fabcc1 100644
          }
  
          Function("hasShareIntent") { _: String ->
-@@ -197,7 +326,12 @@ class ExpoShareIntentModule : Module() {
+@@ -197,7 +366,12 @@ class ExpoShareIntentModule : Module() {
          }
  
          OnNewIntent {
@@ -353,10 +396,16 @@ index 0153c89..9fabcc1 100644
          }
  
          OnCreate {
-@@ -209,6 +343,50 @@ class ExpoShareIntentModule : Module() {
-         }
-     }
+@@ -206,6 +380,53 @@ class ExpoShareIntentModule : Module() {
  
+         OnDestroy {
+             instance = null
++            // Lightning Piggy patch: a share arriving while the React host is
++            // torn down / reloaded stays parked for the next getShareIntent.
++            jsListening = false
++        }
++    }
++
 +    /**
 +     * Lightning Piggy patch: copy one shared stream into `cache/lp-share/` under
 +     * a generated name (the sender's display name is never used for a path),
@@ -398,13 +447,10 @@ index 0153c89..9fabcc1 100644
 +        } catch (e: Exception) {
 +            target.delete()
 +            null
-+        }
-+    }
-+
-     /**
-      * Get a file path from a Uri. This will get the the path for Storage Access
-      * Framework Documents, as well as the _data field for the MediaStore and
-@@ -300,8 +478,19 @@ class ExpoShareIntentModule : Module() {
+         }
+     }
+ 
+@@ -300,8 +521,19 @@ class ExpoShareIntentModule : Module() {
                  if (cursor != null && cursor.moveToFirst()) {
                      val columnIndex = cursor.getColumnIndexOrThrow(column)
                      val fileName = cursor.getString(columnIndex)
@@ -602,13 +648,25 @@ index f2ebd1a..752846f 100644
  }
  /**
 diff --git a/node_modules/expo-share-intent/build/utils.js b/node_modules/expo-share-intent/build/utils.js
-index 3d343c6..f47a6e6 100644
+index 3d343c6..7894b75 100644
 --- a/node_modules/expo-share-intent/build/utils.js
 +++ b/node_modules/expo-share-intent/build/utils.js
-@@ -112,6 +112,11 @@ export const parseShareIntent = (value, options) => {
+@@ -57,7 +57,9 @@ export const parseShareIntent = (value, options) => {
+     else {
+         shareIntent = value; // Android
+     }
+-    if (shareIntent?.text) {
++    // Lightning Piggy patch: images shared with a caption / link (Android
++    // EXTRA_TEXT) take the files branch below, which keeps the text too.
++    if (shareIntent?.text && !shareIntent?.files?.length) {
+         // Try to find the webURL in the SharedIntent text
+         const webUrl = shareIntent.text
+             .match(/[(http(s)?)://(www.)?-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)/gi)
+@@ -112,6 +114,12 @@ export const parseShareIntent = (value, options) => {
                  }, [])
                  : null,
              type: isMedia ? "media" : "file",
++            ...(shareIntent?.text ? { text: shareIntent.text } : {}),
 +            // Lightning Piggy patch: Android reports how many files were
 +            // offered before its cap / checks dropped any (a count only).
 +            ...(typeof shareIntent?.lpOfferedFileCount === "number"
