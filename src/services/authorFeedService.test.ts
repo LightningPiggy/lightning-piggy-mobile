@@ -14,6 +14,10 @@ jest.mock('./nostrPool', () => ({
   },
   trackRelays: jest.fn(),
 }));
+// Relays whose URL says "parked" count as parked by the health breaker (#1326).
+jest.mock('./relayHealth', () => ({
+  selectHealthyRelays: (urls: string[]) => urls.filter((u) => !u.includes('parked')),
+}));
 jest.mock('./relayQuery', () => ({
   querySyncAbortable: (...args: unknown[]) => mockQuery(...args),
 }));
@@ -203,5 +207,18 @@ describe('subscribeAuthorFeed', () => {
     } finally {
       now.mockRestore();
     }
+  });
+
+  it('skips parked relays and opens one subscription per distinct relay', () => {
+    mockSubscribeMany.mockReturnValue({ close: jest.fn() });
+    const before = mockSubscribeMany.mock.calls.length;
+    subscribeAuthorFeed({
+      authorPubkey: PK,
+      relays: ['wss://a.example', 'wss://a.example/', 'wss://parked.example', 'wss://b.example'],
+      onEvent: jest.fn(),
+    });
+    const relays = mockSubscribeMany.mock.calls.slice(before).map((c) => c[0]);
+    expect(relays).toEqual([['wss://a.example'], ['wss://b.example']]);
+    mockSubscribeMany.mockReset();
   });
 });

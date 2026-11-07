@@ -201,3 +201,23 @@ it('recovers from unavailable on a late answer, a late post, or a retry', async 
   expect(h.result.current.loading).toBe(true);
   expect(subscribe).toHaveBeenCalledTimes(2);
 });
+
+it('does not flash the spinner when refocusing a profile that already answered', async () => {
+  subscribe.mockImplementation(({ onAnswered, onEose }) => {
+    onAnswered(); // a real answer: this profile has no posts
+    onEose();
+    return jest.fn();
+  });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  expect(h.result.current.loading).toBe(false);
+  subscribe.mockImplementation(() => jest.fn()); // the refocus attempt hasn't answered yet
+  mockFocused = false;
+  h.rerender({});
+  mockFocused = true;
+  h.rerender({});
+  expect(subscribe).toHaveBeenCalledTimes(2);
+  expect(h.result.current.loading).toBe(false); // still "No posts yet", no spinner
+});

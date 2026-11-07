@@ -48,6 +48,8 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
   // No relay has answered yet (all failed, or none replied within the grace
   // period): the profile says it couldn't load posts rather than "no posts".
   const [unavailable, setUnavailable] = useState(false);
+  // The author whose feed last got a real relay answer (see the focus effect).
+  const answeredAuthorRef = useRef<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [reachedEnd, setReachedEnd] = useState(false);
   const pagesRef = useRef(0);
@@ -88,18 +90,26 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
       // this (reused) screen.
       let live = true;
       let answered = false;
-      // Every attempt (refocus, pull-to-refresh after a failure) loads afresh:
-      // never "No posts yet" while the new request is still unanswered.
-      setUnavailable(false);
-      setLoading(true);
+      // After a failure, a new attempt (refocus, pull-to-refresh) shows the
+      // spinner, never "No posts yet" while it's still unanswered. After a
+      // real answer for this author, keep showing it while re-subscribing:
+      // no spinner flash on every refocus of a profile with no posts.
+      if (answeredAuthorRef.current !== authorPubkey) {
+        setUnavailable(false);
+        setLoading(true);
+      }
       const unsubscribe = subscribeAuthorFeed({
         authorPubkey,
         relays: readRelays,
         limit: AUTHOR_FEED_PAGE_SIZE,
         onEvent: (event) => {
           if (!live) return;
-          answered = true;
-          setUnavailable(false);
+          // Once per attempt, not per event (CLAUDE.md: no setState per relay event).
+          if (!answered) {
+            answered = true;
+            answeredAuthorRef.current = authorPubkey;
+            setUnavailable(false);
+          }
           enqueue(event.id, event);
         },
         // Every relay is done, but that includes relays that failed or timed
@@ -114,16 +124,23 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         onAnswered: () => {
           if (!live) return;
           answered = true;
+          answeredAuthorRef.current = authorPubkey;
           setUnavailable(false);
         },
         onUnavailable: () => {
           if (!live) return;
+          // A late event or answer after this must clear the error again.
+          answered = false;
+          answeredAuthorRef.current = null;
           setUnavailable(true);
           setLoading(false);
         },
       });
       const grace = setTimeout(() => {
-        if (!answered) setUnavailable(true);
+        if (!answered) {
+          answeredAuthorRef.current = null;
+          setUnavailable(true);
+        }
         setLoading(false);
       }, FIRST_EVENT_GRACE_MS);
       return () => {
