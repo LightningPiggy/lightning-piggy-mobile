@@ -6,6 +6,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useAccountState } from '../contexts/useAccountState';
 import { messageEditDelete } from '../utils/messageEditDelete';
+import { appendSharedText } from '../utils/incomingShare';
 import {
   sendMarmotMessageAction,
   type MarmotActionTarget,
@@ -181,6 +182,20 @@ export function useMessageActionsMenu<T extends EditableRow>({
     setDraft(editing.priorDraft);
   }, [editing, setDraft, setEditing]);
 
+  /** Text shared in from another app (#1692) goes on the new-message draft,
+   *  after anything typed. Mid-edit it waits on the draft the edit hands back
+   *  — never in the edit, where Save would write it into an old message. */
+  const appendDraftText = useCallback(
+    (text: string) => {
+      if (editing) {
+        setEditing({ ...editing, priorDraft: appendSharedText(editing.priorDraft, text) });
+      } else {
+        setDraft(appendSharedText(draft, text));
+      }
+    },
+    [editing, draft, setDraft, setEditing],
+  );
+
   /** Send the composer's text as the edit (unchanged or empty = just stop editing). */
   const submitEdit = useCallback(() => {
     if (!editing) return;
@@ -236,8 +251,10 @@ export function useMessageActionsMenu<T extends EditableRow>({
         onSend: isEditing ? submitEdit : onSend,
         editing: isEditing ? { onCancel: cancelEdit } : undefined,
       },
+      appendDraftText,
     }),
     [
+      appendDraftText,
       copyText,
       onCopyText,
       canEdit,

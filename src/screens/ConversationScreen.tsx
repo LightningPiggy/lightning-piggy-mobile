@@ -71,6 +71,9 @@ import { useConversationTimeline } from '../hooks/useConversationTimeline';
 import { useConversationLiveLocation } from '../hooks/useConversationLiveLocation';
 import type { ConversationMessageInput, Item } from '../utils/conversationItems';
 import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
+import { useStagedShare } from '../hooks/useStagedShare';
+import { useAccountState } from '../contexts/useAccountState';
+import { dmShareTarget } from '../utils/incomingShare';
 import { useStartLiveLocationShare } from '../hooks/useStartLiveLocationShare';
 import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useItemHandlers } from '../hooks/useItemHandlers';
@@ -143,7 +146,8 @@ const ConversationScreen: React.FC = () => {
     `${protocol}:${pubkey}`,
     rawMessages,
   );
-  const [draft, setDraft] = useState('');
+  // Per account: a draft (typed or shared in) never crosses an account switch.
+  const [draft, setDraft] = useAccountState(myPubkey, '');
   const [sendSheetOpen, setSendSheetOpen] = useState(false);
   const [invoiceToPay, setInvoiceToPay] = useState<string | null>(null);
   const [detailTx, setDetailTx] = useState<TransactionDetailData | null>(null);
@@ -322,7 +326,7 @@ const ConversationScreen: React.FC = () => {
     handleSendVoiceNote,
     shareNwcWallet,
     offerNip17ForText,
-    stagedShare,
+    sendSharedImage,
   } = useConversationComposerActions({
     protocol,
     pubkey,
@@ -502,12 +506,19 @@ const ConversationScreen: React.FC = () => {
     closeActions: closeMessageActions,
     onSend: handleSend,
   });
+  // Text and photos shared in from another app (#1692), waiting for Send.
+  const stagedShare = useStagedShare({
+    target: dmShareTarget(pubkey, protocol),
+    owner: myPubkey,
+    appendText: menu.appendDraftText,
+    sendImage: sendSharedImage,
+  });
 
   // Ephemeral "typing…" indicator (#dm-typing). `pubkey` is the peer here.
   const { isPeerTyping, notifyTyping } = useTypingIndicator(pubkey);
 
   // Failed Marmot invite → draft a "please invite me again" for them (#1269).
-  const askForInvite = useCallback(() => setDraft(t('marmotInviteFailed.askDraft')), [t]);
+  const askForInvite = useCallback(() => setDraft(t('marmotInviteFailed.askDraft')), [t, setDraft]);
   const renderItem = useCallback(
     ({ item }: { item: Item }) => {
       const handlers = handlersFor(item);

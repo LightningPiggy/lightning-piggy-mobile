@@ -12,7 +12,6 @@ import type { ConversationMessageInput } from '../utils/conversationItems';
 import { type DeliveryStatus, pendingDelivery, failedDelivery } from '../utils/dmDeliveryStatus';
 import { setDmDeliveryStatus } from '../utils/dmDeliveryStore';
 import { useComposerActions } from './useComposerActions';
-import { dmShareTarget } from '../utils/incomingShare';
 import { NWC_SHARE_KIND, serializeNwcShare, type NwcShareCard } from '../utils/nwcShareMessage';
 import type { SendHooks, SendResult } from '../contexts/useMessageSend';
 import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
@@ -426,7 +425,6 @@ export function useConversationComposerActions(params: {
     setGifPickerOpen,
     setContactPickerOpen,
     setVoiceSheetOpen,
-    shareTarget: dmShareTarget(pubkey, protocol),
   });
 
   // `sendText` re-exposed as `resendText` for the delivery sheet's Re-publish

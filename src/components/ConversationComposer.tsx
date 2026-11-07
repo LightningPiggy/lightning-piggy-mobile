@@ -180,7 +180,17 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   return (
     <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
       {attachmentsEnabled && attachOpen && !editing ? attachPanel : null}
-      {stagedShare ? <SharedImageTray {...stagedShare} /> : null}
+      {stagedShare ? (
+        <SharedImageTray
+          {...stagedShare}
+          // Photos go out only where the composer could send one itself: not
+          // in a text-only (NIP-04) chat, not mid-edit, not signed out.
+          sendBlocked={!attachmentsEnabled || !!editing || !!disabled}
+          sendBlockedHint={
+            attachmentsEnabled ? undefined : t('conversationComposer.attachmentsNip17Only')
+          }
+        />
+      ) : null}
       {editing ? (
         <View style={styles.editBanner} testID="composer-edit-banner">
           <Pencil size={14} color={colors.brandPink} />

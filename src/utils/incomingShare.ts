@@ -136,30 +136,51 @@ export function renamedForMime(fileName: string, mime: SharedImageMime): string 
 // C0 controls except tab / newline, DEL, C1 controls, the bidi marks /
 // embeddings / overrides / isolates that can make text read differently from
 // what it says ("Trojan Source" style spoofing of a shared link), and
-// invisible zero-width / format characters (ZWSP, ZWNJ, word joiner, BOM,
-// soft hyphen, Mongolian vowel separator, line / paragraph separators,
-// interlinear annotation marks, Hangul fillers).
+// invisible zero-width / format characters (ZWSP, word joiner, BOM, soft
+// hyphen, Mongolian vowel separator, line / paragraph separators, interlinear
+// annotation marks, Hangul fillers). The two joiners (ZWNJ, ZWJ) are handled
+// by `stripStrayJoiners` instead.
 // Written as escapes so the source itself carries no invisible characters.
 const UNSAFE_TEXT_CHARS =
-  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200c\u200e\u200f\u2028-\u202e\u2060\u2066-\u2069\u3164\ufeff\ufff9-\ufffb\uffa0]/g;
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200e\u200f\u2028-\u202e\u2060\u2066-\u2069\u3164\ufeff\ufff9-\ufffb\uffa0]/g;
 
-const ZERO_WIDTH_JOINER = /\u200d/g;
+const JOINERS = /[\u200c\u200d]/g;
+const ZWJ = 0x200d;
 
-/** Last unit of an emoji (low surrogate, VS16, BMP symbol / dingbat). */
+/** BMP symbols that take part in emoji sequences: Misc Symbols, Dingbats
+ *  (♀ ♂ ⚕ ✈ ❄ ❤ ➡) and Misc Symbols and Arrows (⬛ in 🐈‍⬛ / 🐦‍⬛). */
+const isEmojiSymbol = (code: number) =>
+  (code >= 0x2600 && code <= 0x27bf) || (code >= 0x2b00 && code <= 0x2bff);
+/** Last unit of an emoji (low surrogate, VS16, BMP emoji symbol). */
 const endsEmoji = (code: number) =>
-  (code >= 0xdc00 && code <= 0xdfff) || code === 0xfe0f || (code >= 0x2600 && code <= 0x27bf);
-/** First unit of an emoji (high surrogate, BMP symbol / dingbat). */
-const startsEmoji = (code: number) =>
-  (code >= 0xd800 && code <= 0xdbff) || (code >= 0x2600 && code <= 0x27bf);
+  (code >= 0xdc00 && code <= 0xdfff) || code === 0xfe0f || isEmojiSymbol(code);
+/** First unit of an emoji (high surrogate, BMP emoji symbol). */
+const startsEmoji = (code: number) => (code >= 0xd800 && code <= 0xdbff) || isEmojiSymbol(code);
 
-/** Zero-width joiners are invisible too, but they also glue emoji sequences
- *  together (family, profession, flag emoji): keep one only between emoji. */
+/** Letters and marks of the scripts whose spelling needs ZWNJ / ZWJ: Arabic
+ *  (Persian, Urdu …), Syriac, and the Indic scripts Devanagari through Sinhala
+ *  (Hindi, Marathi …). Never Latin, Greek or Cyrillic — the scripts a spoofed
+ *  link would be written in. */
+const isJoiningScript = (code: number) =>
+  (code >= 0x0600 && code <= 0x074f) ||
+  (code >= 0x0750 && code <= 0x077f) ||
+  (code >= 0x08a0 && code <= 0x08ff) ||
+  (code >= 0x0900 && code <= 0x0dff) ||
+  (code >= 0xfb50 && code <= 0xfdff) ||
+  (code >= 0xfe70 && code <= 0xfefc);
+
+/** ZWNJ / ZWJ are invisible, but they are also spelling: they glue emoji
+ *  sequences together (family, profession, 🐈‍⬛) and shape Persian and Indic
+ *  words. Keep a ZWJ between emoji and either joiner between two letters of a
+ *  script that uses it; drop every other one. */
 function stripStrayJoiners(text: string): string {
-  return text.replace(ZERO_WIDTH_JOINER, (joiner, offset: number) =>
-    offset > 0 && endsEmoji(text.charCodeAt(offset - 1)) && startsEmoji(text.charCodeAt(offset + 1))
-      ? joiner
-      : '',
-  );
+  return text.replace(JOINERS, (joiner, offset: number) => {
+    if (offset === 0) return '';
+    const before = text.charCodeAt(offset - 1);
+    const after = text.charCodeAt(offset + 1);
+    if (joiner.charCodeAt(0) === ZWJ && endsEmoji(before) && startsEmoji(after)) return joiner;
+    return isJoiningScript(before) && isJoiningScript(after) ? joiner : '';
+  });
 }
 
 /** Shared text as plain composer text: line endings normalised, unsafe
@@ -240,4 +261,25 @@ export function dmShareTarget(pubkey: string, protocol: string): string {
 
 export function groupShareTarget(groupId: string): string {
   return `group:${groupId}`;
+}
+
+/** The chat a target belongs to, whichever protocol its thread is on: staged
+ *  images stay through an in-place protocol switch (e.g. the Marmot → NIP-17
+ *  fallback) but never move to another chat. */
+export function shareChatOf(target: string): string {
+  const dm = /^dm:[^:]*:(.+)$/.exec(target);
+  return dm ? `dm:${dm[1]}` : target;
+}
+
+/** Add a share's images to the ones already waiting in a chat, keeping the
+ *  tray at `MAX_SHARED_IMAGES`; `dropped` are the copies to delete. */
+export function mergeStagedImages(
+  staged: readonly SharedImage[],
+  incoming: readonly SharedImage[],
+): { images: SharedImage[]; dropped: SharedImage[] } {
+  const room = Math.max(0, MAX_SHARED_IMAGES - staged.length);
+  return {
+    images: [...staged, ...incoming.slice(0, room)],
+    dropped: incoming.slice(room),
+  };
 }

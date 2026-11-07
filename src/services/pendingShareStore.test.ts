@@ -48,6 +48,40 @@ describe('pendingShareStore', () => {
     expect(mockDelete).toHaveBeenCalledTimes(1);
   });
 
+  it('expires a share on its own when its chat never opens', () => {
+    jest.useFakeTimers();
+    try {
+      stagePendingShare('group:g1', 'alice', share(1));
+      jest.advanceTimersByTime(PENDING_SHARE_TTL_MS - 1);
+      expect(mockDelete).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(mockDelete).toHaveBeenCalledTimes(1);
+      expect(takePendingShare('group:g1', 'alice')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('cancels the expiry once the share is taken or replaced', () => {
+    jest.useFakeTimers();
+    try {
+      stagePendingShare('group:g1', 'alice', share(1));
+      expect(takePendingShare('group:g1', 'alice')).toEqual(share(1));
+      stagePendingShare('group:g2', 'alice', share(2));
+      jest.advanceTimersByTime(PENDING_SHARE_TTL_MS / 2);
+      stagePendingShare('group:g3', 'alice', share(3));
+      mockDelete.mockClear();
+      // g2's timer would have fired here; only g3's is armed.
+      jest.advanceTimersByTime(PENDING_SHARE_TTL_MS / 2);
+      expect(mockDelete).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(1);
+      expect(takePendingShare('group:g3', 'alice')).toEqual(share(3));
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('a newer share replaces (and deletes) the older one, and notifies listeners', () => {
     const listener = jest.fn();
     const unsubscribe = subscribePendingShare(listener);

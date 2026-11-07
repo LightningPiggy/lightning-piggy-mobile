@@ -5,7 +5,7 @@ import {
   uploadToBlossomServers,
   BlossomSigner,
 } from './blossomService';
-import { readAsStringAsync } from 'expo-file-system/legacy';
+import { deleteAsync, readAsStringAsync } from 'expo-file-system/legacy';
 import { Buffer } from 'buffer';
 import { encryptFile } from './encryptedFile';
 
@@ -66,6 +66,20 @@ export async function stripImageMetadata(
     throw new Error('Failed to strip image metadata: no base64 returned');
   }
   return { uri: result.uri, base64: result.base64 };
+}
+
+/**
+ * Delete the re-encoded copy `stripImageMetadata` wrote to the cache — a
+ * plaintext image — once its send has finished or failed. Never the original
+ * (a GIF passes through as itself). Best effort.
+ */
+export async function discardScrubbedCopy(originalUri: string, scrubbedUri: string): Promise<void> {
+  if (scrubbedUri === originalUri) return;
+  try {
+    await deleteAsync(scrubbedUri, { idempotent: true });
+  } catch {
+    // Left for the OS to clear with the rest of the cache.
+  }
 }
 
 // Map a filename extension to the spec-correct MIME type. Required so

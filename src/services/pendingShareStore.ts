@@ -24,6 +24,15 @@ interface PendingShare {
 
 let pending: PendingShare | null = null;
 const listeners = new Set<() => void>();
+// Drops the staged share once its TTL is up, even if its chat never opens.
+let expiry: ReturnType<typeof setTimeout> | null = null;
+
+function setPending(next: PendingShare | null): void {
+  if (expiry) clearTimeout(expiry);
+  expiry = null;
+  pending = next;
+  if (next) expiry = setTimeout(clearPendingShare, PENDING_SHARE_TTL_MS);
+}
 
 export function stagePendingShare(
   target: string,
@@ -32,7 +41,7 @@ export function stagePendingShare(
   now = Date.now(),
 ): void {
   if (pending) deleteShareCopies(shareCopies(pending.share));
-  pending = { target, owner: owner.toLowerCase(), share, at: now };
+  setPending({ target, owner: owner.toLowerCase(), share, at: now });
   for (const listener of [...listeners]) listener();
 }
 
@@ -49,7 +58,7 @@ export function takePendingShare(
 ): IncomingShare | null {
   if (!pending || pending.target !== target) return null;
   const entry = pending;
-  pending = null;
+  setPending(null);
   if (entry.owner !== owner.toLowerCase() || now - entry.at > PENDING_SHARE_TTL_MS) {
     deleteShareCopies(shareCopies(entry.share));
     return null;
@@ -67,5 +76,5 @@ export function subscribePendingShare(listener: () => void): () => void {
 /** Drop whatever is staged (and its files). */
 export function clearPendingShare(): void {
   if (pending) deleteShareCopies(shareCopies(pending.share));
-  pending = null;
+  setPending(null);
 }

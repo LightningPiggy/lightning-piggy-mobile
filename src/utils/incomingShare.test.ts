@@ -6,9 +6,11 @@ import {
   isOwnedShareCopy,
   MAX_SHARED_IMAGES,
   MAX_SHARED_TEXT_CHARS,
+  mergeStagedImages,
   normalizeShareIntent,
   renamedForMime,
   sanitizeSharedText,
+  shareChatOf,
   shareCopies,
   sniffImageMime,
   someSharedItemsSkipped,
@@ -120,6 +122,29 @@ describe('sanitizeSharedText', () => {
     const family = '\u{1F468}\u200d\u{1F469}\u200d\u{1F467}';
     const heart = '\u2764\ufe0f\u200d\u{1F525}';
     expect(sanitizeSharedText(`hi ${family} ${heart}`)).toBe(`hi ${family} ${heart}`);
+  });
+
+  it('keeps the joiner in emoji sequences ending in a Misc Symbols and Arrows symbol', () => {
+    const blackCat = '\u{1F408}\u200d\u2b1b';
+    const blackBird = '\u{1F426}\u200d\u2b1b';
+    expect(sanitizeSharedText(`${blackCat} ${blackBird}`)).toBe(`${blackCat} ${blackBird}`);
+  });
+
+  it('keeps ZWNJ / ZWJ inside Persian and Indic words', () => {
+    // Persian "mi-khaham" (ZWNJ after the prefix), Marathi eyelash ra (ZWJ
+    // after the virama), Hindi ZWNJ blocking a conjunct.
+    const persian = '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645';
+    const marathi = '\u0930\u094d\u200d\u092f\u093e';
+    const hindi = '\u0915\u094d\u200c\u0937';
+    expect(sanitizeSharedText(`${persian} ${marathi} ${hindi}`)).toBe(
+      `${persian} ${marathi} ${hindi}`,
+    );
+  });
+
+  it('still drops joiners in Latin text, at the edges and next to spaces', () => {
+    expect(sanitizeSharedText('pay\u200dpal.com\u200c/x')).toBe('paypal.com/x');
+    expect(sanitizeSharedText('\u200c\u0645\u06cc \u200d\u0915')).toBe('\u0645\u06cc \u0915');
+    expect(sanitizeSharedText('\u0645\u200ca')).toBe('\u0645a');
   });
 
   it('caps the length and drops empty text', () => {
@@ -251,5 +276,39 @@ describe('small helpers', () => {
     expect(dmShareTarget('ABC', 'marmot')).toBe('dm:marmot:abc');
     expect(dmShareTarget('abc', 'nip17')).not.toBe(dmShareTarget('abc', 'marmot'));
     expect(groupShareTarget('g1')).toBe('group:g1');
+  });
+
+  it('shareChatOf ignores the protocol of a DM thread', () => {
+    expect(shareChatOf(dmShareTarget('abc', 'marmot'))).toBe('dm:abc');
+    expect(shareChatOf(dmShareTarget('abc', 'nip17'))).toBe('dm:abc');
+    expect(shareChatOf(dmShareTarget('abd', 'nip17'))).not.toBe('dm:abc');
+    expect(shareChatOf(groupShareTarget('g1'))).toBe('group:g1');
+  });
+});
+
+describe('mergeStagedImages', () => {
+  const images = (from: number, n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      uri: `${DIR}x${from + i}.jpg`,
+      mimeType: 'image/jpeg',
+    }));
+
+  it('appends while there is room', () => {
+    const merged = mergeStagedImages(images(0, 2), images(2, 3));
+    expect(merged.images).toEqual(images(0, 5));
+    expect(merged.dropped).toEqual([]);
+  });
+
+  it('keeps the tray at the cap and drops the rest', () => {
+    const merged = mergeStagedImages(images(0, MAX_SHARED_IMAGES - 1), images(100, 3));
+    expect(merged.images).toHaveLength(MAX_SHARED_IMAGES);
+    expect(merged.images[MAX_SHARED_IMAGES - 1]).toEqual(images(100, 1)[0]);
+    expect(merged.dropped).toEqual(images(101, 2));
+  });
+
+  it('drops everything when the tray is already full', () => {
+    const merged = mergeStagedImages(images(0, MAX_SHARED_IMAGES), images(100, 2));
+    expect(merged.images).toEqual(images(0, MAX_SHARED_IMAGES));
+    expect(merged.dropped).toEqual(images(100, 2));
   });
 });

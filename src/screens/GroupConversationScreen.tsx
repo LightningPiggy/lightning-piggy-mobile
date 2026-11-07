@@ -63,6 +63,8 @@ import { canAutoLoadMedia } from '../utils/mediaTrust';
 import MessageActionsSheet from '../components/MessageActionsSheet';
 import { useGroupMessageActions } from '../hooks/useGroupMessageActions';
 import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
+import { useStagedShare } from '../hooks/useStagedShare';
+import { groupShareTarget } from '../utils/incomingShare';
 import { isMarmotGroupId } from '../services/marmotSession';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import DeviceNoticeLine from '../components/DeviceNoticeLine';
@@ -278,7 +280,7 @@ const GroupConversationScreen: React.FC = () => {
     handleSendInvoiceToGroup,
     handleSendVoiceNote,
     resendText,
-    stagedShare,
+    sendSharedImage,
   } = useGroupComposerActions({
     group,
     draft,
@@ -318,6 +320,13 @@ const GroupConversationScreen: React.FC = () => {
     actioned,
     closeActions,
     onSend: handleSend,
+  });
+  // Text and photos shared in from another app (#1692), waiting for Send.
+  const stagedShare = useStagedShare({
+    target: group ? groupShareTarget(group.id) : null,
+    owner: myPubkey,
+    appendText: menu.appendDraftText,
+    sendImage: sendSharedImage,
   });
 
   const closeAttachPanel = useCallback(() => setAttachPanelOpen(false), []);

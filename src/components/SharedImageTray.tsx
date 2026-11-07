@@ -8,15 +8,31 @@ import { useTranslation } from '../contexts/LocaleContext';
 import { createSharedImageTrayStyles } from '../styles/SharedImageTray.styles';
 import type { StagedShare } from '../hooks/useStagedShare';
 
+interface Props extends StagedShare {
+  /** The composer can't send a photo right now (text-only chat, editing a
+   *  message, signed out): Send is disabled, × still drops a photo. */
+  sendBlocked?: boolean;
+  /** Why, for screen readers. */
+  sendBlockedHint?: string;
+}
+
 /**
  * Images shared in from another app (#1692), waiting above the composer. They
  * go out only when the user taps Send here; × drops one.
  */
-const SharedImageTray: React.FC<StagedShare> = ({ images, sending, onSend, onRemove }) => {
+const SharedImageTray: React.FC<Props> = ({
+  images,
+  sending,
+  onSend,
+  onRemove,
+  sendBlocked = false,
+  sendBlockedHint,
+}) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createSharedImageTrayStyles(colors), [colors]);
   const count = images.length;
+  const sendDisabled = sending || sendBlocked;
 
   return (
     <View style={styles.tray} testID="shared-image-tray">
@@ -63,11 +79,12 @@ const SharedImageTray: React.FC<StagedShare> = ({ images, sending, onSend, onRem
           ))}
         </ScrollView>
         <TouchableOpacity
-          style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+          style={[styles.sendButton, sendDisabled && styles.sendButtonDisabled]}
           onPress={onSend}
-          disabled={sending}
+          disabled={sendDisabled}
           accessibilityRole="button"
-          accessibilityState={{ disabled: sending, busy: sending }}
+          accessibilityState={{ disabled: sendDisabled, busy: sending }}
+          accessibilityHint={sendBlocked ? sendBlockedHint : undefined}
           accessibilityLabel={t('shareIntent.sendImages', { count })}
           testID="shared-image-send"
         >

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import FriendPickerSheet, { type PickedFriend } from './FriendPickerSheet';
 import ShareTargetRecents from './ShareTargetRecents';
 import { useNostr } from '../contexts/NostrContext';
@@ -32,6 +32,17 @@ const ShareTargetSheet: React.FC<Props> = ({ share, owner, onDone }) => {
   const t = useTranslation();
   const { pubkey } = useNostr();
   const pickedRef = useRef(false);
+  // The host remounts this sheet (new `key`) for each share. A friend lookup
+  // still pending when a newer share replaced this one, or the account
+  // changed, must not stage this share or dismiss the newer one: the host
+  // has already deleted this share's files.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // The share must only ever go out from the account that received it.
   const stillOwner = useCallback(
@@ -41,6 +52,7 @@ const ShareTargetSheet: React.FC<Props> = ({ share, owner, onDone }) => {
 
   const finish = useCallback(
     (target: string, open: () => void) => {
+      if (!mountedRef.current) return;
       if (!stillOwner() || !navigationRef.isReady()) {
         onDone(false);
         return;
