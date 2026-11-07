@@ -209,7 +209,7 @@ const MediaThumb: React.FC<{
       {loading ? (
         <MediaStatusBox
           status="loading"
-          style={styles.thumbImage}
+          style={styles.thumbStatus}
           testID={`nostr-inline-image-loading-${index}`}
         />
       ) : null}
@@ -217,7 +217,7 @@ const MediaThumb: React.FC<{
         <MediaStatusBox
           status="failed"
           label={t('messageBubble.imageLoadFailed')}
-          style={styles.thumbImage}
+          style={styles.thumbStatus}
           testID={`nostr-inline-image-failed-${index}`}
         />
       ) : null}
