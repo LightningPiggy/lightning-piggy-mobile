@@ -210,9 +210,9 @@ subsequent tests may still be exercising the pre-fix app. Verify
 
 Releases are cut by publishing a **GitHub Release** (which creates the tag server-side and fires `.github/workflows/release.yml`). The workflow:
 
-1. Runs quality gates (typecheck / lint / format-check).
-2. Kicks off EAS production builds for both platforms. **iOS** is auto-submitted to TestFlight via EAS's ASC API key. **Android** is built only — no auto-submit to Play Internal until the Google Play Developer account + service-account JSON are wired up via `eas credentials` (see the "Android Distribution — Google Play Internal Testing" section below). The Android APKs are attached to the GitHub Release instead, so testers can sideload them immediately.
-3. Downloads the Android build from EAS and attaches one APK per CPU architecture to the Release page for sideloading: `lightning-piggy-<tag>-arm64-v8a.apk` and `lightning-piggy-<tag>-armeabi-v7a.apk` (see "Android release APKs" below). The Release body says which one to download.
+1. Runs quality gates (typecheck / lint / format-check) and resolves which platforms to build, in a short `prepare` job.
+2. Kicks off EAS production builds for both platforms **in parallel**, as separate `build-ios` and `build-android` jobs (the EAS Starter plan allows concurrent builds), so Android no longer waits for the iOS build and submission. **iOS** is auto-submitted to TestFlight via EAS's ASC API key. **Android** is built only — no auto-submit to Play Internal until the Google Play Developer account + service-account JSON are wired up via `eas credentials` (see the "Android Distribution — Google Play Internal Testing" section below). The Android APKs are attached to the GitHub Release instead, so testers can sideload them immediately.
+3. As soon as the Android build finishes (without waiting for iOS), downloads it from EAS and attaches one APK per CPU architecture to the Release page for sideloading: `lightning-piggy-<tag>-arm64-v8a.apk` and `lightning-piggy-<tag>-armeabi-v7a.apk` (see "Android release APKs" below). The Release body says which one to download.
 4. Regenerates `docs/TECHNICAL_SOLUTION_DOCUMENT.pdf` from the AsciiDoc sources and attaches that too.
 
 ==== Android release APKs
@@ -463,7 +463,7 @@ If a release run fails (EAS queue timeout, flaky network), re-run it via *Action
 
 Manual runs skip the asset-attach steps (they need a Release to attach to); use them for rebuilds, not for the first cut.
 
-A failed iOS build or TestFlight submission no longer skips the Android build: the iOS step continues on error, Android still builds (and attaches its APK on a Release run), and the job is then marked failed so the iOS problem stays visible. After fixing the cause: if only the *submission* failed (the build finished), resubmit that build with `eas submit --platform ios --id <build-id>`; if the *build* itself failed, re-run this workflow with `platform: ios` to build again. Then set the build's "What to Test" by running *Actions → Release → Run workflow* with `whats_new_build` set to the iOS build number (e.g. `45`). That run builds nothing; it only fills in the TestFlight notes from merged PR titles; select the release tag when dispatching.
+A failed iOS build or TestFlight submission can't skip the Android build: iOS and Android build in separate parallel jobs, so Android still builds (and attaches its APKs on a Release run) while the `build-ios` job fails and marks the run failed so the iOS problem stays visible. After fixing the cause: if only the *submission* failed (the build finished), resubmit that build with `eas submit --platform ios --id <build-id>`; if the *build* itself failed, re-run this workflow with `platform: ios` to build again. Then set the build's "What to Test" by running *Actions → Release → Run workflow* with `whats_new_build` set to the iOS build number (e.g. `45`). That run builds nothing; it only fills in the TestFlight notes from merged PR titles; select the release tag when dispatching.
 
 ==== Secrets
 

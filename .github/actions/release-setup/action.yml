@@ -1,0 +1,45 @@
+name: Release setup
+description: >-
+  Shared setup for the Release workflow's prepare / build jobs: install Node
+  and dependencies, then stamp the user-visible version from the Release tag.
+  Run actions/checkout first (a local action can only be used after checkout).
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+        cache: npm
+
+    # Also needed by `eas build`, which evaluates app.config.ts (imports
+    # expo/config + ./package.json) on the runner before uploading.
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Set user-visible version from Release tag
+      # Triggered Releases set tag_name (e.g. "v1.0.1"). Strip the leading "v"
+      # and write into package.json — app.config.ts reads `version: pkg.version`,
+      # so iOS CFBundleShortVersionString, Android versionName, and the in-app
+      # version label (src/utils/appVersion.ts) all pick it up from the same
+      # source of truth. Build numbers (CFBundleVersion / versionCode) come
+      # from EAS via appVersionSource: remote + autoIncrement.
+      if: github.event_name == 'release'
+      shell: bash
+      env:
+        TAG: ${{ github.event.release.tag_name }}
+      run: |
+        VERSION="${TAG#v}"
+        # Strip any pre-release suffix (e.g. 1.0.0-rc1 → 1.0.0); store-side
+        # versions must be strict X.Y.Z. Keep the original tag in the commit
+        # history / Release page for traceability.
+        VERSION="${VERSION%%-*}"
+        echo "Setting version to $VERSION (from tag $TAG)"
+        # `npm version --no-git-tag-version` rewrites package.json's version
+        # field in place without creating a commit/tag (the Release tag
+        # already exists). --allow-same-version covers the case where
+        # package.json was bumped manually before tagging.
+        npm version "$VERSION" --no-git-tag-version --allow-same-version
+        git diff package.json

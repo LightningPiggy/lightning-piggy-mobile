@@ -111,16 +111,20 @@ jobs:
             gh release upload "$RELEASE_REF" "$RUNNER_TEMP/CHANGELOG.md" --clobber
           fi
 
-  build-and-submit:
-    name: EAS build & submit
+  # Gates + platform resolution, shared by both build jobs. The two EAS
+  # builds below then run in PARALLEL on separate runners (the EAS Starter
+  # plan allows 2 concurrent iOS + 5 Android builds). They used to run one
+  # after the other in a single job, so Android waited ~13 min for iOS.
+  prepare:
+    name: Quality gates & resolve platform
     runs-on: ubuntu-latest
-    env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     outputs:
       platform: ${{ steps.platform.outputs.value }}
-      android: ${{ steps.android.outcome }}
     steps:
       - name: Verify EXPO_TOKEN is set
+        # Fail fast here, before either build job starts.
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           if [ -z "$EXPO_TOKEN" ]; then
             echo "::error title=Missing EXPO_TOKEN::Set EXPO_TOKEN under Settings → Secrets and variables → Actions. Generate at https://expo.dev/accounts/bengweeks/settings/access-tokens."
@@ -130,37 +134,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Set user-visible version from Release tag
-        # Triggered Releases set tag_name (e.g. "v1.0.1"). Strip the leading "v"
-        # and write into package.json — app.config.ts reads `version: pkg.version`,
-        # so iOS CFBundleShortVersionString, Android versionName, and the in-app
-        # version label (src/utils/appVersion.ts) all pick it up from the same
-        # source of truth. Build numbers (CFBundleVersion / versionCode) come
-        # from EAS via appVersionSource: remote + autoIncrement.
-        if: github.event_name == 'release'
-        run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          # Strip any pre-release suffix (e.g. 1.0.0-rc1 → 1.0.0); store-side
-          # versions must be strict X.Y.Z. Keep the original tag in the commit
-          # history / Release page for traceability.
-          VERSION="${VERSION%%-*}"
-          echo "Setting version to $VERSION (from tag $TAG)"
-          # `npm version --no-git-tag-version` rewrites package.json's version
-          # field in place without creating a commit/tag (the Release tag
-          # already exists). --allow-same-version covers the case where
-          # package.json was bumped manually before tagging.
-          npm version "$VERSION" --no-git-tag-version --allow-same-version
-          git diff package.json
+      - name: Setup Node, install dependencies, set version from tag
+        uses: ./.github/actions/release-setup
 
       - name: Quality gates
         run: |
@@ -172,6 +147,7 @@ jobs:
         id: platform
         env:
           WHATS_NEW_BUILD: ${{ github.event.inputs.whats_new_build }}
+          PLATFORM_INPUT: ${{ github.event.inputs.platform || 'all' }}
         run: |
           # On Release events the input is empty, so default to building
           # both platforms. iOS is auto-submitted to TestFlight; Android
@@ -182,22 +158,54 @@ jobs:
           if [ -n "$WHATS_NEW_BUILD" ]; then
             echo "value=none" >> "$GITHUB_OUTPUT"
           else
-            echo "value=${{ github.event.inputs.platform || 'all' }}" >> "$GITHUB_OUTPUT"
+            echo "value=$PLATFORM_INPUT" >> "$GITHUB_OUTPUT"
           fi
+
+  build-ios:
+    name: EAS build & submit — iOS
+    # Own job, so a failed iOS build or TestFlight submission (e.g. an Apple
+    # agreement awaiting acceptance — v1.4.0) can't skip or delay Android.
+    # The job still fails, which fails the run, so the problem stays visible.
+    needs: prepare
+    if: contains(fromJSON('["ios","all"]'), needs.prepare.outputs.platform)
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node, install dependencies, set version from tag
+        uses: ./.github/actions/release-setup
 
       - name: EAS build — iOS (auto-submit to TestFlight)
         id: ios
-        if: steps.platform.outputs.value == 'ios' || steps.platform.outputs.value == 'all'
-        # A failed iOS build or TestFlight submission (e.g. an Apple agreement
-        # awaiting acceptance — v1.4.0) must not skip the Android build. The
-        # last step below still fails the job so the failure stays visible.
-        continue-on-error: true
         run: |
           npx -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build \
             --profile production \
             --platform ios \
             --non-interactive \
             --auto-submit
+
+      - name: Explain the iOS build or submission failure
+        if: failure() && steps.ios.outcome == 'failure'
+        run: |
+          echo "::error title=iOS build or TestFlight submission failed::Android builds in its own job and is unaffected. If the build finished but submission failed, resubmit with 'eas submit --platform ios --id <build-id>'; if the build failed, re-run this workflow with platform=ios. Then re-run with whats_new_build set."
+          exit 1
+
+  build-android:
+    name: EAS build — Android
+    needs: prepare
+    if: contains(fromJSON('["android","all"]'), needs.prepare.outputs.platform)
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node, install dependencies, set version from tag
+        uses: ./.github/actions/release-setup
 
       - name: EAS build — Android (APKs only, attached to Release)
         # Deliberately no --auto-submit: Google Play credentials aren't
@@ -207,28 +215,27 @@ jobs:
         # the `attach-android-apk` job below downloads and attaches.
         # Add `--auto-submit` here once `eas submit --platform android`
         # is configured in eas.json.
-        id: android
-        if: steps.platform.outputs.value == 'android' || steps.platform.outputs.value == 'all'
         run: |
           npx -p eas-cli@${{ env.EAS_CLI_VERSION }} eas build \
             --profile production \
             --platform android \
             --non-interactive
 
-      - name: Fail if the iOS build or submission failed
-        if: steps.ios.outcome == 'failure'
-        run: |
-          echo "::error title=iOS build or TestFlight submission failed::Android still ran. If the build finished but submission failed, resubmit with 'eas submit --platform ios --id <build-id>'; if the build failed, re-run this workflow with platform=ios. Then re-run with whats_new_build set."
-          exit 1
-
   set-testflight-whats-new:
     name: Set TestFlight "What to Test"
     # iOS-only: the App Store Connect betaBuildLocalizations endpoint has no
     # Android equivalent (Play Console "What's New" is a separate flow that
     # eas submit handles natively once Android auto-submit is wired up).
-    # Skip when the build job didn't include iOS.
-    if: contains(fromJSON('["ios","all"]'), needs.build-and-submit.outputs.platform) || github.event.inputs.whats_new_build != ''
-    needs: [build-and-submit, release-notes]
+    # Runs after a successful iOS build, or on a "What to Test"-only re-run
+    # (whats_new_build set), where prepare resolves platform=none and
+    # build-ios is skipped. A skipped need would skip this job by default,
+    # hence the explicit !cancelled() + result checks.
+    if: >-
+      !cancelled() &&
+      needs.prepare.result == 'success' &&
+      needs.release-notes.result == 'success' &&
+      (needs.build-ios.result == 'success' || github.event.inputs.whats_new_build != '')
+    needs: [prepare, build-ios, release-notes]
     runs-on: ubuntu-latest
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -352,10 +359,11 @@ jobs:
   attach-android-apk:
     name: Attach Android APKs to Release
     # Only runs on an actual Release event (workflow_dispatch has no release to attach to)
-    # AND only when the build job actually built for Android.
-    # always(): still attach when the build job failed only because of iOS.
-    if: always() && github.event_name == 'release' && needs.build-and-submit.outputs.android == 'success'
-    needs: build-and-submit
+    # AND only when the Android build succeeded. Depends on build-android
+    # alone, so the APKs attach as soon as Android finishes and an iOS
+    # failure can't skip them.
+    if: github.event_name == 'release'
+    needs: build-android
     runs-on: ubuntu-latest
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -396,7 +404,7 @@ jobs:
           # Pick the FINISHED Android production build for THIS commit, filtering
           # by gitCommitHash so we never grab an unrelated older build.
           #
-          # This job runs right after build-and-submit, and there's a brief
+          # This job runs right after build-android, and there's a brief
           # window where the just-finished build hasn't yet surfaced as
           # "finished" in `eas build:list` (eventual consistency). A single-shot
           # query raced here on v1.2.0 and produced a spurious "No Android build
@@ -556,7 +564,7 @@ jobs:
     # the Release title to embed the iOS + Android build numbers, so a
     # tester can match `(42)` in TestFlight against the title here.
     if: github.event_name == 'release'
-    needs: [build-and-submit, attach-android-apk]
+    needs: [build-ios, build-android, attach-android-apk]
     runs-on: ubuntu-latest
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -676,7 +684,15 @@ jobs:
   summary:
     name: Summary
     if: always()
-    needs: [build-and-submit, attach-android-apk, attach-technical-pdf, set-testflight-whats-new]
+    needs:
+      [
+        prepare,
+        build-ios,
+        build-android,
+        attach-android-apk,
+        attach-technical-pdf,
+        set-testflight-whats-new,
+      ]
     runs-on: ubuntu-latest
     steps:
       - name: Write summary
