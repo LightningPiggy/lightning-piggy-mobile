@@ -87,13 +87,23 @@ interface LnurlWithdrawHostProps {
    *  (`payRequest`) rather than a voucher — e.g. a bare `lnurl://` or a scanned
    *  `lnurl1…`, whose direction is only known once resolved. The host closes
    *  itself and hands over; the Send sheet still asks for the amount and the
-   *  Send tap, so nothing is paid without the user confirming. A prop rather
-   *  than a direct `navigateToSend` import to avoid a require cycle
-   *  (AppNavigator → HomeScreen → ReceiveSheet → this file). */
-  onPayLink?: (url: string) => void;
+   *  Send tap, so nothing is paid without the user confirming. Never used for
+   *  `lnurlw://`, whose consent said "Withdraw": that shows an error instead.
+   *  Returns false if it couldn't open the Send sheet (the error shows then).
+   *  A prop rather than a direct `navigateToSend` import to avoid a require
+   *  cycle (AppNavigator → HomeScreen → ReceiveSheet → this file). */
+  onPayLink?: (url: string) => boolean;
 }
 
+/** Only `lnurlw://` declares its direction up front; `lnurl://` / `lnurl1…`
+ *  may turn out to be a pay link. */
+const isDeclaredWithdraw = (lnurl: string) => /^(lightning:)?lnurlw:\/\//i.test(lnurl.trim());
+
 export function LnurlWithdrawHost({ onPayLink }: LnurlWithdrawHostProps = {}): React.ReactElement {
+  // Read through a ref so a caller passing an inline arrow can't cancel and
+  // re-issue the resolve fetch on every parent re-render.
+  const onPayLinkRef = useRef(onPayLink);
+  onPayLinkRef.current = onPayLink;
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createLnurlWithdrawSheetStyles(colors), [colors]);
@@ -281,17 +291,24 @@ export function LnurlWithdrawHost({ onPayLink }: LnurlWithdrawHostProps = {}): R
       } catch (e) {
         if (cancelled || !mountedRef.current) return;
         // A pay link opened as a claim (bare `lnurl://`, scanned `lnurl1…`):
-        // hand it to the Send sheet rather than dead-ending on an error.
-        if (e instanceof LnurlWithdrawError && e.code === 'pay-request' && onPayLink) {
+        // hand it to the Send sheet rather than dead-ending on an error. Not
+        // for `lnurlw://`: the user agreed to "Withdraw from <host>", and a
+        // withdraw tag that turns out to request payment gets the error.
+        const payLink = onPayLinkRef.current;
+        if (
+          e instanceof LnurlWithdrawError &&
+          e.code === 'pay-request' &&
+          payLink &&
+          !isDeclaredWithdraw(lnurl)
+        ) {
           let url: string | null = null;
           try {
             url = decodeLnurlWithdraw(lnurl);
           } catch {
             /* Unreachable — resolve already decoded it; fall through to the error. */
           }
-          if (url) {
+          if (url && payLink(url)) {
             sheetRef.current?.dismiss();
-            onPayLink(url);
             return;
           }
         }
@@ -309,7 +326,7 @@ export function LnurlWithdrawHost({ onPayLink }: LnurlWithdrawHostProps = {}): R
     return () => {
       cancelled = true;
     };
-  }, [lnurl, stage.kind, t, onPayLink]);
+  }, [lnurl, stage.kind, t]);
 
   // Tick the cooldown countdown each second while sleeping. Decrements the
   // `remaining` carried in the sleeping stage; stops at 0 (the user can then
@@ -375,10 +392,9 @@ export function LnurlWithdrawHost({ onPayLink }: LnurlWithdrawHostProps = {}): R
   } catch {
     /* Resolve reports invalid inputs after consent. */
   }
-  // Only `lnurlw://` declares its direction up front; `lnurl://` / `lnurl1…`
-  // may turn out to be a pay link, so the pre-fetch consent stays neutral
-  // (same wording as the app-wide link prompt in `confirmLinkAction`).
-  const isWithdrawForm = !!lnurl && /^(lightning:)?lnurlw:\/\//i.test(lnurl.trim());
+  // Unless the link declares itself a withdraw, the pre-fetch consent stays
+  // neutral (same wording as the app-wide link prompt in `confirmLinkAction`).
+  const isWithdrawForm = !!lnurl && isDeclaredWithdraw(lnurl);
 
   const close = () => sheetRef.current?.dismiss();
 
