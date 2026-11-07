@@ -16,8 +16,9 @@
 //   - A persisted 'fof' tier loads its cached set (one bounded read) and, if
 //     it has expired or the follow list changed, rebuilds it in the
 //     background after a cancellable delay, so startup work settles first.
-import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { computeFofSet, loadFofCache } from '../services/friendsOfFriendsService';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
+import { computeFofSet, FOF_CACHE_TTL_MS, loadFofCache } from '../services/friendsOfFriendsService';
 import { fetchFollowLists } from '../services/followListsFetcher';
 import { useAccountState } from './useAccountState';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
@@ -38,6 +39,8 @@ import type { WotTier } from '../services/wotSettingsService';
 export const WOT_FOF_MAX = 2000;
 /** Startup work settles before a stale persisted set is rebuilt in the background. */
 export const L2_BACKGROUND_REFRESH_DELAY_MS = 8_000;
+/** Resume work staggers (CLAUDE.md → AppState handlers); only DM re-arm is immediate. */
+export const L2_RESUME_CHECK_DELAY_MS = 3_000;
 
 export interface FofBuildProgress {
   /** Follow-list batches (50 friends each) fetched so far. */
@@ -88,9 +91,12 @@ export function useTrustGraphL2({
   const controllerRef = useRef<AbortController | null>(null);
   const l2ComputedAtRef = useRef<number | null>(null);
   l2ComputedAtRef.current = l2?.computedAt ?? null;
-  // One unattended rebuild per (account, follow list) per session, so a
-  // relay outage can't turn into a retry loop.
+  // One unattended rebuild per (account, follow list, cached build), so a
+  // relay outage can't turn into a retry loop — yet a set rebuilt
+  // successfully gets its own attempt once it, too, expires.
   const autoAttemptRef = useRef<string | null>(null);
+  // Bumped when a resumed app finds the in-memory set past its TTL.
+  const [expiryTick, setExpiryTick] = useState(0);
 
   const friendsList = useMemo(() => [...friends].sort(), [friends]);
   const friendsKey = friendsList.join(',');
@@ -181,17 +187,19 @@ export function useTrustGraphL2({
 
   // Persisted 'fof': load the cached set (one bounded read), and rebuild a
   // stale one after startup settles. Any other tier: nothing at all (#565).
+  // With no direct friends there are no friends of friends: nothing is read,
+  // and a set cached before the last unfollow is never restored.
   useEffect(() => {
-    if (!pubkey || !wotTierReady || wotTier !== 'fof') return;
+    if (!pubkey || !wotTierReady || wotTier !== 'fof' || !friendsKey) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const attemptKey = `${pubkey}|${friendsKey}`;
-    void loadFofCache(pubkey, friendsKey ? friendsKey.split(',') : [], WOT_FOF_MAX, {
+    void loadFofCache(pubkey, friendsKey.split(','), WOT_FOF_MAX, {
       allowStale: true,
     }).then((cached) => {
       if (cancelled) return;
       if (cached) applySnapshot(cached);
-      if ((cached && !cached.stale) || !friendsKey) return;
+      if (cached && !cached.stale) return;
+      const attemptKey = `${pubkey}|${friendsKey}|${cached?.computedAt ?? 'none'}`;
       if (autoAttemptRef.current === attemptKey) return;
       timer = setTimeout(() => {
         if (controllerRef.current) return; // a foreground build is already running
@@ -203,7 +211,26 @@ export function useTrustGraphL2({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [pubkey, wotTier, wotTierReady, friendsKey, applySnapshot, runBuild]);
+  }, [pubkey, wotTier, wotTierReady, friendsKey, expiryTick, applySnapshot, runBuild]);
+
+  // An app left open (backgrounded) past the 24 h TTL re-checks on resume,
+  // staggered so it never competes with latency-sensitive resume work.
+  useEffect(() => {
+    if (!pubkey || wotTier !== 'fof') return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const at = l2ComputedAtRef.current;
+        if (at !== null && Date.now() - at > FOF_CACHE_TTL_MS) setExpiryTick((n) => n + 1);
+      }, L2_RESUME_CHECK_DELAY_MS);
+    });
+    return () => {
+      sub.remove();
+      if (timer) clearTimeout(timer);
+    };
+  }, [pubkey, wotTier]);
 
   // An account switch (or unmount) abandons the previous account's build.
   useEffect(
@@ -215,7 +242,7 @@ export function useTrustGraphL2({
   );
 
   return {
-    l2Follows: l2?.set ?? EMPTY_SET,
+    l2Follows: friendsKey ? (l2?.set ?? EMPTY_SET) : EMPTY_SET,
     status,
     enableFof,
     cancelL2,
