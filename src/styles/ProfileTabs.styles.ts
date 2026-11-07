@@ -1,5 +1,6 @@
 import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
+import { PROFILE_TOP_BAR_BUTTON, PROFILE_TOP_BAR_HEIGHT } from '../utils/profileHeaderLayout';
 
 /**
  * Profile page tabs (#1332): the Posts / Media / Products tab bar and the
@@ -155,8 +156,10 @@ export const createProfileTabsStyles = (colors: Palette) =>
       borderBottomColor: colors.divider,
     },
     stickyTitleRow: {
-      // Leaves room for the floating back / ⋯ buttons (36 dp + 8 dp margins).
-      height: 52,
+      // Same height as the floating back / ⋯ row, title centred on the
+      // buttons (the 8 dp gap below them is padding).
+      height: PROFILE_TOP_BAR_HEIGHT,
+      paddingBottom: PROFILE_TOP_BAR_HEIGHT - PROFILE_TOP_BAR_BUTTON,
       justifyContent: 'center',
       paddingHorizontal: 64,
     },
