@@ -18,6 +18,8 @@
  *   - App-private storage, like the verified-event cache and the DM database.
  *   - Re-verified in the background on every profile open, and entries not
  *     re-confirmed for `TTL_MS` stop seeding the UI.
+ *   - Wiped on logout / account switch: it holds public data only, but on a
+ *     shared device it would show whose profiles the previous account opened.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -42,6 +44,8 @@ type CacheShape = Record<string, Entry>;
 
 let memoryCache: CacheShape | null = null;
 let loading: Promise<CacheShape> | null = null;
+// Writes run in call order, so a wipe can't be overtaken by an older snapshot.
+let writeChain: Promise<void> = Promise.resolve();
 
 function load(): Promise<CacheShape> {
   if (memoryCache) return Promise.resolve(memoryCache);
@@ -53,19 +57,25 @@ function load(): Promise<CacheShape> {
     } catch {
       // Unreadable blob: start empty; the next verified fetch rebuilds it.
     }
-    memoryCache = parsed;
+    // A wipe during the read already installed an empty mirror: keep it.
+    memoryCache ??= parsed;
     loading = null;
-    return parsed;
+    return memoryCache;
   })();
   return loading;
 }
 
-async function persist(cache: CacheShape): Promise<void> {
-  try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
-  } catch {
+function enqueueWrite(write: () => Promise<void>): Promise<void> {
+  writeChain = writeChain.then(write).catch(() => {
     // Non-fatal: the in-memory mirror still serves this session.
-  }
+  });
+  return writeChain;
+}
+
+function persist(cache: CacheShape): void {
+  const snapshot = JSON.stringify(cache);
+  // Fire-and-forget: fetchProfile callers must not wait on storage.
+  void enqueueWrite(() => AsyncStorage.setItem(STORAGE_KEY, snapshot));
 }
 
 function fresh(entry: Entry | undefined): string | null {
@@ -108,14 +118,26 @@ export async function recordVerifiedLud16(
   cache[pubkey] = { lud16, createdAt, verifiedAt: now };
   const keys = Object.keys(cache);
   for (let i = 0; i < keys.length - MAX_ENTRIES; i++) delete cache[keys[i]];
-  await persist(cache);
+  persist(cache);
   return lud16;
+}
+
+/** Drops every cached address (logout / account switch). */
+export async function clearVerifiedLud16Cache(): Promise<void> {
+  memoryCache = {};
+  loading = null;
+  await enqueueWrite(() => AsyncStorage.removeItem(STORAGE_KEY));
 }
 
 /** Test-only: drop the in-memory mirror so the next read hits storage. */
 export function __resetForTests(): void {
   memoryCache = null;
   loading = null;
+}
+
+/** Test-only: resolves once queued storage writes have landed. */
+export function __flushWritesForTests(): Promise<void> {
+  return writeChain;
 }
 
 export const __TEST__ = { STORAGE_KEY, TTL_MS, MAX_ENTRIES, REFRESH_PERSIST_MS };

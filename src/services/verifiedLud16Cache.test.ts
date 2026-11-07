@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   __TEST__,
+  __flushWritesForTests,
   __resetForTests,
+  clearVerifiedLud16Cache,
   getVerifiedLud16,
   peekVerifiedLud16,
   recordVerifiedLud16,
@@ -23,6 +25,7 @@ describe('verifiedLud16Cache (#1719)', () => {
 
   it('round-trips through storage across a cold start', async () => {
     await recordVerifiedLud16(PK, 'eden@example.com', 100);
+    await __flushWritesForTests();
     __resetForTests();
     expect(peekVerifiedLud16(PK)).toBeNull(); // mirror not loaded yet
     expect(await getVerifiedLud16(PK)).toBe('eden@example.com');
@@ -62,10 +65,12 @@ describe('verifiedLud16Cache (#1719)', () => {
 
   it('skips rewriting storage for a same-event re-confirmation', async () => {
     await recordVerifiedLud16(PK, 'eden@example.com', 100);
+    await __flushWritesForTests();
     // The storage mock's setItem is already a jest.fn: count, don't spy.
     const { calls } = (AsyncStorage.setItem as jest.Mock).mock;
     const before = calls.length;
     await recordVerifiedLud16(PK, 'eden@example.com', 100);
+    await __flushWritesForTests();
     expect(calls.length).toBe(before);
   });
 
@@ -74,12 +79,31 @@ describe('verifiedLud16Cache (#1719)', () => {
     for (let i = 0; i <= MAX_ENTRIES; i++) {
       await recordVerifiedLud16(i.toString(16).padStart(64, '0'), `u${i}@example.com`, 1);
     }
+    await __flushWritesForTests();
     const stored = JSON.parse((await AsyncStorage.getItem(__TEST__.STORAGE_KEY)) ?? '{}');
     expect(Object.keys(stored)).toHaveLength(MAX_ENTRIES);
     expect(await getVerifiedLud16('0'.padStart(64, '0'))).toBeNull();
     expect(await getVerifiedLud16(MAX_ENTRIES.toString(16).padStart(64, '0'))).toBe(
       `u${MAX_ENTRIES}@example.com`,
     );
+  });
+
+  it('a logout wipe clears memory and storage, even with a write still queued', async () => {
+    await recordVerifiedLud16(PK, 'eden@example.com', 100);
+    await clearVerifiedLud16Cache();
+    expect(peekVerifiedLud16(PK)).toBeNull();
+    expect(await AsyncStorage.getItem(__TEST__.STORAGE_KEY)).toBeNull();
+    __resetForTests();
+    expect(await getVerifiedLud16(PK)).toBeNull();
+  });
+
+  it('a wipe during a cold read is not undone by the read', async () => {
+    await recordVerifiedLud16(PK, 'eden@example.com', 100);
+    await __flushWritesForTests();
+    __resetForTests();
+    const reading = getVerifiedLud16(PK);
+    await clearVerifiedLud16Cache();
+    expect(await reading).toBeNull();
   });
 
   it('starts empty when the stored blob is corrupt', async () => {

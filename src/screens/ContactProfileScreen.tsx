@@ -184,13 +184,15 @@ const ContactProfileScreen: React.FC = () => {
   // from the last verified fetch shows at once (#1719), so a slow network
   // doesn't grey out a known address. Keyed on the pubkey alone, so seeding
   // the address can't cancel the fetch.
-  const verifiedInputsRef = useRef({ contact, relays });
-  verifiedInputsRef.current = { contact, relays };
+  const relaysRef = useRef(relays);
+  useEffect(() => {
+    relaysRef.current = relays;
+  }, [relays]);
   useEffect(() => {
     const pubkey = contact.pubkey;
     if (!pubkey) return;
     let cancelled = false;
-    const readRelays = verifiedInputsRef.current.relays.filter((r) => r.read).map((r) => r.url);
+    const readRelays = relaysRef.current.filter((r) => r.read).map((r) => r.url);
     const cachedLud16 = getVerifiedLud16(pubkey).catch(() => null);
     void cachedLud16.then((cached) => {
       if (cancelled || !cached) return;
@@ -235,7 +237,8 @@ const ContactProfileScreen: React.FC = () => {
 
   // Pull-to-refresh: unlike the gap-fill effect above (which only fills
   // missing about/lud16, once), this re-fetches the kind-0 from relays and
-  // OVERWRITES every displayed field with the latest — so a friend who
+  // OVERWRITES every displayed field with the latest (the address being the
+  // newest verified one, see fetchProfile) — so a friend who
   // updated their name, picture, banner, bio or Lightning address surfaces
   // without waiting out the 24h profile cache. `fetchProfile` is a direct
   // relay query, so there's no cache to bypass.
