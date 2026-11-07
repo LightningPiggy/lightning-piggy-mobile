@@ -288,18 +288,21 @@ export default function App() {
       const needsConsent =
         (/^(lightning:|lnurl|bitcoin:|nostr:)/i.test(trimmed) || isProfileReferenceUri(trimmed)) &&
         !/^lnurlw?:\/\//i.test(trimmed);
-      if (needsConsent) {
-        // On a cold start the launch URL arrives before the consent sheet's
-        // host has mounted, so wait for it rather than drop the prompt.
-        whenLinkActionSheetReady(() => {
-          if (cancelled) return;
+      // On a cold start the launch URL arrives before the sheet hosts have
+      // mounted, so wait for them rather than drop the prompt or the withdraw
+      // sheet. `LnurlWithdrawHost` renders just before `LinkActionSheetHost`
+      // in the same parent, so its listener is registered by the time this
+      // runs.
+      whenLinkActionSheetReady(() => {
+        if (cancelled) return;
+        if (needsConsent) {
           confirmLinkAction(trimmed, () => {
             if (!cancelled) routeFresh(trimmed);
           });
-        });
-      } else {
-        routeFresh(trimmed);
-      }
+        } else {
+          routeFresh(trimmed);
+        }
+      });
     };
     const routeFresh = (trimmed: string) => {
       // Truncate noisy URIs so the log doesn't blow past logcat's

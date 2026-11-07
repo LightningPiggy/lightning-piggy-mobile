@@ -30,6 +30,24 @@ it('waits for the host before running a cold-start prompt, then runs it once', (
   expect(host).toHaveBeenCalledTimes(1);
 });
 
+it('runs every queued readiness callback once', () => {
+  const first = jest.fn();
+  const second = jest.fn();
+  whenLinkActionSheetReady(first);
+  whenLinkActionSheetReady(second);
+  expect(first).not.toHaveBeenCalled();
+  expect(second).not.toHaveBeenCalled();
+
+  unregister = registerLinkActionSheet(jest.fn());
+  expect(first).toHaveBeenCalledTimes(1);
+  expect(second).toHaveBeenCalledTimes(1);
+
+  unregister();
+  unregister = registerLinkActionSheet(jest.fn());
+  expect(first).toHaveBeenCalledTimes(1);
+  expect(second).toHaveBeenCalledTimes(1);
+});
+
 it('runs immediately when the host is already mounted', () => {
   unregister = registerLinkActionSheet(jest.fn());
   const run = jest.fn();

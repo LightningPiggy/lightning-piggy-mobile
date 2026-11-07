@@ -511,7 +511,7 @@ Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`
 
 iOS registers `lightningpiggy`, `lightning`, `lnurlw` and `lnurl` as `CFBundleURLSchemes`, via `ios.scheme` in `app.config.ts`. `nostr` isn't registered on iOS. A `lightning:` link from another app or Safari (for example a top-up screen's "Open in wallet" button) opens Lightning Piggy and goes through the same `App.tsx` routing. iOS has no app chooser: if several installed apps register the same scheme, iOS picks one and Apple doesn't define which. On the iOS 26 Simulator, the wallet that registered `lightning:` first kept it after Lightning Piggy was installed. So Lightning Piggy may not open on a phone that has another Lightning wallet.
 
-On a cold start, the launch URL arrives before the consent sheet's host has mounted. `App.tsx` therefore waits for it (`whenLinkActionSheetReady` in `src/utils/linkActionSheet.ts`) instead of dropping the prompt.
+On a cold start, the launch URL arrives before the consent and withdraw sheet hosts have mounted. `App.tsx` therefore waits for them (`whenLinkActionSheetReady` in `src/utils/linkActionSheet.ts`) before it routes the link, instead of dropping the prompt or the withdraw sheet.
 
 ==== Routing table
 
