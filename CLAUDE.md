@@ -13,7 +13,8 @@
 
 ## Sideloading a release-flavor APK to a physical device (for testing, not release)
 
-- The user's primary device is a Pixel running an EAS-built install. A locally-signed APK won't upgrade it (`INSTALL_FAILED_UPDATE_INCOMPATIBLE` — different keystore). To validate release-mode behavior on real hardware without losing app data, pull a cloud-built production APK instead of running `eas build --local`:
+- The user's primary device is a Pixel running an EAS-built install. A locally-signed APK won't upgrade it (`INSTALL_FAILED_UPDATE_INCOMPATIBLE` — different keystore). To validate release-mode behavior on real hardware without losing app data, pull a cloud-built production APK instead of running `eas build --local`.
+- Production builds are **per-ABI APKs** (`plugins/withAndroidAbiSplits.js`): the Pixel takes **arm64-v8a**. For a published release, just `gh release download vX.Y.Z --pattern '*-arm64-v8a.apk'`. An EAS production build's artifact is a `.tar.gz` (builds from before the split: one universal `.apk`) holding `app-arm64-v8a-release.apk` and `app-armeabi-v7a-release.apk`; both carry the same versionCode and signature, so either upgrades in place.
   ```
   # 0. The APK you install must actually contain the code under test. The
   #    "latest" finished build may be the PREVIOUS release — if your fix
@@ -26,8 +27,10 @@
   #    isn't constrained to a profile and may hand back a development/
   #    preview APK (which uses the `.dev` / `.preview` applicationId
   #    and won't upgrade a production install).
-  eas build:view <build-id> --json | jq -r '.artifacts.buildUrl' | xargs -I{} curl -L -o build.apk {}
-  adb -s <serial> install -r build.apk
+  # 3. The artifact is a tarball of the per-ABI APKs; install the arm64 one.
+  eas build:view <build-id> --json | jq -r '.artifacts.buildUrl' | xargs -I{} curl -L -o build.tar.gz {}
+  mkdir -p build-apks && tar -xzf build.tar.gz -C build-apks
+  adb -s <serial> install -r build-apks/app-arm64-v8a-release.apk
   ```
 - `adb` takes the adb serial; `expo run:android --device` takes the model name (`Pixel_8`). For dev iteration, `npx expo run:android --device Pixel_8` is still the right call — release-mode sideload is only needed when validating R8 / proguard behavior.
 - `eas build --local` survives as an offline fallback (no network, urgent). Documented in `docs/DEPLOYMENT.adoc` → "Local production builds (fallback)". It requires manually bumping `versionCode` in `app.config.ts` first, and is not the release path.

@@ -15,6 +15,8 @@ import pkg from './package.json';
 const APP_VARIANT = process.env.APP_VARIANT ?? (process.env.EAS_BUILD ? undefined : 'development');
 const IS_DEV = APP_VARIANT === 'development';
 const IS_PREVIEW = APP_VARIANT === 'preview';
+// Same fallback as the production package / icon below.
+const IS_PRODUCTION = !IS_DEV && !IS_PREVIEW;
 
 const getAppName = () => {
   if (IS_DEV) return 'Lightning Piggy (Dev)';
@@ -280,9 +282,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
             '# all live in rust.nostr.sdk, and JNA resolves them reflectively.',
             '-keep class rust.nostr.sdk.** { *; }',
           ].join('\n'),
+          // Production APKs store native libraries compressed
+          // (extractNativeLibs=true): a much smaller download, at the cost
+          // of Android unpacking the libraries on install (slightly bigger
+          // install, slightly slower first start). Dev and preview builds
+          // keep the uncompressed default.
+          useLegacyPackaging: IS_PRODUCTION,
         },
       },
     ],
+    // Production only: one APK per CPU architecture (arm64-v8a, armeabi-v7a)
+    // for the GitHub Release instead of a universal APK. Dev and preview
+    // builds stay universal so EAS install links and emulators keep working.
+    ...(IS_PRODUCTION ? ['./plugins/withAndroidAbiSplits'] : []),
   ],
   android: {
     adaptiveIcon: {

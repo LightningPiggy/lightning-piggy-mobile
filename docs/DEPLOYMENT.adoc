@@ -56,7 +56,7 @@ Build profiles are defined in `eas.json`:
 | `production`
 | Store (iOS) / Internal sideload (Android, today)
 | APK
-| Used by the release workflow. Outputs an APK for sideloading + Release attachment. **Switch to App Bundle (AAB)** once we enrol on Google Play, or split into a `production-aab` profile alongside.
+| Used by the release workflow. Outputs one APK per ABI (arm64-v8a, armeabi-v7a, packed by EAS into one `.tar.gz`) for sideloading + Release attachment; see "Android release APKs". **Switch to App Bundle (AAB)** once we enrol on Google Play, or split into a `production-aab` profile alongside.
 
 |===
 
@@ -81,8 +81,9 @@ install you don't want to lose data on):
 [source,bash]
 ----
 # Build locally but with EAS's production keystore, so the APK is
-# sig-compatible with whatever's already on the phone. APK lands at
-# android/app/build/outputs/apk/release/app-release.apk.
+# sig-compatible with whatever's already on the phone. The production
+# profile builds one APK per ABI; eas-cli packs them into
+# build-<timestamp>.tar.gz in the repo root.
 #
 # EXPO_NO_DOCTOR=1 skips the pre-flight version-compatibility checker
 # which is noisy on minor-mismatch deps and not relevant to signing.
@@ -90,7 +91,7 @@ install you don't want to lose data on):
 # TMPDIR="$HOME/eas-tmp" is REQUIRED on hosts with /tmp on tmpfs
 # (default Ubuntu/Debian setup, 12 GB cap). The EAS local builder
 # generates ~9 GB of native-lib intermediates during the multi-arch
-# APK assembly (arm64 + armv7 + x86 + x86_64), and Gradle crashes with
+# native build, and Gradle crashes with
 # `UncheckedIOException: Could not add entry ... to cache fileHashes.bin`
 # the moment tmpfs hits 100 %. Pointing TMPDIR at disk-backed storage
 # gives Gradle the ~10 GB of headroom it needs. ($HOME instead of ~ is
@@ -98,9 +99,11 @@ install you don't want to lose data on):
 mkdir -p "$HOME/eas-tmp"
 TMPDIR="$HOME/eas-tmp" EXPO_NO_DOCTOR=1 eas build --local --platform android --profile production --non-interactive
 
-# Install over the existing app — preserves user data (Nostr nsec,
-# wallet pairings, conversation cache).
-adb -s <serial> install -r android/app/build/outputs/apk/release/app-release.apk
+# Unpack the arm64-v8a APK (any 64-bit phone) and install it over the
+# existing app — preserves user data (Nostr nsec, wallet pairings,
+# conversation cache).
+mkdir -p build-apks && tar -xzf "$(ls -1t build-*.tar.gz | head -1)" -C build-apks
+adb -s <serial> install -r build-apks/app-arm64-v8a-release.apk
 ----
 
 Build time: ~10-15 min fresh, ~2-3 min on a warm gradle cache. No
@@ -208,9 +211,35 @@ subsequent tests may still be exercising the pre-fix app. Verify
 Releases are cut by publishing a **GitHub Release** (which creates the tag server-side and fires `.github/workflows/release.yml`). The workflow:
 
 1. Runs quality gates (typecheck / lint / format-check).
-2. Kicks off EAS production builds for both platforms. **iOS** is auto-submitted to TestFlight via EAS's ASC API key. **Android** is built only — no auto-submit to Play Internal until the Google Play Developer account + service-account JSON are wired up via `eas credentials` (see the "Android Distribution — Google Play Internal Testing" section below). The Android APK is attached to the GitHub Release instead, so testers can sideload it immediately.
-3. Downloads the resulting Android APK from EAS and attaches it as `lightning-piggy-<tag>.apk` on the Release page for sideloading.
+2. Kicks off EAS production builds for both platforms. **iOS** is auto-submitted to TestFlight via EAS's ASC API key. **Android** is built only — no auto-submit to Play Internal until the Google Play Developer account + service-account JSON are wired up via `eas credentials` (see the "Android Distribution — Google Play Internal Testing" section below). The Android APKs are attached to the GitHub Release instead, so testers can sideload them immediately.
+3. Downloads the Android build from EAS and attaches one APK per CPU architecture to the Release page for sideloading: `lightning-piggy-<tag>-arm64-v8a.apk` and `lightning-piggy-<tag>-armeabi-v7a.apk` (see "Android release APKs" below). The Release body says which one to download.
 4. Regenerates `docs/TECHNICAL_SOLUTION_DOCUMENT.pdf` from the AsciiDoc sources and attaches that too.
+
+==== Android release APKs
+
+The production profile builds **one APK per CPU architecture** instead of one universal APK. The universal APK carried native libraries for four ABIs, stored uncompressed, and weighed ~320 MB (v1.7.1).
+
+[cols="2,1,3", options="header"]
+|===
+| Release asset | Size (approx.) | Who needs it
+
+| `lightning-piggy-<tag>-arm64-v8a.apk`
+| ~84 MB
+| **Most phones**: any phone running 64-bit Android, which is nearly every phone in use.
+
+| `lightning-piggy-<tag>-armeabi-v7a.apk`
+| ~80 MB
+| Older 32-bit phones, only if the arm64 APK won't install ("App not installed" / `INSTALL_FAILED_NO_MATCHING_ABIS`).
+|===
+
+How it's wired:
+
+* `plugins/withAndroidAbiSplits.js` adds a Gradle `splits { abi { … } }` block (arm64-v8a and armeabi-v7a, no universal APK). x86 and x86_64 are emulator ABIs and aren't released.
+* `useLegacyPackaging` (`expo-build-properties` in `app.config.ts`) stores the native libraries **compressed** (`extractNativeLibs=true`). Trade-off: a much smaller download, but Android unpacks the libraries on install, so the installed app takes slightly more storage and the first start after an install or update is slightly slower.
+* Both are applied to the **production variant only**. Development and preview builds stay universal and uncompressed, so EAS install links, emulators and CI's preview APK build are unchanged.
+* `eas.json` → `build.production.android.applicationArchivePath` matches both APKs. EAS uploads more than one application archive as a single `.tar.gz`, so the build's artifact URL is a tarball containing `app-arm64-v8a-release.apk` and `app-armeabi-v7a-release.apk`. The `attach-android-apk` job unpacks it, renames the two APKs and checks them before upload: 16 KB ELF alignment (arm64), `zipalign`, exactly one ABI per APK, compressed `lib/` entries and an identical `versionCode`.
+* **Same applicationId, signature and versionCode.** Both APKs are signed with the EAS upload keystore and carry the versionCode from EAS's remote counter, unchanged. The plugin deliberately sets no per-ABI versionCode offset (the old Play multi-APK `versionCodeOverride` pattern): offsets are only needed to publish several APKs to one Play listing, which an AAB replaces, and they would push the Android versionCode out of step with the EAS counter. So either APK upgrades an existing install in place with `adb install -r`.
+* Google Play, when wired up, should use an **AAB** (`buildType: app-bundle`), which Play splits per device itself. ABI splits only affect APK outputs, so they don't change an AAB.
 
 ==== Version numbering
 
@@ -277,25 +306,27 @@ WARNING: **This is not the release path.** Cutting a release goes through `.gith
 
 The fallbacks below are for two narrow cases:
 
-. **Sideloading a release-flavor APK to a device for testing** — usually for R8 / proguard validation. Prefer pulling the latest **production-profile** cloud-built APK instead: list with `eas build:list --platform android --profile production --status finished --limit 1`, then download the artifact by its build URL/ID (not `--latest`, which isn't profile-constrained and may hand back a `development` / `preview` APK with the `.dev` / `.preview` applicationId — that won't upgrade a production install). Only fall back to a local build when you're offline or the EAS queue is jammed.
+. **Sideloading a release-flavor APK to a device for testing** — usually for R8 / proguard validation. For a published release, download `lightning-piggy-<tag>-arm64-v8a.apk` from its GitHub Release (`gh release download <tag> --pattern '*-arm64-v8a.apk'`). Otherwise, pull the latest **production-profile** cloud build: list with `eas build:list --platform android --profile production --status finished --limit 1`, then download the artifact by its build URL/ID (not `--latest`, which isn't profile-constrained and may hand back a `development` / `preview` APK with the `.dev` / `.preview` applicationId — that won't upgrade a production install). The production artifact is a `.tar.gz` holding both per-ABI APKs; install `app-arm64-v8a-release.apk` from it. Only fall back to a local build when you're offline or the EAS queue is jammed.
 . **Reproducing a release-build issue locally** — e.g. a class got stripped and you need to bisect Gradle config.
 
 ===== Case 1 (offline fallback): keep existing data on an EAS-built device
 
 NOTE: The **recommended** path is to download a cloud-built production APK (see the bullet above) — it's already signed with the EAS upload keystore and needs no `versionCode` bookkeeping. Reach for the local build below only when you're offline or the EAS queue is jammed.
 
-Use `eas build --local --profile production`. This runs **EAS's production pipeline** on your machine — it fetches the EAS upload keystore at build time so the APK signature matches your existing install, and emits a sideload-able `.apk`:
+Use `eas build --local --profile production`. This runs **EAS's production pipeline** on your machine — it fetches the EAS upload keystore at build time so the APK signature matches your existing install, and emits sideload-able per-ABI APKs:
 
 [source,bash]
 ----
-# Builds an .apk in the repo root (e.g. build-1733864000123.apk) without
-# installing. The signing keystore comes from EAS — that's what makes
-# the APK a valid upgrade for an existing EAS-installed app.
+# Builds the per-ABI APKs and packs them into a tarball in the repo root
+# (e.g. build-1733864000123.tar.gz) without installing. The signing
+# keystore comes from EAS — that's what makes the APK a valid upgrade
+# for an existing EAS-installed app.
 eas build --local --profile production --platform android --non-interactive
 
-# Then sideload to the Pixel. `adb -s` takes the adb serial here (NOT
-# the model name expo run:android wants).
-adb -s <serial> install -r build-*.apk
+# Then unpack and sideload the arm64-v8a APK to the Pixel. `adb -s` takes
+# the adb serial here (NOT the model name expo run:android wants).
+mkdir -p build-apks && tar -xzf "$(ls -1t build-*.tar.gz | head -1)" -C build-apks
+adb -s <serial> install -r build-apks/app-arm64-v8a-release.apk
 ----
 
 Side-loading this way preserves all app data (`/data/data/com.lightningpiggy.app/` is left untouched on upgrade). Wallets, Nostr login, message history all survive.
@@ -392,7 +423,7 @@ eas build:list --platform android --status finished --limit 1 \
 . Go to https://github.com/LightningPiggy/lightning-piggy-mobile/releases → *Draft a new release*.
 . Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and writes it into `package.json` via `npm version --no-git-tag-version`. `app.config.ts` reads `version: pkg.version`, so iOS `CFBundleShortVersionString`, Android `versionName`, and the in-app version label (drawer + About screen, via `src/utils/appVersion.ts`) all flow from that single value. Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
 . Write release notes, click *Publish release*.
-. Watch *Actions → Release*. When it finishes, the Release page has the APK and PDF attached; TestFlight has the iOS build (auto-distributed to the Public Beta external group via `eas.json` `submit.production.ios.groups`).
+. Watch *Actions → Release*. When it finishes, the Release page has the two per-ABI APKs and the PDF attached; TestFlight has the iOS build (auto-distributed to the Public Beta external group via `eas.json` `submit.production.ios.groups`).
 . *What to Test* fills itself in — the `set-testflight-whats-new` workflow job uses the generated PR-title notes, polls App Store Connect for the just-submitted build, and PATCHes the localisation via `scripts/asc-set-whats-new.mjs` (see "TestFlight 'What to Test' notes" below). Manual pasting is only needed when the `EXPO_ASC_API_KEY_ID` / `EXPO_ASC_API_KEY_ISSUER_ID` / `EXPO_ASC_API_KEY_P8` secrets aren't configured.
 
 NOTE: `versionCode` (Android) and `buildNumber` (iOS) are managed by EAS's remote counter (`eas.json` → `"appVersionSource": "remote"` + `"autoIncrement": true`). Don't hand-edit them for releases — cloud builds auto-increment past whatever's in `app.config.ts`. The integer in the file is only the floor for `eas build --local` and `expo run:android --variant release`, both of which are dev-test paths, not release paths.
@@ -844,6 +875,8 @@ zsp publish
 
 The wizard guides you through source repository, metadata, signing, and relay selection. Signing options include `nsec`, NIP-07 browser extension, or NIP-46 bunker.
 
+When publishing a production release, point Zapstore at the Release's `lightning-piggy-<tag>-arm64-v8a.apk` (the Release no longer has a universal APK; see "Android release APKs"). A `zsp` asset `match` regex for it: `^lightning-piggy-v[0-9]+\.[0-9]+\.[0-9]+-arm64-v8a\.apk$`.
+
 To receive payments, add a Lightning address to your Nostr profile.
 
 === F-Droid
@@ -872,35 +905,22 @@ Users on Android, GrapheneOS, or other custom ROMs can install specific versions
 
 ==== From GitHub Releases
 
-Attach APK builds to GitHub Releases so users can download and install specific versions:
-
-[source,bash]
-----
-# Build an APK for sideloading
-eas build --platform android --profile preview
-
-# Download the APK from EAS
-eas build:list --platform android --status finished
-# Copy the build URL and download the APK
-
-# Attach to a GitHub Release
-gh release create v1.0.0 ./lightning-piggy.apk --title "v1.0.0" --notes "Release notes"
-----
+The release workflow attaches the APKs to every GitHub Release automatically: `lightning-piggy-<tag>-arm64-v8a.apk` for most phones and `lightning-piggy-<tag>-armeabi-v7a.apk` for older 32-bit phones (see "Release workflow" → "Android release APKs").
 
 ==== Installing on Device
 
 Users can install the APK by:
 
-1. **Direct download**: Download the `.apk` file from the GitHub Releases page on the device, then tap to install
-2. **ADB install**: Connect via USB and run `adb install lightning-piggy.apk`
-3. **Obtainium**: Users can add the GitHub repository to https://github.com/ImranR98/Obtainium[Obtainium], which automatically tracks releases and notifies users of updates
+1. **Direct download**: Download `lightning-piggy-<tag>-arm64-v8a.apk` from the GitHub Releases page on the device, then tap to install. If Android says the app isn't compatible, use the `armeabi-v7a` APK instead.
+2. **ADB install**: Connect via USB and run `adb install -r lightning-piggy-<tag>-arm64-v8a.apk`
+3. **Obtainium**: Users can add the GitHub repository to https://github.com/ImranR98/Obtainium[Obtainium], which automatically tracks releases and notifies users of updates. If it asks which APK to use, pick (or filter for) `arm64-v8a`.
 4. **Zapstore**: If published to Zapstore, users can install and update from there
 
 On GrapheneOS, sideloading works the same as stock Android — enable "Install unknown apps" for the browser or file manager, then open the APK.
 
 ==== Version Management
 
-Tag each release in Git and attach the corresponding APK to the GitHub Release. This gives users a clear history of versions to choose from:
+Tag each release in Git; the release workflow attaches the corresponding APKs to the GitHub Release. This gives users a clear history of versions to choose from:
 
 [source,bash]
 ----

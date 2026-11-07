@@ -102,8 +102,15 @@ wait "$BUILD_PID"
 BUILD_RC=$?
 [ $BUILD_RC -ne 0 ] && { echo "build failed rc=$BUILD_RC"; tail -30 "$BUILD_LOG"; exit $BUILD_RC; }
 
-APK=$(ls -1t build-*.apk 2>/dev/null | head -1)
-[ -z "$APK" ] && { echo "no APK produced"; exit 1; }
+# The production profile builds one APK per ABI, which EAS packs into
+# build-<timestamp>.tar.gz. The Pixel takes the arm64-v8a one.
+ARCHIVE=$(ls -1t build-*.tar.gz 2>/dev/null | head -1)
+[ -z "$ARCHIVE" ] && { echo "no build-*.tar.gz produced"; exit 1; }
+APK_DIR="${ARCHIVE%.tar.gz}"
+mkdir -p "$APK_DIR"
+tar -xzf "$ARCHIVE" -C "$APK_DIR"
+APK=$(find "$APK_DIR" -type f -name 'app-arm64-v8a-release.apk' | head -1)
+[ -z "$APK" ] && { echo "no arm64-v8a APK in $ARCHIVE"; exit 1; }
 echo "APK = $APK"
 
 echo "installing on $PIXEL"
