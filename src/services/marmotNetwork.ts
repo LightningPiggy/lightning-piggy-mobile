@@ -11,6 +11,7 @@ import { getCurrentUserPubkey } from './nostrActiveAccount';
 // own `limit`/`since`, and `request()` resolves on EOSE or `maxWait`.
 
 import type { NostrNetworkInterface } from '@internet-privacy/marmot-ts';
+import type { VerifiedEvent, VerifyEventMethod } from 'applesauce-core/helpers';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
 import { createGroupSubscriptionMux } from './marmotGroupSubscriptions';
@@ -23,6 +24,20 @@ import { isPublicRelayUrl } from '../utils/publicUrl';
 import { pool, trackRelays } from './nostrPool';
 import { selectHealthyRelays } from './relayHealth';
 import { DEFAULT_RELAYS, MARMOT_PUSH_SERVER_RELAYS } from './nostrRelayDefaults';
+import { verifyEventCached } from './nostrVerifyCache';
+
+/**
+ * The event verifier handed to `MarmotClient` (kind-445 group events, kind-30443
+ * key packages, kind-1059 invites). Without one, marmot-ts falls back to
+ * applesauce's `verifyEvent`, which resolves its OWN nested nostr-tools copy —
+ * so the pool's `verifiedSymbol` mark is invisible to it and every group event
+ * paid a second ~34 ms JS Schnorr check. Events arriving through `pool` were
+ * already verified by `verifyEventCached` (see nostrService's `pool.verifyEvent`),
+ * so this is a cache hit (one event hash); anything else still gets a full
+ * Schnorr check, never a pass-through.
+ */
+export const verifyMarmotEvent: VerifyEventMethod = (event): event is VerifiedEvent =>
+  verifyEventCached(event);
 
 const REQUEST_MAX_WAIT_MS = 6_000;
 const PUBLISH_TIMEOUT_MS = 10_000;
