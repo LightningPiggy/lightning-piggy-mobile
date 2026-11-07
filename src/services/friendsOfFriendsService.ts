@@ -162,11 +162,9 @@ const tallyFriend = (fof: Map<string, number>, list: readonly string[], plan: Fo
 // Heuristic 4 — counting sort by "friends who follow it" (bounded by the
 // friend count), so ranking ~100k candidates is O(n) rather than a
 // comparison sort. Equal counts keep discovery order (same result as a
-// stable descending sort).
-const rankFof = (fof: Map<string, number>, maxSize: number): Set<string> => {
+// stable descending sort). `buckets[count]` lists pubkeys in discovery order.
+const topOfBuckets = (buckets: string[][], maxSize: number): Set<string> => {
   const limit = Math.max(0, maxSize);
-  const buckets: string[][] = [];
-  for (const [pk, count] of fof) (buckets[count] ??= []).push(pk);
   const out = new Set<string>();
   for (let count = buckets.length - 1; count > 0 && out.size < limit; count -= 1) {
     for (const pk of buckets[count] ?? []) {
@@ -190,9 +188,16 @@ export const buildFofSet = (
   const plan = planFof(userPubkey, myFollows, followListsByFriend);
   const fof = new Map<string, number>();
   for (const friend of plan.contributors) tallyFriend(fof, followListsByFriend[friend], plan);
-  const set = maxSize === undefined ? new Set(fof.keys()) : rankFof(fof, maxSize);
-  return { set, excludedFriends: plan.excludedFriends };
+  if (maxSize === undefined)
+    return { set: new Set(fof.keys()), excludedFriends: plan.excludedFriends };
+  const buckets: string[][] = [];
+  for (const [pk, count] of fof) (buckets[count] ??= []).push(pk);
+  return { set: topOfBuckets(buckets, maxSize), excludedFriends: plan.excludedFriends };
 };
+
+// Bucketing yields every this many candidates: a real graph can hold well
+// over 100k distinct follows-of-follows.
+const RANK_YIELD_EVERY = 1024;
 
 /**
  * `buildFofSet`, but cooperative: yields the JS thread between friends via
@@ -218,8 +223,19 @@ export const buildFofSetYielding = async (
     }
     await scheduler.maybeYield();
     if (signal?.aborted) throw abortError();
-    const set = maxSize === undefined ? new Set(fof.keys()) : rankFof(fof, maxSize);
-    return { set, excludedFriends: plan.excludedFriends };
+    if (maxSize === undefined) {
+      return { set: new Set(fof.keys()), excludedFriends: plan.excludedFriends };
+    }
+    const buckets: string[][] = [];
+    let seen = 0;
+    for (const [pk, count] of fof) {
+      (buckets[count] ??= []).push(pk);
+      if (++seen % RANK_YIELD_EVERY === 0) {
+        await scheduler.maybeYield();
+        if (signal?.aborted) throw abortError();
+      }
+    }
+    return { set: topOfBuckets(buckets, maxSize), excludedFriends: plan.excludedFriends };
   } finally {
     scheduler.dispose();
   }
