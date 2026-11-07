@@ -71,7 +71,7 @@ perfLog('registerRootComponent called');
 registerRootComponent(App);
 
 // Native crypto warm-up (#1046, #1057). Fire-and-forget so it never blocks
-// startup. First hydrate the tester Settings pref and apply it to routing
+// startup. First hydrate the Settings pref (default on, #1727) and apply it to routing
 // (setNativeCryptoEnabled: flags.native = env-flag || pref), THEN warm up —
 // warmUp pays the one-time JNA + libnostr_sdk_ffi.so load off the JS thread and
 // latches the facade's nativeReady flag. This is what makes native routing
@@ -80,8 +80,8 @@ registerRootComponent(App);
 // route real crypto into a failing path. The pref is read ONCE here (not on the
 // hot path) — one AsyncStorage read at launch regardless of the pref value —
 // and the toggle only takes effect on the next launch (its "restart to apply"
-// caption). warmUpNativeCrypto short-circuits to false when routing is off, so
-// beyond that single pref read this adds no cost in a normal build.
+// caption). warmUpNativeCrypto short-circuits to false when the user opted out,
+// and only latches routing after a known-answer self-test passes.
 void (async () => {
   try {
     setNativeCryptoEnabled(await loadNativeCryptoEnabled());

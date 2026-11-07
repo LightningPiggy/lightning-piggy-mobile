@@ -13,10 +13,9 @@ import {
 } from '../services/nativeCryptoPreference';
 
 /**
- * Settings → Advanced → On this phone → Encryption: "Faster encryption
- * (beta)" — routes
- * NIP-44 encryption and signature checks through the native rust-nostr
- * module (#1057). Moved from the Nostr screen.
+ * Settings → Advanced → On this phone: "Faster encryption" — routes NIP-44
+ * encryption and signature checks through the native rust-nostr module
+ * (#1057). On by default since #1727; this toggle is the opt-out.
  */
 const NativeCryptoSection: React.FC = () => {
   const t = useTranslation();
@@ -27,11 +26,22 @@ const NativeCryptoSection: React.FC = () => {
   // linked) — compute once. `active` is re-read on a focus tick so a tester
   // can watch it flip to "yes" only AFTER restarting with the pref on.
   const available = useMemo(() => isNativeCryptoAvailable(), []);
-  const [on, setOn] = useState(false);
+  const [on, setOn] = useState(true); // the default (#1727) until the pref loads
+  // The switch stays disabled until the saved value is known, so a toggle
+  // can't race (and be overwritten by) the initial read.
+  const [hydrated, setHydrated] = useState(false);
   const [active, setActive] = useState(false);
 
   useEffect(() => {
-    loadNativeCryptoEnabled().then(setOn);
+    let mounted = true;
+    loadNativeCryptoEnabled().then((value) => {
+      if (!mounted) return;
+      setOn(value);
+      setHydrated(true);
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useFocusEffect(
@@ -67,7 +77,7 @@ const NativeCryptoSection: React.FC = () => {
         toggle={{
           value: available && on,
           onValueChange: handleToggle,
-          disabled: !available,
+          disabled: !available || !hydrated,
           testID: 'nostr-native-crypto-toggle',
         }}
         details={

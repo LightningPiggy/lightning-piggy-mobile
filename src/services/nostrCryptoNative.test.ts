@@ -5,7 +5,7 @@
  * the EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK mode; here we verify the routing,
  * fallback, memoisation, and cross-check reporting logic.
  */
-import { bytesToHex } from '@noble/hashes/utils.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import * as nip44 from 'nostr-tools/nip44';
 import {
   finalizeEvent,
@@ -33,6 +33,7 @@ import {
   saveNativeCryptoEnabled,
   __resetForTests as __resetNativeCryptoPref,
 } from './nativeCryptoPreference';
+import { NATIVE_CRYPTO_KAT } from './nativeCryptoSelfTest';
 
 jest.mock('../../modules/nostr-native', () => ({
   getNostrNative: jest.fn(() => null),
@@ -62,13 +63,21 @@ function makeSignedEvent(): NostrEvent & { [verifiedSymbol]?: boolean } {
   return event;
 }
 
+// Healthy-module defaults also answer warm-up's known-answer self-test
+// (#1727): the KAT payload decrypts to its plaintext, the forged KAT sig fails.
 function mockNative(overrides: Partial<NostrNativeApi> = {}): jest.Mocked<NostrNativeApi> {
   const native = {
     warmUp: jest.fn(async () => true),
-    nip44Encrypt: jest.fn(() => 'native-payload'),
-    nip44Decrypt: jest.fn(() => 'native-plaintext'),
+    nip44Encrypt: jest.fn((sk: string, _pk: string, text: string) =>
+      sk === NATIVE_CRYPTO_KAT.secretKeyHex
+        ? nip44.v2.encrypt(text, hexToBytes(NATIVE_CRYPTO_KAT.conversationKeyHex))
+        : 'native-payload',
+    ),
+    nip44Decrypt: jest.fn((_sk: string, _pk: string, payload: string) =>
+      payload === NATIVE_CRYPTO_KAT.payload ? NATIVE_CRYPTO_KAT.plaintext : 'native-plaintext',
+    ),
     schnorrSign: jest.fn(() => 'native-signature'),
-    schnorrVerify: jest.fn(() => true),
+    schnorrVerify: jest.fn((sig: string) => sig !== NATIVE_CRYPTO_KAT.tamperedSig),
     ...overrides,
   } as jest.Mocked<NostrNativeApi>;
   mockGetNostrNative.mockReturnValue(native);
@@ -165,6 +174,32 @@ describe('native routing (flag on, warmed up)', () => {
     expect(native.nip44Decrypt).toHaveBeenCalledTimes(1);
   });
 
+  it('falls back to JS when native encrypt throws mid-session, so a send never fails', () => {
+    const native = mockNative({
+      nip44Encrypt: jest.fn(() => {
+        throw new Error('native encrypt failed');
+      }),
+    });
+    const payload = nip44EncryptForRecipient(
+      plaintext,
+      counterpartySecret,
+      getPublicKey(secretKey),
+    );
+    expect(native.nip44Encrypt).toHaveBeenCalledTimes(1);
+    // A real NIP-44 payload the recipient can read (JS decrypt; routing off).
+    __setNostrCryptoFlagsForTests({ native: false });
+    expect(nip44DecryptFrom(payload, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+  });
+
+  it('still throws for invalid input when native encrypt throws (from JS)', () => {
+    mockNative({
+      nip44Encrypt: jest.fn(() => {
+        throw new Error('bad pubkey');
+      }),
+    });
+    expect(() => nip44EncryptForRecipient(plaintext, secretKey, 'not-a-pubkey')).toThrow();
+  });
+
   it('nostrVerifyEvent routes the schnorr check natively and memoises via verifiedSymbol', () => {
     const native = mockNative();
     const event = makeSignedEvent();
@@ -229,8 +264,10 @@ describe('warm-up gate (flag on, not yet/never warmed up)', () => {
     expect(isNativeCryptoActive()).toBe(false);
     await expect(warmUpNativeCrypto()).resolves.toBe(true);
     expect(isNativeCryptoActive()).toBe(true);
-    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe('native-plaintext');
+    // Warm-up's known-answer self-test made one decrypt of its own.
     expect(native.nip44Decrypt).toHaveBeenCalledTimes(1);
+    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe('native-plaintext');
+    expect(native.nip44Decrypt).toHaveBeenCalledTimes(2);
   });
 
   it('a failed warm-up (dlopen/JNA failure) leaves routing on JS for the session', async () => {
@@ -385,9 +422,70 @@ describe('startup wiring: pref → setNativeCryptoEnabled → warm-up (#1057)', 
     expect(isNativeCryptoActive()).toBe(true);
   });
 
-  it('a persisted pref of false leaves routing on JS', async () => {
+  it('with nothing persisted, a linked module engages native routing (#1727)', async () => {
+    const native = mockNative({ warmUp: jest.fn(async () => true) });
+    setNativeCryptoEnabled(await loadNativeCryptoEnabled());
+    await warmUpNativeCrypto();
+
+    expect(native.warmUp).toHaveBeenCalled();
+    expect(isNativeCryptoActive()).toBe(true);
+  });
+
+  it('with nothing persisted, an unlinked module keeps every op on JS', async () => {
+    setNativeCryptoEnabled(await loadNativeCryptoEnabled());
+    expect(await warmUpNativeCrypto()).toBe(false);
+    expect(isNativeCryptoActive()).toBe(false);
+    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+    expect(nostrVerifyEvent(makeSignedEvent())).toBe(true);
+  });
+
+  it('with nothing persisted, a failed warm-up falls back to JS for the session', async () => {
+    const native = mockNative({ warmUp: jest.fn(async () => Promise.reject(new Error('dlopen'))) });
+    setNativeCryptoEnabled(await loadNativeCryptoEnabled());
+    expect(await warmUpNativeCrypto()).toBe(false);
+    expect(isNativeCryptoActive()).toBe(false);
+    expect(nip44DecryptFrom(ciphertext, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+    expect(native.nip44Decrypt).not.toHaveBeenCalled();
+  });
+
+  it('a module that loads but fails the known-answer self-test stays on JS', async () => {
+    const native = mockNative({ schnorrVerify: jest.fn(() => true) }); // accepts forgeries
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    setNativeCryptoEnabled(await loadNativeCryptoEnabled());
+    expect(await warmUpNativeCrypto()).toBe(false);
+    expect(isNativeCryptoActive()).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('staying on JS'));
+    warn.mockRestore();
+    native.schnorrVerify.mockClear();
+    expect(nostrVerifyEvent(makeSignedEvent())).toBe(true); // JS verdict
+    expect(native.schnorrVerify).not.toHaveBeenCalled();
+  });
+
+  it('a module whose encrypt is broken fails the self-test, so sends stay on JS', async () => {
+    const native = mockNative({
+      nip44Encrypt: jest.fn(() => {
+        throw new Error('UnsatisfiedLinkError');
+      }),
+    });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    setNativeCryptoEnabled(await loadNativeCryptoEnabled());
+    expect(await warmUpNativeCrypto()).toBe(false);
+    warn.mockRestore();
+    expect(isNativeCryptoActive()).toBe(false);
+    native.nip44Encrypt.mockClear();
+    const payload = nip44EncryptForRecipient(
+      plaintext,
+      counterpartySecret,
+      getPublicKey(secretKey),
+    );
+    expect(nip44DecryptFrom(payload, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+    expect(native.nip44Encrypt).not.toHaveBeenCalled();
+  });
+
+  it('a persisted opt-out (false) leaves routing on JS', async () => {
     const native = mockNative();
-    // Nothing persisted → loadNativeCryptoEnabled defaults false.
+    await saveNativeCryptoEnabled(false);
+    __resetNativeCryptoPref(); // force a real storage read, like a fresh launch
     setNativeCryptoEnabled(await loadNativeCryptoEnabled());
     await warmUpNativeCrypto();
 
