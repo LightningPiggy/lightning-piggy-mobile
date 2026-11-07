@@ -69,6 +69,7 @@ import {
   claimWrapNotification,
   isLiveDmSubArmed,
   noteContentlessWrapAlert,
+  wasWrapDecided,
   wasWrapHandled,
 } from './dmWrapNotificationDedupe';
 import * as nostrService from './nostrService';
@@ -265,6 +266,8 @@ async function handleWrap(input: {
     // remote signer): give it a moment. A wrap it decoded is its call — the
     // self-copy of a message we sent, a stranger's wrap or a reaction must
     // not raise a contentless "New encrypted message" with nothing behind it.
+    // Nor must one it already has stored: with no freshness gate here, a
+    // re-delivered old wrap would raise a phantom alert (#1279).
     if (isLiveDmSubArmed()) {
       await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
       if (wasWrapHandled(ev.id)) return;
@@ -291,14 +294,18 @@ async function handleWrap(input: {
   // foreground or the background, and decrypts the same wraps. Decrypting each
   // one here as well doubled the gift-wrap crypto on the one JS thread. Give
   // it the same grace as above and leave it every wrap it has DECIDED (alerted,
-  // or nothing to alert: our own copy, a stranger, already stored). Any other
-  // wrap is decrypted and alerted here as before: one it never got, one it is
+  // or nothing to alert: our own copy, a stranger, a reaction). Any other wrap
+  // is decrypted and alerted here as before: one it never got, one it is
   // keeping silent as not fresh to it, one it dropped on teardown. The claim
   // below keeps that from becoming a second alert. With no live sub (headless,
   // after a swipe-away) nothing waits.
   if (isLiveDmSubArmed()) {
     await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
-    if (wasWrapHandled(ev.id)) return;
+    // Decided only, not "already stored": a stored wrap may never have been
+    // alerted for (kept silent as not fresh, or ingested by a silent refresh
+    // while the live sub was deaf). Decrypting it costs a re-arm's backlog
+    // once; the freshness gate below keeps a stale one silent.
+    if (wasWrapDecided(ev.id)) return;
     // Signed out / switched account meanwhile: not this watch's to alert.
     if (activeWatch?.viewerPubkey !== viewerPubkey) return;
   }

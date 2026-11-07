@@ -22,6 +22,7 @@ import { createLiveDmEngineBridge } from './liveDmEngineBridge';
 import {
   claimWrapNotification,
   isWrapInFlight,
+  markWrapAlreadyStored,
   markWrapHandled,
   noteLiveDmSubArmed,
   noteWrapInFlight,
@@ -207,10 +208,11 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
     });
   };
-  // Give back a wrap this sub claimed but never decided. A re-opened sub that
+  // Give back a wrap this sub claimed but never stored. A re-opened sub that
   // shares knownWrapIds may have seen the claim meanwhile and marked the wrap
-  // handled as "already stored"; undo that too, or the background watch would
-  // stay silent for a message nobody alerted for.
+  // "already stored"; undo that too, or the background watch would stay silent
+  // for a message nobody alerted for. A decision already made (alerted, or
+  // nothing to see) stands — see unmarkWrapHandled.
   const releaseWrap = (id: string): void => {
     knownWrapIds.delete(id);
     seen.delete(id);
@@ -310,6 +312,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         .then(dropPlaceholder)
         .catch(() => undefined);
     }
+    // Decided: alerted here, or the watch already did (claim taken). Without
+    // this the background sync would ping a duplicate for it.
+    if (item.notify) markWrapHandled(item.entry.id);
   };
   setDeferredReplay(replayDeferredFollowGate);
   const followGate = startFollowGateFallback(
@@ -378,7 +383,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       // Already stored (and shown): nothing for the background watch to alert.
       // Not one a predecessor sub (same knownWrapIds) is still deciding or
       // holds in the follow gate: that stays the watch's to alert if needed.
-      if (ev.kind === 1059 && !isWrapInFlight(ev.id)) markWrapHandled(ev.id);
+      if (ev.kind === 1059 && !isWrapInFlight(ev.id)) markWrapAlreadyStored(ev.id);
       return;
     }
     // Eagerly claim this wrap.id in the in-memory dedup Set before

@@ -6,6 +6,7 @@
 import { startLiveDmSubscription, type LiveDmSubscriptionParams } from './nostrLiveDmSub';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
+import { upsertDmMessages } from '../services/dmDb';
 import {
   claimWrapNotification,
   wasWrapHandled,
@@ -106,10 +107,10 @@ function makeParams(
   } as LiveDmSubscriptionParams;
 }
 
-function freshWrap() {
+function freshWrap(id: string = WRAP_ID, fromMe = false) {
   const now = Math.floor(Date.now() / 1000);
   return {
-    id: WRAP_ID,
+    id,
     kind: 1059,
     pubkey: 'e'.repeat(64),
     created_at: now,
@@ -122,7 +123,7 @@ function freshWrap() {
       created_at: now,
       content: 'hello',
       tags: [['p', VIEWER]],
-      partnership: { partnerPubkey: ALICE, fromMe: false },
+      partnership: { partnerPubkey: ALICE, fromMe },
     },
   };
 }
@@ -251,5 +252,83 @@ it('leaves a wrap the follow gate holds to the background watch across a re-open
   await flush();
   expect(mockFireNotification).not.toHaveBeenCalled();
   stopB();
+  await flush();
+});
+
+it('keeps an alerted wrap handled when its store write fails afterwards', async () => {
+  jest
+    .mocked(tryRouteGroupRumor)
+    .mockResolvedValue({ kind: 'not-group' } as Awaited<ReturnType<typeof tryRouteGroupRumor>>);
+  jest.mocked(upsertDmMessages).mockRejectedValueOnce(new Error('disk full'));
+  const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+  const stop = startLiveDmSubscription(makeParams(knownWrapIdsRef));
+  await flush();
+  capturedOnEvent!(freshWrap());
+  await flush();
+  await flush();
+  // Alerted, then the write failed and the wrap was given back for a retry...
+  expect(mockFireNotification).toHaveBeenCalledTimes(1);
+  expect(knownWrapIdsRef.current.set.has(WRAP_ID)).toBe(false);
+  // ...but the alert stands: the background sync must not ping it again.
+  expect(wasWrapHandled(WRAP_ID)).toBe(true);
+  stop();
+  await flush();
+});
+
+it('keeps our own sent copy handled when the sub is torn down before storing it', async () => {
+  jest
+    .mocked(tryRouteGroupRumor)
+    .mockResolvedValue({ kind: 'not-group' } as Awaited<ReturnType<typeof tryRouteGroupRumor>>);
+  // A backlog on the write chain: the first wrap's store write is still pending.
+  let finishFirstWrite: () => void = () => {};
+  jest.mocked(upsertDmMessages).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finishFirstWrite = resolve;
+      }),
+  );
+  const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+  const stop = startLiveDmSubscription(makeParams(knownWrapIdsRef));
+  await flush();
+  capturedOnEvent!(freshWrap('first'));
+  await flush();
+  capturedOnEvent!(freshWrap('own-echo', true));
+  await flush();
+  expect(wasWrapHandled('own-echo')).toBe(true); // nothing to see: decided
+  // Relay-list change tears the sub down before the echo's store task runs.
+  stop();
+  finishFirstWrite();
+  await flush();
+  await flush();
+  expect(knownWrapIdsRef.current.set.has('own-echo')).toBe(false);
+  // Still decided: no phantom "New message" from the background sync.
+  expect(wasWrapHandled('own-echo')).toBe(true);
+});
+
+it('marks a follow-gate replay handled once it alerts, so the background sync stays silent', async () => {
+  jest
+    .mocked(tryRouteGroupRumor)
+    .mockResolvedValue({ kind: 'not-group' } as Awaited<ReturnType<typeof tryRouteGroupRumor>>);
+  const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+  const followGateBuffer = createLiveSubFollowGateBuffer();
+  const params: LiveDmSubscriptionParams = {
+    ...makeParams(knownWrapIdsRef),
+    followPubkeysRef: { current: new Set<string>() },
+    followHydratedRef: { current: false },
+    followGateBuffer,
+  };
+  const stop = startLiveDmSubscription(params);
+  await flush();
+  capturedOnEvent!(freshWrap());
+  await flush();
+  expect(followGateBuffer.size).toBe(1);
+
+  const replay = jest.mocked(params.setDeferredReplay).mock.calls.at(-1)?.[0];
+  followGateBuffer.reevaluate(new Set([ALICE]), replay!);
+  await flush();
+  await flush();
+  expect(mockFireNotification).toHaveBeenCalledTimes(1);
+  expect(wasWrapHandled(WRAP_ID)).toBe(true);
+  stop();
   await flush();
 });

@@ -12,6 +12,7 @@ import {
 } from './backgroundDmService';
 import {
   claimWrapNotification,
+  markWrapAlreadyStored,
   markWrapHandled,
   noteLiveDmSubArmed,
   __resetForTests as __resetDedupeForTests,
@@ -88,8 +89,10 @@ function armLiveSub() {
       claimWrapNotification(id);
       markWrapHandled(id);
     },
-    /** Decided there is nothing to alert (own copy, stranger, already stored). */
+    /** Decided there is nothing to alert (own copy, stranger, reaction). */
     nothingToSee: (id: string) => markWrapHandled(id),
+    /** Got it but already had it stored: not a decision, nobody may have alerted. */
+    alreadyStored: (id: string) => markWrapAlreadyStored(id),
     tearDown: () => noteLiveDmSubArmed(false),
   };
 }
@@ -136,14 +139,43 @@ it('stays silent without decrypting when the live sub decided there is nothing t
   expect(mockFireMessageNotification).not.toHaveBeenCalled();
 });
 
-it('skips the backlog the live sub already handled when the watch re-arms', async () => {
+it('skips the backlog the live sub already decided when the watch re-arms', async () => {
   const live = armLiveSub();
   for (let i = 0; i < 50; i++) {
-    live.nothingToSee(`old${i}`); // known on receipt: already stored
+    live.nothingToSee(`old${i}`); // decided earlier this session
     deliver(`old${i}`);
   }
   await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
   expect(mockUnwrapWrapNsec).not.toHaveBeenCalled();
+});
+
+it('alerts for a wrap the live sub only had stored, which nobody alerted for', async () => {
+  // Stored silently (not fresh to the live sub, or by a silent refresh while it
+  // was deaf), then re-delivered to a re-armed live sub inside the grace.
+  const live = armLiveSub();
+  deliver('stored-unalerted');
+  live.alreadyStored('stored-unalerted');
+  await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
+  expect(mockUnwrapWrapNsec).toHaveBeenCalledTimes(1);
+  expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
+});
+
+it('decrypts a stored backlog on re-arm but keeps the stale ones silent', async () => {
+  mockUnwrapWrapNsec.mockImplementation(() => ({
+    kind: 14,
+    pubkey: 'b'.repeat(64),
+    created_at: Math.floor(Date.now() / 1000) - 86_400,
+    content: 'old',
+    tags: [],
+  }));
+  const live = armLiveSub();
+  for (let i = 0; i < 5; i++) {
+    live.alreadyStored(`old${i}`);
+    deliver(`old${i}`);
+  }
+  await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
+  expect(mockUnwrapWrapNsec).toHaveBeenCalledTimes(5);
+  expect(mockFireMessageNotification).not.toHaveBeenCalled();
 });
 
 it('still alerts for a wrap the live sub has but never decides (silent as not fresh to it)', async () => {

@@ -49,8 +49,24 @@ describe('live sub hand-off (contentless phantoms)', () => {
     mod.markWrapHandled('w1');
     expect(mod.wasWrapHandled('w1')).toBe(true);
     expect(mod.wasWrapHandled('w2')).toBe(false);
-    mod.unmarkWrapHandled('w1'); // given back undecided
-    expect(mod.wasWrapHandled('w1')).toBe(false);
+    // A give-back after the decision (teardown, failed write) keeps it decided.
+    mod.unmarkWrapHandled('w1');
+    expect(mod.wasWrapHandled('w1')).toBe(true);
+    expect(mod.wasWrapDecided('w1')).toBe(true);
+  });
+
+  it('keeps "already stored" apart from decided, and lets a give-back undo it', () => {
+    mod.markWrapAlreadyStored('s1');
+    expect(mod.wasWrapHandled('s1')).toBe(true); // contentless watch + sync skip it
+    expect(mod.wasWrapDecided('s1')).toBe(false); // the nsec watch still checks it
+    mod.unmarkWrapHandled('s1');
+    expect(mod.wasWrapHandled('s1')).toBe(false);
+  });
+
+  it('never evicts a wrap still in flight behind a burst of newer ones', () => {
+    mod.noteWrapInFlight('held'); // e.g. parked in the follow gate
+    for (let i = 0; i < 1000; i++) mod.noteWrapInFlight(`burst-${i}`);
+    expect(mod.isWrapInFlight('held')).toBe(true);
   });
 
   it('tracks a wrap in flight until it is decided, stored or given back', () => {

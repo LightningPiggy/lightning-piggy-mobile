@@ -20,6 +20,7 @@ import { cancelInFlightNotifications, dismissNotificationsFor } from './notifica
 
 const claimed = new Set<string>();
 const handled = new Set<string>();
+const stored = new Set<string>();
 const contentless = new Set<string>();
 const inFlight = new Set<string>();
 let liveSubsArmed = 0;
@@ -27,11 +28,18 @@ let liveSubsArmed = 0;
 // Bounded so a long-lived watch session can't grow the sets unboundedly.
 // Insertion-ordered Set: when full, evict the oldest half in one pass.
 const MAX_CLAIMED = 512;
+// In-flight wraps get a much larger cap. Evicting one a live sub still holds
+// (decrypting, or parked in the follow gate) would let a re-opened sub take it
+// for "already stored" and silence the watch for a message nobody alerted for.
+// The set isn't naturally bounded — an undecryptable wrap stays in it for the
+// session — but a held wrap lives at most ~FOLLOW_GATE_TIMEOUT_MS (15 s), so
+// evicting it needs thousands of new wraps inside that window.
+const MAX_IN_FLIGHT = 4096;
 
-function addBounded(set: Set<string>, id: string): void {
+function addBounded(set: Set<string>, id: string, max: number = MAX_CLAIMED): void {
   set.add(id);
-  if (set.size <= MAX_CLAIMED) return;
-  let toDrop = MAX_CLAIMED / 2;
+  if (set.size <= max) return;
+  let toDrop = max / 2;
   for (const old of set) {
     if (toDrop-- <= 0) break;
     set.delete(old);
@@ -50,28 +58,39 @@ export function claimWrapNotification(wrapId: string | null | undefined): boolea
   return true;
 }
 
-/** The live sub decoded this event — a gift wrap, a kind-4 DM or an order —
- * or already had it stored: whether it deserves an alert is now its decision. */
+/** The live sub DECIDED this event — a gift wrap, a kind-4 DM or an order:
+ * it alerted for it, or there is nothing to alert (our own copy, a stranger,
+ * a reaction). Final: a later give-back (teardown, failed write) never undoes
+ * it, or the background sync would ping a duplicate / phantom for it. */
 export function markWrapHandled(wrapId: string): void {
   if (!wrapId) return;
   inFlight.delete(wrapId);
   addBounded(handled, wrapId);
 }
 
-/** The live sub gave this wrap back undecided (torn down mid-wrap, a failed
- * write): any "handled" mark it picked up meanwhile — e.g. a re-opened sub
- * that saw the in-flight claim and took it for "already stored" — no longer
- * holds, so the background watch must handle it again. */
+/** The live sub got this wrap and already had it stored (knownWrapIds), so it
+ * shows in the app. NOT a decision: nobody may have alerted for it (stored
+ * silently as not fresh, or ingested by a silent refresh). */
+export function markWrapAlreadyStored(wrapId: string): void {
+  if (!wrapId) return;
+  inFlight.delete(wrapId);
+  addBounded(stored, wrapId);
+}
+
+/** The live sub gave this wrap back (torn down mid-wrap, a failed write): an
+ * "already stored" mark it picked up meanwhile — e.g. a re-opened sub that saw
+ * the claim and took it for stored — no longer holds. A decision does: if it
+ * already alerted (or found nothing to see), the wrap stays handled. */
 export function unmarkWrapHandled(wrapId: string): void {
   inFlight.delete(wrapId);
-  handled.delete(wrapId);
+  stored.delete(wrapId);
 }
 
 /** A live sub took this wrap in and hasn't decided or stored it yet (still
  * decrypting / routing, or held by the follow gate). Its id is already in the
  * shared knownWrapIds, so a re-opened sub must not take it for "stored". */
 export function noteWrapInFlight(wrapId: string): void {
-  if (wrapId) addBounded(inFlight, wrapId);
+  if (wrapId) addBounded(inFlight, wrapId, MAX_IN_FLIGHT);
 }
 
 /** The wrap is now stored: a redelivery is "already stored" from here on. */
@@ -83,7 +102,16 @@ export function isWrapInFlight(wrapId: string): boolean {
   return inFlight.has(wrapId);
 }
 
+/** Decided or already stored: the app has it, so a contentless alert or a
+ * generic background-sync ping would be noise. */
 export function wasWrapHandled(wrapId: string): boolean {
+  return handled.has(wrapId) || stored.has(wrapId);
+}
+
+/** Decided only (alerted, or nothing to alert). The nsec watch skips just
+ * these: an "already stored" wrap may never have been alerted for, and the
+ * watch can decrypt it and apply its own freshness gate. */
+export function wasWrapDecided(wrapId: string): boolean {
   return handled.has(wrapId);
 }
 
@@ -121,6 +149,7 @@ export async function retractContentlessWrapAlert(owner: string, wrapId: string)
 export function __resetForTests(): void {
   claimed.clear();
   handled.clear();
+  stored.clear();
   contentless.clear();
   inFlight.clear();
   liveSubsArmed = 0;
