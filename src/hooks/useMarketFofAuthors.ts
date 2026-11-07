@@ -1,7 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useNostr, useNostrContacts } from '../contexts/NostrContext';
-import { computeFofSet, loadFofCache, FOF_CACHE_TTL_MS } from '../services/friendsOfFriendsService';
+import {
+  computeFofSet,
+  dropFofCache,
+  loadFofCache,
+  FOF_CACHE_TTL_MS,
+  FOF_SHARED_MAX,
+} from '../services/friendsOfFriendsService';
 import { fetchFollowLists } from '../services/followListsFetcher';
 import { marketFofAuthors, MARKET_FOF_MAX } from '../utils/marketFofScope';
 
@@ -32,16 +38,33 @@ function cachedMemo(key: string) {
   return memo;
 }
 
+// Accounts whose pre-sharing cap-1024 blob has been dropped this session.
+const droppedLegacy = new Set<string>();
+
 /** Test hook: forget the in-memory set. */
 export const __resetMarketFofMemo = () => {
   memo = null;
+  droppedLegacy.clear();
 };
+
+/** The Market's slice of the shared ranked set: its first MARKET_FOF_MAX (most-shared first). */
+export function marketFofSlice(set: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  for (const pk of set) {
+    if (out.length >= MARKET_FOF_MAX) break;
+    out.push(pk);
+  }
+  return out;
+}
 
 /**
  * Seller set for the Market's friends-of-friends scope: the viewer's follows
  * plus the follows-of-follows from the shared `friendsOfFriendsService`
- * (high-fanout / bot exclusion, per-friend caps, ranked cap, 24 h cache) —
- * the same computation the Web of Trust tiers are built on.
+ * (high-fanout / bot exclusion, per-friend caps, ranked cap, 24 h cache).
+ * It is the SAME set the Messages Web of Trust tier uses (FOF_SHARED_MAX),
+ * sliced to the Market's MARKET_FOF_MAX: a set either one built or read is
+ * reused from the service's memory or cache, and a build already running for
+ * Messages is joined rather than repeated.
  *
  * Built only while `enabled` and the screen is focused; blurring aborts it.
  * Pull-to-refresh reloads listings, not the graph — the service's 24 h TTL
@@ -103,25 +126,33 @@ export function useMarketFofAuthors(enabled: boolean) {
       );
       void (async () => {
         try {
-          const cached = await loadFofCache(pubkey, friends, MARKET_FOF_MAX);
+          const cached = await loadFofCache(pubkey, friends, FOF_SHARED_MAX);
           if (signal.aborted) return;
           // Cache miss: say so at once, before the first batch lands.
           if (!cached) setState((prev) => ({ ...prev, key, progress: { done: 0, total: 0 } }));
           const result =
             cached ??
             (await computeFofSet(pubkey, friends, {
-              maxSize: MARKET_FOF_MAX,
+              maxSize: FOF_SHARED_MAX,
               signal,
-              fetchKind3: (batch) => fetchFollowLists(batch, relaysKey.split(','), signal),
+              // The service's signal: a shared build outlives our cancel.
+              fetchKind3: (batch, buildSignal) =>
+                fetchFollowLists(batch, relaysKey.split(','), buildSignal),
               onProgress: (done, total) => {
                 if (!signal.aborted)
                   setState((prev) => ({ ...prev, key, progress: { done, total } }));
               },
             }));
           if (signal.aborted) return;
-          const fof = [...result.set];
+          const fof = marketFofSlice(result.set);
           memo = { key, fof, computedAt: result.computedAt };
           setState({ key, fof, failed: false, progress: null });
+          // The Market's own cap-1024 set (before it shared Messages') is
+          // never read again: free its storage once per account.
+          if (!droppedLegacy.has(pubkey)) {
+            droppedLegacy.add(pubkey);
+            void dropFofCache(pubkey, MARKET_FOF_MAX);
+          }
         } catch {
           if (signal.aborted) return;
           const fof: readonly string[] = [];

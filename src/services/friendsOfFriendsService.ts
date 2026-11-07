@@ -3,7 +3,9 @@
 //
 // Pure logic — relay I/O is injected via `fetchKind3` so jest can mock it
 // without spinning up the real pool. Persistence is via AsyncStorage with a
-// 24 h TTL, one key per (account, ranked cap) — see `fofCacheKey`.
+// 24 h TTL, one key per (account, ranked cap) — see `fofCacheKey` — plus an
+// in-memory copy of the latest set per key, so a second consumer of the same
+// set skips the read. Concurrent builds of the same set share one fetch.
 //
 // Anti-pollution heuristics (issue #535):
 //   1. Exclude friends with > FANOUT_CAP (500) follows from the FoF union —
@@ -34,9 +36,17 @@ export const FANOUT_CAP = 500;
 // drop the exclusion. Stops a 3-friends-over-cap user from getting an
 // FoF dominated by their remaining 2 friends.
 export const SOFT_CAP_MIN_RATIO = 0.5;
-// One key per (account, cap): `@lp:wot-fof:v3:cap-<N|all>_<pubkey>`. The
-// Market (cap 1024) and the Web of Trust tier (cap 2000) each keep their own
-// set, and signing out removes only that account's keys (#565).
+/**
+ * The ranked cap of the friends-of-friends set shared by the Web of Trust
+ * tier (Messages) and the Market's friends-of-friends scope. A ranked set
+ * iterates most-shared first, so a consumer with a smaller cap (the Market's
+ * 1024) takes its first N entries — exactly the set a build with that cap
+ * would return — and both pay for one fetch of the friends' follow lists.
+ */
+export const FOF_SHARED_MAX = 2000;
+// One key per (account, cap): `@lp:wot-fof:v3:cap-<N|all>_<pubkey>`. Both
+// consumers use FOF_SHARED_MAX; signing out removes only that account's keys
+// (#565).
 const FOF_CACHE_KEY_PREFIX = '@lp:wot-fof:v3:';
 // Pre-#565 single device-wide key (whichever account / cap wrote last won).
 // Not attributable to an account, so it is simply deleted.
@@ -90,10 +100,12 @@ export interface ComputeFofOptions {
   // Returns a mapping from friend pubkey to that friend's full follow list
   // (kind-3 `p` tags). Missing pubkeys are treated as "kind-3 not yet
   // fetched" — they contribute 0 follows, same as a friend with no
-  // contact list published.
-  fetchKind3: (pubkeys: string[]) => Promise<Record<string, string[]>>;
+  // contact list published. Honour the `signal` passed in, not the caller's
+  // own: a build shared by two consumers outlives either one's cancel.
+  fetchKind3: (pubkeys: string[], signal: AbortSignal) => Promise<Record<string, string[]>>;
   // Optional progress callback so the bottom sheet can render "Fetching N / M".
   onProgress?: (done: number, total: number) => void;
+  // Withdraws this caller; a shared build stops once no caller is left.
   signal?: AbortSignal;
   // Ranked cap (heuristic 4) — keep the `maxSize` most-shared pubkeys.
   maxSize?: number;
@@ -244,6 +256,12 @@ export const buildFofSetYielding = async (
 // Full pipeline: fetch kind-3 lists, apply heuristics, persist with TTL.
 // Returns the FoF set + how many friends were excluded by heuristic 1.
 // An aborted or failed run rejects and persists nothing.
+//
+// Callers asking for the same set (account, follow list, cap) while a build
+// is running join it instead of fetching again, so the Messages tier and the
+// Market's scope pay for one round of follow-list fetches. Each caller's
+// `signal` only withdraws that caller (its promise rejects with an
+// AbortError); the build itself is aborted once every caller has left.
 export const computeFofSet = async (
   userPubkey: string | null,
   myFollows: readonly string[],
@@ -256,6 +274,111 @@ export const computeFofSet = async (
   if (friendsLower.length === 0) {
     return { set: new Set(), excludedFriends: 0, computedAt: Date.now() };
   }
+  if (opts.signal?.aborted) throw abortError();
+  if (!userPubkey) {
+    const signal = opts.signal ?? new AbortController().signal;
+    return runFofBuild(null, friendsLower, { ...opts, signal }, epoch);
+  }
+  // The epoch is part of the key: a build retired by a sign-out is never
+  // joined by the next login's.
+  const key = `${fofCacheKey(userPubkey, opts.maxSize)}|${hashFriends(friendsLower)}|${epoch}`;
+  const build =
+    inflightBuilds.get(key) ?? startSharedBuild(key, userPubkey, friendsLower, opts, epoch);
+  return joinSharedBuild(key, build, opts);
+};
+
+interface SharedBuild {
+  promise: Promise<FofResult>;
+  controller: AbortController;
+  callers: number;
+  listeners: Set<(done: number, total: number) => void>;
+  progress: { done: number; total: number } | null;
+}
+
+const inflightBuilds = new Map<string, SharedBuild>();
+
+const startSharedBuild = (
+  key: string,
+  userPubkey: string,
+  friendsLower: string[],
+  opts: ComputeFofOptions,
+  epoch: number,
+): SharedBuild => {
+  const controller = new AbortController();
+  const listeners = new Set<(done: number, total: number) => void>();
+  // runFofBuild is async: `build` is assigned before its first callback runs.
+  const promise = runFofBuild(
+    userPubkey,
+    friendsLower,
+    {
+      fetchKind3: opts.fetchKind3,
+      maxSize: opts.maxSize,
+      signal: controller.signal,
+      // Once per batch, fanned out to every caller still waiting.
+      onProgress: (done, total) => {
+        build.progress = { done, total };
+        for (const listener of listeners) listener(done, total);
+      },
+    },
+    epoch,
+  ).finally(() => {
+    if (inflightBuilds.get(key) === build) inflightBuilds.delete(key);
+  });
+  // Every caller may have left; each observes the rejection on its own promise.
+  promise.catch(() => {});
+  const build: SharedBuild = { promise, controller, callers: 0, listeners, progress: null };
+  inflightBuilds.set(key, build);
+  return build;
+};
+
+const joinSharedBuild = (
+  key: string,
+  build: SharedBuild,
+  opts: ComputeFofOptions,
+): Promise<FofResult> =>
+  new Promise<FofResult>((resolve, reject) => {
+    build.callers += 1;
+    const listener = opts.onProgress;
+    let left = false;
+    const leave = (): boolean => {
+      if (left) return false;
+      left = true;
+      if (listener) build.listeners.delete(listener);
+      opts.signal?.removeEventListener('abort', onAbort);
+      build.callers -= 1;
+      return true;
+    };
+    const onAbort = () => {
+      if (!leave()) return;
+      if (build.callers === 0) {
+        build.controller.abort();
+        // The next caller starts afresh rather than joining a dying build.
+        if (inflightBuilds.get(key) === build) inflightBuilds.delete(key);
+      }
+      reject(abortError());
+    };
+    if (listener) {
+      build.listeners.add(listener);
+      // A late joiner sees where the build already is.
+      if (build.progress) listener(build.progress.done, build.progress.total);
+    }
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    build.promise.then(
+      (result) => {
+        if (leave()) resolve(result);
+      },
+      (error: unknown) => {
+        if (leave()) reject(error);
+      },
+    );
+  });
+
+const runFofBuild = async (
+  userPubkey: string | null,
+  friendsLower: string[],
+  opts: ComputeFofOptions & { signal: AbortSignal },
+  epoch: number,
+): Promise<FofResult> => {
   // Chunk into 50-author batches, fetched one batch at a time, so a single
   // relay is never asked for 500 authors in one filter and at most 50
   // kind-3 lists are in flight — matches the chunking note in #535 / #565.
@@ -267,16 +390,16 @@ export const computeFofSet = async (
   const followLists: Record<string, string[]> = {};
   let done = 0;
   for (const batch of batches) {
-    if (opts.signal?.aborted) throw abortError();
+    if (opts.signal.aborted) throw abortError();
     let partial: Record<string, string[]>;
     try {
-      partial = await opts.fetchKind3(batch);
+      partial = await opts.fetchKind3(batch, opts.signal);
     } catch (error) {
       // One flaky batch (e.g. no relay answered in time) shouldn't sink a
       // 20-batch build: retry it once — `fetchKind3` sets a fresh deadline per
       // call — then fail. Aborts are never retried.
-      if (opts.signal?.aborted || (error as Error | undefined)?.name === 'AbortError') throw error;
-      partial = await opts.fetchKind3(batch);
+      if (opts.signal.aborted || (error as Error | undefined)?.name === 'AbortError') throw error;
+      partial = await opts.fetchKind3(batch, opts.signal);
     }
     // Only the first FANOUT_CAP follows are tallied; one more keeps the
     // over-cap signal (heuristic 1) without holding up to 5,000 per friend.
@@ -293,7 +416,7 @@ export const computeFofSet = async (
     opts.maxSize,
     opts.signal,
   );
-  if (opts.signal?.aborted) throw abortError();
+  if (opts.signal.aborted) throw abortError();
   const result: FofResult = { set, excludedFriends, computedAt: Date.now() };
   await writeFofCache(userPubkey, friendsLower, result, opts.maxSize, epoch);
   return result;
@@ -313,25 +436,61 @@ export const loadFofCache = async (
   opts: LoadFofCacheOptions = {},
 ): Promise<(FofResult & { stale: boolean }) | null> => {
   if (!userPubkey) return null;
+  const key = fofCacheKey(userPubkey, maxSize);
+  const fromMemory = (entry: MemoryEntry): (FofResult & { stale: boolean }) | null => {
+    const stale =
+      Date.now() - entry.computedAt > FOF_CACHE_TTL_MS ||
+      entry.friendsHash !== hashFriends(currentFriends);
+    if (stale && !opts.allowStale) return null;
+    return {
+      set: entry.set,
+      excludedFriends: entry.excludedFriends,
+      computedAt: entry.computedAt,
+      stale,
+    };
+  };
+  // Once either consumer has built or read this set it is in memory: no
+  // AsyncStorage read, no JSON parse, and the same Set instance.
+  const remembered = fofMemory.get(key);
+  if (remembered) return fromMemory(remembered);
+  const epoch = accountEpoch(userPubkey);
   try {
-    const raw = await AsyncStorage.getItem(fofCacheKey(userPubkey, maxSize));
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CacheEntry;
     if (parsed.userPubkey !== userPubkey.toLowerCase()) return null;
     if (parsed.maxSize !== maxSize || !Array.isArray(parsed.setArr)) return null;
-    const stale =
-      Date.now() - parsed.computedAt > FOF_CACHE_TTL_MS ||
-      parsed.friendsHash !== hashFriends(currentFriends);
-    if (stale && !opts.allowStale) return null;
-    return {
+    const entry: MemoryEntry = {
       set: new Set(parsed.setArr),
+      friendsHash: parsed.friendsHash,
       excludedFriends: parsed.excludedFriends,
       computedAt: parsed.computedAt,
-      stale,
     };
+    // A read overtaken by a sign-out wipe must not bring the set back, and a
+    // build that landed meanwhile is newer than what was read.
+    if (accountEpoch(userPubkey) !== epoch) return null;
+    if (!fofMemory.has(key)) fofMemory.set(key, entry);
+    return fromMemory(fofMemory.get(key) ?? entry);
   } catch {
     return null;
   }
+};
+
+interface MemoryEntry {
+  set: Set<string>;
+  friendsHash: string;
+  excludedFriends: number;
+  computedAt: number;
+}
+
+// The latest set per cache key (per account and cap). Bounded by the
+// accounts on the device; a sign-out drops that account's entries.
+const fofMemory = new Map<string, MemoryEntry>();
+
+/** Test hook: forget the in-memory sets and running builds. */
+export const __resetFofMemory = () => {
+  fofMemory.clear();
+  inflightBuilds.clear();
 };
 
 // Sign-out retirement (#565 review). `retireFofCache` bumps the account's
@@ -347,7 +506,26 @@ const accountEpoch = (userPubkey: string | null): number =>
 export const retireFofCache = async (userPubkey: string): Promise<void> => {
   const key = userPubkey.toLowerCase();
   fofEpochs.set(key, accountEpoch(key) + 1);
+  forgetFofMemory(key);
   await Promise.allSettled([...pendingWrites]);
+  forgetFofMemory(key);
+};
+
+/** Delete one account's set for one cap (memory and storage). Best-effort. */
+export const dropFofCache = async (userPubkey: string, maxSize?: number): Promise<void> => {
+  const key = fofCacheKey(userPubkey, maxSize);
+  fofMemory.delete(key);
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch {
+    // Best-effort.
+  }
+};
+
+const forgetFofMemory = (userPubkey: string): void => {
+  for (const key of [...fofMemory.keys()]) {
+    if (isFofCacheKeyFor(key, userPubkey)) fofMemory.delete(key);
+  }
 };
 
 const writeFofCache = (
@@ -372,11 +550,18 @@ export const persistFofCache = async (
   maxSize?: number,
 ): Promise<void> => {
   if (!userPubkey) return;
+  const friendsHash = hashFriends(friends);
+  fofMemory.set(fofCacheKey(userPubkey, maxSize), {
+    set: result.set,
+    friendsHash,
+    excludedFriends: result.excludedFriends,
+    computedAt: result.computedAt,
+  });
   try {
     const entry: CacheEntry = {
       userPubkey: userPubkey.toLowerCase(),
       maxSize,
-      friendsHash: hashFriends(friends),
+      friendsHash,
       setArr: [...result.set],
       excludedFriends: result.excludedFriends,
       computedAt: result.computedAt,

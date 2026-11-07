@@ -4,7 +4,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook } from '@testing-library/react-native';
 import { AppState, type AppStateStatus } from 'react-native';
 import { fetchFollowLists } from '../services/followListsFetcher';
+import * as fofService from '../services/friendsOfFriendsService';
 import {
+  __resetFofMemory,
   fofCacheKey,
   FOF_CACHE_TTL_MS,
   persistFofCache,
@@ -53,6 +55,7 @@ const flush = () => act(async () => {});
 beforeEach(async () => {
   jest.useRealTimers();
   await AsyncStorage.clear();
+  __resetFofMemory();
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (batch) =>
     Object.fromEntries(batch.map((f) => [f, [SHARED, pk(`only-${f.slice(-3)}`)]])),
@@ -163,6 +166,35 @@ it('a persisted fof tier with a fresh set never refetches', async () => {
   expect([...result.current.l2Follows]).toEqual([SHARED]);
 });
 
+it('a stale set is replaced by one the Market built meanwhile, without refetching', async () => {
+  jest.useFakeTimers();
+  await persistFofCache(
+    USER,
+    [...FRIENDS],
+    { set: new Set([SHARED]), excludedFriends: 0, computedAt: Date.now() - FOF_CACHE_TTL_MS - 1 },
+    WOT_FOF_MAX,
+  );
+  const { result } = render('fof');
+  await flush();
+  expect([...result.current.l2Follows]).toEqual([SHARED]);
+  // The Market's friends-of-friends scope builds the shared set before the
+  // background rebuild is due.
+  const fresh = pk('fresh');
+  await persistFofCache(
+    USER,
+    [...FRIENDS],
+    { set: new Set([fresh]), excludedFriends: 0, computedAt: Date.now() },
+    WOT_FOF_MAX,
+  );
+  await act(async () => {
+    jest.advanceTimersByTime(L2_BACKGROUND_REFRESH_DELAY_MS);
+  });
+  await flush();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect([...result.current.l2Follows]).toEqual([fresh]);
+  expect(result.current.status.building).toBe(false);
+});
+
 it('with no direct friends left, a previously cached set is neither read nor trusted', async () => {
   jest.useFakeTimers();
   await persistFofCache(
@@ -223,7 +255,8 @@ it('a new but equal friends Set (profile hydration) does not re-read the cache',
     { set: new Set([SHARED]), excludedFriends: 0, computedAt: Date.now() },
     WOT_FOF_MAX,
   );
-  const getItem = AsyncStorage.getItem as jest.Mock;
+  // Counted at the service: the set is in memory, so storage isn't touched.
+  const loads = jest.spyOn(fofService, 'loadFofCache');
   const persistTier = jest.fn(); // stable, as the context's useCallback is
   const { rerender } = renderHook(
     (props: { friends: ReadonlySet<string> }) =>
@@ -238,13 +271,12 @@ it('a new but equal friends Set (profile hydration) does not re-read the cache',
     { initialProps: { friends: new Set(FRIENDS) as ReadonlySet<string> } },
   );
   await flush();
-  const fofReads = () =>
-    getItem.mock.calls.filter(([key]) => key === fofCacheKey(USER, WOT_FOF_MAX)).length;
-  const reads = fofReads();
+  const reads = loads.mock.calls.length;
   expect(reads).toBeGreaterThan(0);
   for (let i = 0; i < 3; i += 1) {
     rerender({ friends: new Set([...FRIENDS].reverse()) });
     await flush();
   }
-  expect(fofReads()).toBe(reads);
+  expect(loads.mock.calls.length).toBe(reads);
+  loads.mockRestore();
 });

@@ -1,14 +1,24 @@
 import { act, renderHook } from '@testing-library/react-native';
-import { __resetMarketFofMemo, useMarketFofAuthors } from './useMarketFofAuthors';
-import { computeFofSet, loadFofCache } from '../services/friendsOfFriendsService';
+import { __resetMarketFofMemo, marketFofSlice, useMarketFofAuthors } from './useMarketFofAuthors';
+import {
+  computeFofSet,
+  dropFofCache,
+  FOF_SHARED_MAX,
+  loadFofCache,
+} from '../services/friendsOfFriendsService';
 import { fetchFollowLists } from '../services/followListsFetcher';
 import { MARKET_FOF_MAX } from '../utils/marketFofScope';
 
-jest.mock('../services/friendsOfFriendsService', () => ({
-  computeFofSet: jest.fn(),
-  loadFofCache: jest.fn(),
-  FOF_CACHE_TTL_MS: jest.requireActual('../services/friendsOfFriendsService').FOF_CACHE_TTL_MS,
-}));
+jest.mock('../services/friendsOfFriendsService', () => {
+  const actual = jest.requireActual('../services/friendsOfFriendsService');
+  return {
+    computeFofSet: jest.fn(),
+    loadFofCache: jest.fn(),
+    dropFofCache: jest.fn(async () => {}),
+    FOF_CACHE_TTL_MS: actual.FOF_CACHE_TTL_MS,
+    FOF_SHARED_MAX: actual.FOF_SHARED_MAX,
+  };
+});
 jest.mock('../services/followListsFetcher', () => ({ fetchFollowLists: jest.fn() }));
 const hex = (n: number) => n.toString(16).padStart(64, '0');
 let mockViewer = hex(0xfeed);
@@ -30,6 +40,7 @@ jest.mock('@react-navigation/native', () => ({
 }));
 const compute = computeFofSet as jest.Mock;
 const loadCache = loadFofCache as jest.Mock;
+const drop = dropFofCache as jest.Mock;
 
 beforeEach(() => {
   __resetMarketFofMemo();
@@ -37,6 +48,7 @@ beforeEach(() => {
   mockViewer = hex(0xfeed);
   compute.mockReset();
   loadCache.mockReset().mockResolvedValue(null);
+  drop.mockClear();
   (fetchFollowLists as jest.Mock).mockReset().mockResolvedValue({});
 });
 
@@ -56,14 +68,17 @@ it('builds the set with the shared FoF service: follows first, then ranked FoF',
   );
   const h = renderHook(() => useMarketFofAuthors(true));
   await act(async () => {});
-  expect(loadCache).toHaveBeenCalledWith(mockViewer, [hex(1), hex(2)], MARKET_FOF_MAX);
+  // The Messages Web of Trust set (shared cap), not a Market-only one.
+  expect(loadCache).toHaveBeenCalledWith(mockViewer, [hex(1), hex(2)], FOF_SHARED_MAX);
   const [user, friends, opts] = compute.mock.calls[0];
   expect(user).toBe(mockViewer);
   expect(friends).toEqual([hex(1), hex(2)]);
-  expect(opts.maxSize).toBe(MARKET_FOF_MAX);
-  // The injected relay layer is the kind-3 fetcher, on the user's read relays.
-  await opts.fetchKind3([hex(1)]);
-  expect(fetchFollowLists).toHaveBeenCalledWith([hex(1)], ['wss://read.example'], opts.signal);
+  expect(opts.maxSize).toBe(FOF_SHARED_MAX);
+  // The injected relay layer is the kind-3 fetcher, on the user's read relays,
+  // cancelled by the (possibly shared) build's signal the service passes in.
+  const buildSignal = new AbortController().signal;
+  await opts.fetchKind3([hex(1)], buildSignal);
+  expect(fetchFollowLists).toHaveBeenCalledWith([hex(1)], ['wss://read.example'], buildSignal);
   expect(h.result.current.authors).toBeUndefined();
   expect(h.result.current.progress).toEqual({ done: 1, total: 3 });
   await act(async () => resolve({ set: new Set([hex(9), hex(2), hex(8)]) }));
@@ -201,5 +216,44 @@ it('expires a successful memo from the original computation time, including cach
     expect(expired.result.current.authors).toEqual([hex(1), hex(2), hex(9)]);
   } finally {
     now.mockRestore();
+  }
+});
+
+it("slices the shared set to the Market's cap, most-shared first", async () => {
+  const ranked = Array.from({ length: FOF_SHARED_MAX }, (_, i) => hex(0x1000 + i));
+  loadCache.mockResolvedValue({ set: new Set(ranked), excludedFriends: 0, computedAt: Date.now() });
+  const h = renderHook(() => useMarketFofAuthors(true));
+  await act(async () => {});
+  expect(compute).not.toHaveBeenCalled();
+  // Follows first, then the top of the ranked set, capped at MARKET_FOF_MAX.
+  expect(h.result.current.authors).toEqual([
+    hex(1),
+    hex(2),
+    ...ranked.slice(0, MARKET_FOF_MAX - 2),
+  ]);
+  expect(marketFofSlice(new Set(ranked))).toEqual(ranked.slice(0, MARKET_FOF_MAX));
+});
+
+it('drops the old Market-only cap-1024 set once per account', async () => {
+  loadCache.mockResolvedValue({
+    set: new Set([hex(7)]),
+    excludedFriends: 0,
+    computedAt: Date.now(),
+  });
+  const h = renderHook(() => useMarketFofAuthors(true));
+  await act(async () => {});
+  expect(drop).toHaveBeenCalledWith(mockViewer, MARKET_FOF_MAX);
+  h.unmount();
+  // A follow change misses the memo and loads again — same account, no second drop.
+  const oldContact = mockContacts[0].pubkey;
+  try {
+    mockContacts[0].pubkey = hex(3);
+    const again = renderHook(() => useMarketFofAuthors(true));
+    await act(async () => {});
+    expect(loadCache).toHaveBeenCalledTimes(2);
+    expect(drop).toHaveBeenCalledTimes(1);
+    again.unmount();
+  } finally {
+    mockContacts[0].pubkey = oldContact;
   }
 });
