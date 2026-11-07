@@ -15,6 +15,9 @@ import { checkRemoteUrl, fetchBounded, MEDIA_MAX_BYTES } from '../utils/remoteUr
 const pending = new Map<string, Promise<string>>();
 const publishing = new Map<string, Set<Promise<void>>>();
 const generations = new Map<string, number>();
+// When each cached file was last (re)written, so a decode error reported
+// against an older copy can't delete a newer download at the same path.
+const writtenAt = new Map<string, number>();
 let activeOwner: string | null = null;
 const hash = (value: string) => bytesToHex(sha256(utf8ToBytes(value)));
 const generation = (owner: string) => generations.get(owner) ?? 0;
@@ -61,6 +64,7 @@ export async function resolveRemoteMedia(url: string, maxBytes = MEDIA_MAX_BYTES
           });
           assertCurrent();
           await moveAsync({ from: tmp, to: uri });
+          writtenAt.set(uri, Date.now());
         } finally {
           await deleteAsync(tmp, { idempotent: true });
         }
@@ -86,6 +90,30 @@ export async function resolveRemoteMedia(url: string, maxBytes = MEDIA_MAX_BYTES
   }
 }
 
+/**
+ * Forget the active account's cached copy of `url` (same key as
+ * resolveRemoteMedia), so the next resolve downloads it again. For a file
+ * that downloaded but couldn't be decoded: a retry must not reuse it.
+ * `resolvedAt` is when the caller got the file: if another view of the same
+ * URL has re-downloaded it since then, the newer copy stays.
+ */
+export async function evictRemoteMedia(
+  url: string,
+  maxBytes = MEDIA_MAX_BYTES,
+  resolvedAt = Infinity,
+  /** The account the broken copy belonged to: never evict another's. */
+  expectedOwner?: string | null,
+): Promise<void> {
+  const checked = checkRemoteUrl(url, { kind: 'media' });
+  const owner = activeOwner;
+  if (!checked.ok || !owner || !cacheDirectory) return;
+  if (expectedOwner !== undefined && expectedOwner?.toLowerCase() !== owner) return;
+  const uri = `${ownerDirectory(owner)}${hash(`${maxBytes}:${checked.url}`)}`;
+  if ((writtenAt.get(uri) ?? 0) > resolvedAt) return;
+  writtenAt.delete(uri);
+  await deleteAsync(uri, { idempotent: true });
+}
+
 /** Retire the account immediately; late downloads cannot publish plaintext. */
 export async function wipeRemoteMediaForOwner(pubkey: string): Promise<void> {
   const owner = pubkey.toLowerCase();
@@ -94,6 +122,8 @@ export async function wipeRemoteMediaForOwner(pubkey: string): Promise<void> {
   await Promise.allSettled([...(publishing.get(owner) ?? [])]);
   if (!cacheDirectory) return;
   await deleteAsync(ownerDirectory(owner), { idempotent: true });
+  for (const uri of [...writtenAt.keys()])
+    if (uri.startsWith(ownerDirectory(owner))) writtenAt.delete(uri);
   // Pre-account cache files cannot be attributed to an owner: remove on any logout.
   for (const name of await readDirectoryAsync(cacheDirectory)) {
     if (/^remote-[a-f0-9]{64}$/.test(name))

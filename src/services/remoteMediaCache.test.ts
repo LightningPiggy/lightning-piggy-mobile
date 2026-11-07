@@ -7,7 +7,7 @@ import {
   deleteAsync,
   readDirectoryAsync,
 } from 'expo-file-system/legacy';
-import { resolveRemoteMedia, wipeRemoteMediaForOwner } from './remoteMediaCache';
+import { resolveRemoteMedia, evictRemoteMedia, wipeRemoteMediaForOwner } from './remoteMediaCache';
 import { PREVIEW_IMAGE_MAX_BYTES } from '../utils/remoteUrlPolicy';
 
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
@@ -239,4 +239,83 @@ it('removes legacy unscoped plaintext files on account removal', async () => {
   await wipeRemoteMediaForOwner('reader');
   expect(deleteAsync).toHaveBeenCalledWith(`file:///cache/${legacy}`, { idempotent: true });
   expect(deleteAsync).not.toHaveBeenCalledWith('file:///cache/other-cache', expect.anything());
+});
+
+it('evicts exactly the cached file for a URL, so the next resolve downloads it again', async () => {
+  const uri = await (async () => {
+    let sent = false;
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent) return { done: true };
+            sent = true;
+            return { done: false, value: new Uint8Array([1, 2, 3]) };
+          },
+          cancel: async () => {},
+          releaseLock: () => {},
+        }),
+      },
+    });
+    return resolveRemoteMedia('https://example.com/broken.jpg');
+  })();
+  jest.mocked(deleteAsync).mockClear();
+  await evictRemoteMedia('https://example.com/broken.jpg');
+  expect(deleteAsync).toHaveBeenCalledTimes(1);
+  expect(deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
+  // A blocked URL evicts nothing.
+  await evictRemoteMedia('https://127.0.0.1/x.jpg');
+  expect(deleteAsync).toHaveBeenCalledTimes(1);
+});
+
+it("never lets a stale decode error delete another view's fresh download of the same URL", async () => {
+  const url = 'https://example.com/shared.jpg';
+  mockFetch.mockImplementation(async () => {
+    let sent = false;
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent) return { done: true };
+            sent = true;
+            return { done: false, value: new Uint8Array([1, 2, 3]) };
+          },
+          cancel: async () => {},
+          releaseLock: () => {},
+        }),
+      },
+    };
+  });
+  const now = jest.spyOn(Date, 'now');
+  // Two thumbnails of one URL resolve the same (corrupt) copy at t=1000.
+  now.mockReturnValue(1000);
+  const uri = await resolveRemoteMedia(url);
+  // Thumbnail A reports it broken and re-downloads a good copy at t=2000.
+  now.mockReturnValue(2000);
+  await evictRemoteMedia(url, undefined, 1000);
+  await resolveRemoteMedia(url);
+  jest.mocked(deleteAsync).mockClear();
+  // Thumbnail B's late error for the copy it got at t=1000 leaves it alone...
+  await evictRemoteMedia(url, undefined, 1000);
+  expect(deleteAsync).not.toHaveBeenCalled();
+  // ...while an error against the current copy still evicts it.
+  await evictRemoteMedia(url, undefined, 2000);
+  expect(deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
+  now.mockRestore();
+});
+
+it("never evicts another account's copy after an account switch", async () => {
+  jest.mocked(deleteAsync).mockClear();
+  // The broken copy belonged to "reader"; the active account is now "other".
+  setRemoteMediaOwner('other');
+  await evictRemoteMedia('https://example.com/switch.jpg', undefined, Infinity, 'reader');
+  expect(deleteAsync).not.toHaveBeenCalled();
+  await evictRemoteMedia('https://example.com/switch.jpg', undefined, Infinity, 'OTHER');
+  expect(deleteAsync).toHaveBeenCalledTimes(1);
 });
