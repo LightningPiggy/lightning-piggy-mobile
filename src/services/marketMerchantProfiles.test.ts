@@ -6,6 +6,7 @@ import type { Event } from 'nostr-tools';
 jest.mock('./nostrPool', () => ({ pool: {}, trackRelays: jest.fn() }));
 jest.mock('./relayQuery', () => ({ querySyncAbortable: jest.fn() }));
 jest.mock('./zapSenderProfileStorage', () => ({ getMany: jest.fn(), setMany: jest.fn() }));
+jest.mock('./testRelayRouting', () => ({ activeAccountRelays: (relays: string[]) => relays }));
 const query = querySyncAbortable as jest.Mock;
 const cached = cache.getMany as jest.Mock;
 const save = cache.setMany as jest.Mock;
@@ -34,12 +35,7 @@ it('queries every cache miss in bounded chunks using the profile relays', async 
     expect(filter.kinds).toEqual([0]);
     expect(filter.authors.length).toBeLessThanOrEqual(50);
     expect(filter.limit).toBeLessThanOrEqual(100);
-    expect(options).toEqual({
-      signal,
-      maxWait: 8000,
-      rejectOnAllRelaysFailure: true,
-      rejectOnTimeout: true,
-    });
+    expect(options).toEqual({ signal, maxWait: 8000, completedRelays: expect.any(Set) });
     requested.push(...filter.authors);
   }
   expect(requested).toEqual(authors);
@@ -121,7 +117,12 @@ it('preserves valid display metadata alongside malformed fields', async () => {
 it('reports failed chunks as unresolved while preserving cached and successful profiles', async () => {
   const authors = Array.from({ length: 52 }, (_, i) => key(i));
   cached.mockResolvedValue(new Map([[key(0), { name: 'Cached' }]]));
-  query.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce([]);
+  query
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockImplementationOnce(async (_pool, _relays, _filter, options) => {
+      PROFILE_RELAYS.forEach((relay) => options.completedRelays.add(relay));
+      return [];
+    });
   const unresolved = jest.fn();
   const profiles = await fetchMarketMerchantProfiles(
     authors,
@@ -131,4 +132,39 @@ it('reports failed chunks as unresolved while preserving cached and successful p
   expect(profiles.get(key(0))?.name).toBe('Cached');
   expect(unresolved).toHaveBeenCalledWith(new Set(authors.slice(1, 51)));
   expect(profiles.has(key(51))).toBe(false);
+});
+
+describe('one slow profile relay', () => {
+  // Fills `completedRelays` like querySyncAbortable does: these relays finished.
+  const answer = (done: readonly string[], events: Event[]) =>
+    query.mockImplementation(async (_pool, _relays, _filter, options) => {
+      done.forEach((relay) => options.completedRelays.add(relay));
+      return events;
+    });
+
+  it('keeps what the other relays returned; only sellers not found are unresolved', async () => {
+    answer(PROFILE_RELAYS.slice(1), [event(key(1), 1, 'Found')]);
+    const onUnresolved = jest.fn();
+    const profiles = await fetchMarketMerchantProfiles(
+      [key(1), key(2)],
+      new AbortController().signal,
+      onUnresolved,
+    );
+    expect(profiles.get(key(1))).toMatchObject({ name: 'Found' });
+    expect([...onUnresolved.mock.calls[0][0]]).toEqual([key(2)]);
+  });
+
+  it('a seller missing from every relay is "no profile", not unresolved', async () => {
+    answer(PROFILE_RELAYS, [event(key(1), 1, 'Found')]);
+    const onUnresolved = jest.fn();
+    await fetchMarketMerchantProfiles([key(1), key(2)], new AbortController().signal, onUnresolved);
+    expect(onUnresolved.mock.calls[0][0].size).toBe(0);
+  });
+
+  it('marks the whole chunk unresolved when no relay completed', async () => {
+    query.mockRejectedValue(new Error('No relay completed the query'));
+    const onUnresolved = jest.fn();
+    await fetchMarketMerchantProfiles([key(1), key(2)], new AbortController().signal, onUnresolved);
+    expect([...onUnresolved.mock.calls[0][0]].sort()).toEqual([key(1), key(2)]);
+  });
 });
