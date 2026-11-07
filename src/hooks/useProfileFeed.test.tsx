@@ -133,3 +133,27 @@ it('hides non-note comments but still pages past them (#1337)', async () => {
   // The hidden product comment is the oldest fetched event: the cursor.
   expect(fetchPage.mock.calls[0][0].until).toBe(80);
 });
+
+it('shows "no posts" rather than unavailable when one relay answered and another stays silent', async () => {
+  subscribe.mockImplementation(({ onAnswered }) => {
+    onAnswered(); // one relay: real EOSE, nothing stored; the other never replies
+    return jest.fn();
+  });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  expect(h.result.current.loading).toBe(true);
+  await act(async () => {
+    jest.advanceTimersByTime(6000); // the grace period ends
+  });
+  expect(h.result.current.loading).toBe(false);
+  expect(h.result.current.unavailable).toBe(false);
+  expect(h.result.current.events).toHaveLength(0);
+});
+
+it('is unavailable when no relay answered within the grace period', async () => {
+  subscribe.mockImplementation(() => jest.fn());
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(6000);
+  });
+  expect(h.result.current.unavailable).toBe(true);
+});

@@ -109,6 +109,13 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
           flush();
           setLoading(false);
         },
+        // One relay really answered: when the grace period ends with no
+        // posts, that's "No posts yet", even if another relay is still silent.
+        onAnswered: () => {
+          if (!live) return;
+          answered = true;
+          setUnavailable(false);
+        },
         onUnavailable: () => {
           if (!live) return;
           setUnavailable(true);
