@@ -509,7 +509,9 @@ A scanned NFC tag (Android system NDEF dispatch) and a tapped deep link both arr
 
 Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to Lightning Piggy's own + opt-in schemes (`lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
 
-iOS registers `lightningpiggy`, `lightning`, `lnurlw` and `lnurl` as `CFBundleURLSchemes`, via `ios.scheme` in `app.config.ts`. `nostr` isn't registered on iOS. A `lightning:` link from another app or Safari (for example a top-up screen's "Open in wallet" button) opens Lightning Piggy and goes through the same `App.tsx` routing. iOS has no app chooser: if several installed apps register the same scheme, iOS picks one (in practice the most recently installed), so Lightning Piggy may not open on a phone that has another Lightning wallet.
+iOS registers `lightningpiggy`, `lightning`, `lnurlw` and `lnurl` as `CFBundleURLSchemes`, via `ios.scheme` in `app.config.ts`. `nostr` isn't registered on iOS. A `lightning:` link from another app or Safari (for example a top-up screen's "Open in wallet" button) opens Lightning Piggy and goes through the same `App.tsx` routing. iOS has no app chooser: if several installed apps register the same scheme, iOS picks one and Apple doesn't define which. On the iOS 26 Simulator, the wallet that registered `lightning:` first kept it after Lightning Piggy was installed. So Lightning Piggy may not open on a phone that has another Lightning wallet.
+
+On a cold start, the launch URL arrives before the consent sheet's host has mounted. `App.tsx` therefore waits for it (`whenLinkActionSheetReady` in `src/utils/linkActionSheet.ts`) instead of dropping the prompt.
 
 ==== Routing table
 

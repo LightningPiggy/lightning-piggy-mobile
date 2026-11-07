@@ -37,6 +37,7 @@ import {
   pubkeyToContactBodyStub,
 } from './src/utils/nostrProfileLink';
 import { confirmLinkAction } from './src/utils/confirmLinkAction';
+import { whenLinkActionSheetReady } from './src/utils/linkActionSheet';
 import { resolveLnurlDirection } from './src/services/lnurlService';
 import {
   ensureNotificationsInitialised,
@@ -288,8 +289,13 @@ export default function App() {
         (/^(lightning:|lnurl|bitcoin:|nostr:)/i.test(trimmed) || isProfileReferenceUri(trimmed)) &&
         !/^lnurlw?:\/\//i.test(trimmed);
       if (needsConsent) {
-        confirmLinkAction(trimmed, () => {
-          if (!cancelled) routeFresh(trimmed);
+        // On a cold start the launch URL arrives before the consent sheet's
+        // host has mounted, so wait for it rather than drop the prompt.
+        whenLinkActionSheetReady(() => {
+          if (cancelled) return;
+          confirmLinkAction(trimmed, () => {
+            if (!cancelled) routeFresh(trimmed);
+          });
         });
       } else {
         routeFresh(trimmed);

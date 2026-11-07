@@ -11,12 +11,28 @@ export interface LinkActionPrompt {
   options: BrandedAlertOptions;
 }
 let listener: ((prompt: LinkActionPrompt) => void) | null = null;
+let readyWaiters: (() => void)[] = [];
 
 export function registerLinkActionSheet(next: (prompt: LinkActionPrompt) => void): () => void {
   listener = next;
+  const waiters = readyWaiters;
+  readyWaiters = [];
+  waiters.forEach((run) => run());
   return () => {
     if (listener === next) listener = null;
   };
+}
+
+/**
+ * Runs `run` once the consent sheet host is mounted (immediately if it already
+ * is). A cold-start deep link resolves `Linking.getInitialURL()` while the
+ * providers above `LinkActionSheetHost` are still loading; without this wait
+ * the prompt falls back to an alert whose host isn't mounted either, and the
+ * link is silently dropped.
+ */
+export function whenLinkActionSheetReady(run: () => void): void {
+  if (listener) run();
+  else readyWaiters.push(run);
 }
 
 export function showLinkActionSheet(

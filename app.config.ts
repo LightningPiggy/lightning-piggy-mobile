@@ -89,8 +89,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // SendSheet; LNURL-withdraw opens LnurlWithdrawSheet; anything else
     // under `lightning:` gets a "Link not supported" toast. Unlike Android,
     // iOS shows no app chooser: when several installed apps claim the same
-    // scheme, iOS picks one (in practice the most recently installed), so
-    // another wallet may win on a given phone.
+    // scheme, iOS picks one and Apple doesn't define which, so another
+    // wallet may win on a given phone.
     scheme: ['lightning', 'lnurlw', 'lnurl'],
     supportsTablet: true,
     bundleIdentifier: getIosBundleId(),
