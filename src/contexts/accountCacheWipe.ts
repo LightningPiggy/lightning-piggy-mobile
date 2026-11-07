@@ -8,6 +8,7 @@ import { drainOrderAdmission, orderBudgetKey } from '../services/orderAdmission'
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import { retireBuyerOrderTitles, waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
+import { isFofCacheKeyFor, LEGACY_FOF_CACHE_KEY } from '../services/friendsOfFriendsService';
 /**
  * wipeAccountCaches — delete every per-account persisted artifact for a
  * signed-out identity: per-wallet secrets (SecureStore), all per-wallet
@@ -172,6 +173,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     // wipe removes them (the content is re-fetchable from relays).
     AMBER_NIP17_CACHE_KEY_BASE,
     NSEC_NIP17_CACHE_KEY_BASE,
+    // Pre-#565 device-wide friends-of-friends set (any account's graph).
+    LEGACY_FOF_CACHE_KEY,
     // Pre-existing per-pubkey caches (already namespaced before #288)
     inboxCacheKey(loggedOutPubkey),
     inboxLastSeenKey(loggedOutPubkey),
@@ -207,6 +210,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';
   for (const k of allKeys) {
     if (k.startsWith(convPrefix) || k.startsWith(lastSeenPrefix)) toRemove.push(k);
+    // This account's friends-of-friends sets — one key per ranked cap (#565).
+    else if (isFofCacheKeyFor(k, loggedOutPubkey)) toRemove.push(k);
   }
   // Decrypted group-chat plaintext (#689) — ONLY this account's logs (#1240):
   // other accounts on the device keep theirs, and Marmot history can't be

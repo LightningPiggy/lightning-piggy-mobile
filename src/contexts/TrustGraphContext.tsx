@@ -6,7 +6,6 @@ import React, {
   useEffect,
   useMemo,
   useRef,
-  useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNostr, useNostrContacts } from './NostrContext';
@@ -16,25 +15,8 @@ import {
   computeTrustSet,
   isPubkeyTrusted,
 } from '../services/trustGraphService';
-// L2 (friends-of-friends) is currently disabled. The previous
-// implementation eagerly fetched + cached the L2 set on every cold
-// start, regardless of which WoT tier the user was on. For a graph of
-// ~600 follows this produced a ~2 MB JSON blob in AsyncStorage —
-// exactly at Android's SQLite CursorWindow ceiling — and a 20-30 s
-// JS-thread freeze on read when the blob crossed the limit
-// (SQLiteBlobTooBigException, see #565). The cost was paid by every
-// user even though the default 'friends' tier doesn't use L2 at all.
-//
-// Next implementation should be foreground + explicit: when the user
-// selects the FoF tier we open a progress dialog ("Downloading follow
-// lists from N relays…"), stream the kind-3 fetches with a cancel
-// button, and persist the result in a sharded form that can't exceed
-// the CursorWindow limit (16 buckets keyed by first hex digit, each
-// ~130 KB max). Tracked under GH #565.
-//
-// The fetcher module is intentionally not imported here while disabled,
-// so any accidental call site fails at type-check.
-// import { fetchL2Follows, loadL2Cache, persistL2Cache } from '../services/trustGraphFetcher';
+import { LEGACY_FOF_CACHE_KEY } from '../services/friendsOfFriendsService';
+import { useTrustGraphL2, type TrustGraphL2Status } from './useTrustGraphL2';
 import {
   loadWotSettings,
   peekWotSettings,
@@ -43,7 +25,9 @@ import {
   type WotTier,
 } from '../services/wotSettingsService';
 
-const L2_CACHE_KEY_PREFIX = '@lp:trust-graph-l2:';
+// Pre-#565 uncapped L2 blob (~2 MB, the CursorWindow freeze). Deleted on
+// launch; the capped set now lives under friendsOfFriendsService's keys.
+const LEGACY_L2_CACHE_KEY_PREFIX = '@lp:trust-graph-l2:';
 
 // Re-export the tier type so consumers (chip + sheet) can type their props
 // without reaching into the service layer.
@@ -83,20 +67,30 @@ interface TrustGraphContextType {
   // start, or a switch to an account added this session). Every consumer is
   // already gated during that window because `wotTier` reads 'friends'.
   wotTierReady: boolean;
-  // Persist + apply a new tier. Wider tiers (fof / all) are gated on
-  // secretMode at the UI layer (WebOfTrustBottomSheet); this setter
-  // doesn't enforce the gate so a power user with secretMode flipped
-  // can still tier-switch without ceremony.
+  // Persist + apply a new tier. Choosing 'fof' doesn't switch at once: it
+  // starts the friends-of-friends build (progress + Cancel via
+  // `useTrustGraphL2Status`) and the tier only becomes 'fof' once the set is
+  // ready (#565). Choosing another tier cancels a build in flight.
   setWotTier: (next: WotTier) => void;
-  // L2 backfill state — `loading` until the friends-of-follows fetch
-  // resolves; consumers can show a subtle "filter is still loading"
-  // note while this is true.
+  // True while the friends-of-friends set is being built (foreground pick
+  // or a background refresh of a stale persisted set).
   l2Loading: boolean;
   // Number of pubkeys in the L2 (friends-of-follows) set.
   l2Size: number;
-  // Trigger an explicit L2 refresh (bypasses cache).
+  // Rebuild the L2 set now (bypasses the cache; keeps the current tier).
   refreshL2: () => Promise<void>;
 }
+
+// Build progress lives in its own context: it changes once per follow-list
+// batch, and only the Web of Trust sheet needs it — the heavy trust-filter
+// consumers (MessagesScreen, Map, Hunt) must not re-render per batch.
+interface TrustGraphL2StatusContextType {
+  status: TrustGraphL2Status;
+  // Abort the running build; nothing is persisted and the tier is unchanged.
+  cancelL2: () => void;
+}
+
+const TrustGraphL2StatusContext = createContext<TrustGraphL2StatusContextType | null>(null);
 
 const TrustGraphContext = createContext<TrustGraphContextType | null>(null);
 
@@ -110,8 +104,12 @@ interface ProviderProps {
 const HYDRATING_TIER: WotTier = 'friends';
 
 export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
-  const { pubkey } = useNostr();
+  const { pubkey, relays } = useNostr();
   const { contacts } = useNostrContacts();
+  const readRelays = useMemo(
+    () => (relays ?? []).filter((r) => r.read).map((r) => r.url),
+    [relays],
+  );
 
   // Direct follows (L1) — derived from NostrContext's contacts state.
   const l1Follows = useMemo(() => {
@@ -120,25 +118,13 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     return s;
   }, [contacts]);
 
-  // L2 friends-of-follows is currently disabled (see top-of-file
-  // comment + #565). Stays as an empty Set; consumers that consult
-  // `l2Follows` (e.g. trustSet's tier branch) silently degrade FoF to
-  // Friends-only. The setters are retained so we don't have to thread
-  // conditional optionality through the rest of the file.
-  const [l2Follows] = useState<Set<string>>(new Set());
-  const l2Loading = false;
-
-  const refreshL2 = useCallback(async () => {
-    // No-op while L2 is disabled. Stubbed (rather than removed) so the
-    // context's public shape stays stable for consumers like
-    // WebOfTrustBottomSheet that already pull this through `useTrustGraph`.
-  }, []);
-
-  // One-time cleanup of the legacy L2 cache. The previous implementation
-  // wrote a single ~2 MB blob keyed by `${L2_CACHE_KEY_PREFIX}${pubkey}`;
-  // leaving it around (a) wastes storage for every existing install and
-  // (b) keeps the SQLiteBlobTooBigException primed to fire if any code
-  // path still tries to read it. Iterating getAllKeys is O(n) over total
+  // Cleanup of the legacy L2 caches. The first implementation wrote a single
+  // ~2 MB blob keyed by `${LEGACY_L2_CACHE_KEY_PREFIX}${pubkey}`; leaving it
+  // around (a) wastes storage for every existing install and (b) keeps the
+  // SQLiteBlobTooBigException primed to fire if any code path still tries to
+  // read it. The pre-#565 FoF cache was one device-wide key shared by every
+  // account and cap, so it goes too. Only key NAMES are listed — no values
+  // are read. Iterating getAllKeys is O(n) over total
   // AsyncStorage keys, which for this app is ~50, so the cost is trivial.
   useEffect(() => {
     let cancelled = false;
@@ -146,7 +132,9 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
       try {
         const keys = await AsyncStorage.getAllKeys();
         if (cancelled) return;
-        const stale = keys.filter((k) => k.startsWith(L2_CACHE_KEY_PREFIX));
+        const stale = keys.filter(
+          (k) => k.startsWith(LEGACY_L2_CACHE_KEY_PREFIX) || k === LEGACY_FOF_CACHE_KEY,
+        );
         if (stale.length > 0) await AsyncStorage.multiRemove(stale);
       } catch {
         // Best-effort cleanup; failure is non-fatal and re-tries next launch.
@@ -192,13 +180,52 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
   const wotTierReady = knownSettings !== null;
   const wotTier: WotTier = knownSettings?.wotTier ?? HYDRATING_TIER;
 
-  const setWotTier = useCallback(
+  const persistTier = useCallback(
     (next: WotTier) => {
       changeVersion.current += 1;
       setLoadedSettings({ wotTier: next });
       saveWotSettings({ wotTier: next }, pubkey).catch(() => {});
     },
     [pubkey, setLoadedSettings],
+  );
+
+  // L2 (friends-of-friends): nothing is read or fetched unless the tier is
+  // 'fof' — see useTrustGraphL2.
+  const {
+    l2Follows,
+    status: l2Status,
+    enableFof,
+    cancelL2,
+    refreshL2,
+  } = useTrustGraphL2({
+    pubkey,
+    friends: l1Follows,
+    readRelays,
+    wotTier,
+    wotTierReady,
+    persistTier,
+  });
+  const l2Loading = l2Status.building;
+  const l2Empty = l2Follows.size === 0;
+
+  // Read through a ref so `setWotTier` keeps one identity across builds
+  // (GroupsContext re-exports it in its own memoised value).
+  const tierStateRef = useRef({ wotTier, l2Empty, l2Loading });
+  tierStateRef.current = { wotTier, l2Empty, l2Loading };
+  const setWotTier = useCallback(
+    (next: WotTier) => {
+      if (next === 'fof') {
+        const current = tierStateRef.current;
+        // Already on FoF: only rebuild a set that never arrived (a failed
+        // first build) — never re-fetch on an accidental re-tap.
+        if (current.wotTier !== 'fof') enableFof();
+        else if (current.l2Empty && !current.l2Loading) void refreshL2();
+        return;
+      }
+      cancelL2();
+      persistTier(next);
+    },
+    [enableFof, refreshL2, cancelL2, persistTier],
   );
 
   // For 'friends' tier the trust set is L1 + user + seeds.
@@ -281,7 +308,18 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     ],
   );
 
-  return <TrustGraphContext.Provider value={value}>{children}</TrustGraphContext.Provider>;
+  const statusValue = useMemo<TrustGraphL2StatusContextType>(
+    () => ({ status: l2Status, cancelL2 }),
+    [l2Status, cancelL2],
+  );
+
+  return (
+    <TrustGraphContext.Provider value={value}>
+      <TrustGraphL2StatusContext.Provider value={statusValue}>
+        {children}
+      </TrustGraphL2StatusContext.Provider>
+    </TrustGraphContext.Provider>
+  );
 };
 
 export const useTrustGraph = (): TrustGraphContextType => {
@@ -289,6 +327,15 @@ export const useTrustGraph = (): TrustGraphContextType => {
   if (!ctx) throw new Error('useTrustGraph must be used inside <TrustGraphProvider>');
   return ctx;
 };
+
+/** Friends-of-friends build progress + Cancel (Web of Trust sheet only). */
+export const useTrustGraphL2Status = (): TrustGraphL2StatusContextType => {
+  const ctx = useContext(TrustGraphL2StatusContext);
+  if (!ctx) throw new Error('useTrustGraphL2Status must be used inside <TrustGraphProvider>');
+  return ctx;
+};
+
+export type { TrustGraphL2Status, FofBuildProgress } from './useTrustGraphL2';
 
 // Re-export so consumers can reference the seed list (e.g. "follow these
 // recommended accounts" UI) without depending on the service module.
