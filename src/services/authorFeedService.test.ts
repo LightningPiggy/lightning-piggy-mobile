@@ -1,9 +1,13 @@
-import { fetchAuthorFeedPage } from './authorFeedService';
+import { fetchAuthorFeedPage, subscribeAuthorFeed } from './authorFeedService';
 const mockQuery = jest.fn();
 const mockStatus = jest.fn();
 
+const mockSubscribeMany = jest.fn();
 jest.mock('./nostrPool', () => ({
-  pool: { listConnectionStatus: () => mockStatus() },
+  pool: {
+    listConnectionStatus: () => mockStatus(),
+    subscribeMany: (...args: unknown[]) => mockSubscribeMany(...args),
+  },
   trackRelays: jest.fn(),
 }));
 jest.mock('./relayQuery', () => ({
@@ -71,4 +75,38 @@ it('is not complete when aborted', async () => {
     signal: controller.signal,
   });
   expect(page.complete).toBe(false);
+});
+
+describe('subscribeAuthorFeed', () => {
+  type Handlers = { onevent: (e: unknown) => void; oneose: () => void; onclose: () => void };
+  const open = () => {
+    const close = jest.fn();
+    mockSubscribeMany.mockReturnValueOnce({ close });
+    const calls = { onEvent: jest.fn(), onEose: jest.fn(), onUnavailable: jest.fn() };
+    const unsubscribe = subscribeAuthorFeed({
+      authorPubkey: PK,
+      relays: ['wss://a.example'],
+      ...calls,
+    });
+    const handlers = mockSubscribeMany.mock.calls.at(-1)![2] as Handlers;
+    return { ...calls, handlers, unsubscribe };
+  };
+
+  it('reports unavailable when every relay closes before anything arrives', () => {
+    const s = open();
+    s.handlers.oneose(); // the pool also signals EOSE for failed relays
+    s.handlers.onclose();
+    expect(s.onUnavailable).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not unavailable once an event arrived, or when we closed it ourselves', () => {
+    const got = open();
+    got.handlers.onevent(ev('x', 1));
+    got.handlers.onclose();
+    expect(got.onUnavailable).not.toHaveBeenCalled();
+    const ours = open();
+    ours.unsubscribe();
+    ours.handlers.onclose();
+    expect(ours.onUnavailable).not.toHaveBeenCalled();
+  });
 });

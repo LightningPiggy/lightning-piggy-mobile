@@ -574,6 +574,7 @@
     "noShopItems": "W sklepie nie ma jeszcze produktów",
     "loadMore": "Wczytaj więcej",
     "shopUnavailable": "Nie udało się wczytać sklepu. Przeciągnij w dół, aby spróbować ponownie.",
+    "feedUnavailable": "Nie udało się wczytać wpisów. Przeciągnij w dół, aby spróbować ponownie.",
     "filterPosts": "Wpisy",
     "filterPostsAndReplies": "Wpisy i odpowiedzi",
     "replyingTo": "W odpowiedzi do",
