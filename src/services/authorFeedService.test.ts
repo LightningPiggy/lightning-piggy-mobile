@@ -1,4 +1,8 @@
-import { fetchAuthorFeedPage, subscribeAuthorFeed } from './authorFeedService';
+import {
+  AUTHOR_FEED_EOSE_WAIT_MS,
+  fetchAuthorFeedPage,
+  subscribeAuthorFeed,
+} from './authorFeedService';
 const mockQuery = jest.fn();
 const mockStatus = jest.fn();
 
@@ -97,6 +101,21 @@ describe('subscribeAuthorFeed', () => {
     s.handlers.oneose(); // the pool also signals EOSE for failed relays
     s.handlers.onclose();
     expect(s.onUnavailable).toHaveBeenCalledTimes(1);
+  });
+
+  it('a relay that answered "nothing" and disconnected later is not unavailable', async () => {
+    const s = open();
+    s.handlers.oneose(); // real EOSE: no posts
+    await Promise.resolve(); // a later tick
+    s.handlers.onclose(); // the socket drops afterwards
+    expect(s.onEose).toHaveBeenCalledTimes(1);
+    expect(s.onUnavailable).not.toHaveBeenCalled();
+  });
+
+  it('waits for real EOSE rather than the SDK default timeout', () => {
+    open();
+    const params = mockSubscribeMany.mock.calls.at(-1)![2] as { maxWait?: number };
+    expect(params.maxWait).toBe(AUTHOR_FEED_EOSE_WAIT_MS);
   });
 
   it('is not unavailable once an event arrived, or when we closed it ourselves', () => {
