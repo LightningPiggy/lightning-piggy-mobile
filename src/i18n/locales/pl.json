@@ -2365,6 +2365,9 @@
       "fofBuildingStart": "Budowanie twojej sieci…",
       "fofFailed": "Nie udało się zbudować twojej sieci — pokazujemy oferty twoich znajomych.",
       "emptyNone": "Brak dostępnych produktów.",
+      "relaysUnreachable": "Nie udało się połączyć z przekaźnikami Rynku. Sprawdź połączenie i spróbuj ponownie.",
+      "retry": "Ponów",
+      "retryAccessibility": "Ponów ładowanie Rynku",
       "myOrders": "Moje zamówienia"
     },
     "card": {

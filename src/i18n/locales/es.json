@@ -2361,6 +2361,9 @@
       "fofBuildingStart": "Creando tu red…",
       "fofFailed": "No se pudo crear tu red: se muestran los anuncios de tus amigos.",
       "emptyNone": "No hay productos disponibles en este momento.",
+      "relaysUnreachable": "No se pudo conectar con los relays del Mercado. Revisa tu conexión e inténtalo de nuevo.",
+      "retry": "Reintentar",
+      "retryAccessibility": "Volver a cargar el Mercado",
       "myOrders": "Mis pedidos"
     },
     "card": {

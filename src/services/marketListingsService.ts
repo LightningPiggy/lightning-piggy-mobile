@@ -40,6 +40,7 @@ export interface MarketListingsResult {
   unreachableSellers?: string[];
   /** Deliberate query/work limits, separately from an unanswered relay pass. */
   budgetLimited?: boolean;
+  /** No relay answered the listings (or deletions) pass: nothing was really checked. */
   transportFailed?: boolean;
   /** Relays that answered the listings pass in full. */
   answeredRelays?: string[];
@@ -196,7 +197,8 @@ async function withSnapshotRelays(
   // Leave out relays parked as dead (#1326): they'd only burn a connect
   // timeout each. The healthiest 2 are always kept.
   const urls = selectHealthyRelays(planned.urls);
-  if (urls.length === 0) return { products: [], incomplete: true, answeredRelays: [] };
+  if (urls.length === 0)
+    return { products: [], incomplete: true, transportFailed: true, answeredRelays: [] };
   // A dedicated structure-only pool: every event is verified here before use
   // (see marketListingsPool). Its sockets close when the last snapshot ends.
   const lease = acquireMarketListingsPool(urls);

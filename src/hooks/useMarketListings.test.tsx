@@ -315,6 +315,38 @@ describe('partial snapshot recovery', () => {
     expect(h.result.current.incomplete).toBe(false);
     expect(Toast.showOwned).not.toHaveBeenCalled();
   });
+  it('reports a transport failure only once the retry also reached no relay', async () => {
+    const h = renderHook(() => useMarketListings(true));
+    const unreached: MarketListingsResult = {
+      products: [],
+      incomplete: true,
+      transportFailed: true,
+      answeredRelays: [],
+    };
+    await act(async () => finish(unreached));
+    // The automatic retry is still pending: keep showing "loading".
+    expect(h.result.current.loading).toBe(true);
+    expect(h.result.current.transportFailed).toBe(false);
+    act(() => jest.advanceTimersByTime(1500));
+    await act(async () => finish(unreached));
+    expect(h.result.current.loading).toBe(false);
+    expect(h.result.current.transportFailed).toBe(true);
+    // Retry (refresh) that reaches a relay clears it.
+    act(() => h.result.current.refresh());
+    expect(h.result.current.loading).toBe(true);
+    await act(async () => finish({ products: [], incomplete: false, answeredRelays: ['x'] }));
+    expect(h.result.current.loading).toBe(false);
+    expect(h.result.current.transportFailed).toBe(false);
+  });
+  it('reports a transport failure when the fetch itself throws', async () => {
+    fetch.mockImplementation(() => Promise.reject(new Error('offline')));
+    const h = renderHook(() => useMarketListings(true));
+    await act(async () => {});
+    act(() => jest.advanceTimersByTime(1500));
+    await act(async () => {});
+    expect(h.result.current.loading).toBe(false);
+    expect(h.result.current.transportFailed).toBe(true);
+  });
   it('cancels a pending retry on blur', async () => {
     const h = renderHook(() => useMarketListings(true));
     await act(async () => finish({ products: [], incomplete: true }));

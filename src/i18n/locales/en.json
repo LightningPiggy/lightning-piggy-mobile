@@ -2361,6 +2361,9 @@
       "fofBuildingStart": "Building your network…",
       "fofFailed": "Couldn’t build your network — showing your friends’ listings.",
       "emptyNone": "No products available right now.",
+      "relaysUnreachable": "Couldn’t reach the Market relays. Check your connection and try again.",
+      "retry": "Retry",
+      "retryAccessibility": "Retry loading the Market",
       "myOrders": "My orders"
     },
     "card": {
