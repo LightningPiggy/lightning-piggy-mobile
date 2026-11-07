@@ -51,6 +51,21 @@ describe('live sub hand-off (contentless phantoms)', () => {
     expect(mod.wasWrapHandled('w2')).toBe(false);
     mod.unmarkWrapHandled('w1'); // given back undecided
     expect(mod.wasWrapHandled('w1')).toBe(false);
+  });
+
+  it('tracks a wrap in flight until it is decided, stored or given back', () => {
+    mod.noteWrapInFlight('a');
+    mod.noteWrapInFlight('b');
+    mod.noteWrapInFlight('c');
+    expect(mod.isWrapInFlight('a')).toBe(true);
+    mod.markWrapHandled('a'); // decided
+    mod.noteWrapStored('b'); // stored silently
+    mod.unmarkWrapHandled('c'); // given back
+    expect(mod.isWrapInFlight('a')).toBe(false);
+    expect(mod.isWrapInFlight('b')).toBe(false);
+    expect(mod.isWrapInFlight('c')).toBe(false);
+    mod.noteWrapInFlight(''); // bad data is ignored
+    expect(mod.isWrapInFlight('')).toBe(false);
     mod.noteContentlessWrapAlert('w2');
     expect(mod.takeContentlessWrapAlert('w2')).toBe(true);
     expect(mod.takeContentlessWrapAlert('w2')).toBe(false);

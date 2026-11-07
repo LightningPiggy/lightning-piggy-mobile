@@ -21,8 +21,11 @@ import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { createLiveDmEngineBridge } from './liveDmEngineBridge';
 import {
   claimWrapNotification,
+  isWrapInFlight,
   markWrapHandled,
   noteLiveDmSubArmed,
+  noteWrapInFlight,
+  noteWrapStored,
   unmarkWrapHandled,
   retractContentlessWrapAlert,
   takeContentlessWrapAlert,
@@ -266,6 +269,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           },
         ]);
         pendingReplays.delete(item);
+        noteWrapStored(item.entry.id);
         if (cancelled || !isCurrentOwner()) return;
         knownWrapIds.add(item.entry.id);
         capKnownWrapIds(knownWrapIds);
@@ -372,7 +376,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // Per issue #505.
     if ((ev.kind === 1059 || ev.kind === 4) && knownWrapIds.has(ev.id)) {
       // Already stored (and shown): nothing for the background watch to alert.
-      if (ev.kind === 1059) markWrapHandled(ev.id);
+      // Not one a predecessor sub (same knownWrapIds) is still deciding or
+      // holds in the follow gate: that stays the watch's to alert if needed.
+      if (ev.kind === 1059 && !isWrapInFlight(ev.id)) markWrapHandled(ev.id);
       return;
     }
     // Eagerly claim this wrap.id in the in-memory dedup Set before
@@ -386,9 +392,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     if (ev.kind === 1059) {
       knownWrapIds.add(ev.id);
       capKnownWrapIds(knownWrapIds);
+      noteWrapInFlight(ev.id);
     }
     if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
-    if (cancelled || !isCurrentOwner()) return;
+    if (cancelled || !isCurrentOwner()) {
+      if (ev.kind === 1059) releaseWrap(ev.id);
+      return;
+    }
     if (seen.has(ev.id)) {
       if (__DEV__) console.log(`[Nostr] live evt ${ev.id.slice(0, 8)} dedup-seen`);
       return;

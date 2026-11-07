@@ -21,6 +21,7 @@ import { cancelInFlightNotifications, dismissNotificationsFor } from './notifica
 const claimed = new Set<string>();
 const handled = new Set<string>();
 const contentless = new Set<string>();
+const inFlight = new Set<string>();
 let liveSubsArmed = 0;
 
 // Bounded so a long-lived watch session can't grow the sets unboundedly.
@@ -52,7 +53,9 @@ export function claimWrapNotification(wrapId: string | null | undefined): boolea
 /** The live sub decoded this event — a gift wrap, a kind-4 DM or an order —
  * or already had it stored: whether it deserves an alert is now its decision. */
 export function markWrapHandled(wrapId: string): void {
-  if (wrapId) addBounded(handled, wrapId);
+  if (!wrapId) return;
+  inFlight.delete(wrapId);
+  addBounded(handled, wrapId);
 }
 
 /** The live sub gave this wrap back undecided (torn down mid-wrap, a failed
@@ -60,7 +63,24 @@ export function markWrapHandled(wrapId: string): void {
  * that saw the in-flight claim and took it for "already stored" — no longer
  * holds, so the background watch must handle it again. */
 export function unmarkWrapHandled(wrapId: string): void {
+  inFlight.delete(wrapId);
   handled.delete(wrapId);
+}
+
+/** A live sub took this wrap in and hasn't decided or stored it yet (still
+ * decrypting / routing, or held by the follow gate). Its id is already in the
+ * shared knownWrapIds, so a re-opened sub must not take it for "stored". */
+export function noteWrapInFlight(wrapId: string): void {
+  if (wrapId) addBounded(inFlight, wrapId);
+}
+
+/** The wrap is now stored: a redelivery is "already stored" from here on. */
+export function noteWrapStored(wrapId: string): void {
+  inFlight.delete(wrapId);
+}
+
+export function isWrapInFlight(wrapId: string): boolean {
+  return inFlight.has(wrapId);
 }
 
 export function wasWrapHandled(wrapId: string): boolean {
@@ -102,5 +122,6 @@ export function __resetForTests(): void {
   claimed.clear();
   handled.clear();
   contentless.clear();
+  inFlight.clear();
   liveSubsArmed = 0;
 }

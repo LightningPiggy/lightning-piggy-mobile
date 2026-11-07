@@ -22,6 +22,7 @@ import {
   claimWrapNotification,
   markWrapHandled,
   noteContentlessWrapAlert,
+  noteWrapStored,
   retractContentlessWrapAlert,
   takeContentlessWrapAlert,
 } from '../services/dmWrapNotificationDedupe';
@@ -373,6 +374,7 @@ export function createLiveRumorSurfacer(
           throw error;
         }
         knownWrapIds.add(wrapId);
+        noteWrapStored(wrapId);
       });
       nothingToSee();
       if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} stored as a reaction`);
@@ -464,6 +466,7 @@ export function createLiveRumorSurfacer(
       }
       if (order && !partnership.fromMe) await completeOrderRumors(viewerPubkey, [rumor]);
       knownWrapIds.add(wrapId);
+      noteWrapStored(wrapId);
       if (order) surface();
     });
     // Surface to the UI without awaiting the persist chain (#934 item 2) —

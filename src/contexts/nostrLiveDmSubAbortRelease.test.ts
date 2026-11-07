@@ -7,6 +7,7 @@ import { startLiveDmSubscription, type LiveDmSubscriptionParams } from './nostrL
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
 import {
+  claimWrapNotification,
   wasWrapHandled,
   __resetForTests as __resetDedupeForTests,
 } from '../services/dmWrapNotificationDedupe';
@@ -25,6 +26,9 @@ jest.mock('../services/dmDb', () => ({
   selectDmWrapIds: jest.fn(async () => [] as string[]),
   hasConversationWith: jest.fn(async () => true),
   upsertDmMessages: jest.fn(async () => {}),
+  subscribeDmStorage: jest.fn(() => () => {}),
+  selectRepliedConversations: jest.fn(async () => [] as string[]),
+  REPLY_WIRE_KINDS: [14, 15],
 }));
 jest.mock('../services/groupMessagesStorageService', () => ({
   listPersistedGroupWrapIds: jest.fn(async () => [] as string[]),
@@ -192,7 +196,8 @@ it('un-marks a wrap the re-opened sub took for stored while the torn-down sub st
   await flush();
   capturedOnEvent!(freshWrap());
   await flush();
-  expect(wasWrapHandled(WRAP_ID)).toBe(true); // B took the in-flight claim for "stored"
+  // A still holds it undecided: B must not take the claim for "stored".
+  expect(wasWrapHandled(WRAP_ID)).toBe(false);
 
   // A resumes, sees it was torn down and gives the wrap back undecided.
   releaseRouting({ kind: 'not-group' });
@@ -201,6 +206,50 @@ it('un-marks a wrap the re-opened sub took for stored while the torn-down sub st
   // Nobody alerted, so the background watch must not treat it as handled.
   expect(mockFireNotification).not.toHaveBeenCalled();
   expect(wasWrapHandled(WRAP_ID)).toBe(false);
+  stopB();
+  await flush();
+});
+
+it('leaves a wrap the follow gate holds to the background watch across a re-open, with no second alert', async () => {
+  jest
+    .mocked(tryRouteGroupRumor)
+    .mockResolvedValue({ kind: 'not-group' } as Awaited<ReturnType<typeof tryRouteGroupRumor>>);
+  const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+  // Follows not hydrated yet (first login, no follow cache): the gate defers.
+  const followGateBuffer = createLiveSubFollowGateBuffer();
+  const unhydrated = (): LiveDmSubscriptionParams => ({
+    ...makeParams(knownWrapIdsRef),
+    followPubkeysRef: { current: new Set<string>() },
+    followHydratedRef: { current: false },
+    followGateBuffer,
+  });
+
+  const stopA = startLiveDmSubscription(unhydrated());
+  await flush();
+  capturedOnEvent!(freshWrap());
+  await flush();
+  expect(followGateBuffer.size).toBe(1);
+  expect(wasWrapHandled(WRAP_ID)).toBe(false);
+
+  // Relay-list change: B opens on the same knownWrapIds and gets a redelivery.
+  stopA();
+  const paramsB = unhydrated();
+  const stopB = startLiveDmSubscription(paramsB);
+  await flush();
+  capturedOnEvent!(freshWrap());
+  await flush();
+  // Held, not stored: still the background watch's to alert for.
+  expect(wasWrapHandled(WRAP_ID)).toBe(false);
+  expect(mockFireNotification).not.toHaveBeenCalled();
+
+  // The watch alerts after its grace (it claims the notification)...
+  expect(claimWrapNotification(WRAP_ID)).toBe(true);
+  // ...and when follows hydrate later, the replayed deferral doesn't alert again.
+  const replay = jest.mocked(paramsB.setDeferredReplay).mock.calls.at(-1)?.[0];
+  followGateBuffer.reevaluate(new Set([ALICE]), replay!);
+  await flush();
+  await flush();
+  expect(mockFireNotification).not.toHaveBeenCalled();
   stopB();
   await flush();
 });
