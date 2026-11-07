@@ -210,16 +210,18 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
 
   // Read through a ref so `setWotTier` keeps one identity across builds
   // (GroupsContext re-exports it in its own memoised value).
-  const tierStateRef = useRef({ wotTier, l2Empty, l2Loading });
-  tierStateRef.current = { wotTier, l2Empty, l2Loading };
+  const l2Failed = l2Status.failed;
+  const tierStateRef = useRef({ wotTier, l2Empty, l2Loading, l2Failed });
+  tierStateRef.current = { wotTier, l2Empty, l2Loading, l2Failed };
   const setWotTier = useCallback(
     (next: WotTier) => {
       if (next === 'fof') {
         const current = tierStateRef.current;
-        // Already on FoF: only rebuild a set that never arrived (a failed
-        // first build) — never re-fetch on an accidental re-tap.
+        // Already on FoF: only rebuild a set that never arrived or whose last
+        // build failed (the tap is the retry) — never re-fetch on an
+        // accidental re-tap of a healthy set.
         if (current.wotTier !== 'fof') enableFof();
-        else if (current.l2Empty && !current.l2Loading) void refreshL2();
+        else if ((current.l2Empty || current.l2Failed) && !current.l2Loading) void refreshL2();
         return;
       }
       cancelL2();
