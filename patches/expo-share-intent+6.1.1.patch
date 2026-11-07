@@ -1,5 +1,5 @@
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89..664aff3 100644
+index 0153c89..94dbc6d 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 @@ -13,6 +13,8 @@ import android.content.ContentResolver
@@ -23,9 +23,15 @@ index 0153c89..664aff3 100644
  
  
  class ExpoShareIntentModule : Module() {
-@@ -42,37 +48,82 @@ class ExpoShareIntentModule : Module() {
+@@ -41,38 +47,88 @@ class ExpoShareIntentModule : Module() {
+     private val currentActivity: Activity?
          get() = appContext.currentActivity
  
++    /** Lightning Piggy patch: set once JS has called getShareIntent on this
++     *  module instance (one per React context), i.e. its listeners are
++     *  attached. Set on the async queue, read on the main thread. */
++    @Volatile private var jsListening = false
++
      companion object {
 -        private var instance: ExpoShareIntentModule? = null
 +        // Read from the share executor thread too.
@@ -126,7 +132,7 @@ index 0153c89..664aff3 100644
  
              var mediaWidth: String? = null;
              var mediaHeight: String? = null;
-@@ -81,7 +132,7 @@ class ExpoShareIntentModule : Module() {
+@@ -81,7 +137,7 @@ class ExpoShareIntentModule : Module() {
                  val options = BitmapFactory.Options().apply {
                      inJustDecodeBounds = true
                  }
@@ -135,7 +141,7 @@ index 0153c89..664aff3 100644
                  mediaHeight = options.outHeight.toString()
                  mediaWidth = options.outWidth.toString()
              }
-@@ -101,7 +152,7 @@ class ExpoShareIntentModule : Module() {
+@@ -101,7 +157,7 @@ class ExpoShareIntentModule : Module() {
  
              return mapOf(
                      "contentUri" to uri.toString(),
@@ -144,16 +150,24 @@ index 0153c89..664aff3 100644
                      "fileName" to fileName,
                      "fileSize" to fileSize,
                      "mimeType" to mimeType,
-@@ -111,18 +162,56 @@ class ExpoShareIntentModule : Module() {
+@@ -111,18 +167,64 @@ class ExpoShareIntentModule : Module() {
              )
          }
  
++        /** Lightning Piggy patch: hand the parked share, if any, to
++         *  handleShareIntent. Taking it empties the slot, so the getShareIntent
++         *  and OnNewIntent paths can't both deliver the same share. */
++        fun deliverPendingShare() {
++            ExpoShareIntentSingleton.take()?.let { handleShareIntent(it) }
++        }
++
 +        /**
-+         * Lightning Piggy patch: entry point for both the cold-start
-+         * (`getShareIntent`) and warm-start (`OnNewIntent`) paths. Only the
-+         * cheap share check and task-root relaunch happen on the caller's
-+         * thread; reading the shared content (provider IPC, copies) is handed
-+         * to `shareExecutor` so a slow provider can't stall the UI thread.
++         * Lightning Piggy patch: entry point for both the JS-request
++         * (`getShareIntent`) and warm-start (`OnNewIntent`) paths, always via
++         * `deliverPendingShare`. Only the cheap share check and task-root
++         * relaunch happen on the caller's thread; reading the shared content
++         * (provider IPC, copies) is handed to `shareExecutor` so a slow
++         * provider can't stall the UI thread.
 +         * Never throws: a malformed intent becomes a generic `onError`.
 +         */
          fun handleShareIntent(intent: Intent) {
@@ -209,7 +223,7 @@ index 0153c89..664aff3 100644
                  // text / urls
                  if (intent.action == Intent.ACTION_SEND) {
                      notifyShareIntent(mapOf(
-@@ -141,15 +230,27 @@ class ExpoShareIntentModule : Module() {
+@@ -141,15 +243,27 @@ class ExpoShareIntentModule : Module() {
                  // files / medias
                  if (intent.action == Intent.ACTION_SEND) {
                      val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
@@ -242,21 +256,52 @@ index 0153c89..664aff3 100644
                      } else {
                          notifyError("empty uris array for file sharing: " + intent.action)
                      }
-@@ -182,10 +283,9 @@ class ExpoShareIntentModule : Module() {
+@@ -179,17 +293,23 @@ class ExpoShareIntentModule : Module() {
+ 
+         Events("onChange", "onStateChange", "onError")
+ 
++        // Lightning Piggy patch: every share goes through the single pending
++        // slot in ExpoShareIntentSingleton (filled from the activity's onCreate
++        // and onNewIntent, and from OnNewIntent below) and is handed to JS by
++        // whichever of these takes it first — so exactly once.
          AsyncFunction("getShareIntent") { _: String ->
-             // get the Intent from onCreate activity (app not running in background)
-             ExpoShareIntentSingleton.isPending = false
+-            // get the Intent from onCreate activity (app not running in background)
+-            ExpoShareIntentSingleton.isPending = false
 -            if (ExpoShareIntentSingleton.intent?.type != null) {
 -                handleShareIntent(ExpoShareIntentSingleton.intent!!);
 -                ExpoShareIntentSingleton.intent = null
 -            }
-+            val initial = ExpoShareIntentSingleton.intent
-+            ExpoShareIntentSingleton.intent = null
-+            if (initial?.type != null) handleShareIntent(initial)
++            // JS calls this on mount, after attaching its listeners, and on
++            // every return to the foreground: from here on a new share can be
++            // delivered as soon as it arrives.
++            jsListening = true
++            deliverPendingShare()
          }
  
          Function("clearShareIntent") { _: String ->
-@@ -209,6 +309,50 @@ class ExpoShareIntentModule : Module() {
+-            ExpoShareIntentSingleton.intent = null
++            // Lightning Piggy patch: a no-op. A share leaves the slot when it
++            // is handed over, so there is nothing delivered left to clear, and
++            // clearing here could drop a share parked between the activity
++            // callback and its hand-over.
+         }
+ 
+         Function("hasShareIntent") { _: String ->
+@@ -197,7 +317,12 @@ class ExpoShareIntentModule : Module() {
+         }
+ 
+         OnNewIntent {
+-            handleShareIntent(it)
++            // Usually already parked by the activity listener (offer is
++            // idempotent); parked here too in case it wasn't.
++            ExpoShareIntentSingleton.offer(it)
++            // Before JS is listening an event would be lost: leave it parked
++            // for getShareIntent.
++            if (jsListening) deliverPendingShare()
+         }
+ 
+         OnCreate {
+@@ -209,6 +334,50 @@ class ExpoShareIntentModule : Module() {
          }
      }
  
@@ -307,7 +352,7 @@ index 0153c89..664aff3 100644
      /**
       * Get a file path from a Uri. This will get the the path for Storage Access
       * Framework Documents, as well as the _data field for the MediaStore and
-@@ -300,8 +444,19 @@ class ExpoShareIntentModule : Module() {
+@@ -300,8 +469,19 @@ class ExpoShareIntentModule : Module() {
                  if (cursor != null && cursor.moveToFirst()) {
                      val columnIndex = cursor.getColumnIndexOrThrow(column)
                      val fileName = cursor.getString(columnIndex)
@@ -329,6 +374,101 @@ index 0153c89..664aff3 100644
                  }
              } finally {
                  cursor?.close()
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
+index db573ec..47c301f 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
+@@ -13,10 +13,24 @@ import expo.modules.core.interfaces.ReactActivityLifecycleListener
+ class ExpoShareIntentReactActivityLifecycleListener(activityContext: Context) : ReactActivityLifecycleListener {
+ 
+     override fun onCreate(activity: Activity?, savedInstanceState: Bundle?) {
+-        // only store when the new intent is not empty
+-        if (activity?.intent?.type != null) {
+-            ExpoShareIntentSingleton.intent = activity?.intent
+-            ExpoShareIntentSingleton.isPending = true
+-        }
++        val intent = activity?.intent ?: return
++        // Lightning Piggy patch: reopened from Recents after the process died,
++        // the activity is recreated with the intent that first started it — a
++        // share the previous process already handled. Don't replay it.
++        if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
++        // Share intents only (see ExpoShareIntentSingleton.isShareIntent).
++        ExpoShareIntentSingleton.offer(intent)
++    }
++
++    /**
++     * Lightning Piggy patch: runs at activity level whether or not React is
++     * ready, so a share that arrives while the app is restarting (process
++     * killed in the background) is parked instead of lost. Never claims the
++     * intent: the module's OnNewIntent still runs and hands it over at once
++     * when JS is already listening.
++     */
++    override fun onNewIntent(intent: Intent?): Boolean {
++        if (intent != null) ExpoShareIntentSingleton.offer(intent)
++        return false
+     }
+ }
+\ No newline at end of file
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
+index 7f93abe..526ce6b 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
+@@ -9,7 +9,51 @@ object ExpoShareIntentSingleton : SingletonModule {
+     return "ExpoShareIntent"
+   }
+ 
+-  // members to store the initial launch intent
+-  var intent: Intent? = null
+-  var isPending: Boolean = false
++  // Lightning Piggy patch: ONE pending-share slot, filled by every path a share
++  // can arrive on and emptied exactly once when it is handed to JS.
++  //
++  // Why: when Android has killed the process in the background and the user
++  // then shares into the app, the activity is recreated with its OLD launch
++  // intent and the SEND arrives through onNewIntent before React (and so this
++  // module's OnNewIntent) is ready; React drops it with a soft exception. The
++  // activity lifecycle listener sees that onNewIntent regardless, parks the
++  // share here, and `getShareIntent` (called by JS once its listeners are
++  // attached) takes it.
++  //
++  // Latest wins: if two shares arrive before JS asks, only the newest is kept
++  // (the same rule as a second share replacing an open picker). Offering the
++  // same Intent object twice is a no-op — the activity listener and the module
++  // both see every warm onNewIntent — and an intent already taken is never
++  // queued again, so a share is delivered at most once.
++  // Written on the main thread, taken on the module's async queue: guarded.
++  private val lock = Any()
++  private var pending: Intent? = null
++  private var lastTaken: Intent? = null
++
++  /** True for an ACTION_SEND / ACTION_SEND_MULTIPLE with a MIME type; never
++   *  for the app's own `lightning:` / `nostr:` VIEW links or NFC intents. */
++  fun isShareIntent(intent: Intent?): Boolean {
++    if (intent == null || intent.type == null) return false
++    return intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE
++  }
++
++  /** Park a share until it is handed to JS. Latest wins (see above). */
++  fun offer(intent: Intent) {
++    if (!isShareIntent(intent)) return
++    synchronized(lock) {
++      if (intent === lastTaken) return
++      pending = intent
++    }
++  }
++
++  /** Take the parked share, if any; it can't be taken (or offered) again. */
++  fun take(): Intent? = synchronized(lock) {
++    val intent = pending
++    pending = null
++    if (intent != null) lastTaken = intent
++    intent
++  }
++
++  val isPending: Boolean
++    get() = synchronized(lock) { pending != null }
+ }
+\ No newline at end of file
 diff --git a/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts b/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts
 index f2ebd1a..752846f 100644
 --- a/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts
