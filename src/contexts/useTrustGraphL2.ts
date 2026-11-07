@@ -20,6 +20,8 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { computeFofSet, loadFofCache } from '../services/friendsOfFriendsService';
 import { fetchFollowLists } from '../services/followListsFetcher';
 import { useAccountState } from './useAccountState';
+import { PERF_LOGS_ENABLED } from '../utils/perfLog';
+import { startJsStallProbe, type JsStallProbe } from '../utils/jsStallProbe';
 import type { WotTier } from '../services/wotSettingsService';
 
 /**
@@ -120,6 +122,7 @@ export function useTrustGraphL2({
       controllerRef.current = controller;
       const { signal } = controller;
       setStatus({ building: true, progress: { done: 0, total: 0 }, failed: false });
+      let probe: JsStallProbe | null = null;
       try {
         if (mode === 'enable') {
           // A fresh cached set (built within 24 h for this follow list)
@@ -134,6 +137,10 @@ export function useTrustGraphL2({
           }
         }
         const relays = relaysKey ? relaysKey.split(',') : [];
+        // Dev / preview builds only: how long the build took and the worst
+        // JS-thread stall while it ran (#565 perf proof).
+        const startedAt = Date.now();
+        probe = PERF_LOGS_ENABLED ? startJsStallProbe() : null;
         const result = await computeFofSet(pubkey, friendsList, {
           maxSize: WOT_FOF_MAX,
           signal,
@@ -143,6 +150,14 @@ export function useTrustGraphL2({
             if (!signal.aborted) setStatus((prev) => ({ ...prev, progress: { done, total } }));
           },
         });
+        if (probe) {
+          const stall = probe.stop();
+          console.log(
+            `[PerfBlock] wot fof build (${mode}): ${Date.now() - startedAt}ms, ` +
+              `${friendsList.length} friends → ${result.set.size} pubkeys, ` +
+              `js max stall ${stall.maxMs}ms, blocked ${stall.blockedMs}ms`,
+          );
+        }
         if (signal.aborted) return;
         applySnapshot(result);
         if (mode === 'enable') persistTier('fof');
@@ -151,6 +166,7 @@ export function useTrustGraphL2({
         // Cancel already reset the status; a failure keeps the tier as it was.
         if (!signal.aborted) setStatus({ building: false, progress: null, failed: true });
       } finally {
+        probe?.stop(); // no-op after a successful build already reported
         if (controllerRef.current === controller) controllerRef.current = null;
       }
     },
