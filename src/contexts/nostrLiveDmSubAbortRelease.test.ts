@@ -9,6 +9,7 @@ import { tryRouteGroupRumor } from './nostrGroupRouting';
 import { upsertDmMessages } from '../services/dmDb';
 import {
   claimWrapNotification,
+  wasWrapDecided,
   wasWrapHandled,
   __resetForTests as __resetDedupeForTests,
 } from '../services/dmWrapNotificationDedupe';
@@ -329,6 +330,19 @@ it('marks a follow-gate replay handled once it alerts, so the background sync st
   await flush();
   expect(mockFireNotification).toHaveBeenCalledTimes(1);
   expect(wasWrapHandled(WRAP_ID)).toBe(true);
+  stop();
+  await flush();
+});
+
+it('decides a wrap an nsec account cannot decrypt, so the background watch does not retry it', async () => {
+  const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+  const stop = startLiveDmSubscription(makeParams(knownWrapIdsRef));
+  await flush();
+  const { rumor: _rumor, ...undecryptable } = freshWrap('stranger-wrap');
+  capturedOnEvent!(undecryptable);
+  await flush();
+  expect(wasWrapDecided('stranger-wrap')).toBe(true);
+  expect(mockFireNotification).not.toHaveBeenCalled();
   stop();
   await flush();
 });

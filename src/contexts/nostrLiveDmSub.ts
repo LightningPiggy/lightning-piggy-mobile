@@ -675,6 +675,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
     if (!rumor) {
       if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-rumor`);
+      // nsec: the background watch would retry with the same key and fail
+      // again, so this wrap is decided. Remote signers stay undecided —
+      // their contentless alert is the right fallback.
+      if (activeSigner === 'nsec') markWrapHandled(wrap.id);
       return;
     }
     // Dev cross-check: record every wrap the JS path successfully unwrapped

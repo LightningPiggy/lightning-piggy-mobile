@@ -215,7 +215,13 @@ export function createLiveRumorSurfacer(
             }),
           );
         else markWrapHandled(wrapId); // alerted already
-      } // else: a real group message we don't alert for now — keep any placeholder
+      } else {
+        // A real group message we don't alert for now (not fresh): it's
+        // stored, so leave in-flight — a redelivery then counts as stored
+        // rather than leaving a contentless watch free to post a phantom.
+        // Keep any placeholder: it may be the only alert this message had.
+        noteWrapStored(wrapId);
+      }
       if (__DEV__)
         console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} group-routed (${routeResult.kind})`);
       return;
