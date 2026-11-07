@@ -696,11 +696,12 @@ const ContactProfileScreen: React.FC = () => {
     <View style={styles.container}>
       {/* Header strip pinned over the banner. The banner extends up behind
           the status bar (battery / clock / wifi) — `topBar` is absolute so
-          the buttons stay at a consistent inset.top + 8 offset. Back on
+          the buttons sit just under the status bar (the safe-area inset,
+          which already clears a camera cutout), with no extra gap. Back on
           the left, the "More" actions button on the right (mirrors the
           back chevron). Both buttons use a solid dark-pill background for
           contrast against busy banner imagery. */}
-      <View style={[styles.topBar, { top: insets.top + 8 }]}>
+      <View style={[styles.topBar, { top: insets.top }]}>
         <TouchableOpacity
           accessibilityRole="button"
           onPress={() => navigation.goBack()}
