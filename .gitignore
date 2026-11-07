@@ -60,6 +60,8 @@ modules/*/android/build/
 
 # Build artifacts
 *.apk
+# `eas build --local --profile production` packs the per-ABI APKs into one archive
+/build-*.tar.gz
 
 # Generated documentation
 docs/*.pdf

@@ -29,7 +29,8 @@
         "APP_VARIANT": "production"
       },
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "applicationArchivePath": "android/app/build/outputs/apk/release/app-*-release.apk"
       }
     },
     "production-adhoc": {

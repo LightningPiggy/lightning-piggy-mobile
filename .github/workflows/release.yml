@@ -12,7 +12,7 @@ on:
         description: Platform(s) to release
         type: choice
         # iOS auto-submits to TestFlight (ASC API key on EAS). Android
-        # builds an APK that the `attach-android-apk` job downloads and
+        # builds per-ABI APKs that the `attach-android-apk` job downloads and
         # attaches to the GitHub Release — no auto-submit to Play until
         # a Google Play account + service-account JSON are wired up via
         # `eas credentials` (see docs/DEPLOYMENT.adoc).
@@ -72,8 +72,20 @@ jobs:
       - name: Append generated notes to GitHub Release
         if: github.event_name == 'release'
         run: |
+          # The Release page alone (not TestFlight or the changelog) also says
+          # which of the per-ABI APKs attach-android-apk uploads to download.
+          cp "$RUNNER_TEMP/release-notes.md" "$RUNNER_TEMP/release-body.md"
+          cat >> "$RUNNER_TEMP/release-body.md" <<EOF
+
+          ### Android download
+
+          - **Most phones:** \`lightning-piggy-${RELEASE_REF}-arm64-v8a.apk\`
+          - **Older 32-bit phones** (if that one won't install): \`lightning-piggy-${RELEASE_REF}-armeabi-v7a.apk\`
+
+          The APKs appear under Assets once the Android build finishes.
+          EOF
           node scripts/update-release-body.mjs --tag "$RELEASE_REF" \
-            --section generated-notes --content-file "$RUNNER_TEMP/release-notes.md"
+            --section generated-notes --content-file "$RUNNER_TEMP/release-body.md"
       - name: Append generated section to changelog archive
         if: github.event_name == 'release'
         env:
@@ -164,8 +176,8 @@ jobs:
           # On Release events the input is empty, so default to building
           # both platforms. iOS is auto-submitted to TestFlight; Android
           # is built only (no Google Play submit until creds wired), then
-          # the attach-android-apk job downloads the APK and attaches it
-          # to the Release page for sideloading.
+          # the attach-android-apk job downloads the per-ABI APKs and
+          # attaches them to the Release page for sideloading.
           # A "What to Test"-only re-run builds nothing.
           if [ -n "$WHATS_NEW_BUILD" ]; then
             echo "value=none" >> "$GITHUB_OUTPUT"
@@ -187,11 +199,12 @@ jobs:
             --non-interactive \
             --auto-submit
 
-      - name: EAS build — Android (APK only, attached to Release)
+      - name: EAS build — Android (APKs only, attached to Release)
         # Deliberately no --auto-submit: Google Play credentials aren't
         # wired yet (pending Play Developer account + service-account
-        # JSON). The APK produced here is downloaded by the
-        # `attach-android-apk` job below and attached to the Release.
+        # JSON). The production profile builds one APK per ABI
+        # (arm64-v8a, armeabi-v7a; plugins/withAndroidAbiSplits.js), which
+        # the `attach-android-apk` job below downloads and attaches.
         # Add `--auto-submit` here once `eas submit --platform android`
         # is configured in eas.json.
         id: android
@@ -337,7 +350,7 @@ jobs:
         run: node scripts/asc-set-whats-new.mjs
 
   attach-android-apk:
-    name: Attach Android APK to Release
+    name: Attach Android APKs to Release
     # Only runs on an actual Release event (workflow_dispatch has no release to attach to)
     # AND only when the build job actually built for Android.
     # always(): still attach when the build job failed only because of iOS.
@@ -452,18 +465,35 @@ jobs:
           fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
 
-      - name: Download APK
+      - name: Download and unpack the per-ABI APKs
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          URL: ${{ steps.find.outputs.url }}
         run: |
-          mkdir -p dist
+          # The production profile builds one APK per ABI
+          # (plugins/withAndroidAbiSplits.js). EAS uploads more than one
+          # application archive as a single .tar.gz of the matched files.
+          work="$RUNNER_TEMP/eas-artifact"
+          mkdir -p "$work" dist
           curl --fail --location --silent --show-error --retry 3 --retry-delay 2 \
-            "${{ steps.find.outputs.url }}" \
-            -o "dist/lightning-piggy-${{ github.event.release.tag_name }}.apk"
-          # Verify it's actually an APK (ZIP magic bytes), not an HTML error page.
-          file dist/*.apk | grep -qi 'zip\|android' || {
-            echo "::error title=APK download invalid::Downloaded file does not look like an APK."
-            file dist/*.apk
+            "$URL" -o "$work/artifact"
+          # A bare APK here means the ABI splits didn't apply; an HTML page
+          # means a failed download. Either way, don't attach anything.
+          file "$work/artifact" | grep -qi 'gzip' || {
+            echo "::error title=Android artifact is not a .tar.gz::Expected EAS to pack the arm64-v8a and armeabi-v7a APKs into one archive."
+            file "$work/artifact"
             exit 1
           }
+          tar -xzf "$work/artifact" -C "$work"
+          for abi in arm64-v8a armeabi-v7a; do
+            src=$(find "$work" -type f -name "app-$abi-release.apk")
+            if [ "$(printf '%s\n' "$src" | grep -c .)" -ne 1 ]; then
+              echo "::error title=Missing $abi APK::Expected exactly one app-$abi-release.apk in the EAS artifact."
+              find "$work" -type f
+              exit 1
+            fi
+            mv "$src" "dist/lightning-piggy-$TAG-$abi.apk"
+          done
           ls -la dist/
 
       - name: Install Android alignment tools
@@ -474,15 +504,48 @@ jobs:
       - name: Install pinned Android build tools
         run: sdkmanager 'build-tools;35.0.0'
 
-      - name: Verify 16 KB native library alignment
+      - name: Verify the APKs
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          bash scripts/check-elf-alignment.sh dist/*.apk
-          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -c -P 16 4 dist/*.apk
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          # 16 KB page-size alignment of the 64-bit libraries. The script only
+          # audits 64-bit ABIs, so the armeabi-v7a APK has nothing for it.
+          bash scripts/check-elf-alignment.sh "dist/lightning-piggy-$TAG-arm64-v8a.apk"
+          version_codes=""
+          for abi in arm64-v8a armeabi-v7a; do
+            apk="dist/lightning-piggy-$TAG-$abi.apk"
+            "$BUILD_TOOLS/zipalign" -c -P 16 4 "$apk"
+            # Exactly one ABI per APK.
+            abis=$(unzip -Z1 "$apk" 'lib/*' | cut -d/ -f2 | sort -u | paste -sd, -)
+            if [ "$abis" != "$abi" ]; then
+              echo "::error title=Wrong native libraries in $abi APK::Found ABIs: ${abis:-none}"
+              exit 1
+            fi
+            # Native libraries stored compressed (useLegacyPackaging in app.config.ts).
+            stored=$(unzip -v "$apk" 'lib/*' | awk '$2 == "Stored" { n++ } END { print n + 0 }')
+            if [ "$stored" -ne 0 ]; then
+              echo "::error title=Uncompressed native libraries in $abi APK::$stored lib/ entries are Stored, expected Deflated."
+              exit 1
+            fi
+            code=$("$BUILD_TOOLS/aapt2" dump badging "$apk" | sed -n "s/.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+            echo "$abi: versionCode $code, $(du -h "$apk" | cut -f1)"
+            version_codes="$version_codes $code"
+          done
+          # Both APKs must carry the same versionCode (no per-ABI offset), so
+          # either one upgrades an existing install in place.
+          if [ "$(echo $version_codes | tr ' ' '\n' | sort -u | grep -c .)" -ne 1 ]; then
+            echo "::error title=versionCode differs between APKs::$version_codes"
+            exit 1
+          fi
 
-      - name: Upload APK to Release
+      - name: Upload APKs to Release
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          gh release upload "${{ github.event.release.tag_name }}" \
-            dist/lightning-piggy-${{ github.event.release.tag_name }}.apk \
+          gh release upload "$TAG" \
+            "dist/lightning-piggy-$TAG-arm64-v8a.apk" \
+            "dist/lightning-piggy-$TAG-armeabi-v7a.apk" \
             --repo "$GITHUB_REPOSITORY" --clobber
 
   sync-release-identifiers:

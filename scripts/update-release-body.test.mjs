@@ -15,6 +15,12 @@ const nostr = parse(
   fs.readFileSync(path.join(root, '.github/workflows/release-nostr-note.yml'), 'utf8'),
 );
 const step = (workflow, job, name) => workflow.jobs[job].steps.find((s) => s.name === name);
+// The Release page (only) also says which per-ABI APK to download.
+const androidDownloads = (tag) =>
+  `### Android download\n\n- **Most phones:** \`lightning-piggy-${tag}-arm64-v8a.apk\`\n` +
+  `- **Older 32-bit phones** (if that one won't install): \`lightning-piggy-${tag}-armeabi-v7a.apk\`\n\n` +
+  'The APKs appear under Assets once the Android build finishes.';
+const withDownloads = (notes) => `${notes.trim()}\n\n${androidDownloads('v1.0.0')}`;
 
 function fixture(t, initial = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-body-test-'));
@@ -92,7 +98,7 @@ for (const order of [
     assert.ok(body.startsWith('Human notes\n\nLast-minute human edit\n'));
     assert.ok(
       body.includes(
-        '<!-- generated-notes -->\n### Fixed\n- A shipped fix\n<!-- /generated-notes -->',
+        `<!-- generated-notes -->\n${withDownloads('### Fixed\n- A shipped fix')}\n<!-- /generated-notes -->`,
       ),
     );
     assert.ok(
@@ -108,9 +114,15 @@ for (const order of [
     // Retries refresh only the owned section and do not add another link or notes block.
     fs.writeFileSync(path.join(f.dir, 'release-notes.md'), 'Corrected notes\n');
     execFileSync('bash', ['-e', '-c', commands['generated-notes']], { cwd: root, env: f.env });
-    assert.equal(f.state().body, replaceSection(body, 'generated-notes', 'Corrected notes'));
+    assert.equal(
+      f.state().body,
+      replaceSection(body, 'generated-notes', withDownloads('Corrected notes')),
+    );
     execFileSync('bash', ['-e', '-c', commands['nostr-link']], { cwd: root, env: f.env });
-    assert.equal(f.state().body, replaceSection(body, 'generated-notes', 'Corrected notes'));
+    assert.equal(
+      f.state().body,
+      replaceSection(body, 'generated-notes', withDownloads('Corrected notes')),
+    );
     assert.equal(f.calls().at(-1)[1], 'view'); // Idempotent retry makes no write.
   });
 }
