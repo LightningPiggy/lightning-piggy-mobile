@@ -338,7 +338,7 @@ it('decides a wrap an nsec account cannot decrypt, so the background watch does 
   const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
   const stop = startLiveDmSubscription(makeParams(knownWrapIdsRef));
   await flush();
-  const { rumor: _rumor, ...undecryptable } = freshWrap('stranger-wrap');
+  const undecryptable = { ...freshWrap('stranger-wrap'), rumor: undefined };
   capturedOnEvent!(undecryptable);
   await flush();
   expect(wasWrapDecided('stranger-wrap')).toBe(true);
