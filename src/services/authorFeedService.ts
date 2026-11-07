@@ -61,15 +61,20 @@ export function subscribeAuthorFeed(input: {
   limit?: number;
   onEvent: (event: AuthorFeedEvent) => void;
   onEose?: () => void;
+  /** Every relay closed the subscription (failed / unreachable) before any
+   *  event arrived: "couldn't ask", which is not the same as "no posts". */
+  onUnavailable?: () => void;
 }): () => void {
   trackRelays(input.relays);
   let eoseFired = false;
+  let gotEvent = false;
   const sub = pool.subscribeMany(
     input.relays,
     feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE),
     {
       onevent: (ev: Event) => {
         if (ev.pubkey !== input.authorPubkey || !AUTHOR_FEED_KINDS.includes(ev.kind)) return;
+        gotEvent = true;
         input.onEvent(toFeedEvent(ev));
       },
       oneose: () => {
@@ -77,9 +82,17 @@ export function subscribeAuthorFeed(input: {
         eoseFired = true;
         input.onEose?.();
       },
+      // A live subscription only closes when every relay has closed it: a
+      // relay that answered stays open. Closing early with nothing received
+      // means no relay was reachable. A close we asked for isn't reported.
+      onclose: () => {
+        if (!closedByUs && !gotEvent) input.onUnavailable?.();
+      },
     },
   );
+  let closedByUs = false;
   return () => {
+    closedByUs = true;
     try {
       sub.close();
     } catch {

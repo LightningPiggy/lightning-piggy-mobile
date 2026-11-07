@@ -574,6 +574,7 @@
     "noShopItems": "Noch keine Artikel im Shop",
     "loadMore": "Mehr laden",
     "shopUnavailable": "Der Shop konnte nicht geladen werden. Zum Aktualisieren nach unten ziehen.",
+    "feedUnavailable": "Die Beiträge konnten nicht geladen werden. Zum Aktualisieren nach unten ziehen.",
     "filterPosts": "Beiträge",
     "filterPostsAndReplies": "Beiträge & Antworten",
     "replyingTo": "Antwort an",

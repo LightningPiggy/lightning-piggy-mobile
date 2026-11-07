@@ -574,6 +574,7 @@
     "noShopItems": "A boltban még nincs termék",
     "loadMore": "Továbbiak betöltése",
     "shopUnavailable": "Nem sikerült betölteni a boltot. Húzd le az újrapróbáláshoz.",
+    "feedUnavailable": "Nem sikerült betölteni a bejegyzéseket. Húzd le az újrapróbáláshoz.",
     "filterPosts": "Bejegyzések",
     "filterPostsAndReplies": "Bejegyzések és válaszok",
     "replyingTo": "Válasz neki:",
