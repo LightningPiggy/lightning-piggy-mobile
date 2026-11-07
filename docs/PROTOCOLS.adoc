@@ -509,6 +509,10 @@ A scanned NFC tag (Android system NDEF dispatch) and a tapped deep link both arr
 
 Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`android.intentFilters`) wake the app on a deep link / cold launch, and the `NDEF_DISCOVERED` filters in `plugins/withNfc.js` route a foreground/background tag tap. Both are scoped to Lightning Piggy's own + opt-in schemes (`lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr`) so they don't hijack the user's preferred Lightning / Nostr wallet — Android shows its standard chooser when another handler is installed.
 
+iOS registers `lightningpiggy`, `lightning`, `lnurlw` and `lnurl` as `CFBundleURLSchemes`, via `ios.scheme` in `app.config.ts`. `nostr` isn't registered on iOS. A `lightning:` link from another app or Safari (for example a top-up screen's "Open in wallet" button) opens Lightning Piggy and goes through the same `App.tsx` routing. iOS has no app chooser: if several installed apps register the same scheme, iOS picks one and Apple doesn't define which. On the iOS 26 Simulator, the wallet that registered `lightning:` first kept it after Lightning Piggy was installed. So Lightning Piggy may not open on a phone that has another Lightning wallet.
+
+On a cold start, the launch URL arrives before the consent and withdraw sheet hosts have mounted. `App.tsx` therefore waits for them (`whenLinkActionSheetReady` in `src/utils/linkActionSheet.ts`) before it routes the link, instead of dropping the prompt or the withdraw sheet.
+
 ==== Routing table
 
 |===
@@ -539,6 +543,7 @@ Android registration is twofold: the `VIEW` intent filters in `app.config.ts` (`
 
 | `App.tsx` :: `Linking` handler | Single deep-link / NFC entry point; scheme dispatch + cold-start retry per branch.
 | `app.config.ts` :: `android.intentFilters` | `VIEW` filters for `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (cold launch / deep link).
+| `app.config.ts` :: `ios.scheme` | iOS URL schemes `lightning`, `lnurlw`, `lnurl`, merged with the top-level `lightningpiggy`.
 | `plugins/withNfc.js` | `NDEF_DISCOVERED` filters for `lightningpiggy`, `lightning`, `lnurlw`, `lnurl`, `nostr` schemes (foreground tag tap).
 | `src/services/nostrService.ts` :: `decodeProfileReference` / `buildOwnProfileRelayHints` / `nprofileEncode` | NIP-19 decode + outbox-hint construction.
 | `src/utils/nostrProfileLink.ts` | Pure, unit-tested URI claiming + kind-0 → `ContactProfileBodyData` shaping.
