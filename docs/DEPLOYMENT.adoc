@@ -224,11 +224,11 @@ The production profile builds **one APK per CPU architecture** instead of one un
 | Release asset | Size (approx.) | Who needs it
 
 | `lightning-piggy-<tag>-arm64-v8a.apk`
-| ~80 MB
-| **Most phones**: any 64-bit Android phone (practically every phone since ~2017).
+| ~84 MB
+| **Most phones**: any phone running 64-bit Android, which is nearly every phone in use.
 
 | `lightning-piggy-<tag>-armeabi-v7a.apk`
-| ~65 MB
+| ~80 MB
 | Older 32-bit phones, only if the arm64 APK won't install ("App not installed" / `INSTALL_FAILED_NO_MATCHING_ABIS`).
 |===
 
