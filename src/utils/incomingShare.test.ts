@@ -94,7 +94,25 @@ describe('sanitizeSharedText', () => {
   });
 
   it('removes control and direction-override characters, normalises line endings', () => {
-    expect(sanitizeSharedText('a\u0000b‮c⁦d\r\ne\rf\tg')).toBe('abcd\ne\nf\tg');
+    expect(sanitizeSharedText('a\u0000b\u202ec\u2066d\r\ne\rf\tg')).toBe('abcd\ne\nf\tg');
+  });
+
+  it('removes every bidi mark, embedding, override and isolate', () => {
+    const bidi = ['\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e'];
+    const isolates = ['\u2066', '\u2067', '\u2068', '\u2069'];
+    expect(sanitizeSharedText(`x${[...bidi, ...isolates].join('')}y`)).toBe('xy');
+  });
+
+  it('removes zero-width and invisible format characters', () => {
+    expect(sanitizeSharedText('\ufeffexa\u200bmple\u200c.com\u2060/\u200dpath')).toBe(
+      'example.com/path',
+    );
+  });
+
+  it('keeps the joiner inside an emoji sequence', () => {
+    const family = '\u{1F468}\u200d\u{1F469}\u200d\u{1F467}';
+    const heart = '\u2764\ufe0f\u200d\u{1F525}';
+    expect(sanitizeSharedText(`hi ${family} ${heart}`)).toBe(`hi ${family} ${heart}`);
   });
 
   it('caps the length and drops empty text', () => {

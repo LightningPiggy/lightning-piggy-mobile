@@ -130,16 +130,40 @@ export function renamedForMime(fileName: string, mime: SharedImageMime): string 
   return `${fileName.slice(0, fileName.lastIndexOf('.'))}.${ext}`;
 }
 
-// C0 controls except tab / newline, DEL, C1 controls, and the bidi embedding /
-// override / isolate characters that can make text read differently from what
-// it says ("Trojan Source" style spoofing of a shared link).
-const UNSAFE_TEXT_CHARS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
+// C0 controls except tab / newline, DEL, C1 controls, the bidi marks /
+// embeddings / overrides / isolates that can make text read differently from
+// what it says ("Trojan Source" style spoofing of a shared link), and
+// invisible zero-width / format characters (ZWSP, ZWNJ, word joiner, BOM).
+// Written as escapes so the source itself carries no invisible characters.
+const UNSAFE_TEXT_CHARS =
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b\u200c\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g;
+
+const ZERO_WIDTH_JOINER = /\u200d/g;
+
+/** Last unit of an emoji (low surrogate, VS16, BMP symbol / dingbat). */
+const endsEmoji = (code: number) =>
+  (code >= 0xdc00 && code <= 0xdfff) || code === 0xfe0f || (code >= 0x2600 && code <= 0x27bf);
+/** First unit of an emoji (high surrogate, BMP symbol / dingbat). */
+const startsEmoji = (code: number) =>
+  (code >= 0xd800 && code <= 0xdbff) || (code >= 0x2600 && code <= 0x27bf);
+
+/** Zero-width joiners are invisible too, but they also glue emoji sequences
+ *  together (family, profession, flag emoji): keep one only between emoji. */
+function stripStrayJoiners(text: string): string {
+  return text.replace(ZERO_WIDTH_JOINER, (joiner, offset: number) =>
+    offset > 0 && endsEmoji(text.charCodeAt(offset - 1)) && startsEmoji(text.charCodeAt(offset + 1))
+      ? joiner
+      : '',
+  );
+}
 
 /** Shared text as plain composer text: line endings normalised, unsafe
  *  characters removed, trimmed and capped. Null when nothing is left. */
 export function sanitizeSharedText(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  const cleaned = raw.replace(/\r\n?/g, '\n').replace(UNSAFE_TEXT_CHARS, '').trim();
+  const cleaned = stripStrayJoiners(
+    raw.replace(/\r\n?/g, '\n').replace(UNSAFE_TEXT_CHARS, ''),
+  ).trim();
   if (!cleaned) return null;
   return cleaned.slice(0, MAX_SHARED_TEXT_CHARS).trimEnd();
 }

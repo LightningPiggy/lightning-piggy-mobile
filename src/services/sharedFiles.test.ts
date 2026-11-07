@@ -78,7 +78,11 @@ const shareOf = (...uris: string[]): IncomingShare => ({
   discard: [],
 });
 
-beforeEach(() => mockFs.clear());
+beforeEach(() => {
+  // Also resets the module's in-use set between tests.
+  wipeSharedFiles();
+  mockFs.clear();
+});
 
 describe('verifySharedImages', () => {
   it('keeps real images with their sniffed type', () => {
@@ -138,6 +142,23 @@ describe('deleting shared copies', () => {
     put(DIR + name(2, 'jpg'), JPEG, { mtime: 9_500 });
     sweepStaleSharedFiles(5_000, 10_000);
     expect([...mockFs.keys()]).toEqual([DIR + name(2, 'jpg')]);
+  });
+
+  it('sweepStaleSharedFiles keeps an old copy that is still part of a live share', () => {
+    put(DIR + name(1, 'jpg'), JPEG, { mtime: 1_000 });
+    put(DIR + name(2, 'jpg'), JPEG, { mtime: 1_000 });
+    verifySharedImages(shareOf(DIR + name(1, 'jpg')));
+    sweepStaleSharedFiles(5_000, 10_000);
+    expect([...mockFs.keys()]).toEqual([DIR + name(1, 'jpg')]);
+  });
+
+  it('a copy deleted with its share is no longer protected from the sweep', () => {
+    put(DIR + name(1, 'jpg'), JPEG, { mtime: 1_000 });
+    verifySharedImages(shareOf(DIR + name(1, 'jpg')));
+    deleteShareCopies([DIR + name(1, 'jpg')]);
+    put(DIR + name(1, 'jpg'), JPEG, { mtime: 1_000 });
+    sweepStaleSharedFiles(5_000, 10_000);
+    expect(mockFs.size).toBe(0);
   });
 
   it('shareDirUri points into the app cache', () => {

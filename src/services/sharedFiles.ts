@@ -25,7 +25,20 @@ function fileSystem(): typeof import('expo-file-system') {
 /** Enough leading bytes for every signature `sniffImageMime` knows. */
 const SNIFF_BYTES = 16;
 
-/** `file://` URI of the folder the share module copies into. */
+/**
+ * Copies that passed `verifySharedImages` and are still part of a live share
+ * (open picker, staged for a chat, waiting in a composer). The stale sweep
+ * never deletes these; `deleteShareCopies` / `wipeSharedFiles` release them.
+ */
+const inUse = new Set<string>();
+
+/**
+ * `file://` URI of the folder the share module copies into. The native module
+ * copies into `context.cacheDir/lp-share/` and reports `file://<path>`;
+ * expo-file-system's `Paths.cache` is `Uri.fromFile(context.cacheDir)`, so both
+ * sides share one prefix. `isOwnedShareCopy` relies on that match — if either
+ * side changes how it builds the path, every shared copy is rejected.
+ */
 export function shareDirUri(): string | null {
   try {
     const { Directory, Paths } = fileSystem();
@@ -78,8 +91,10 @@ export function verifySharedImages(share: IncomingShare): IncomingShare {
     } catch {
       checked = null;
     }
-    if (checked) images.push(checked);
-    else discard.push(image.uri);
+    if (checked) {
+      images.push(checked);
+      inUse.add(checked.uri);
+    } else discard.push(image.uri);
   }
   return { text: share.text, images, discard };
 }
@@ -92,6 +107,7 @@ export function deleteShareCopies(uris: readonly string[]): void {
   if (uris.length === 0) return;
   const root = shareDirUri();
   for (const uri of uris) {
+    inUse.delete(uri);
     if (!isOwnedShareCopy(uri, root)) continue;
     try {
       const file = new (fileSystem().File)(uri);
@@ -106,6 +122,7 @@ export function deleteShareCopies(uris: readonly string[]): void {
 export function wipeSharedFiles(): void {
   try {
     const { Directory, Paths } = fileSystem();
+    inUse.clear();
     const dir = new Directory(Paths.cache, SHARE_DIR_NAME);
     if (dir.exists) dir.delete();
   } catch {
@@ -114,14 +131,15 @@ export function wipeSharedFiles(): void {
 }
 
 /** Delete copies older than `maxAgeMs` — leftovers from a share that was never
- *  finished (the app was killed with it open). */
+ *  finished (the app was killed with it open, or it was abandoned). Copies of a
+ *  share that is still open, staged or in a composer are kept. */
 export function sweepStaleSharedFiles(maxAgeMs: number, now = Date.now()): void {
   try {
     const { Directory, File, Paths } = fileSystem();
     const dir = new Directory(Paths.cache, SHARE_DIR_NAME);
     if (!dir.exists) return;
     for (const entry of dir.list()) {
-      if (!(entry instanceof File)) continue;
+      if (!(entry instanceof File) || inUse.has(entry.uri)) continue;
       const modified = entry.modificationTime;
       if (modified == null || now - modified > maxAgeMs) entry.delete();
     }

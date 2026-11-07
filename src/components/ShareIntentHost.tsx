@@ -1,5 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { InteractionManager, Platform } from 'react-native';
+import { AppState, InteractionManager, Platform } from 'react-native';
 import { useShareIntent } from 'expo-share-intent';
 import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
@@ -60,13 +60,21 @@ const ShareIntentHost: React.FC = () => {
   }, []);
   const nextId = useRef(0);
 
-  // Leftovers from a share that was never finished (app killed mid-share).
+  // Leftovers from a share that was never finished: swept on start (the app
+  // was killed mid-share) and whenever the app goes to the background. Copies
+  // of a share that is still open or staged are kept (see `sharedFiles`).
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const handle = InteractionManager.runAfterInteractions(() =>
       sweepStaleSharedFiles(PENDING_SHARE_TTL_MS),
     );
-    return () => handle.cancel();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background') sweepStaleSharedFiles(PENDING_SHARE_TTL_MS);
+    });
+    return () => {
+      handle.cancel();
+      sub.remove();
+    };
   }, []);
 
   const drop = useCallback((share: IncomingShare) => {
