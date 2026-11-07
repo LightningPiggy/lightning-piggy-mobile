@@ -604,6 +604,36 @@
     "noSearchMatch": "Brak znajomych pasujących do wyszukiwania.",
     "noResolvedProfiles": "Brak kontaktów z rozpoznanymi profilami, do których można wysłać."
   },
+  "shareIntent": {
+    "title": "Wyślij do…",
+    "subtitlePhotos": {
+      "one": "Wybierz czat, na który wyślesz zdjęcie. Przed wysłaniem możesz dodać wiadomość.",
+      "few": "Wybierz czat, na który wyślesz {{count}} zdjęcia. Przed wysłaniem możesz dodać wiadomość.",
+      "many": "Wybierz czat, na który wyślesz {{count}} zdjęć. Przed wysłaniem możesz dodać wiadomość.",
+      "other": "Wybierz czat, na który wyślesz {{count}} zdjęcia. Przed wysłaniem możesz dodać wiadomość."
+    },
+    "subtitleText": "Wybierz czat. Twój tekst pojawi się w polu wiadomości, gotowy do wysłania.",
+    "recentChats": "Ostatnie czaty",
+    "friends": "Znajomi",
+    "trayTitle": {
+      "one": "1 udostępnione zdjęcie, gotowe do wysłania",
+      "few": "{{count}} udostępnione zdjęcia, gotowe do wysłania",
+      "many": "{{count}} udostępnionych zdjęć, gotowych do wysłania",
+      "other": "{{count}} udostępnionego zdjęcia, gotowego do wysłania"
+    },
+    "imageLabel": "Udostępnione zdjęcie {{index}} z {{total}}",
+    "removeImage": "Usuń udostępnione zdjęcie {{index}} z {{total}}",
+    "sendImages": {
+      "one": "Wyślij zdjęcie",
+      "few": "Wyślij {{count}} zdjęcia",
+      "many": "Wyślij {{count}} zdjęć",
+      "other": "Wyślij {{count}} zdjęcia"
+    },
+    "nothingToShare": "Lightning Piggy może odbierać tekst i zdjęcia (JPEG, PNG, GIF, WebP lub HEIC, do 25 MB każde).",
+    "someSkipped": "Nie udało się dodać niektórych elementów. Lightning Piggy pozwala udostępnić do 10 zdjęć, każde do 25 MB.",
+    "signedOutTitle": "Zaloguj się, aby udostępnić",
+    "signedOutMessage": "Zaloguj się do Lightning Piggy, a następnie udostępnij ponownie. Żadne udostępnione treści nie zostały zachowane."
+  },
   "friendsScreen": {
     "title": "Znajomi",
     "searchPlaceholder": "Szukaj...",

@@ -604,6 +604,30 @@
     "noSearchMatch": "没有符合搜索条件的好友。",
     "noResolvedProfiles": "尚无已加载个人资料的联系人可接收消息。"
   },
+  "shareIntent": {
+    "title": "发送到…",
+    "subtitlePhotos": {
+      "one": "选择一个聊天来发送照片。发送前可以添加留言。",
+      "other": "选择一个聊天来发送这 {{count}} 张照片。发送前可以添加留言。"
+    },
+    "subtitleText": "选择一个聊天。你的文字会填入消息框，等待你发送。",
+    "recentChats": "最近聊天",
+    "friends": "好友",
+    "trayTitle": {
+      "one": "1 张分享的照片，待发送",
+      "other": "{{count}} 张分享的照片，待发送"
+    },
+    "imageLabel": "分享的照片，第 {{index}} 张，共 {{total}} 张",
+    "removeImage": "移除分享的照片，第 {{index}} 张，共 {{total}} 张",
+    "sendImages": {
+      "one": "发送照片",
+      "other": "发送 {{count}} 张照片"
+    },
+    "nothingToShare": "Lightning Piggy 可接收文字和照片（JPEG、PNG、GIF、WebP 或 HEIC，每张不超过 25 MB）。",
+    "someSkipped": "部分内容无法添加。Lightning Piggy 最多可分享 10 张照片，每张不超过 25 MB。",
+    "signedOutTitle": "登录后分享",
+    "signedOutMessage": "请登录 Lightning Piggy 后重新分享。你分享的内容均未保存。"
+  },
   "friendsScreen": {
     "title": "好友",
     "searchPlaceholder": "搜索...",

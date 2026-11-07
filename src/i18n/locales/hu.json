@@ -604,6 +604,30 @@
     "noSearchMatch": "Nincs a keresésnek megfelelő barát.",
     "noResolvedProfiles": "Nincs olyan névjegy, amelynek sikerült betölteni a profilját, így nincs kinek küldeni."
   },
+  "shareIntent": {
+    "title": "Küldés…",
+    "subtitlePhotos": {
+      "one": "Válassz egy csevegést a fotódhoz. Küldés előtt üzenetet is írhatsz hozzá.",
+      "other": "Válassz egy csevegést a {{count}} fotódhoz. Küldés előtt üzenetet is írhatsz hozzájuk."
+    },
+    "subtitleText": "Válassz egy csevegést. A szöveged az üzenetmezőbe kerül, ahonnan elküldheted.",
+    "recentChats": "Legutóbbi csevegések",
+    "friends": "Barátok",
+    "trayTitle": {
+      "one": "1 megosztott fotó küldésre kész",
+      "other": "{{count}} megosztott fotó küldésre kész"
+    },
+    "imageLabel": "{{index}}. megosztott fotó (összesen {{total}})",
+    "removeImage": "{{index}}. megosztott fotó eltávolítása (összesen {{total}})",
+    "sendImages": {
+      "one": "Fotó küldése",
+      "other": "{{count}} fotó küldése"
+    },
+    "nothingToShare": "A Lightning Piggy szöveget és fotókat tud fogadni (JPEG, PNG, GIF, WebP vagy HEIC, egyenként legfeljebb 25 MB).",
+    "someSkipped": "Néhány elemet nem sikerült hozzáadni. A Lightning Piggy legfeljebb 10 fotót tud megosztani, egyenként legfeljebb 25 MB méretben.",
+    "signedOutTitle": "Jelentkezz be a megosztáshoz",
+    "signedOutMessage": "Jelentkezz be a Lightning Piggy alkalmazásba, majd oszd meg újra. A megosztott tartalmakból semmit sem őriztünk meg."
+  },
   "friendsScreen": {
     "title": "Barátok",
     "searchPlaceholder": "Keresés...",
