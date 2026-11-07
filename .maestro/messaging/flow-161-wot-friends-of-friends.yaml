@@ -6,11 +6,12 @@ name: Web of Trust — build Friends of friends on demand, cancel, then select (
 #   - the row is selectable (no longer greyed out);
 #   - picking it shows the "Finding friends of friends… X of Y" panel with
 #     Cancel, and Cancel leaves the tier on Friends;
-#   - picking it again completes, the sheet shows the set size, and the
-#     Messages inbox switches to the fof tier;
+#   - picking it again completes, the sheet shows the set size and the
+#     Friends of friends row becomes the selected tier;
 #   - switching back to Friends restores the original state.
 #
-# The cancel step only runs when the build is still in flight (a fresh 24 h
+# The active tier is read from the rows' `selected` accessibility state.
+# The cancel step only runs while the build is still in flight (a fresh 24 h
 # cache switches instantly, with no progress panel).
 #
 # Preconditions: logged in. Test accounts on the LAN relay have a tiny graph,
@@ -38,6 +39,9 @@ name: Web of Trust — build Friends of friends on demand, cancel, then select (
 - tapOn:
     id: 'wot-tier-friends-chip'
 - assertVisible:
+    id: 'wot-tier-friends-chip'
+    selected: true
+- assertVisible:
     id: 'wot-tier-fof-chip'
     enabled: true
 
@@ -49,47 +53,48 @@ name: Web of Trust — build Friends of friends on demand, cancel, then select (
       visible:
         id: 'wot-fof-progress'
     commands:
-      - assertVisible:
-          id: 'wot-fof-cancel'
       - tapOn:
           id: 'wot-fof-cancel'
       - assertNotVisible:
           id: 'wot-fof-progress'
-      - tapOn:
-          id: 'wot-sheet-done'
       - assertVisible:
-          id: 'messages-wot-tier-friends'
-      - tapOn:
-          id: 'messages-wot-chip'
-      - extendedWaitUntil:
-          visible:
-            id: 'wot-bottom-sheet'
-          timeout: 5000
+          id: 'wot-tier-friends-chip'
+          selected: true
       - tapOn:
           id: 'wot-tier-fof-chip'
 
-# Let the build finish: the set size replaces the progress panel.
+# Let the build finish: the set size replaces the progress panel and the
+# tier switches.
 - extendedWaitUntil:
     visible:
       id: 'wot-fof-meta'
     timeout: 90000
 - assertNotVisible:
     id: 'wot-fof-error'
+- assertVisible:
+    id: 'wot-tier-fof-chip'
+    selected: true
 - tapOn:
     id: 'wot-sheet-done'
-- assertVisible:
-    id: 'messages-wot-tier-fof'
+- assertNotVisible:
+    id: 'wot-bottom-sheet'
 
-# Restore Friends.
+# Reopen: still Friends of friends. Then restore Friends.
 - tapOn:
     id: 'messages-wot-chip'
 - extendedWaitUntil:
     visible:
       id: 'wot-bottom-sheet'
     timeout: 5000
+- assertVisible:
+    id: 'wot-tier-fof-chip'
+    selected: true
 - tapOn:
     id: 'wot-tier-friends-chip'
+- assertVisible:
+    id: 'wot-tier-friends-chip'
+    selected: true
+- assertNotVisible:
+    id: 'wot-fof-meta'
 - tapOn:
     id: 'wot-sheet-done'
-- assertVisible:
-    id: 'messages-wot-tier-friends'
