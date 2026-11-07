@@ -86,8 +86,10 @@ export function profileHeaderLayout(
   };
 }
 
-/** Height of the floating back / ⋯ row below the status bar (8 + 36 + 8). */
-export const PROFILE_TOP_BAR_HEIGHT = 52;
+/** Height of the floating back / ⋯ row below the status bar: the 36 dp
+ *  buttons sit right at the safe-area inset (#1696), plus an 8 dp gap below. */
+export const PROFILE_TOP_BAR_BUTTON = 36;
+export const PROFILE_TOP_BAR_HEIGHT = PROFILE_TOP_BAR_BUTTON + 8;
 /** Banner height in ContactProfileScreen.styles (`bannerContainer`). */
 export const PROFILE_BANNER_HEIGHT = 200;
 
