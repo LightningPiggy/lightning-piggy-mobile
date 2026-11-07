@@ -23,7 +23,8 @@ let cached: boolean | null = null;
 export async function loadNativeCryptoEnabled(): Promise<boolean> {
   if (cached !== null) return cached;
   const raw = await AsyncStorage.getItem(NATIVE_CRYPTO_ENABLED_KEY).catch(() => null);
-  cached = raw !== 'false';
+  // A save that landed while this read was in flight is newer: keep it.
+  if (cached === null) cached = raw !== 'false';
   return cached;
 }
 

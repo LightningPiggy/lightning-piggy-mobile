@@ -41,6 +41,20 @@ describe('nativeCryptoPreference', () => {
     expect(await loadNativeCryptoEnabled()).toBe(false);
   });
 
+  it('a save made while a read is in flight wins over that read', async () => {
+    let finishRead!: (raw: string | null) => void;
+    jest.spyOn(AsyncStorage, 'getItem').mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishRead = resolve;
+      }),
+    );
+    const pending = loadNativeCryptoEnabled();
+    await saveNativeCryptoEnabled(false); // the user switched it off meanwhile
+    finishRead(null); // the stale read (unset → default on) lands afterwards
+    expect(await pending).toBe(false);
+    expect(await loadNativeCryptoEnabled()).toBe(false);
+  });
+
   it('serves the in-memory cache without re-reading storage', async () => {
     await saveNativeCryptoEnabled(true);
     // Corrupt storage behind the cache — cached value should still win.
