@@ -3,9 +3,10 @@
 
 /**
  * Ceiling on the scope's authors — the listings service queries at most this
- * many (`MAX_AUTHORS` in marketListingsService), in 64-author batches. Also
- * the ranked cap the shared FoF service builds the set with, so the
- * most-shared follows-of-follows are the ones that make the cut.
+ * many (`MAX_AUTHORS` in marketListingsService), in 64-author batches. The
+ * Market takes the first MARKET_FOF_MAX of the shared ranked set
+ * (FOF_SHARED_MAX, most-shared first), so the most-shared
+ * follows-of-follows are the ones that make the cut.
  */
 export const MARKET_FOF_MAX = 1024;
 

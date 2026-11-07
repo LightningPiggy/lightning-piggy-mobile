@@ -18,7 +18,12 @@
 //     background after a cancellable delay, so startup work settles first.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { computeFofSet, FOF_CACHE_TTL_MS, loadFofCache } from '../services/friendsOfFriendsService';
+import {
+  computeFofSet,
+  FOF_CACHE_TTL_MS,
+  FOF_SHARED_MAX,
+  loadFofCache,
+} from '../services/friendsOfFriendsService';
 import { fetchFollowLists } from '../services/followListsFetcher';
 import { useAccountState } from './useAccountState';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
@@ -35,8 +40,10 @@ import type { WotTier } from '../services/wotSettingsService';
  *     typical user's friends, i.e. it keeps every strong FoF signal and drops
  *     only the long tail followed by a single friend (bots, curators' lists);
  *   - small enough that `computeTrustSet` over friends ∪ L2 stays O(ms).
+ * It is the service's shared cap: the Market's friends-of-friends scope reads
+ * the first 1024 of the same set, so one build serves both.
  */
-export const WOT_FOF_MAX = 2000;
+export const WOT_FOF_MAX = FOF_SHARED_MAX;
 /** Startup work settles before a stale persisted set is rebuilt in the background. */
 export const L2_BACKGROUND_REFRESH_DELAY_MS = 8_000;
 /** Resume work staggers (CLAUDE.md → AppState handlers); only DM re-arm is immediate. */
@@ -134,14 +141,15 @@ export function useTrustGraphL2({
       setStatus({ building: true, progress: { done: 0, total: 0 }, failed: false });
       let probe: JsStallProbe | null = null;
       try {
-        if (mode === 'enable') {
+        if (mode !== 'refresh') {
           // A fresh cached set (built within 24 h for this follow list)
-          // switches instantly — no relay round trip.
+          // switches instantly — no relay round trip. For a background
+          // rebuild that is a set the Market built meanwhile (shared cap).
           const cached = await loadFofCache(pubkey, friendsList, WOT_FOF_MAX);
           if (signal.aborted) return;
           if (cached) {
             applySnapshot(cached);
-            persistTier('fof');
+            if (mode === 'enable') persistTier('fof');
             setStatus(IDLE);
             return;
           }
@@ -154,7 +162,8 @@ export function useTrustGraphL2({
         const result = await computeFofSet(pubkey, friendsList, {
           maxSize: WOT_FOF_MAX,
           signal,
-          fetchKind3: (batch) => fetchFollowLists(batch, relays, signal),
+          // The service's signal: a build the Market joined outlives our cancel.
+          fetchKind3: (batch, buildSignal) => fetchFollowLists(batch, relays, buildSignal),
           // Once per 50-friend batch, never per relay event.
           onProgress: (done, total) => {
             if (!signal.aborted) setStatus((prev) => ({ ...prev, progress: { done, total } }));

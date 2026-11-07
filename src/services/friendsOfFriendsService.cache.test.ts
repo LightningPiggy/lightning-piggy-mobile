@@ -11,6 +11,7 @@ import {
   isFofCacheKeyFor,
   loadFofCache,
   retireFofCache,
+  __resetFofMemory,
 } from './friendsOfFriendsService';
 
 const pk = (label: string, n = 0) => `${label}_${n}`.padStart(64, '0').slice(-64);
@@ -30,6 +31,7 @@ const fetchKind3 = jest.fn(async (batch: string[]) =>
 
 beforeEach(async () => {
   await AsyncStorage.clear();
+  __resetFofMemory();
   fetchKind3.mockClear();
 });
 
