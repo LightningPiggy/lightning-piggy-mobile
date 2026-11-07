@@ -178,7 +178,7 @@ describe('subscribeAuthorFeed', () => {
   });
 
   it("a silent relay's SDK timeout EOSE is not an answer; a real empty EOSE is", async () => {
-    const now = jest.spyOn(Date, 'now').mockReturnValue(0);
+    const now = jest.spyOn(performance, 'now').mockReturnValue(0);
     try {
       mockSubscribeMany.mockReturnValueOnce({ close: jest.fn() });
       mockSubscribeMany.mockReturnValueOnce({ close: jest.fn() });
