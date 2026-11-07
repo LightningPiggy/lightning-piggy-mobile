@@ -37,10 +37,6 @@ export const createContactProfileBodyStyles = (colors: Palette) =>
       width: '100%',
       height: '100%',
     },
-    // Solid brand violet (#9B40FF) used when the contact has no kind-0 banner.
-    bannerFallback: {
-      backgroundColor: colors.brandPurple,
-    },
     avatarContainer: {
       marginTop: -36,
       width: 88,

@@ -11,6 +11,7 @@ import { npubEncode } from '../services/nostrService';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createContactProfileBodyStyles } from '../styles/ContactProfileBody.styles';
+import BrandGradientBackground from './BrandGradientBackground';
 
 export interface ContactProfileBodyData {
   pubkey: string | null;
@@ -100,9 +101,8 @@ const ContactProfileBody: React.FC<Props> = ({
   return (
     <View style={styles.sheetContent}>
       <View style={styles.bannerContainer}>
-        {/* When the contact has no kind-0 banner, fall back to a solid brand
-            violet (#9B40FF) rather than the white-background ostrich texture —
-            the white read as a broken/empty band in this sheet (#18). */}
+        {/* No kind-0 banner: a plain brand gradient (not a picture), so it reads
+            as "no banner set" rather than something the person chose (#18). */}
         {contact.banner ? (
           <Image
             source={{ uri: contact.banner }}
@@ -113,12 +113,8 @@ const ContactProfileBody: React.FC<Props> = ({
             autoplay={false}
           />
         ) : (
-          <View style={[styles.bannerImage, styles.bannerFallback]}>
-            <Image
-              source={require('../../assets/images/banner-ostriches.png')}
-              style={styles.bannerImage}
-              contentFit="cover"
-            />
+          <View style={styles.bannerImage}>
+            <BrandGradientBackground />
           </View>
         )}
         <View style={styles.handleOverlay}>
