@@ -69,6 +69,7 @@ import {
   claimWrapNotification,
   isLiveDmSubArmed,
   noteContentlessWrapAlert,
+  wasWrapDecided,
   wasWrapHandled,
 } from './dmWrapNotificationDedupe';
 import * as nostrService from './nostrService';
@@ -225,9 +226,10 @@ async function resolveSenderName(pubkey: string, readRelays: string[]): Promise<
  * (Signal sealed-sender style) — we still know a wrap addressed to us
  * arrived, we just can't read it off-screen.
  */
-/** How long the contentless path waits for a live sub to decrypt a wrap. A
- * remote signer answers in a second or two; a slower one still gets the
- * contentless alert, which the live sub replaces once it decrypts. */
+/** How long the watch waits for a live sub in this context to decide a wrap
+ * before handling it itself. A remote signer answers in a second or two; a
+ * slower one still gets the contentless alert, which the live sub replaces
+ * once it decrypts. An nsec live sub decides within milliseconds. */
 export const LIVE_SUB_DECRYPT_GRACE_MS = 8_000;
 const waitMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -264,6 +266,8 @@ async function handleWrap(input: {
     // remote signer): give it a moment. A wrap it decoded is its call — the
     // self-copy of a message we sent, a stranger's wrap or a reaction must
     // not raise a contentless "New encrypted message" with nothing behind it.
+    // Nor must one it already has stored: with no freshness gate here, a
+    // re-delivered old wrap would raise a phantom alert (#1279).
     if (isLiveDmSubArmed()) {
       await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
       if (wasWrapHandled(ev.id)) return;
@@ -284,6 +288,26 @@ async function handleWrap(input: {
       data: { wrapId: ev.id },
     });
     return;
+  }
+
+  // The app's live sub runs in this JS context too, whether the app is in the
+  // foreground or the background, and decrypts the same wraps. Decrypting each
+  // one here as well doubled the gift-wrap crypto on the one JS thread. Give
+  // it the same grace as above and leave it every wrap it has DECIDED (alerted,
+  // or nothing to alert: our own copy, a stranger, a reaction). Any other wrap
+  // is decrypted and alerted here as before: one it never got, one it is
+  // keeping silent as not fresh to it, one it dropped on teardown. The claim
+  // below keeps that from becoming a second alert. With no live sub (headless,
+  // after a swipe-away) nothing waits.
+  if (isLiveDmSubArmed()) {
+    await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
+    // Decided only, not "already stored": a stored wrap may never have been
+    // alerted for (kept silent as not fresh, or ingested by a silent refresh
+    // while the live sub was deaf). Decrypting it costs a re-arm's backlog
+    // once; the freshness gate below keeps a stale one silent.
+    if (wasWrapDecided(ev.id)) return;
+    // Signed out / switched account meanwhile: not this watch's to alert.
+    if (activeWatch?.viewerPubkey !== viewerPubkey) return;
   }
 
   const rumor = decryptWrap(ev);

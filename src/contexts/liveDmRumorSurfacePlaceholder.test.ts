@@ -8,7 +8,9 @@ import { upsertDmMessages } from '../services/dmDb';
 import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import {
   claimWrapNotification,
+  isWrapInFlight,
   noteContentlessWrapAlert,
+  noteWrapInFlight,
   takeContentlessWrapAlert,
   wasWrapHandled,
   __resetForTests,
@@ -231,3 +233,22 @@ it.each(['failure', 'cancelled'])(
     expect(tasks).toHaveLength(0);
   },
 );
+
+it('a not-fresh group message leaves in-flight once stored, keeping any placeholder', async () => {
+  const { tryRouteGroupRumor } = jest.requireMock('./nostrGroupRouting');
+  (tryRouteGroupRumor as jest.Mock).mockResolvedValueOnce({
+    kind: 'routed',
+    group: { id: 'g1', name: 'Family' },
+    message: { id: 'm1', senderPubkey: PEER, createdAt: now() - 1200, text: 'hi' },
+  });
+  noteWrapInFlight('group-old');
+  noteContentlessWrapAlert('group-old');
+  await surfacer({ fresh: false })(
+    { pubkey: PEER, created_at: now() - 1200, kind: 14, tags: [['p', ME]], content: 'hi' },
+    'group-old',
+  );
+  await flush();
+  expect(isWrapInFlight('group-old')).toBe(false);
+  expect(mockFire).not.toHaveBeenCalled();
+  expect(mockRemove).not.toHaveBeenCalled();
+});

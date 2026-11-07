@@ -5,6 +5,7 @@ import {
   LIVE_SUB_DECRYPT_GRACE_MS,
 } from './backgroundDmService';
 import {
+  markWrapAlreadyStored,
   markWrapHandled,
   noteLiveDmSubArmed,
   takeContentlessWrapAlert,
@@ -123,6 +124,17 @@ it('stays silent for a wrap the live sub decoded (e.g. the copy of our own messa
   onEvent()({ id: 'own-copy', kind: 1059 });
   // The live sub decrypts it within the grace and decides it shows nothing new.
   markWrapHandled('own-copy');
+  await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
+  expect(mockFireMessageNotification).not.toHaveBeenCalled();
+});
+
+it('stays silent for a re-delivered wrap the live sub already has stored', async () => {
+  await armAmberWatch();
+  noteLiveDmSubArmed(true);
+  jest.useFakeTimers();
+  onEvent()({ id: 'stored', kind: 1059 });
+  // No freshness gate here, so "already stored" must keep it silent (#1279).
+  markWrapAlreadyStored('stored');
   await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
   expect(mockFireMessageNotification).not.toHaveBeenCalled();
 });

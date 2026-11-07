@@ -15,6 +15,7 @@ jest.mock('../services/notificationService', () => ({
 }));
 jest.mock('../services/dmWrapNotificationDedupe', () => ({
   takeContentlessWrapAlert: jest.fn(),
+  noteWrapStored: jest.fn(),
   markWrapHandled: jest.fn(),
 }));
 

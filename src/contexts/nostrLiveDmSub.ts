@@ -21,8 +21,13 @@ import { createLiveRumorSurfacer } from './liveDmRumorSurface';
 import { createLiveDmEngineBridge } from './liveDmEngineBridge';
 import {
   claimWrapNotification,
+  isWrapInFlight,
+  markWrapAlreadyStored,
   markWrapHandled,
   noteLiveDmSubArmed,
+  noteWrapInFlight,
+  noteWrapStored,
+  unmarkWrapHandled,
   retractContentlessWrapAlert,
   takeContentlessWrapAlert,
 } from '../services/dmWrapNotificationDedupe';
@@ -203,11 +208,20 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
     });
   };
+  // Give back a wrap this sub claimed but never stored. A re-opened sub that
+  // shares knownWrapIds may have seen the claim meanwhile and marked the wrap
+  // "already stored"; undo that too, or the background watch would stay silent
+  // for a message nobody alerted for. A decision already made (alerted, or
+  // nothing to see) stands — see unmarkWrapHandled.
+  const releaseWrap = (id: string): void => {
+    knownWrapIds.delete(id);
+    seen.delete(id);
+    unmarkWrapHandled(id);
+  };
   const pendingReplays = new Set<DeferredFollowGateEntry>();
   const releaseReplayClaim = (item: DeferredFollowGateEntry): void => {
     if (!pendingReplays.delete(item)) return;
-    knownWrapIds.delete(item.entry.id);
-    seen.delete(item.entry.id);
+    releaseWrap(item.entry.id);
     item.onEvict?.();
   };
   // Replay the surface + notify side-effects of a fresh inbound that was
@@ -257,6 +271,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           },
         ]);
         pendingReplays.delete(item);
+        noteWrapStored(item.entry.id);
         if (cancelled || !isCurrentOwner()) return;
         knownWrapIds.add(item.entry.id);
         capKnownWrapIds(knownWrapIds);
@@ -297,6 +312,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         .then(dropPlaceholder)
         .catch(() => undefined);
     }
+    // Decided: alerted here, or the watch already did (claim taken). Without
+    // this the background sync would ping a duplicate for it.
+    if (item.notify) markWrapHandled(item.entry.id);
   };
   setDeferredReplay(replayDeferredFollowGate);
   const followGate = startFollowGateFallback(
@@ -319,10 +337,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     queueInboxEntry,
     includeNonFollowOrders: params.includeNonFollowOrders,
     knownWrapIds,
-    releaseWrapClaim: (id) => {
-      knownWrapIds.delete(id);
-      seen.delete(id);
-    },
+    releaseWrapClaim: releaseWrap,
     seen,
     chainWrite,
   });
@@ -366,7 +381,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // Per issue #505.
     if ((ev.kind === 1059 || ev.kind === 4) && knownWrapIds.has(ev.id)) {
       // Already stored (and shown): nothing for the background watch to alert.
-      if (ev.kind === 1059) markWrapHandled(ev.id);
+      // Not one a predecessor sub (same knownWrapIds) is still deciding or
+      // holds in the follow gate: that stays the watch's to alert if needed.
+      if (ev.kind === 1059 && !isWrapInFlight(ev.id)) markWrapAlreadyStored(ev.id);
       return;
     }
     // Eagerly claim this wrap.id in the in-memory dedup Set before
@@ -380,9 +397,13 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     if (ev.kind === 1059) {
       knownWrapIds.add(ev.id);
       capKnownWrapIds(knownWrapIds);
+      noteWrapInFlight(ev.id);
     }
     if (__DEV__) console.log(`[Nostr] live evt kind=${ev.kind} recv ${ev.id.slice(0, 8)}`);
-    if (cancelled || !isCurrentOwner()) return;
+    if (cancelled || !isCurrentOwner()) {
+      if (ev.kind === 1059) releaseWrap(ev.id);
+      return;
+    }
     if (seen.has(ev.id)) {
       if (__DEV__) console.log(`[Nostr] live evt ${ev.id.slice(0, 8)} dedup-seen`);
       return;
@@ -604,14 +625,17 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // instance for the rest of the session even though the store never got
     // it — undetectable because it never resurfaces even on the next arm.
     if (cancelled || !isCurrentOwner()) {
-      knownWrapIds.delete(wrap.id);
+      releaseWrap(wrap.id);
       return;
     }
 
     let rumor: DecodedRumor | null = null;
     if (activeSigner === 'nsec') {
       const secretKey = await getMemoisedSecretKey(viewerPubkey);
-      if (!secretKey) return;
+      if (!secretKey) {
+        releaseWrap(wrap.id);
+        return;
+      }
       rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
     } else if (activeSigner === 'amber') {
       try {
@@ -651,6 +675,10 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     }
     if (!rumor) {
       if (__DEV__) console.log(`[Nostr] live wrap ${wrap.id.slice(0, 8)} no-rumor`);
+      // nsec: the background watch would retry with the same key and fail
+      // again, so this wrap is decided. Remote signers stay undecided —
+      // their contentless alert is the right fallback.
+      if (activeSigner === 'nsec') markWrapHandled(wrap.id);
       return;
     }
     // Dev cross-check: record every wrap the JS path successfully unwrapped
