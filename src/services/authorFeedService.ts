@@ -55,8 +55,12 @@ const feedFilter = (authorPubkey: string, limit: number, until?: number): Filter
  * for these kinds, and the author is re-checked here (relays can ignore
  * `authors`).
  */
-/** How long a relay may stay silent before the SDK treats it as done (EOSE). */
-export const AUTHOR_FEED_EOSE_WAIT_MS = 20_000;
+/**
+ * How long a relay may stay silent before the SDK fakes EOSE for it. The feed
+ * is a live subscription, so this only stops a silent relay ever counting as
+ * an answer ("No posts yet"): effectively, only a relay's real EOSE does.
+ */
+export const AUTHOR_FEED_EOSE_WAIT_MS = 10 * 60_000;
 
 export function subscribeAuthorFeed(input: {
   authorPubkey: string;
