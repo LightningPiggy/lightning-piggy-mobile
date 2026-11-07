@@ -1,5 +1,6 @@
 import { Alert } from '../components/BrandedAlert';
 import {
+  __resetLinkActionSheetForTests,
   registerLinkActionSheet,
   showLinkActionSheet,
   whenLinkActionSheetReady,
@@ -9,9 +10,19 @@ jest.mock('../components/BrandedAlert', () => ({ Alert: { alert: jest.fn() } }))
 
 let unregister: (() => void) | null = null;
 afterEach(() => {
-  unregister?.();
   unregister = null;
+  // Clears the host AND the module-level waiter queue, so a test that queues a
+  // waiter without registering a host can't leak it into the next test.
+  __resetLinkActionSheetForTests();
   jest.clearAllMocks();
+});
+
+it('the reset drops a queued waiter that no host ever released', () => {
+  const leaked = jest.fn();
+  whenLinkActionSheetReady(leaked);
+  __resetLinkActionSheetForTests();
+  unregister = registerLinkActionSheet(jest.fn());
+  expect(leaked).not.toHaveBeenCalled();
 });
 
 it('waits for the host before running a cold-start prompt, then runs it once', () => {

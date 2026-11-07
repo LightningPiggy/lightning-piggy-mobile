@@ -35,6 +35,13 @@ export function whenLinkActionSheetReady(run: () => void): void {
   else readyWaiters.push(run);
 }
 
+/** Test-only: drop the host and any queued readiness callbacks, so a waiter
+ *  queued (but never released) by one test can't run in the next. */
+export function __resetLinkActionSheetForTests(): void {
+  listener = null;
+  readyWaiters = [];
+}
+
 export function showLinkActionSheet(
   title: string,
   message: string,
