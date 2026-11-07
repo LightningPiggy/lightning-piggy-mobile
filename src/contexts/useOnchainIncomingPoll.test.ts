@@ -23,9 +23,17 @@ import type { MutableRefObject } from 'react';
 import {
   ONCHAIN_BOOT_DELAY_MS,
   ONCHAIN_RESUME_DELAY_MS,
-  onchainRetryDelayMs,
+  ONCHAIN_RESUME_MIN_GAP_MS,
   useOnchainIncomingPoll,
 } from './useOnchainIncomingPoll';
+import {
+  __onchainSyncBackoffSize,
+  clearOnchainSyncBackoff,
+  isOnchainSyncBackedOff,
+  noteOnchainSyncSuccess,
+  onchainRetryDelayMs,
+  recordOnchainSyncFailure,
+} from '../services/onchainSyncBackoff';
 import * as onchainService from '../services/onchainService';
 import type { WalletState } from '../types/wallet';
 
@@ -68,7 +76,7 @@ function mount(wallets: WalletState[], updateWalletInState = jest.fn()) {
 }
 
 const advance = (ms: number) => act(() => jest.advanceTimersByTimeAsync(ms));
-const setAppState = (next: 'active' | 'background') =>
+const setAppState = (next: 'active' | 'background' | 'inactive') =>
   act(async () => {
     (AppState as unknown as { currentState: string }).currentState = next;
     latestChangeHandler?.(next);
@@ -77,6 +85,7 @@ const callsFor = (id: string) => mockedGetBalance.mock.calls.filter(([w]) => w =
 
 beforeEach(() => {
   jest.useFakeTimers();
+  clearOnchainSyncBackoff(); // module state: don't leak backoff between tests
   jest.clearAllMocks();
   latestChangeHandler = null;
   (AppState as unknown as { currentState: string }).currentState = 'active';
@@ -171,6 +180,34 @@ describe('useOnchainIncomingPoll', () => {
     expect(mockedGetBalance).toHaveBeenCalledTimes(2);
   });
 
+  it('ignores iOS inactive flickers: no extra sweep, and the poll keeps running', async () => {
+    mockedGetBalance.mockResolvedValue(100);
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 5; i++) {
+      await setAppState('inactive'); // notification shade, Face ID, share sheet
+      await setAppState('active');
+      await advance(ONCHAIN_RESUME_DELAY_MS);
+    }
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+    await advance(POLL_MS - 5 * ONCHAIN_RESUME_DELAY_MS); // the 2-min cadence survives
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips a resume sweep right after one ran, but keeps the poll going', async () => {
+    mockedGetBalance.mockResolvedValue(100);
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS);
+    await advance(10_000);
+    await setAppState('background'); // stops the timer
+    await setAppState('active'); // 10 s after the last sweep
+    await advance(ONCHAIN_RESUME_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+    await advance(POLL_MS - 10_000 - ONCHAIN_RESUME_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+  });
+
   it('waits out the boot delay even when resumed inside it', async () => {
     mockedGetBalance.mockResolvedValue(100);
     mount([wallet('oc', 'onchain', 100)]);
@@ -205,6 +242,64 @@ describe('useOnchainIncomingPoll', () => {
     expect(await attemptsAfter(30)).toBe(6); // still capped
     // 2 h of polling: ~60 failing syncs (and new Electrum connections) before, 6 now.
     expect(callsFor('ok')).toBe(1 + (2 + 2 + 6 + 2 + 16 + 28 + 2 + 30) / 2);
+  });
+
+  it('lifts the backoff on resume from background (the network may have changed)', async () => {
+    let failing = true;
+    mockedGetBalance.mockImplementation(async () => (failing ? null : 500));
+    const { updateWalletInState } = mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS); // fail #1 → retry in 4 min
+    await advance(4 * MIN); // fail #2 → retry in 8 min
+    await advance(8 * MIN); // fail #3 → retry in 16 min
+    expect(mockedGetBalance).toHaveBeenCalledTimes(3);
+
+    // Out of the tunnel: a payment lands while backgrounded, then resume.
+    failing = false;
+    await setAppState('background');
+    await advance(MIN);
+    await setAppState('active');
+    await advance(ONCHAIN_RESUME_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(4);
+    expect(updateWalletInState).toHaveBeenCalledWith('oc', { balance: 500 });
+  });
+
+  it('lifts the backoff when the wallet syncs successfully elsewhere (pull-to-refresh)', async () => {
+    mockedGetBalance.mockResolvedValue(null);
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS); // fail → retry in 4 min
+    expect(isOnchainSyncBackedOff('oc')).toBe(true);
+    // onchainService.syncAndRefresh reports any successful sync of the wallet.
+    noteOnchainSyncSuccess('oc');
+    mockedGetBalance.mockResolvedValue(100);
+    await advance(POLL_MS); // the very next tick syncs it again
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+  });
+
+  it('forgets other accounts and removed wallets', async () => {
+    let generation = 0;
+    const capture = () => {
+      const ticket = generation;
+      return () => ticket === generation;
+    };
+    mockedGetBalance.mockResolvedValue(100);
+    const wallets = [wallet('oc', 'onchain', 100)];
+    renderHook(() =>
+      useOnchainIncomingPoll({
+        wallets,
+        walletsRef: refOf(wallets),
+        updateWalletInState: jest.fn(),
+        captureIdentity: capture,
+      }),
+    );
+    recordOnchainSyncFailure('gone'); // a wallet no longer in the list
+    await advance(ONCHAIN_BOOT_DELAY_MS);
+    expect(__onchainSyncBackoffSize()).toBe(0);
+
+    recordOnchainSyncFailure('oc', Date.now());
+    generation++; // account switch; the same wallet id may now be another wallet
+    await advance(POLL_MS);
+    expect(isOnchainSyncBackedOff('oc')).toBe(false);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
   });
 
   it('resets the backoff after a successful sync', async () => {
@@ -242,7 +337,9 @@ describe('useOnchainIncomingPoll', () => {
     await advance(ONCHAIN_BOOT_DELAY_MS);
     expect(mockedGetBalance).toHaveBeenCalledTimes(1);
 
-    // A resume that lands mid-sweep must be dropped by the in-flight guard.
+    // A resume that lands mid-sweep (past the resume gap: a slow BDK sync)
+    // must be dropped by the in-flight guard.
+    await advance(ONCHAIN_RESUME_MIN_GAP_MS);
     await setAppState('active');
     await advance(ONCHAIN_RESUME_DELAY_MS);
     expect(mockedGetBalance).toHaveBeenCalledTimes(1);
@@ -250,6 +347,7 @@ describe('useOnchainIncomingPoll', () => {
     // Once the first sweep settles, later triggers proceed normally.
     await act(async () => resolveBalance(500));
     mockedGetBalance.mockResolvedValue(500);
+    await advance(ONCHAIN_RESUME_MIN_GAP_MS);
     await setAppState('active');
     await advance(ONCHAIN_RESUME_DELAY_MS);
     expect(mockedGetBalance).toHaveBeenCalledTimes(2);

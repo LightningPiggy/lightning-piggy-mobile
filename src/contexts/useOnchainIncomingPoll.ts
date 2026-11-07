@@ -3,6 +3,14 @@ import type { MutableRefObject } from 'react';
 import { AppState } from 'react-native';
 
 import * as onchainService from '../services/onchainService';
+import {
+  ONCHAIN_POLL_MS,
+  clearOnchainSyncBackoff,
+  isOnchainSyncBackedOff,
+  noteOnchainSyncSuccess,
+  pruneOnchainSyncBackoff,
+  recordOnchainSyncFailure,
+} from '../services/onchainSyncBackoff';
 import type { WalletState } from '../types/wallet';
 
 // On-chain incoming-payment coverage (#134). Extracted from
@@ -20,6 +28,9 @@ import type { WalletState } from '../types/wallet';
 //   - Foreground resume → one refresh of every on-chain wallet, staggered
 //     by ONCHAIN_RESUME_DELAY_MS (CLAUDE.md AppState rule, #554), so a tx
 //     that landed while backgrounded is still detected soon after return.
+//     Skipped when a sweep started under ONCHAIN_RESUME_MIN_GAP_MS ago, so
+//     iOS `inactive → active` flickers (notification shade, Face ID, share
+//     sheet) don't each buy a full BDK sweep; `inactive` keeps the poll alive.
 //   - 2-minute slow poll while the app is foregrounded → catches
 //     mempool credits arriving while the user lingers on Friends /
 //     Home / anywhere else. Mempool (0-conf) detection is intentional:
@@ -29,22 +40,18 @@ import type { WalletState } from '../types/wallet';
 //     in `syncSingleAddressViaEsplora`'s balance, so 0-conf credits
 //     trip the existing balance-diff detector with zero extra work.
 //   - A wallet whose sync fails backs off exponentially (4, 8, 16, then
-//     every 30 min), reset by its next success. Each failure opens a fresh
-//     Electrum connection, so an unreachable server mustn't be retried
-//     every 2 minutes forever (#1725).
+//     every 30 min — services/onchainSyncBackoff). Each failure opens a fresh
+//     Electrum connection, so an unreachable server mustn't be retried every
+//     2 minutes forever (#1725). The backoff lifts on any successful sync of
+//     that wallet (pull-to-refresh included), on a resume from background
+//     (the network may have changed), and on an account switch.
 //
 // We sweep ALL on-chain wallets, not just the active one — incoming
 // funds to any of the user's wallets warrant a celebration, mirroring
 // the balance-diff detector's per-wallet behaviour.
-const ONCHAIN_POLL_MS = 2 * 60 * 1000;
 export const ONCHAIN_BOOT_DELAY_MS = 30_000;
 export const ONCHAIN_RESUME_DELAY_MS = 3_000;
-const ONCHAIN_BACKOFF_CAP_MS = 30 * 60 * 1000;
-
-/** Wait before retrying a wallet after `failures` consecutive failed syncs. */
-export function onchainRetryDelayMs(failures: number): number {
-  return failures <= 0 ? 0 : Math.min(ONCHAIN_POLL_MS * 2 ** failures, ONCHAIN_BACKOFF_CAP_MS);
-}
+export const ONCHAIN_RESUME_MIN_GAP_MS = 30_000;
 
 interface Params {
   // Current wallet list — read only to derive the on-chain wallet
@@ -70,10 +77,11 @@ export function useOnchainIncomingPoll({
   // when the user adds / removes an on-chain wallet, but doesn't tear
   // down on every balance tick (the full `wallets` array would).
   const onchainWalletCount = wallets.filter((w) => w.walletType === 'onchain').length;
-  // Both survive a re-arm: adding a wallet mustn't restart the boot delay
-  // or forget another wallet's backoff.
+  // These survive a re-arm: adding a wallet mustn't restart the boot delay
+  // or the resume gap, nor look like an account switch.
   const [launchedAt] = useState(Date.now);
-  const backoff = useRef(new Map<string, { failures: number; retryAt: number }>());
+  const lastSweepAt = useRef(0);
+  const lastIdentity = useRef<(() => boolean) | null>(null);
 
   useEffect(() => {
     if (onchainWalletCount === 0) return;
@@ -90,12 +98,17 @@ export function useOnchainIncomingPoll({
       if (inFlight || disposed) return;
       const isIdentityCurrent = captureIdentity();
       const isCurrent = () => !disposed && isIdentityCurrent();
+      // Another account's failures say nothing about this one's wallets.
+      if (lastIdentity.current && !lastIdentity.current()) clearOnchainSyncBackoff();
+      lastIdentity.current = isIdentityCurrent;
       inFlight = true;
+      lastSweepAt.current = Date.now();
       try {
         // Re-read through walletsRef so additions/removals between the
         // effect run and this tick are honoured without re-arming the
         // entire poll.
         const onchain = walletsRef.current.filter((w) => w.walletType === 'onchain');
+        pruneOnchainSyncBackoff(onchain.map((w) => w.id));
         // Sequential, not Promise.all: onchainService shares a singleton
         // Electrum connection (`blockchain`), so concurrent BDK syncs
         // would contend on one socket — and the BDK bindings aren't
@@ -104,8 +117,7 @@ export function useOnchainIncomingPoll({
         // shared-connection races.
         for (const w of onchain) {
           if (!isCurrent()) return;
-          const prior = backoff.current.get(w.id);
-          if (prior && Date.now() < prior.retryAt) continue;
+          if (isOnchainSyncBackedOff(w.id)) continue;
           let b: number | null = null;
           try {
             // `getBalance` reports a failed sync as null rather than throwing.
@@ -117,15 +129,11 @@ export function useOnchainIncomingPoll({
           if (b === null) {
             // Transient Electrum / Esplora failures are routine. Log only in
             // dev so we don't spam production with a flaky third party.
-            const failures = (prior?.failures ?? 0) + 1;
-            backoff.current.set(w.id, {
-              failures,
-              retryAt: Date.now() + onchainRetryDelayMs(failures),
-            });
+            recordOnchainSyncFailure(w.id);
             if (__DEV__) console.log(`[Wallet] on-chain balance refresh failed for ${w.id}`);
             continue;
           }
-          backoff.current.delete(w.id);
+          noteOnchainSyncSuccess(w.id);
           // Only commit when the balance actually changed — an unchanged
           // write still costs an AsyncStorage round-trip (and needlessly
           // re-runs the receive detector).
@@ -148,17 +156,34 @@ export function useOnchainIncomingPoll({
       timer = setTimeout(async () => {
         timer = null;
         await refreshAll();
-        if (!disposed && !timer && AppState.currentState === 'active') schedule(ONCHAIN_POLL_MS);
+        if (!disposed && !timer && AppState.currentState !== 'background')
+          schedule(ONCHAIN_POLL_MS);
       }, delayMs);
     };
     // Resuming inside the boot window still waits out the boot delay.
     const arm = () =>
       schedule(Math.max(ONCHAIN_RESUME_DELAY_MS, launchedAt + ONCHAIN_BOOT_DELAY_MS - Date.now()));
+    const resume = () => {
+      const since = Date.now() - lastSweepAt.current;
+      if (since >= ONCHAIN_RESUME_MIN_GAP_MS) return arm();
+      // A sweep just ran: keep (or restore) the regular poll instead.
+      if (!timer) schedule(Math.max(ONCHAIN_RESUME_DELAY_MS, ONCHAIN_POLL_MS - since));
+    };
 
+    let backgrounded = AppState.currentState === 'background';
     if (AppState.currentState === 'active') arm();
     const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') arm();
-      else stop();
+      if (next === 'active') {
+        // Back from the background, the network may have changed (left the
+        // tunnel / captive Wi-Fi): give every wallet a fresh attempt.
+        if (backgrounded) clearOnchainSyncBackoff();
+        backgrounded = false;
+        resume();
+      } else if (next === 'background') {
+        backgrounded = true;
+        stop();
+      }
+      // 'inactive' (iOS overlays) is transient: leave the poll running.
     });
     return () => {
       disposed = true;
