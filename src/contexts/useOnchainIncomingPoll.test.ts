@@ -1,25 +1,31 @@
 /**
- * Unit tests for the on-chain incoming-payment poll (#134).
+ * Unit tests for the on-chain incoming-payment poll (#134, #1725).
  *
  * The hook drives a gentle background sweep of every on-chain wallet so
  * a mempool credit trips WalletContext's balance-diff receive detector.
- * Its lifecycle is non-trivial (AppState start/stop, an in-flight sweep
- * guard, sequential per-wallet syncs), so the contract is pinned here:
+ * Its lifecycle is non-trivial, so the contract is pinned here:
  *
- *   1. On foreground it sweeps only on-chain wallets and commits a
- *      refreshed balance — but skips the write when nothing changed.
- *   2. With no on-chain wallets it does no work at all.
- *   3. A background→active transition re-triggers a sweep; leaving the
- *      foreground does not.
- *   4. Overlapping triggers can't start a second concurrent sweep while
- *      one is still in flight (the shared Electrum connection guard).
- *   5. Unmounting removes the AppState subscription.
+ *   1. No BDK sync during cold start: the first sweep runs
+ *      ONCHAIN_BOOT_DELAY_MS after launch, then every 2 minutes.
+ *   2. It sweeps only on-chain wallets and commits a refreshed balance,
+ *      skipping the write when nothing changed. No on-chain wallets → no work.
+ *   3. A background→active transition sweeps after a ~3 s stagger (never
+ *      inside the boot window); leaving the foreground cancels it.
+ *   4. A wallet whose sync fails backs off exponentially (capped), without
+ *      holding up healthy wallets; a success resets it.
+ *   5. Overlapping triggers can't start a second concurrent sweep.
+ *   6. Unmounting removes the AppState subscription and the pending timer.
  */
-import { renderHook, act, waitFor } from '@testing-library/react-native';
+import { renderHook, act } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import type { MutableRefObject } from 'react';
 
-import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
+import {
+  ONCHAIN_BOOT_DELAY_MS,
+  ONCHAIN_RESUME_DELAY_MS,
+  onchainRetryDelayMs,
+  useOnchainIncomingPoll,
+} from './useOnchainIncomingPoll';
 import * as onchainService from '../services/onchainService';
 import type { WalletState } from '../types/wallet';
 
@@ -31,6 +37,9 @@ jest.mock('../services/onchainService', () => ({
 const mockedGetBalance = onchainService.getBalance as jest.MockedFunction<
   typeof onchainService.getBalance
 >;
+
+const MIN = 60_000;
+const POLL_MS = 2 * MIN;
 
 // Captures the 'change' handler the hook registers so tests can drive
 // AppState transitions without a real native event.
@@ -46,7 +55,28 @@ function refOf(wallets: WalletState[]): MutableRefObject<WalletState[]> {
   return { current: wallets };
 }
 
+function mount(wallets: WalletState[], updateWalletInState = jest.fn()) {
+  const view = renderHook(() =>
+    useOnchainIncomingPoll({
+      captureIdentity,
+      wallets,
+      walletsRef: refOf(wallets),
+      updateWalletInState,
+    }),
+  );
+  return { ...view, updateWalletInState };
+}
+
+const advance = (ms: number) => act(() => jest.advanceTimersByTimeAsync(ms));
+const setAppState = (next: 'active' | 'background') =>
+  act(async () => {
+    (AppState as unknown as { currentState: string }).currentState = next;
+    latestChangeHandler?.(next);
+  });
+const callsFor = (id: string) => mockedGetBalance.mock.calls.filter(([w]) => w === id).length;
+
 beforeEach(() => {
+  jest.useFakeTimers();
   jest.clearAllMocks();
   latestChangeHandler = null;
   (AppState as unknown as { currentState: string }).currentState = 'active';
@@ -57,98 +87,148 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.useRealTimers();
   (AppState.addEventListener as jest.Mock).mockRestore?.();
 });
 
+describe('onchainRetryDelayMs', () => {
+  it('doubles from 4 min and caps at 30 min', () => {
+    expect([0, 1, 2, 3, 4, 10].map(onchainRetryDelayMs)).toEqual([
+      0,
+      4 * MIN,
+      8 * MIN,
+      16 * MIN,
+      30 * MIN,
+      30 * MIN,
+    ]);
+  });
+});
+
 describe('useOnchainIncomingPoll', () => {
-  it('sweeps only on-chain wallets on foreground and commits changed balances', async () => {
+  it('runs no BDK sync during cold start, then sweeps once the boot delay passes', async () => {
     mockedGetBalance.mockResolvedValue(500);
-    const updateWalletInState = jest.fn();
-    const wallets = [wallet('oc', 'onchain', 100), wallet('ln', 'nwc', 0)];
+    const { updateWalletInState } = mount([wallet('oc', 'onchain', 100), wallet('ln', 'nwc', 0)]);
 
-    renderHook(() =>
-      useOnchainIncomingPoll({
-        captureIdentity,
-        wallets,
-        walletsRef: refOf(wallets),
-        updateWalletInState,
-      }),
-    );
+    await advance(ONCHAIN_BOOT_DELAY_MS - 1);
+    expect(mockedGetBalance).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(updateWalletInState).toHaveBeenCalledWith('oc', { balance: 500 }));
-    // Lightning wallet is never synced.
+    await advance(1);
     expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+    // Lightning wallet is never synced.
     expect(mockedGetBalance).toHaveBeenCalledWith('oc');
+    expect(updateWalletInState).toHaveBeenCalledWith('oc', { balance: 500 });
+  });
+
+  it('keeps polling every 2 minutes while foregrounded', async () => {
+    mockedGetBalance.mockResolvedValue(100);
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+    await advance(POLL_MS);
+    await advance(POLL_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(3);
   });
 
   it('skips the state write when the balance is unchanged', async () => {
     mockedGetBalance.mockResolvedValue(100);
-    const updateWalletInState = jest.fn();
-    const wallets = [wallet('oc', 'onchain', 100)];
-
-    renderHook(() =>
-      useOnchainIncomingPoll({
-        captureIdentity,
-        wallets,
-        walletsRef: refOf(wallets),
-        updateWalletInState,
-      }),
-    );
-
-    await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(1));
+    const { updateWalletInState } = mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
     expect(updateWalletInState).not.toHaveBeenCalled();
   });
 
   it('does no work and registers no polling when there are no on-chain wallets', async () => {
-    const updateWalletInState = jest.fn();
-    const wallets = [wallet('ln', 'nwc', 0)];
-
-    renderHook(() =>
-      useOnchainIncomingPoll({
-        captureIdentity,
-        wallets,
-        walletsRef: refOf(wallets),
-        updateWalletInState,
-      }),
-    );
-
-    // Give any stray microtasks a chance to run.
-    await act(async () => {
-      await Promise.resolve();
-    });
+    mount([wallet('ln', 'nwc', 0)]);
+    await advance(10 * MIN);
     expect(mockedGetBalance).not.toHaveBeenCalled();
     expect(AppState.addEventListener).not.toHaveBeenCalled();
   });
 
-  it('re-sweeps on background→active and ignores leaving the foreground', async () => {
+  it('staggers the resume sweep and cancels it when leaving the foreground', async () => {
     mockedGetBalance.mockResolvedValue(500);
-    const updateWalletInState = jest.fn();
-    const wallets = [wallet('oc', 'onchain', 100)];
-
-    renderHook(() =>
-      useOnchainIncomingPoll({
-        captureIdentity,
-        wallets,
-        walletsRef: refOf(wallets),
-        updateWalletInState,
-      }),
-    );
-
-    await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(1));
-
-    // Leaving the foreground must not sweep.
-    await act(async () => {
-      latestChangeHandler?.('background');
-      await Promise.resolve();
-    });
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS);
     expect(mockedGetBalance).toHaveBeenCalledTimes(1);
 
-    // Returning to the foreground triggers a fresh sweep.
-    await act(async () => {
-      latestChangeHandler?.('active');
-      await Promise.resolve();
-    });
-    await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(2));
+    // Backgrounding stops the poll: nothing runs while away.
+    await setAppState('background');
+    await advance(10 * MIN);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+
+    // Resume: not immediately, but after the stagger.
+    await setAppState('active');
+    await advance(ONCHAIN_RESUME_DELAY_MS - 1);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+
+    // Leaving again inside the stagger cancels the pending resume sweep.
+    await setAppState('background');
+    await setAppState('active');
+    await advance(ONCHAIN_RESUME_DELAY_MS - 1);
+    await setAppState('background');
+    await advance(10 * MIN);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits out the boot delay even when resumed inside it', async () => {
+    mockedGetBalance.mockResolvedValue(100);
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(5_000);
+    await setAppState('background');
+    await setAppState('active');
+    await advance(ONCHAIN_BOOT_DELAY_MS - 5_000 - 1);
+    expect(mockedGetBalance).not.toHaveBeenCalled();
+    await advance(1);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+  });
+
+  it('backs a failing wallet off exponentially, without holding up a healthy one', async () => {
+    mockedGetBalance.mockImplementation(async (id) => (id === 'bad' ? null : 100));
+    mount([wallet('bad', 'onchain', 0), wallet('ok', 'onchain', 100)]);
+
+    // Attempt times for `bad`: boot, then +4, +8, +16, +30, +30 min (rounded
+    // up to the next 2-min tick). `ok` keeps its 2-min cadence throughout.
+    await advance(ONCHAIN_BOOT_DELAY_MS);
+    expect(callsFor('bad')).toBe(1);
+    const attemptsAfter = async (minutes: number) => {
+      await advance(minutes * MIN);
+      return callsFor('bad');
+    };
+    expect(await attemptsAfter(2)).toBe(1); // in backoff: skipped
+    expect(await attemptsAfter(2)).toBe(2); // +4 min
+    expect(await attemptsAfter(6)).toBe(2);
+    expect(await attemptsAfter(2)).toBe(3); // +8 min
+    expect(await attemptsAfter(16)).toBe(4); // +16 min
+    expect(await attemptsAfter(28)).toBe(4);
+    expect(await attemptsAfter(2)).toBe(5); // +30 min (cap)
+    expect(await attemptsAfter(30)).toBe(6); // still capped
+    // 2 h of polling: ~60 failing syncs (and new Electrum connections) before, 6 now.
+    expect(callsFor('ok')).toBe(1 + (2 + 2 + 6 + 2 + 16 + 28 + 2 + 30) / 2);
+  });
+
+  it('resets the backoff after a successful sync', async () => {
+    let failing = true;
+    mockedGetBalance.mockImplementation(async () => (failing ? null : 100));
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS); // fail #1 → retry in 4 min
+    await advance(4 * MIN); // fail #2 → retry in 8 min
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+    failing = false;
+    await advance(8 * MIN); // success
+    expect(mockedGetBalance).toHaveBeenCalledTimes(3);
+    await advance(POLL_MS); // back on the 2-min cadence
+    expect(mockedGetBalance).toHaveBeenCalledTimes(4);
+  });
+
+  it('treats a thrown sync like a failed one', async () => {
+    mockedGetBalance.mockRejectedValue(new Error('electrum down'));
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS);
+    await advance(POLL_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+    await advance(POLL_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
   });
 
   it('does not start a second concurrent sweep while one is in flight', async () => {
@@ -158,57 +238,30 @@ describe('useOnchainIncomingPoll', () => {
         resolveBalance = res;
       }),
     );
-    const updateWalletInState = jest.fn();
-    const wallets = [wallet('oc', 'onchain', 100)];
-
-    renderHook(() =>
-      useOnchainIncomingPoll({
-        captureIdentity,
-        wallets,
-        walletsRef: refOf(wallets),
-        updateWalletInState,
-      }),
-    );
-
-    // Mount sweep is now awaiting getBalance.
-    await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(1));
+    mount([wallet('oc', 'onchain', 100)]);
+    await advance(ONCHAIN_BOOT_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
 
     // A resume that lands mid-sweep must be dropped by the in-flight guard.
-    await act(async () => {
-      latestChangeHandler?.('active');
-      await Promise.resolve();
-    });
+    await setAppState('active');
+    await advance(ONCHAIN_RESUME_DELAY_MS);
     expect(mockedGetBalance).toHaveBeenCalledTimes(1);
 
     // Once the first sweep settles, later triggers proceed normally.
-    await act(async () => {
-      resolveBalance(500);
-      await Promise.resolve();
-    });
-    await act(async () => {
-      latestChangeHandler?.('active');
-      await Promise.resolve();
-    });
-    await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(2));
+    await act(async () => resolveBalance(500));
+    mockedGetBalance.mockResolvedValue(500);
+    await setAppState('active');
+    await advance(ONCHAIN_RESUME_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
   });
 
-  it('removes the AppState subscription on unmount', async () => {
+  it('removes the AppState subscription and the pending timer on unmount', async () => {
     mockedGetBalance.mockResolvedValue(100);
-    const updateWalletInState = jest.fn();
-    const wallets = [wallet('oc', 'onchain', 100)];
-
-    const { unmount } = renderHook(() =>
-      useOnchainIncomingPoll({
-        captureIdentity,
-        wallets,
-        walletsRef: refOf(wallets),
-        updateWalletInState,
-      }),
-    );
-
-    await waitFor(() => expect(mockedGetBalance).toHaveBeenCalledTimes(1));
+    const { unmount } = mount([wallet('oc', 'onchain', 100)]);
     unmount();
     expect(removeSub).toHaveBeenCalled();
+    await advance(10 * MIN);
+    expect(mockedGetBalance).not.toHaveBeenCalled();
   });
 });
 
@@ -235,6 +288,7 @@ it('discards an on-chain balance finishing in a later identity generation', asyn
       captureIdentity: capture,
     }),
   );
+  await advance(ONCHAIN_BOOT_DELAY_MS);
   generation += 2; // B → C → B, wallet id reused
   await act(async () => finish(999));
   expect(updateWalletInState).not.toHaveBeenCalled();
