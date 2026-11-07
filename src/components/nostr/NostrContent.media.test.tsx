@@ -73,6 +73,10 @@ it('shows a spinner while an inline image downloads', async () => {
   await settle();
   expect(view.getByTestId('nostr-inline-image-loading-0')).toBeTruthy();
   expect(view.queryByTestId('nostr-inline-image-failed-0')).toBeNull();
+  // Screen readers hear that it's loading, and it isn't actionable yet.
+  const tile = view.getByTestId('nostr-inline-image-0');
+  expect(tile.props.accessibilityLabel).toBe('messageBubble.loading');
+  expect(tile.props.accessibilityState).toMatchObject({ busy: true, disabled: true });
 });
 
 it('retries a failed inline image once by itself, then offers tap to retry', async () => {
@@ -80,6 +84,9 @@ it('retries a failed inline image once by itself, then offers tap to retry', asy
   const view = render(<NostrContent content={IMAGE} authorPubkey="author" />);
   await settle();
   expect(mockFetch).toHaveBeenCalledTimes(1);
+  // During the pause before the automatic retry it still reads as loading.
+  expect(view.getByTestId('nostr-inline-image-loading-0')).toBeTruthy();
+  expect(view.queryByTestId('nostr-inline-image-failed-0')).toBeNull();
   // One automatic retry after a short pause.
   await act(async () => {
     jest.advanceTimersByTime(3000);

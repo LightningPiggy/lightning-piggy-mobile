@@ -191,8 +191,11 @@ const MediaThumb: React.FC<{
             ? t('messageBubble.tapToLoadImage')
             : loadFailed
               ? `${t('messageBubble.imageLoadFailed')}. ${t('messageBubble.tapToRetry')}`
-              : t('nostrContent.viewImage')
+              : loading
+                ? t('messageBubble.loading')
+                : t('nostrContent.viewImage')
       }
+      accessibilityState={{ busy: loading, disabled: loading }}
       testID={`nostr-inline-${item.type}-${index}`}
       activeOpacity={0.85}
     >

@@ -48,6 +48,10 @@ export function useRemoteMediaWithAutoRetry(url: string | null, maxBytes: number
   const media = useRemoteMedia(url, maxBytes);
   const { failed, retry } = media;
   const [autoRetried, setAutoRetried] = useState<string | null>(null);
+  // Loading switched off (e.g. unfollowed): the next session gets its own retry.
+  useEffect(() => {
+    if (!url) setAutoRetried(null);
+  }, [url]);
   useEffect(() => {
     if (!failed || !url || autoRetried === url) return;
     const timer = setTimeout(() => {
@@ -56,5 +60,6 @@ export function useRemoteMediaWithAutoRetry(url: string | null, maxBytes: number
     }, delayMs);
     return () => clearTimeout(timer);
   }, [failed, url, autoRetried, retry, delayMs]);
-  return media;
+  // Until the automatic retry has also failed, it's still loading.
+  return { ...media, failed: failed && autoRetried === url };
 }
