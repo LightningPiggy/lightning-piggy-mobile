@@ -70,6 +70,7 @@ jest.mock('../services/dmWrapNotificationDedupe', () => ({
   markWrapHandled: jest.fn(),
   takeContentlessWrapAlert: jest.fn(),
   noteLiveDmSubArmed: jest.fn(),
+  unmarkWrapHandled: jest.fn(),
 }));
 
 jest.mock('./nostrSecretKeyCache', () => ({

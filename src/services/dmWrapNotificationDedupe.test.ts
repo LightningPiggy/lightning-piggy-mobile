@@ -49,6 +49,8 @@ describe('live sub hand-off (contentless phantoms)', () => {
     mod.markWrapHandled('w1');
     expect(mod.wasWrapHandled('w1')).toBe(true);
     expect(mod.wasWrapHandled('w2')).toBe(false);
+    mod.unmarkWrapHandled('w1'); // given back undecided
+    expect(mod.wasWrapHandled('w1')).toBe(false);
     mod.noteContentlessWrapAlert('w2');
     expect(mod.takeContentlessWrapAlert('w2')).toBe(true);
     expect(mod.takeContentlessWrapAlert('w2')).toBe(false);

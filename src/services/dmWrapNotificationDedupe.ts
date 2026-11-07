@@ -55,6 +55,14 @@ export function markWrapHandled(wrapId: string): void {
   if (wrapId) addBounded(handled, wrapId);
 }
 
+/** The live sub gave this wrap back undecided (torn down mid-wrap, a failed
+ * write): any "handled" mark it picked up meanwhile — e.g. a re-opened sub
+ * that saw the in-flight claim and took it for "already stored" — no longer
+ * holds, so the background watch must handle it again. */
+export function unmarkWrapHandled(wrapId: string): void {
+  handled.delete(wrapId);
+}
+
 export function wasWrapHandled(wrapId: string): boolean {
   return handled.has(wrapId);
 }

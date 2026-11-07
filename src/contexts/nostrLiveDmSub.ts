@@ -23,6 +23,7 @@ import {
   claimWrapNotification,
   markWrapHandled,
   noteLiveDmSubArmed,
+  unmarkWrapHandled,
   retractContentlessWrapAlert,
   takeContentlessWrapAlert,
 } from '../services/dmWrapNotificationDedupe';
@@ -203,11 +204,19 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       if (__DEV__) console.warn('[Nostr] live wrap persist failed:', e);
     });
   };
+  // Give back a wrap this sub claimed but never decided. A re-opened sub that
+  // shares knownWrapIds may have seen the claim meanwhile and marked the wrap
+  // handled as "already stored"; undo that too, or the background watch would
+  // stay silent for a message nobody alerted for.
+  const releaseWrap = (id: string): void => {
+    knownWrapIds.delete(id);
+    seen.delete(id);
+    unmarkWrapHandled(id);
+  };
   const pendingReplays = new Set<DeferredFollowGateEntry>();
   const releaseReplayClaim = (item: DeferredFollowGateEntry): void => {
     if (!pendingReplays.delete(item)) return;
-    knownWrapIds.delete(item.entry.id);
-    seen.delete(item.entry.id);
+    releaseWrap(item.entry.id);
     item.onEvict?.();
   };
   // Replay the surface + notify side-effects of a fresh inbound that was
@@ -319,10 +328,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     queueInboxEntry,
     includeNonFollowOrders: params.includeNonFollowOrders,
     knownWrapIds,
-    releaseWrapClaim: (id) => {
-      knownWrapIds.delete(id);
-      seen.delete(id);
-    },
+    releaseWrapClaim: releaseWrap,
     seen,
     chainWrite,
   });
@@ -604,14 +610,17 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // instance for the rest of the session even though the store never got
     // it — undetectable because it never resurfaces even on the next arm.
     if (cancelled || !isCurrentOwner()) {
-      knownWrapIds.delete(wrap.id);
+      releaseWrap(wrap.id);
       return;
     }
 
     let rumor: DecodedRumor | null = null;
     if (activeSigner === 'nsec') {
       const secretKey = await getMemoisedSecretKey(viewerPubkey);
-      if (!secretKey) return;
+      if (!secretKey) {
+        releaseWrap(wrap.id);
+        return;
+      }
       rumor = unwrapWrapNsec(wrap, secretKey, onSkip);
     } else if (activeSigner === 'amber') {
       try {

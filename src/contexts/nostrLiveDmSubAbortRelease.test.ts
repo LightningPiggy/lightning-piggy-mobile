@@ -168,3 +168,39 @@ it('gives a wrap back when torn down mid-decision, so the re-opened sub alerts f
   stopB();
   await flush();
 });
+
+it('un-marks a wrap the re-opened sub took for stored while the torn-down sub still held it', async () => {
+  const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+
+  // Sub A takes the wrap and parks in group routing.
+  let releaseRouting: (v: { kind: 'not-group' }) => void = () => {};
+  jest.mocked(tryRouteGroupRumor).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        releaseRouting = resolve as typeof releaseRouting;
+      }) as ReturnType<typeof tryRouteGroupRumor>,
+  );
+  const stopA = startLiveDmSubscription(makeParams(knownWrapIdsRef));
+  await flush();
+  capturedOnEvent!(freshWrap());
+  await flush();
+
+  // Relay-list change: A is torn down, B opens on the same knownWrapIds and
+  // gets the relay's redelivery BEFORE A's abort has given the wrap back.
+  stopA();
+  const stopB = startLiveDmSubscription(makeParams(knownWrapIdsRef));
+  await flush();
+  capturedOnEvent!(freshWrap());
+  await flush();
+  expect(wasWrapHandled(WRAP_ID)).toBe(true); // B took the in-flight claim for "stored"
+
+  // A resumes, sees it was torn down and gives the wrap back undecided.
+  releaseRouting({ kind: 'not-group' });
+  await flush();
+  expect(knownWrapIdsRef.current.set.has(WRAP_ID)).toBe(false);
+  // Nobody alerted, so the background watch must not treat it as handled.
+  expect(mockFireNotification).not.toHaveBeenCalled();
+  expect(wasWrapHandled(WRAP_ID)).toBe(false);
+  stopB();
+  await flush();
+});
