@@ -259,6 +259,23 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // it twice makes the second config win silently, so keep the single
     // entry above. Geofence alerts are fired on-device.
     'expo-task-manager',
+    // "Share to Lightning Piggy" (#1692): Android share-sheet target for text
+    // (ACTION_SEND text/plain) and photos (ACTION_SEND / SEND_MULTIPLE image/*).
+    // Lands in the chosen chat's composer — never auto-sent. Only `text/plain`,
+    // not `text/*`, so HTML and other text types aren't read as files. The
+    // patched native module (patches/expo-share-intent+6.1.1.patch) copies only
+    // other apps' `content://` images into cache/lp-share/ under generated
+    // names, capped in count and size. iOS is off for now: a Share Extension
+    // needs its own signed target, App Group and bundle id per build variant.
+    // MainActivity keeps Expo's default `singleTask` launch mode.
+    [
+      'expo-share-intent',
+      {
+        androidIntentFilters: ['text/plain', 'image/*'],
+        androidMultiIntentFilters: ['image/*'],
+        disableIOS: true,
+      },
+    ],
     // expo-build-properties — inject R8/proguard keep rules into the CNG
     // prebuild output. Production builds run R8 minification, which strips
     // expo-camera's MLKit barcode classes (loaded dynamically), so the QR

@@ -1,0 +1,207 @@
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+index 0153c89..a236158 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+@@ -31,6 +31,8 @@ import expo.modules.kotlin.modules.Module
+ import expo.modules.kotlin.modules.ModuleDefinition
+ import java.io.File
+ import java.io.FileOutputStream
++import java.io.IOException
++import java.util.UUID
+ import java.util.Date
+ 
+ 
+@@ -44,6 +46,32 @@ class ExpoShareIntentModule : Module() {
+     companion object {
+         private var instance: ExpoShareIntentModule? = null
+ 
++        // Lightning Piggy patch: shared files are untrusted input from another
++        // app. Copies go to a dedicated cache subfolder under generated names,
++        // only images are accepted, and both count and size are capped.
++        const val LP_SHARE_DIR = "lp-share"
++        private const val LP_MAX_SHARED_FILES = 10
++        private const val LP_MAX_SHARED_BYTES = 25L * 1024 * 1024
++
++        /** Only a `content://` URI from another app's provider — never `file://`
++         *  (could point into our private storage) nor one of our own providers. */
++        private fun isForeignContentUri(uri: Uri): Boolean {
++            val ctx = try { instance?.context } catch (e: Exception) { null } ?: return false
++            val authority = uri.authority ?: return false
++            return "content".equals(uri.scheme, ignoreCase = true) &&
++                !authority.startsWith(ctx.packageName)
++        }
++
++        private fun safeFileInfo(uri: Uri): Map<String, String?>? {
++            if (!isForeignContentUri(uri)) return null
++            return try {
++                getFileInfo(uri)
++            } catch (e: Exception) {
++                Log.w("ExpoShareIntent", "skipped a shared file that could not be read")
++                null
++            }
++        }
++
+         private fun notifyShareIntent(value: Any) {
+             notifyState("pending")
+             instance!!.sendEvent("onChange", mapOf("value" to value))
+@@ -56,23 +84,22 @@ class ExpoShareIntentModule : Module() {
+         }
+ 
+         @SuppressLint("Range")
+-        private fun getFileInfo(uri: Uri): Map<String, String?> {
+-            val resolver: ContentResolver? = instance?.currentActivity?.contentResolver
+-                    ?: instance?.context?.contentResolver
+-            if (resolver == null) {
+-                notifyError("Cannot get resolver (getFileInfo)")
+-                return mapOf(
+-                    "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
+-                )
++        private fun getFileInfo(uri: Uri): Map<String, String?>? {
++            val resolver: ContentResolver = instance?.currentActivity?.contentResolver
++                    ?: instance?.context?.contentResolver ?: return null
++            val mimeType = resolver.getType(uri)?.lowercase() ?: return null
++            if (!mimeType.startsWith("image/")) return null
++            var fileName: String? = null
++            var fileSize: String? = null
++            resolver.query(uri, null, null, null, null)?.use { queryResult ->
++                if (queryResult.moveToFirst()) {
++                    val nameIndex = queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME)
++                    val sizeIndex = queryResult.getColumnIndex(OpenableColumns.SIZE)
++                    if (nameIndex >= 0) fileName = queryResult.getString(nameIndex)
++                    if (sizeIndex >= 0) fileSize = queryResult.getString(sizeIndex)
++                }
+             }
+-            val queryResult: Cursor = resolver.query(uri, null, null, null, null)!!
+-            queryResult.moveToFirst()
+-            val fileName = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME))
+-            val fileSize = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.SIZE))
+-            queryResult.close()
+-
+-            val mimeType = resolver.getType(uri)!!
++            val filePath = instance?.copySharedFile(resolver, uri, mimeType) ?: return null
+ 
+             var mediaWidth: String? = null;
+             var mediaHeight: String? = null;
+@@ -81,7 +108,7 @@ class ExpoShareIntentModule : Module() {
+                 val options = BitmapFactory.Options().apply {
+                     inJustDecodeBounds = true
+                 }
+-                BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
++                File(filePath).inputStream().use { BitmapFactory.decodeStream(it, null, options) }
+                 mediaHeight = options.outHeight.toString()
+                 mediaWidth = options.outWidth.toString()
+             }
+@@ -101,7 +128,7 @@ class ExpoShareIntentModule : Module() {
+ 
+             return mapOf(
+                     "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
++                    "filePath" to filePath,
+                     "fileName" to fileName,
+                     "fileSize" to fileSize,
+                     "mimeType" to mimeType,
+@@ -112,6 +139,10 @@ class ExpoShareIntentModule : Module() {
+         }
+ 
+         fun handleShareIntent(intent: Intent) {
++            // Lightning Piggy patch: ignore non-share intents (our `lightning:` /
++            // `nostr:` VIEW links, NFC) before the task-root relaunch below.
++            if (intent.type == null) return
++            if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) return
+             val activity = instance?.currentActivity
+             if (activity != null && !activity.isTaskRoot) {
+                 val newIntent = Intent(intent).apply {
+@@ -141,15 +172,19 @@ class ExpoShareIntentModule : Module() {
+                 // files / medias
+                 if (intent.action == Intent.ACTION_SEND) {
+                     val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
+-                    if (uri != null) {
+-                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
++                    val info = uri?.let { safeFileInfo(it) }
++                    if (info != null) {
++                        notifyShareIntent(mapOf( "files" to listOf(info), "type" to "file"))
+                     } else {
+                         notifyError("empty uri for file sharing: " + intent.action)
+                     }
+                 } else if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+-                    val uris = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM)
+-                    if (uris != null) {
+-                        notifyShareIntent(mapOf( "files" to uris.map { getFileInfo(it) }, "type" to "file"))
++                    val infos = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM)
++                        ?.take(LP_MAX_SHARED_FILES)
++                        ?.mapNotNull { safeFileInfo(it) }
++                        .orEmpty()
++                    if (infos.isNotEmpty()) {
++                        notifyShareIntent(mapOf( "files" to infos, "type" to "file"))
+                     } else {
+                         notifyError("empty uris array for file sharing: " + intent.action)
+                     }
+@@ -209,6 +244,45 @@ class ExpoShareIntentModule : Module() {
+         }
+     }
+ 
++    /**
++     * Lightning Piggy patch: copy one shared stream into `cache/lp-share/` under
++     * a generated name (the sender's display name is never used for a path),
++     * stopping at LP_MAX_SHARED_BYTES. The extension comes from the provider's
++     * MIME type; the app re-checks the real type from the file's bytes.
++     */
++    fun copySharedFile(resolver: ContentResolver, uri: Uri, mimeType: String): String? {
++        val dir = File(context.cacheDir, LP_SHARE_DIR)
++        if (!dir.exists() && !dir.mkdirs()) return null
++        val ext = when (mimeType) {
++            "image/png" -> "png"
++            "image/gif" -> "gif"
++            "image/webp" -> "webp"
++            "image/heic", "image/heif" -> "heic"
++            else -> "jpg"
++        }
++        val target = File(dir, "share-${UUID.randomUUID()}.$ext")
++        return try {
++            val input = resolver.openInputStream(uri) ?: return null
++            input.use { inp ->
++                FileOutputStream(target).use { out ->
++                    val buffer = ByteArray(64 * 1024)
++                    var total = 0L
++                    while (true) {
++                        val read = inp.read(buffer)
++                        if (read < 0) break
++                        total += read
++                        if (total > LP_MAX_SHARED_BYTES) throw IOException("shared file too large")
++                        out.write(buffer, 0, read)
++                    }
++                }
++            }
++            target.path
++        } catch (e: Exception) {
++            target.delete()
++            null
++        }
++    }
++
+     /**
+      * Get a file path from a Uri. This will get the the path for Storage Access
+      * Framework Documents, as well as the _data field for the MediaStore and
+@@ -300,8 +374,19 @@ class ExpoShareIntentModule : Module() {
+                 if (cursor != null && cursor.moveToFirst()) {
+                     val columnIndex = cursor.getColumnIndexOrThrow(column)
+                     val fileName = cursor.getString(columnIndex)
+-                    Log.i("FileDirectory", "File name: $fileName")
+-                    targetFile = File(context.cacheDir, fileName)
++                    // Lightning Piggy patch (backport of expo-share-intent 9.0.0):
++                    // `_display_name` is chosen by the sending app, so a name like
++                    // "../files/x" would write outside the cache ("Dirty Stream").
++                    // Keep only the last path segment and require the result to
++                    // stay inside cacheDir; otherwise fall back to a generated name.
++                    val safeName = fileName?.let { File(it).name }.orEmpty()
++                    if (safeName.isNotEmpty()) {
++                        val candidate = File(context.cacheDir, safeName)
++                        val cacheRoot = context.cacheDir.canonicalPath + File.separator
++                        if (candidate.canonicalPath.startsWith(cacheRoot)) {
++                            targetFile = candidate
++                        }
++                    }
+                 }
+             } finally {
+                 cursor?.close()
