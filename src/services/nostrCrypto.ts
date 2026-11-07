@@ -42,6 +42,7 @@ import {
 
 import { getNostrNative, type NostrNativeApi } from '../../modules/nostr-native';
 import { assertNotWrapOnlyKind } from '../utils/wrapOnlyKinds';
+import { nativeCryptoSelfTest } from './nativeCryptoSelfTest';
 
 // ---------------------------------------------------------------------------
 // Perf gate — active in dev (__DEV__) AND in EXPO_PUBLIC_KEEP_PERF_LOGS
@@ -53,15 +54,17 @@ const PERF_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
 // ---------------------------------------------------------------------------
 // Native routing (Stage 2 M1, #1046) — rust-nostr via modules/nostr-native.
 //
-// EXPO_PUBLIC_NATIVE_CRYPTO=1 routes the sk+pk-shaped operations below to
-// the native module when it is linked (Android + iOS dev/EAS builds);
-// everything else — and every platform where the module is absent — keeps the
-// exact JS path. EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK=1 additionally runs BOTH
+// Native routing is ON by default (#1727): the persisted Settings pref
+// (nativeCryptoPreference, default true; the toggle is an opt-out) is applied
+// at startup, and EXPO_PUBLIC_NATIVE_CRYPTO=1 force-enables it for a build.
+// The sk+pk-shaped operations below then route to the native module once it
+// is linked (Android + iOS builds) AND warm-up's self-test passed; everything
+// else — and every platform where the module is absent — keeps the exact JS
+// path. EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK=1 additionally runs BOTH
 // implementations per op in dev and logs any divergence loudly.
 //
-// Both env literals are inlined at bundle time, so a normal build (flags
-// unset) keeps today's JS behaviour with zero routing overhead beyond one
-// boolean check. The conversation-key-shaped nip44Decrypt/nip44Encrypt
+// Both env literals are inlined at bundle time; routing costs one boolean
+// check per op. The conversation-key-shaped nip44Decrypt/nip44Encrypt
 // cannot route natively (rust-nostr's FFI derives the conversation key
 // internally from sk+pk and does not accept a raw key), which is why the
 // sk+pk wrappers below exist and call sites prefer them.
@@ -69,8 +72,9 @@ const PERF_ENABLED = __DEV__ || process.env.EXPO_PUBLIC_KEEP_PERF_LOGS === '1';
 
 // Build-time enable: the env literal is inlined at bundle time. When set it
 // force-enables native routing for the whole build; the runtime Settings
-// pref (#1057) can only ever turn native ON in addition to it, never override
-// it off — so a build compiled with the flag stays native regardless of pref.
+// pref (#1057, default on since #1727) can only ever turn native ON in
+// addition to it, never override it off — so a build compiled with the flag
+// stays native regardless of pref.
 const ENV_NATIVE_CRYPTO = process.env.EXPO_PUBLIC_NATIVE_CRYPTO === '1';
 
 const flags = {
@@ -79,7 +83,7 @@ const flags = {
 };
 
 /**
- * Apply the persisted tester preference (#1057) to routing. Called ONCE at
+ * Apply the persisted preference (#1057; default on, #1727) to routing. Called ONCE at
  * startup (index.ts) after the pref hydrates, before warmUpNativeCrypto().
  * `flags.native` becomes `EXPO_PUBLIC_NATIVE_CRYPTO === '1' || <pref>`, so the
  * env flag always wins and the pref can only add native, never remove it.
@@ -162,11 +166,13 @@ export function isNativeCryptoAvailable(): boolean {
 
 /**
  * Pays the native module's one-time JNA + .so load off the JS thread and
- * latches routing on: sets nativeReady=true ONLY when warm-up resolves true,
- * so every crypto op stays on the pure-JS path until the native module has
- * proven it can load. Resolves false (never rejects) — a linked-but-broken
- * module (dlopen/JNA failure), a disabled env flag, or an unsupported platform
- * all leave nativeReady false and keep callers on JS for the session.
+ * latches routing on: sets nativeReady=true ONLY when warm-up resolves true
+ * AND the known-answer self-test passes (nativeCryptoSelfTest), so every
+ * crypto op stays on the pure-JS path until the native module has proven it
+ * loads and answers correctly. Resolves false (never rejects) — a
+ * linked-but-broken module (dlopen/JNA failure, wrong answers), an opt-out, or
+ * an unsupported platform all leave nativeReady false and keep callers on JS
+ * for the session.
  *
  * Fire-and-forgotten at startup (index.ts) to warm native routing; it does
  * not need awaiting — until it resolves, nativeReady's false default keeps
@@ -179,7 +185,10 @@ export async function warmUpNativeCrypto(): Promise<boolean> {
   const native = getNostrNative();
   if (!native) return false;
   try {
-    nativeReady = (await native.warmUp()) === true;
+    // Loading isn't enough: the module must also give the right answers
+    // (known-answer test) before real crypto routes to it.
+    nativeReady = (await native.warmUp()) === true && nativeCryptoSelfTest(native);
+    if (!nativeReady) console.warn('[NostrCrypto] native crypto unavailable — staying on JS');
     return nativeReady;
   } catch {
     nativeReady = false;
@@ -440,8 +449,11 @@ export function nostrFinalizeEvent(
  * nostr-tools' verifiedSymbol (so SimplePool and our pool.verifyEvent
  * override still see the marker), id must equal the recomputed hash, and
  * any malformed input verifies false rather than throwing. Only the
- * schnorr check itself (the ~25 ms part) moves to rust-nostr — the
- * canonical-serialisation sha256 stays in JS (getEventHash, ~µs).
+ * schnorr check itself (~30 ms in JS) moves to rust-nostr. The
+ * canonical-serialisation sha256 stays in JS (getEventHash) because the
+ * native module exposes no sha256 — and it is NOT ~µs on device: a Pixel
+ * measured eventHash p50 0.5–1 ms, p95 3–5.6 ms (#1727). Moving it needs a
+ * native `sha256`/`eventHash` function (a native rebuild).
  */
 export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
   const memoised = event[verifiedSymbol];
@@ -484,7 +496,8 @@ export function nostrVerifyEvent(event: NostrEvent): event is VerifiedEvent {
 
 /**
  * Hash a Nostr event to produce its id (SHA-256 of the canonical
- * serialisation). Wraps nostr-tools' `getEventHash`.
+ * serialisation). Wraps nostr-tools' `getEventHash`. Always JS: the native
+ * module has no sha256 yet (see nostrVerifyEvent for the measured cost).
  */
 export function nostrGetEventHash(
   event: Pick<UnsignedEvent, 'pubkey' | 'created_at' | 'kind' | 'tags' | 'content'>,
