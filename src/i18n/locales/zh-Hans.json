@@ -1107,7 +1107,8 @@
     "unlocked": "已解锁——再扫描一次即可领取。",
     "cooldownNoHint": "冷却时间还没结束，或sats额度已用完。请稍后再试。",
     "close": "关闭",
-    "couldntClaim": "无法领取"
+    "couldntClaim": "无法领取",
+    "notAVoucher": "这个链接不是代金券，没有可以领取的内容。"
   },
   "locationPickerSheet": {
     "closeLocationPicker": "关闭位置选择器",

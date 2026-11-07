@@ -1107,7 +1107,8 @@
     "unlocked": "Odblokowano — zeskanuj ponownie, aby odebrać.",
     "cooldownNoHint": "Odliczanie jeszcze trwa albo budżet sats został wykorzystany. Spróbuj ponownie później.",
     "close": "Zamknij",
-    "couldntClaim": "Nie udało się odebrać"
+    "couldntClaim": "Nie udało się odebrać",
+    "notAVoucher": "Ten link nie jest bonem, więc nie ma czego z niego odebrać."
   },
   "locationPickerSheet": {
     "closeLocationPicker": "Zamknij wybór lokalizacji",

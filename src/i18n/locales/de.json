@@ -1107,7 +1107,8 @@
     "unlocked": "Freigegeben – scanne erneut, um einzulösen.",
     "cooldownNoHint": "Die Wartezeit läuft noch oder das sats-Budget ist aufgebraucht. Versuche es später erneut.",
     "close": "Schließen",
-    "couldntClaim": "Einlösen nicht möglich"
+    "couldntClaim": "Einlösen nicht möglich",
+    "notAVoucher": "Dieser Link ist kein Gutschein, hier gibt es also nichts einzulösen."
   },
   "locationPickerSheet": {
     "closeLocationPicker": "Standortauswahl schließen",

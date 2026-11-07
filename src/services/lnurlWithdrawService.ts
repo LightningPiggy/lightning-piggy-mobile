@@ -27,10 +27,16 @@ export interface LnurlWithdrawParams {
   maxWithdrawable: number; // millisatoshis per LUD-03
 }
 
+/** Why an endpoint isn't claimable: it's a pay link (LUD-06 `payRequest`,
+ *  which belongs in the Send sheet) or some other / malformed LNURL response. */
+export type LnurlWithdrawErrorCode = 'pay-request' | 'not-withdraw';
+
 export class LnurlWithdrawError extends Error {
-  constructor(message: string) {
+  readonly code?: LnurlWithdrawErrorCode;
+  constructor(message: string, code?: LnurlWithdrawErrorCode) {
     super(message);
     this.name = 'LnurlWithdrawError';
+    this.code = code;
   }
 }
 
@@ -116,7 +122,12 @@ export const resolveLnurlWithdraw = async (input: string): Promise<LnurlWithdraw
   }
 
   if (!isWithdrawRequest(json)) {
-    throw new LnurlWithdrawError('LNURL endpoint is not a withdrawRequest (LUD-03)');
+    const isPayRequest =
+      !!json && typeof json === 'object' && (json as { tag?: unknown }).tag === 'payRequest';
+    throw new LnurlWithdrawError(
+      'LNURL endpoint is not a withdrawRequest (LUD-03)',
+      isPayRequest ? 'pay-request' : 'not-withdraw',
+    );
   }
 
   return {

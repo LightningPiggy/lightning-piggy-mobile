@@ -628,8 +628,10 @@ export default function App() {
                             BottomSheetModalProvider (its BottomSheetModal needs
                             that context) and inside WalletProvider (needs
                             makeInvoice). Replaced the broken passive foreground
-                            NFC listener (#341). */}
-                              <LnurlWithdrawHost />
+                            NFC listener (#341). A link that resolves to
+                            a payRequest (bare `lnurl://`, scanned `lnurl1…`)
+                            is handed to the Send sheet instead. */}
+                              <LnurlWithdrawHost onPayLink={navigateToSend} />
                               {/* Consent sheet for deep links / scans / NFC
                             payloads (#1500). Also a BottomSheetModal, so it
                             MUST sit inside BottomSheetModalProvider — outside

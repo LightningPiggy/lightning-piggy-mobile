@@ -1107,7 +1107,8 @@
     "unlocked": "Unlocked — scan again to claim.",
     "cooldownNoHint": "Cooldown is still running, or the sats budget is used up. Try again later.",
     "close": "Close",
-    "couldntClaim": "Couldn't claim"
+    "couldntClaim": "Couldn't claim",
+    "notAVoucher": "This link isn't a voucher, so there's nothing to claim from it."
   },
   "locationPickerSheet": {
     "closeLocationPicker": "Close location picker",

@@ -1107,7 +1107,8 @@
     "unlocked": "Feloldva – olvasd be újra a beváltáshoz.",
     "cooldownNoHint": "A várakozási idő még tart, vagy elfogyott a sats-keret. Próbáld újra később.",
     "close": "Bezárás",
-    "couldntClaim": "A beváltás nem sikerült"
+    "couldntClaim": "A beváltás nem sikerült",
+    "notAVoucher": "Ez a link nem utalvány, így nincs mit beváltani belőle."
   },
   "locationPickerSheet": {
     "closeLocationPicker": "Helyválasztó bezárása",
