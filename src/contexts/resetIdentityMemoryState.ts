@@ -1,6 +1,7 @@
 import { setRemoteMediaOwner } from '../services/remoteMediaCache';
 import { clearFollowGateStores } from '../services/followSetEvents';
 import { clearConversationReactions } from '../utils/conversationReactionCache';
+import { clearFailedMedia } from '../utils/failedMediaMemory';
 import { useCallback, useLayoutEffect } from 'react';
 import type { NostrContact, NostrProfile } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -27,6 +28,8 @@ export interface IdentityMemoryState {
 export function dropIdentityKeyMaterial(): void {
   clearFollowGateStores();
   clearConversationReactions();
+  // Which media URLs the outgoing account's feed found dead (#1718).
+  clearFailedMedia();
   clearMemoisedSecretKey();
   void stopNativeDmEngineGlobal();
   nip04PlaintextCache.clear();

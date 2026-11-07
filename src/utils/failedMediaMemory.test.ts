@@ -1,11 +1,48 @@
 import {
   MAX_ENTRIES,
+  TTL_MS,
   __resetFailedMediaForTests,
+  clearFailedMedia,
   forgetFailedMedia,
   hasFailedMedia,
   isPermanentMediaFailure,
   rememberFailedMedia,
 } from './failedMediaMemory';
+
+afterEach(() => jest.restoreAllMocks());
+
+describe('expiry', () => {
+  it(`forgets a URL ${TTL_MS / 60000} minutes after it was remembered`, () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const url = 'https://example.com/not-mirrored-yet.jpg';
+    rememberFailedMedia(url);
+    now.mockReturnValue(1_000_000 + TTL_MS - 1);
+    expect(hasFailedMedia(url)).toBe(true);
+    now.mockReturnValue(1_000_000 + TTL_MS);
+    expect(hasFailedMedia(url)).toBe(false);
+    // Deleted on read: even a clock that steps back can't revive it.
+    now.mockReturnValue(1_000_000);
+    expect(hasFailedMedia(url)).toBe(false);
+  });
+
+  it('re-remembering restarts the clock', () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(0);
+    const url = 'https://example.com/a.jpg';
+    rememberFailedMedia(url);
+    now.mockReturnValue(TTL_MS - 1);
+    rememberFailedMedia(url);
+    now.mockReturnValue(TTL_MS + 1);
+    expect(hasFailedMedia(url)).toBe(true);
+  });
+});
+
+it('clearFailedMedia forgets everything (account switch / logout)', () => {
+  rememberFailedMedia('https://example.com/a.jpg');
+  rememberFailedMedia('https://example.com/b.jpg');
+  clearFailedMedia();
+  expect(hasFailedMedia('https://example.com/a.jpg')).toBe(false);
+  expect(hasFailedMedia('https://example.com/b.jpg')).toBe(false);
+});
 
 describe('isPermanentMediaFailure', () => {
   it.each([
@@ -13,6 +50,10 @@ describe('isPermanentMediaFailure', () => {
     ['Remote fetch failed (410)', true],
     ['Remote fetch failed (403)', true],
     ['Remote body exceeds limit', true],
+    ['Blocked remote URL', true],
+    ['Unvalidated remote redirect', true],
+    ['Missing redirect location', true],
+    ['Too many remote redirects', true],
     ['Remote fetch failed (408)', false],
     ['Remote fetch failed (429)', false],
     ['Remote fetch failed (500)', false],
