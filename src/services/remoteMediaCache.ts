@@ -86,6 +86,20 @@ export async function resolveRemoteMedia(url: string, maxBytes = MEDIA_MAX_BYTES
   }
 }
 
+/**
+ * Forget the active account's cached copy of `url` (same key as
+ * resolveRemoteMedia), so the next resolve downloads it again. For a file
+ * that downloaded but couldn't be decoded: a retry must not reuse it.
+ */
+export async function evictRemoteMedia(url: string, maxBytes = MEDIA_MAX_BYTES): Promise<void> {
+  const checked = checkRemoteUrl(url, { kind: 'media' });
+  const owner = activeOwner;
+  if (!checked.ok || !owner || !cacheDirectory) return;
+  await deleteAsync(`${ownerDirectory(owner)}${hash(`${maxBytes}:${checked.url}`)}`, {
+    idempotent: true,
+  });
+}
+
 /** Retire the account immediately; late downloads cannot publish plaintext. */
 export async function wipeRemoteMediaForOwner(pubkey: string): Promise<void> {
   const owner = pubkey.toLowerCase();
