@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   type Dispatch,
@@ -9,7 +10,6 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
-import { confirmLinkAction } from '../utils/confirmLinkAction';
 import { parseBip21 } from '../utils/bip21';
 import {
   type DecodedInvoice,
@@ -58,7 +58,6 @@ export function useSendSheetInput(opts: {
   setSatsValue: (v: string) => void;
 }): {
   processInput: (data: string) => void;
-  acceptVettedInput: (data: string) => void;
   resetInputForOpen: () => void;
   handleBarCodeScanned: (e: { data: string }) => void;
   handleNfcContent: (content: NfcTagContent) => void;
@@ -79,12 +78,21 @@ export function useSendSheetInput(opts: {
   } = opts;
   const t = useTranslation();
   const invalidInvoiceAlertVisible = useRef(false);
-  const linkConfirmationVisible = useRef(false);
   const sessionRef = useRef(0);
+  // Synchronous twin of `scanned`: the camera can deliver two different codes
+  // before React commits `scanned`, and the second must not replace the first.
+  const scanLockRef = useRef(false);
+  const markScanned = (v: boolean) => {
+    scanLockRef.current = v;
+    setScanned(v);
+  };
+  useEffect(() => {
+    // Released whenever the sheet clears `scanned` (scan another, reopen).
+    if (!scanned) scanLockRef.current = false;
+  }, [scanned]);
   useLayoutEffect(() => {
     sessionRef.current += 1;
     invalidInvoiceAlertVisible.current = false;
-    linkConfirmationVisible.current = false;
     return () => {
       sessionRef.current += 1;
     };
@@ -95,13 +103,12 @@ export function useSendSheetInput(opts: {
   const resetInputForOpen = useCallback(() => {
     sessionRef.current += 1;
     invalidInvoiceAlertVisible.current = false;
-    linkConfirmationVisible.current = false;
   }, []);
 
   const rejectInvoiceInput = (input: string, titleKey: string, bodyKey: string) => {
     setInvoiceData(null);
     setDecoded(null);
-    setScanned(false);
+    markScanned(false);
     setSatsValue('');
     setIsOnchainAddress(false);
     setIsLnurl(false);
@@ -142,13 +149,13 @@ export function useSendSheetInput(opts: {
       setIsLnurl(false);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: null, expiry: null });
-      setScanned(true);
+      markScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);
       setIsLnurl(false);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: null, expiry: null });
-      setScanned(true);
+      markScanned(true);
       // Pre-fill amount from BIP-21 URI if present (fiat view is derived
       // inside AmountEntryScreen from satsValue when the user opens it).
       if (bip21Amount) {
@@ -175,7 +182,7 @@ export function useSendSheetInput(opts: {
       setIsLnurl(false);
       setInvoiceData(input);
       setDecoded(invoice);
-      setScanned(true);
+      markScanned(true);
     } else if (isLnurlString(input)) {
       // Raw LNURL (bech32 lnurl1… or cleartext lnurlp://). We can't tell
       // pay vs withdraw from the string alone, so stash it and let the
@@ -186,51 +193,23 @@ export function useSendSheetInput(opts: {
       setIsLnurl(true);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: null, expiry: null });
-      setScanned(true);
+      markScanned(true);
     }
   };
 
-  // Caller-vetted targets skip the consent sheet: an in-app contact's address
-  // (Friends / zap / conversation send) or a deep link that App.tsx has ALREADY
-  // confirmed with the user. Prompting again would be pure friction and would
-  // make the consent sheet feel like noise. Scan / NFC / paste never use this —
-  // they go through `processInput`, which confirms first (#1500).
-  const acceptVettedInput = (data: string) => {
-    if (opts.visible === false) return;
+  // No link-consent sheet here: the user opened Send and chose to scan, paste
+  // or tap this target, and the details step names the recipient before any
+  // payment. Links arriving from outside the app (deep links, the global NFC
+  // reader) and the Add Friend scanner still confirm first (#1500).
+  const processInput = (data: string) => {
+    // One invalid-invoice alert at a time: the camera can deliver the same
+    // bad QR on every frame.
+    if (opts.visible === false || invalidInvoiceAlertVisible.current) return;
     acceptInput(data);
   };
 
-  const processInput = (data: string) => {
-    if (
-      opts.visible === false ||
-      linkConfirmationVisible.current ||
-      invalidInvoiceAlertVisible.current
-    )
-      return;
-    // Reject malformed invoices locally without presenting an action confirmation.
-    const input = stripLightningPrefix(data);
-    if (/^ln/i.test(input) && !isLnurlString(input) && !decodeInvoice(input)) {
-      acceptInput(data);
-      return;
-    }
-    const session = sessionRef.current;
-    linkConfirmationVisible.current = true;
-    confirmLinkAction(
-      data,
-      () => {
-        if (session !== sessionRef.current) return;
-        linkConfirmationVisible.current = false;
-        acceptInput(data);
-      },
-      () => {
-        if (session !== sessionRef.current) return;
-        linkConfirmationVisible.current = false;
-      },
-    );
-  };
-
   const handleBarCodeScanned = ({ data }: { data: string }) => {
-    if (scanned) return;
+    if (scanned || scanLockRef.current) return;
     processInput(data);
   };
 
@@ -238,7 +217,7 @@ export function useSendSheetInput(opts: {
   // scanned QR. Withdraw codes and Nostr profiles aren't payable from
   // here, so say why instead of silently doing nothing.
   const handleNfcContent = (content: NfcTagContent) => {
-    if (scanned) return;
+    if (scanned || scanLockRef.current) return;
     switch (content.type) {
       case 'lnurl-withdraw':
         Alert.alert(t('sendSheet.claimCodeTitle'), t('sendSheet.claimCodeBody'));
@@ -277,7 +256,6 @@ export function useSendSheetInput(opts: {
 
   return {
     processInput,
-    acceptVettedInput,
     resetInputForOpen,
     handleBarCodeScanned,
     handleNfcContent,
