@@ -185,7 +185,9 @@ it('with no direct friends left, a previously cached set is neither read nor tru
 it('a set that expires while the app is backgrounded is rebuilt after resume', async () => {
   jest.useFakeTimers();
   let onChange: ((s: AppStateStatus) => void) | undefined;
-  const listen = jest.spyOn(AppState, 'addEventListener').mockImplementation((_type, cb) => {
+  // Once only: AppState.addEventListener is already a jest mock, and
+  // restoring a spy on it would wipe its default implementation.
+  jest.spyOn(AppState, 'addEventListener').mockImplementationOnce((_type, cb) => {
     onChange = cb as (s: AppStateStatus) => void;
     return { remove: jest.fn() } as unknown as ReturnType<typeof AppState.addEventListener>;
   });
@@ -212,5 +214,37 @@ it('a set that expires while the app is backgrounded is rebuilt after resume', a
   });
   await flush();
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  listen.mockRestore();
+});
+
+it('a new but equal friends Set (profile hydration) does not re-read the cache', async () => {
+  await persistFofCache(
+    USER,
+    [...FRIENDS],
+    { set: new Set([SHARED]), excludedFriends: 0, computedAt: Date.now() },
+    WOT_FOF_MAX,
+  );
+  const getItem = AsyncStorage.getItem as jest.Mock;
+  const persistTier = jest.fn(); // stable, as the context's useCallback is
+  const { rerender } = renderHook(
+    (props: { friends: ReadonlySet<string> }) =>
+      useTrustGraphL2({
+        pubkey: USER,
+        friends: props.friends,
+        readRelays: ['wss://relay.example'], // new array each render, same content
+        wotTier: 'fof',
+        wotTierReady: true,
+        persistTier,
+      }),
+    { initialProps: { friends: new Set(FRIENDS) as ReadonlySet<string> } },
+  );
+  await flush();
+  const fofReads = () =>
+    getItem.mock.calls.filter(([key]) => key === fofCacheKey(USER, WOT_FOF_MAX)).length;
+  const reads = fofReads();
+  expect(reads).toBeGreaterThan(0);
+  for (let i = 0; i < 3; i += 1) {
+    rerender({ friends: new Set([...FRIENDS].reverse()) });
+    await flush();
+  }
+  expect(fofReads()).toBe(reads);
 });

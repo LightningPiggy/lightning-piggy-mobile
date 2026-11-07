@@ -4,8 +4,8 @@ import { Link2, ShieldCheck, KeyRound } from 'lucide-react-native';
 import SettingsRow from '../../components/SettingsRow';
 import AccountScreenLayout from './AccountScreenLayout';
 import type { AccountDrawerNavigation } from '../../navigation/types';
-import { useTranslation } from '../../contexts/LocaleContext';
-import { useTrustGraph } from '../../contexts/TrustGraphContext';
+import { useLocale } from '../../contexts/LocaleContext';
+import { useTrustGraph, WOT_FOF_MAX } from '../../contexts/TrustGraphContext';
 import { useNostr } from '../../contexts/NostrContext';
 import { useAccountState } from '../../contexts/useAccountState';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
@@ -35,7 +35,7 @@ const TIER_TITLE = {
  * content you see" filter, not as a rule about who may message you.
  */
 const MessageSettingsScreen: React.FC = () => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const navigation = useNavigation<AccountDrawerNavigation>();
@@ -82,7 +82,7 @@ const MessageSettingsScreen: React.FC = () => {
           details={[
             t('messageSettingsScreen.trustHint'),
             t('webOfTrustBottomSheet.explainer'),
-            t('webOfTrustBottomSheet.gateHint'),
+            t('webOfTrustBottomSheet.gateHint', { max: WOT_FOF_MAX.toLocaleString(formatLocale) }),
           ].join('\n\n')}
           onPress={() =>
             openPicker({

@@ -2255,7 +2255,7 @@
     },
     "allTitle": "Mind",
     "allSubtitle": "Minden, minden relay-ről. Alapértelmezett, amíg a bizalmi hálód nem készül el – a szigorításhoz válts Barátokra.",
-    "gateHint": "A Barátok barátai a barátaid által legtöbbet követett 2 000 embert tartalmazza, és naponta egyszer frissíti a listát. A Barátok a legbiztonságosabb hírfolyam; a Mind a legszélesebb.",
+    "gateHint": "A Barátok barátai a barátaid által legtöbbet követett {{max}} embert tartalmazza, és naponta egyszer frissíti a listát. A Barátok a legbiztonságosabb hírfolyam; a Mind a legszélesebb.",
     "done": "Kész"
   },
   "welcomeWalletPrompt": {

@@ -15,9 +15,10 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import {
   useTrustGraph,
   useTrustGraphL2Status,
+  WOT_FOF_MAX,
   type FofBuildProgress,
 } from '../contexts/TrustGraphContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale, useTranslation } from '../contexts/LocaleContext';
 import {
   createWebOfTrustBottomSheetStyles,
   type WebOfTrustBottomSheetStyles,
@@ -118,7 +119,7 @@ const FofProgressPanel: React.FC<FofProgressPanelProps> = ({ progress, onCancel,
 
 const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createWebOfTrustBottomSheetStyles(colors), [colors]);
   const { wotTier, setWotTier, l2Size } = useTrustGraph();
@@ -191,7 +192,7 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
               {t('webOfTrustBottomSheet.fofFailed')}
             </Text>
           ) : null}
-          {!status.building && !status.failed && activeTier === 'fof' ? (
+          {!status.building && !status.failed && activeTier === 'fof' && l2Size > 0 ? (
             <Text style={styles.metaText} testID="wot-fof-meta">
               {t('webOfTrustBottomSheet.fofCount', { count: l2Size })}
             </Text>
@@ -206,7 +207,7 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
           />
 
           <Text style={styles.gateHint} testID="wot-sheet-gate-hint">
-            {t('webOfTrustBottomSheet.gateHint')}
+            {t('webOfTrustBottomSheet.gateHint', { max: WOT_FOF_MAX.toLocaleString(formatLocale) })}
           </Text>
         </ScrollView>
 

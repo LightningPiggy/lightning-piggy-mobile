@@ -2255,7 +2255,7 @@
     },
     "allTitle": "Todos",
     "allSubtitle": "Todo de cada relé. Es lo predeterminado hasta que tu red de confianza esté lista: cambia a Amigos para restringir.",
-    "gateHint": "Amigos de amigos incluye a las 2000 personas a las que más siguen tus amigos y actualiza la lista una vez al día. Amigos es el feed más seguro; Todos es el más amplio.",
+    "gateHint": "Amigos de amigos incluye a las {{max}} personas a las que más siguen tus amigos y actualiza la lista una vez al día. Amigos es el feed más seguro; Todos es el más amplio.",
     "done": "Listo"
   },
   "welcomeWalletPrompt": {

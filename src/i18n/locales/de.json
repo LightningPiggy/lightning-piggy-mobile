@@ -2255,7 +2255,7 @@
     },
     "allTitle": "Alle",
     "allSubtitle": "Alles von allen Relays. Standard, bis dein Vertrauensnetz bereit ist – wechsle zu „Freunde“, um strenger zu filtern.",
-    "gateHint": "„Freunde von Freunden“ enthält die 2.000 Personen, denen deine Freunde am häufigsten folgen, und aktualisiert die Liste einmal täglich. „Freunde“ ist der sicherste Feed; „Alle“ der breiteste.",
+    "gateHint": "„Freunde von Freunden“ enthält die {{max}} Personen, denen deine Freunde am häufigsten folgen, und aktualisiert die Liste einmal täglich. „Freunde“ ist der sicherste Feed; „Alle“ der breiteste.",
     "done": "Fertig"
   },
   "welcomeWalletPrompt": {

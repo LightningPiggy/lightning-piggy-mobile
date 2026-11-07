@@ -110,6 +110,59 @@ describe('cancel safety', () => {
   });
 });
 
+describe('flaky batches', () => {
+  const noRelay = () => new Error('No follow-list relay answered');
+
+  it('retries a failed batch once and completes', async () => {
+    const flaky = jest.fn(fetchKind3).mockRejectedValueOnce(noRelay());
+    const result = await computeFofSet(user, friends, { fetchKind3: flaky, maxSize: 2000 });
+    expect(flaky).toHaveBeenCalledTimes(4); // 3 batches + 1 retry
+    expect(result.set.size).toBeGreaterThan(0);
+    expect(await AsyncStorage.getItem(fofCacheKey(user, 2000))).not.toBeNull();
+  });
+
+  it('fails (persisting nothing) when the retry fails too', async () => {
+    const down = jest
+      .fn(fetchKind3)
+      .mockRejectedValueOnce(noRelay())
+      .mockRejectedValueOnce(noRelay());
+    await expect(computeFofSet(user, friends, { fetchKind3: down, maxSize: 2000 })).rejects.toThrow(
+      'No follow-list relay answered',
+    );
+    expect(down).toHaveBeenCalledTimes(2);
+    expect(await AsyncStorage.getItem(fofCacheKey(user, 2000))).toBeNull();
+  });
+
+  it('never retries an abort', async () => {
+    const aborting = jest
+      .fn(fetchKind3)
+      .mockRejectedValueOnce(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+    await expect(
+      computeFofSet(user, friends, { fetchKind3: aborting, maxSize: 2000 }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(aborting).toHaveBeenCalledTimes(1);
+  });
+});
+
+it('keeps only FANOUT_CAP + 1 follows per friend yet gives the same set as the full lists', async () => {
+  // Two over-cap friends (700 follows) among eight normal ones: heuristic 1
+  // must still see them as over the cap after trimming.
+  const ten = friends.slice(0, 10);
+  const lists = Object.fromEntries(
+    ten.map((f, i) => [
+      f,
+      Array.from({ length: i < 2 ? 700 : 40 }, (_, j) => pk('pool', (i * 53 + j * 7) % 900)),
+    ]),
+  );
+  const result = await computeFofSet(user, ten, {
+    fetchKind3: async (batch) => Object.fromEntries(batch.map((f) => [f, lists[f]])),
+    maxSize: 2000,
+  });
+  const full = buildFofSet(user, ten, lists, 2000);
+  expect([...result.set]).toEqual([...full.set]);
+  expect(result.excludedFriends).toBe(2);
+});
+
 describe('sign-out retirement', () => {
   it('a build still running when the account is wiped never writes its graph back', async () => {
     let release!: () => void;

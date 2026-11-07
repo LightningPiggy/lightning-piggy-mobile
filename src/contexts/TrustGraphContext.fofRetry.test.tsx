@@ -5,6 +5,7 @@ import React from 'react';
 import { act, renderHook } from '@testing-library/react-native';
 import { TrustGraphProvider, useTrustGraph } from './TrustGraphContext';
 
+let mockTier = 'fof';
 const mockL2 = {
   l2Follows: new Set(['a'.repeat(64)]) as ReadonlySet<string>,
   status: { building: false, progress: null, failed: false },
@@ -18,7 +19,7 @@ jest.mock('./NostrContext', () => ({
   useNostrContacts: () => ({ contacts: [] }),
 }));
 jest.mock('../services/wotSettingsService', () => ({
-  peekWotSettings: () => ({ wotTier: 'fof' }),
+  peekWotSettings: () => ({ wotTier: mockTier }),
   loadWotSettings: () => new Promise(() => {}),
   saveWotSettings: jest.fn(async () => {}),
 }));
@@ -30,6 +31,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockTier = 'fof';
   mockL2.status = { building: false, progress: null, failed: false };
 });
 
@@ -51,5 +53,14 @@ it('does not start a second build while one is running', () => {
   mockL2.status = { building: true, progress: null, failed: true };
   const { result } = renderHook(() => useTrustGraph(), { wrapper });
   act(() => result.current.setWotTier('fof'));
+  expect(mockL2.refreshL2).not.toHaveBeenCalled();
+});
+
+it('re-picking Friends of friends while its first build runs does not restart it', () => {
+  mockTier = 'friends';
+  mockL2.status = { building: true, progress: null, failed: false };
+  const { result } = renderHook(() => useTrustGraph(), { wrapper });
+  act(() => result.current.setWotTier('fof'));
+  expect(mockL2.enableFof).not.toHaveBeenCalled();
   expect(mockL2.refreshL2).not.toHaveBeenCalled();
 });

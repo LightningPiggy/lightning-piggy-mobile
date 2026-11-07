@@ -217,11 +217,14 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     (next: WotTier) => {
       if (next === 'fof') {
         const current = tierStateRef.current;
+        // A build is already running (from any surface — sheet or Settings):
+        // re-picking FoF must not abort and restart it.
+        if (current.l2Loading) return;
         // Already on FoF: only rebuild a set that never arrived or whose last
         // build failed (the tap is the retry) — never re-fetch on an
         // accidental re-tap of a healthy set.
         if (current.wotTier !== 'fof') enableFof();
-        else if ((current.l2Empty || current.l2Failed) && !current.l2Loading) void refreshL2();
+        else if (current.l2Empty || current.l2Failed) void refreshL2();
         return;
       }
       cancelL2();
@@ -338,6 +341,7 @@ export const useTrustGraphL2Status = (): TrustGraphL2StatusContextType => {
 };
 
 export type { TrustGraphL2Status, FofBuildProgress } from './useTrustGraphL2';
+export { WOT_FOF_MAX } from './useTrustGraphL2';
 
 // Re-export so consumers can reference the seed list (e.g. "follow these
 // recommended accounts" UI) without depending on the service module.

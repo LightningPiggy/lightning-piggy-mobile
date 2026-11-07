@@ -2255,7 +2255,7 @@
     },
     "allTitle": "All",
     "allSubtitle": "Everything from every relay. Default until your trust graph is ready — switch to Friends to tighten.",
-    "gateHint": "Friends of friends keeps the 2,000 people your friends follow most, and refreshes the list once a day. Friends is the safest feed; All is the broadest.",
+    "gateHint": "Friends of friends keeps the {{max}} people your friends follow most, and refreshes the list once a day. Friends is the safest feed; All is the broadest.",
     "done": "Done"
   },
   "welcomeWalletPrompt": {

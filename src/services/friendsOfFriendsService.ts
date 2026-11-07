@@ -268,8 +268,21 @@ export const computeFofSet = async (
   let done = 0;
   for (const batch of batches) {
     if (opts.signal?.aborted) throw abortError();
-    const partial = await opts.fetchKind3(batch);
-    for (const [k, v] of Object.entries(partial)) followLists[k.toLowerCase()] = v;
+    let partial: Record<string, string[]>;
+    try {
+      partial = await opts.fetchKind3(batch);
+    } catch (error) {
+      // One flaky batch (e.g. no relay answered in time) shouldn't sink a
+      // 20-batch build: retry it once — `fetchKind3` sets a fresh deadline per
+      // call — then fail. Aborts are never retried.
+      if (opts.signal?.aborted || (error as Error | undefined)?.name === 'AbortError') throw error;
+      partial = await opts.fetchKind3(batch);
+    }
+    // Only the first FANOUT_CAP follows are tallied; one more keeps the
+    // over-cap signal (heuristic 1) without holding up to 5,000 per friend.
+    for (const [k, v] of Object.entries(partial)) {
+      followLists[k.toLowerCase()] = v.length > FANOUT_CAP ? v.slice(0, FANOUT_CAP + 1) : v;
+    }
     done += 1;
     opts.onProgress?.(done, batches.length);
   }

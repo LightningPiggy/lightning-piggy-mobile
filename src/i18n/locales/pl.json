@@ -2259,7 +2259,7 @@
     },
     "allTitle": "Wszyscy",
     "allSubtitle": "Wszystko ze wszystkich przekaźników. Ustawienie domyślne, dopóki twój graf zaufania nie będzie gotowy — przełącz na Znajomych, aby zaostrzyć filtr.",
-    "gateHint": "Opcja Znajomi znajomych obejmuje 2 000 osób obserwowanych przez największą liczbę twoich znajomych i odświeża listę raz dziennie. Znajomi to najbezpieczniejszy strumień; Wszyscy to najszerszy.",
+    "gateHint": "Opcja Znajomi znajomych obejmuje {{max}} osób obserwowanych przez największą liczbę twoich znajomych i odświeża listę raz dziennie. Znajomi to najbezpieczniejszy strumień; Wszyscy to najszerszy.",
     "done": "Gotowe"
   },
   "welcomeWalletPrompt": {

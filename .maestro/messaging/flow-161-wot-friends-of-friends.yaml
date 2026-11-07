@@ -6,8 +6,8 @@ name: Web of Trust — build Friends of friends on demand, cancel, then select (
 #   - the row is selectable (no longer greyed out);
 #   - picking it shows the "Finding friends of friends… X of Y" panel with
 #     Cancel, and Cancel leaves the tier on Friends;
-#   - picking it again completes, the sheet shows the set size and the
-#     Friends of friends row becomes the selected tier;
+#   - picking it again completes and the Friends of friends row becomes the
+#     selected tier;
 #   - switching back to Friends restores the original state.
 #
 # The active tier is read from the rows' `selected` accessibility state.
@@ -63,17 +63,17 @@ name: Web of Trust — build Friends of friends on demand, cancel, then select (
       - tapOn:
           id: 'wot-tier-fof-chip'
 
-# Let the build finish: the set size replaces the progress panel and the
-# tier switches.
+# Let the build finish: the tier switches once the set is ready (the size
+# row, `wot-fof-meta`, only shows for a non-empty set).
 - extendedWaitUntil:
     visible:
-      id: 'wot-fof-meta'
+      id: 'wot-tier-fof-chip'
+      selected: true
     timeout: 90000
 - assertNotVisible:
+    id: 'wot-fof-progress'
+- assertNotVisible:
     id: 'wot-fof-error'
-- assertVisible:
-    id: 'wot-tier-fof-chip'
-    selected: true
 - tapOn:
     id: 'wot-sheet-done'
 - assertNotVisible:

@@ -98,9 +98,13 @@ export function useTrustGraphL2({
   // Bumped when a resumed app finds the in-memory set past its TTL.
   const [expiryTick, setExpiryTick] = useState(0);
 
-  const friendsList = useMemo(() => [...friends].sort(), [friends]);
-  const friendsKey = friendsList.join(',');
-  const relaysKey = [...readRelays].sort().join(',');
+  // Keyed on CONTENT: NostrContext replaces `contacts` (so a new `friends`
+  // Set) on every kind-0 batch during profile hydration. Deriving the list
+  // from the string key keeps `runBuild` and the load effect stable across
+  // those equal-content updates (no cache re-read, no reset 8 s timer).
+  const friendsKey = useMemo(() => [...friends].sort().join(','), [friends]);
+  const friendsList = useMemo(() => (friendsKey ? friendsKey.split(',') : []), [friendsKey]);
+  const relaysKey = useMemo(() => [...readRelays].sort().join(','), [readRelays]);
 
   const applySnapshot = useCallback(
     (snapshot: L2Snapshot) => {
