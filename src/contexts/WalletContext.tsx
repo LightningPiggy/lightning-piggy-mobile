@@ -412,9 +412,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // "Send button feels frozen for 12 s" symptom. Cached balances
         // from the previous session are hydrated above; fresh balances
         // arrive on pull-to-refresh / wallet detail open / explicit
-        // `refreshBalanceForWallet` calls, all of which lazily init
-        // BDK on demand (the `bdkWallets` cache in onchainService
-        // already memoises per walletId).
+        // `refreshBalanceForWallet` calls and useOnchainIncomingPoll's
+        // first sweep (30 s after launch, #1725), all of which lazily init
+        // BDK on demand (`bdkWallets` in onchainService memoises per id).
         void Promise.all(
           walletList.map(async (wallet) => {
             try {
@@ -1629,8 +1629,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // On-chain incoming-payment coverage (#134). Extracted into its own
   // hook so this over-cap context doesn't grow — see
-  // useOnchainIncomingPoll for the full rationale (gentle 2-min cadence,
-  // foreground-resume one-shot, all-wallet sweep). It refreshes on-chain
+  // useOnchainIncomingPoll for the full rationale (first sweep 30 s after
+  // launch, 2-min cadence, staggered resume, failure backoff). It refreshes on-chain
   // balances, which trips the same balance-diff receive detector above.
   useOnchainIncomingPoll({
     wallets,

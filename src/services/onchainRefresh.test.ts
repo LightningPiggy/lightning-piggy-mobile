@@ -1,4 +1,5 @@
 import { syncAndRefresh, getTransactions } from './onchainService';
+import { isOnchainSyncBackedOff, recordOnchainSyncFailure } from './onchainSyncBackoff';
 const mockSync = jest.fn(async () => true);
 const mockList = jest.fn(async () => [
   { txid: 'old', received: 9, sent: 2, confirmationTime: { height: 5, timestamp: 10 } },
@@ -99,4 +100,18 @@ it('paces individual Esplora inputs and outputs as well as transactions', async 
   } finally {
     global.fetch = originalFetch;
   }
+});
+
+it('lifts the background poll backoff on success only (#1725)', async () => {
+  recordOnchainSyncFailure('w');
+  expect(isOnchainSyncBackedOff('w')).toBe(true);
+  // A failed sync (e.g. pull-to-refresh while offline) leaves the backoff alone.
+  mockSync.mockRejectedValueOnce(new Error('electrum down'));
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  expect((await syncAndRefresh('w')).ok).toBe(false);
+  warn.mockRestore();
+  expect(isOnchainSyncBackedOff('w')).toBe(true);
+  // Any successful sync of the wallet lifts it.
+  expect((await syncAndRefresh('w')).ok).toBe(true);
+  expect(isOnchainSyncBackedOff('w')).toBe(false);
 });
