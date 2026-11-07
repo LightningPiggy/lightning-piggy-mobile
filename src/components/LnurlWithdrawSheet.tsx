@@ -82,7 +82,28 @@ type Stage =
   | { kind: 'claimed'; sats: number }
   | { kind: 'error'; reason: string };
 
-export function LnurlWithdrawHost(): React.ReactElement {
+interface LnurlWithdrawHostProps {
+  /** Called with the endpoint URL when the link turns out to be an LNURL-pay
+   *  (`payRequest`) rather than a voucher — e.g. a bare `lnurl://` or a scanned
+   *  `lnurl1…`, whose direction is only known once resolved. The host closes
+   *  itself and hands over; the Send sheet still asks for the amount and the
+   *  Send tap, so nothing is paid without the user confirming. Never used for
+   *  `lnurlw://`, whose consent said "Withdraw": that shows an error instead.
+   *  Returns false if it couldn't open the Send sheet (the error shows then).
+   *  A prop rather than a direct `navigateToSend` import to avoid a require
+   *  cycle (AppNavigator → HomeScreen → ReceiveSheet → this file). */
+  onPayLink?: (url: string) => boolean;
+}
+
+/** Only `lnurlw://` declares its direction up front; `lnurl://` / `lnurl1…`
+ *  may turn out to be a pay link. */
+const isDeclaredWithdraw = (lnurl: string) => /^(lightning:)?lnurlw:\/\//i.test(lnurl.trim());
+
+export function LnurlWithdrawHost({ onPayLink }: LnurlWithdrawHostProps = {}): React.ReactElement {
+  // Read through a ref so a caller passing an inline arrow can't cancel and
+  // re-issue the resolve fetch on every parent re-render.
+  const onPayLinkRef = useRef(onPayLink);
+  onPayLinkRef.current = onPayLink;
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createLnurlWithdrawSheetStyles(colors), [colors]);
@@ -269,9 +290,35 @@ export function LnurlWithdrawHost(): React.ReactElement {
         setStage({ kind: 'ready', params });
       } catch (e) {
         if (cancelled || !mountedRef.current) return;
+        // A pay link opened as a claim (bare `lnurl://`, scanned `lnurl1…`):
+        // hand it to the Send sheet rather than dead-ending on an error. Not
+        // for `lnurlw://`: the user agreed to "Withdraw from <host>", and a
+        // withdraw tag that turns out to request payment gets the error.
+        const payLink = onPayLinkRef.current;
+        if (
+          e instanceof LnurlWithdrawError &&
+          e.code === 'pay-request' &&
+          payLink &&
+          !isDeclaredWithdraw(lnurl)
+        ) {
+          let url: string | null = null;
+          try {
+            url = decodeLnurlWithdraw(lnurl);
+          } catch {
+            /* Unreachable — resolve already decoded it; fall through to the error. */
+          }
+          if (url && payLink(url)) {
+            sheetRef.current?.dismiss();
+            return;
+          }
+        }
+        // Issuer-sent reasons (`status: ERROR`) are meaningful → show as-is;
+        // our own "not a withdrawRequest" protocol message is not (#1714).
         const reason =
           e instanceof LnurlWithdrawError
-            ? e.message
+            ? e.code
+              ? t('lnurlWithdrawSheet.notAVoucher')
+              : e.message
             : t('lnurlWithdrawSheet.couldNotResolveLnurl', { message: (e as Error).message });
         setStage({ kind: 'error', reason });
       }
@@ -345,6 +392,9 @@ export function LnurlWithdrawHost(): React.ReactElement {
   } catch {
     /* Resolve reports invalid inputs after consent. */
   }
+  // Unless the link declares itself a withdraw, the pre-fetch consent stays
+  // neutral (same wording as the app-wide link prompt in `confirmLinkAction`).
+  const isWithdrawForm = !!lnurl && isDeclaredWithdraw(lnurl);
 
   const close = () => sheetRef.current?.dismiss();
 
@@ -392,7 +442,14 @@ export function LnurlWithdrawHost(): React.ReactElement {
           keyboardShouldPersistTaps="handled"
           testID="lnurl-withdraw-sheet"
         >
-          {(stage.kind === 'confirm' || stage.kind === 'ready') && (
+          {stage.kind === 'confirm' && (
+            <Text style={styles.title}>
+              {t(isWithdrawForm ? 'linkAction.withdraw' : 'linkAction.open', {
+                target: issuerHost,
+              })}
+            </Text>
+          )}
+          {stage.kind === 'ready' && (
             <Text style={styles.title}>{t('linkAction.withdraw', { target: issuerHost })}</Text>
           )}
           {stage.kind === 'confirm' && (

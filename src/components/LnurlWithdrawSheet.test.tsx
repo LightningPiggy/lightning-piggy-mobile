@@ -1,6 +1,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { LnurlWithdrawHost, openLnurlWithdrawSheet } from './LnurlWithdrawSheet';
+import { LnurlWithdrawError } from '../services/lnurlWithdrawService';
 
 let mockDismiss: (() => void) | null = null;
 jest.mock('@gorhom/bottom-sheet', () => {
@@ -164,4 +165,92 @@ it('skips only the host step for an already-consented caller; the claim tap stay
   expect(mockMakeInvoice).not.toHaveBeenCalled();
   await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-claim-button')));
   expect(mockClaim).toHaveBeenCalledTimes(1);
+});
+
+it('hands a pay link to the Send sheet only after the neutral consent tap', async () => {
+  mockResolve.mockRejectedValue(
+    new LnurlWithdrawError('LNURL endpoint is not a withdrawRequest (LUD-03)', 'pay-request'),
+  );
+  const onPayLink = jest.fn(() => true);
+  render(<LnurlWithdrawHost onPayLink={onPayLink} />);
+  await act(async () => {
+    openLnurlWithdrawSheet('lnurl://example.com/pay', undefined, true);
+  });
+  // Direction is unknown until resolved, so the consent doesn't say "Withdraw".
+  expect(screen.getByText('linkAction.open')).toBeTruthy();
+  expect(screen.queryByText('linkAction.withdraw')).toBeNull();
+  expect(mockResolve).not.toHaveBeenCalled();
+  expect(onPayLink).not.toHaveBeenCalled();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  expect(onPayLink).toHaveBeenCalledWith('https://example.com/pay');
+  expect(mockClaim).not.toHaveBeenCalled();
+  expect(mockMakeInvoice).not.toHaveBeenCalled();
+  expect(screen.queryByText(/withdrawRequest/)).toBeNull();
+});
+
+it('shows friendly copy, not the raw protocol error, for a non-voucher link', async () => {
+  mockResolve.mockRejectedValue(
+    new LnurlWithdrawError('LNURL endpoint is not a withdrawRequest (LUD-03)', 'not-withdraw'),
+  );
+  const onPayLink = jest.fn(() => true);
+  render(<LnurlWithdrawHost onPayLink={onPayLink} />);
+  await act(async () => {
+    openLnurlWithdrawSheet('lnurlw://example.com/odd', 'first', true);
+  });
+  expect(screen.getByText('linkAction.withdraw')).toBeTruthy();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  expect(onPayLink).not.toHaveBeenCalled();
+  expect(screen.getByText('lnurlWithdrawSheet.notAVoucher')).toBeTruthy();
+  expect(screen.queryByText(/withdrawRequest/)).toBeNull();
+});
+
+it('never hands an lnurlw:// link to the Send sheet, since its consent said "Withdraw"', async () => {
+  mockResolve.mockRejectedValue(
+    new LnurlWithdrawError('LNURL endpoint is not a withdrawRequest (LUD-03)', 'pay-request'),
+  );
+  const onPayLink = jest.fn(() => true);
+  render(<LnurlWithdrawHost onPayLink={onPayLink} />);
+  await act(async () => {
+    openLnurlWithdrawSheet('lnurlw://example.com/disguised', 'first', true);
+  });
+  expect(screen.getByText('linkAction.withdraw')).toBeTruthy();
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  expect(onPayLink).not.toHaveBeenCalled();
+  expect(screen.getByText('lnurlWithdrawSheet.notAVoucher')).toBeTruthy();
+});
+
+it('shows the friendly error when the Send sheet could not be opened', async () => {
+  mockResolve.mockRejectedValue(
+    new LnurlWithdrawError('LNURL endpoint is not a withdrawRequest (LUD-03)', 'pay-request'),
+  );
+  const onPayLink = jest.fn(() => false);
+  render(<LnurlWithdrawHost onPayLink={onPayLink} />);
+  await act(async () => {
+    openLnurlWithdrawSheet('lnurl://example.com/pay', 'first', true);
+  });
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  expect(onPayLink).toHaveBeenCalledTimes(1);
+  expect(screen.getByText('lnurlWithdrawSheet.notAVoucher')).toBeTruthy();
+});
+
+it('falls back to the friendly error for a pay link when no Send hand-off is wired', async () => {
+  mockResolve.mockRejectedValue(
+    new LnurlWithdrawError('LNURL endpoint is not a withdrawRequest (LUD-03)', 'pay-request'),
+  );
+  render(<LnurlWithdrawHost />);
+  await act(async () => {
+    openLnurlWithdrawSheet('lnurl://example.com/pay', 'first', true);
+  });
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  expect(screen.getByText('lnurlWithdrawSheet.notAVoucher')).toBeTruthy();
+});
+
+it('still shows an issuer-sent reason as-is', async () => {
+  mockResolve.mockRejectedValue(new LnurlWithdrawError('Voucher already spent'));
+  render(<LnurlWithdrawHost />);
+  await act(async () => {
+    openLnurlWithdrawSheet('lnurlw://example.com/spent', 'first', true);
+  });
+  await act(async () => fireEvent.press(screen.getByTestId('lnurl-withdraw-resolve-button')));
+  expect(screen.getByText('Voucher already spent')).toBeTruthy();
 });

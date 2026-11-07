@@ -122,6 +122,14 @@ describe('resolveLnurlWithdraw', () => {
     );
   });
 
+  it('tags a payRequest so the claim sheet can hand it to the Send sheet', async () => {
+    fetchMock.mockResolvedValueOnce(response({ tag: 'payRequest', callback: 'https://x' }));
+    await expect(resolveLnurlWithdraw('lnurl://example.com/p')).rejects.toMatchObject({
+      name: 'LnurlWithdrawError',
+      code: 'pay-request',
+    });
+  });
+
   it('rejects a withdrawRequest whose callback is not an https public host', async () => {
     fetchMock.mockResolvedValueOnce(
       response({ ...withdrawRequest, callback: 'http://example.com/cb' }),
@@ -129,6 +137,13 @@ describe('resolveLnurlWithdraw', () => {
     await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toThrow(
       /not a withdrawRequest/i,
     );
+  });
+
+  it('tags any other non-withdraw response as not-withdraw', async () => {
+    fetchMock.mockResolvedValueOnce(response({ tag: 'channelRequest' }));
+    await expect(resolveLnurlWithdraw('lnurlw://example.com/w')).rejects.toMatchObject({
+      code: 'not-withdraw',
+    });
   });
 
   it('throws when the endpoint returns non-OK', async () => {

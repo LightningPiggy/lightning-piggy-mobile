@@ -1107,7 +1107,8 @@
     "unlocked": "Desbloqueado: vuelve a escanear para reclamar.",
     "cooldownNoHint": "El tiempo de espera sigue activo o se ha agotado el presupuesto de sats. Inténtalo más tarde.",
     "close": "Cerrar",
-    "couldntClaim": "No se pudo reclamar"
+    "couldntClaim": "No se pudo reclamar",
+    "notAVoucher": "Este enlace no es un vale, así que no hay nada que reclamar."
   },
   "locationPickerSheet": {
     "closeLocationPicker": "Cerrar selector de ubicación",
