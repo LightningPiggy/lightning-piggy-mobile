@@ -127,7 +127,7 @@ adb shell pm disable-user --user 0 com.google.android.apps.maps
 2. **Multi-window tap-latency script** — `scripts/perf-cold-tap-windows.sh` cold-starts once per offset and taps Send at +0/+500/+1.5k/+3k/+5k/+7k/+10k/+13k ms after Home renders. Plots tap-to-onPress latency as a curve so the freeze window is visible. +
 3. **`perfLog(tag)`** sprinkled at every cold-start boundary (`WalletProvider first render`, `HomeScreen first render`, `WalletCarousel first render (N wallets)`, `TransactionList first render (N txs)`, `resolveZapSenders[id]: start/done`, etc.). A single `adb logcat \| grep "\[Perf\]"` gives the full attribution. +
 *Common cause + fix:* sequential `await fetchProfile(pk, relays)` in a `for...of` loop over N transactions. Each iteration is one relay round-trip (~500-2000 ms). Replace with two-phase batch: collect all pubkeys → one `zapSenderProfileStorage.getMany([...pks])` from disk → one `nostrService.fetchProfiles(missing, relays)` for the remainder. The incoming branch of `resolveZapSendersForWallet` already used this pattern; the outgoing branch did not until PR #510. +
-*Build a perf-instrumented APK to investigate on a real device:* `EXPO_PUBLIC_KEEP_PERF_LOGS=1 eas build --local --profile production --platform android --non-interactive --output /tmp/lp-perf.apk`. `babel.config.js` skips `transform-remove-console` and `perfLog.ts` honours the same env flag, so `[Perf]` lines survive in the release APK. **Never ship a real release build with the flag set.**
+*Build a perf-instrumented APK to investigate on a real device:* `EXPO_PUBLIC_KEEP_PERF_LOGS=1 eas build --local --profile production --platform android --non-interactive --output /tmp/lp-perf.tar.gz`. The production profile builds per-ABI APKs, so the output is a `.tar.gz`: extract it and install the `arm64-v8a` APK. `babel.config.js` skips `transform-remove-console` and `perfLog.ts` honours the same env flag, so `[Perf]` lines survive in the release APK. **Never ship a real release build with the flag set.**
 
 | `npx expo start` fails but `npm start` works
 | The `start` script includes `--dev-client` which is required for custom native modules. Always use `npm start`.
@@ -153,7 +153,7 @@ The `--local` path is supposed to share the EAS server counter that `eas build:v
 *Symptom + diagnosis sequence:* +
 [source,bash]
 ----
-adb -s <serial> install -r build-*.apk
+adb -s <serial> install -r build-*-arm64-v8a.apk   # production builds are per-ABI (extract the .tar.gz first)
 # → Failure [INSTALL_FAILED_VERSION_DOWNGRADE: Update version code 28 is older than current 34]
 adb -s <serial> shell dumpsys package com.lightningpiggy.app | grep -E versionCode      # device floor
 APP_VARIANT=production eas build:version:get --platform android --profile production    # `:get` counter

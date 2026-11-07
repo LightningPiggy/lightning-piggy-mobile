@@ -517,13 +517,13 @@ jobs:
             apk="dist/lightning-piggy-$TAG-$abi.apk"
             "$BUILD_TOOLS/zipalign" -c -P 16 4 "$apk"
             # Exactly one ABI per APK.
-            abis=$(unzip -Z1 "$apk" 'lib/*' | cut -d/ -f2 | sort -u | paste -sd, -)
+            abis=$({ unzip -Z1 "$apk" 'lib/*' 2>/dev/null || true; } | cut -d/ -f2 | sort -u | paste -sd, -)
             if [ "$abis" != "$abi" ]; then
               echo "::error title=Wrong native libraries in $abi APK::Found ABIs: ${abis:-none}"
               exit 1
             fi
             # Native libraries stored compressed (useLegacyPackaging in app.config.ts).
-            stored=$(unzip -v "$apk" 'lib/*' | awk '$2 == "Stored" { n++ } END { print n + 0 }')
+            stored=$({ unzip -v "$apk" 'lib/*' 2>/dev/null || true; } | awk '$2 == "Stored" { n++ } END { print n + 0 }')
             if [ "$stored" -ne 0 ]; then
               echo "::error title=Uncompressed native libraries in $abi APK::$stored lib/ entries are Stored, expected Deflated."
               exit 1
