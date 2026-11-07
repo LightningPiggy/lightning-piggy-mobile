@@ -8,6 +8,7 @@ import { renderHook } from '@testing-library/react-native';
 import { clearDecryptedMediaMemory, setDecryptedMediaOwner } from '../services/decryptedMediaCache';
 import { stopNativeDmEngineGlobal } from './nativeDmEngine';
 import { clearMemoisedSecretKey, nip04PlaintextCache } from './nostrSecretKeyCache';
+import { hasFailedMedia, rememberFailedMedia } from '../utils/failedMediaMemory';
 import {
   dropIdentityKeyMaterial,
   useIdentityMemoryReset,
@@ -118,6 +119,14 @@ it.each(['switch', 'logout'])(
     expect(readConversationReactions(key).records).toEqual([]);
   },
 );
+
+it.each(['switch', 'logout'])('forgets which media URLs failed on %s', (action) => {
+  const url = 'https://example.com/gone.jpg';
+  rememberFailedMedia(url);
+  if (action === 'switch') setup(A).result.current.activateLoginPubkey(B);
+  else dropIdentityKeyMaterial();
+  expect(hasFailedMedia(url)).toBe(false);
+});
 
 it.each(['switch', 'logout'])('clears canonical follows and deferred plaintext on %s', (action) => {
   const store = getFollowGateStore(A);

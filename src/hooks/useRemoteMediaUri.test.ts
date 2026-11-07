@@ -1,15 +1,20 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import { resolveRemoteMedia } from '../services/remoteMediaCache';
-import { useRemoteMedia } from './useRemoteMediaUri';
+import { useRemoteMedia, useRemoteMediaWithAutoRetry } from './useRemoteMediaUri';
 import { MEDIA_MAX_BYTES } from '../utils/remoteUrlPolicy';
+import { __resetFailedMediaForTests, hasFailedMedia } from '../utils/failedMediaMemory';
 
 let mockOwner = 'alice';
 jest.mock('./useActivePubkey', () => ({ useActivePubkey: () => mockOwner }));
-jest.mock('../services/remoteMediaCache', () => ({ resolveRemoteMedia: jest.fn() }));
+jest.mock('../services/remoteMediaCache', () => ({
+  resolveRemoteMedia: jest.fn(),
+  evictRemoteMedia: jest.fn(async () => undefined),
+}));
 const url = 'https://example.com/voice.mp3';
 beforeEach(() => {
   jest.clearAllMocks();
   mockOwner = 'alice';
+  __resetFailedMediaForTests();
 });
 it('retries a failed plain voice download without changing the URL or consent', async () => {
   jest
@@ -53,4 +58,127 @@ it('does not download or retry before consent', async () => {
   act(() => result.current.retry());
   await act(async () => {});
   expect(resolveRemoteMedia).not.toHaveBeenCalled();
+});
+
+describe('useRemoteMediaWithAutoRetry: per-session failed-URL memory', () => {
+  const image = 'https://example.com/gone.jpg';
+  const mount = () => renderHook(() => useRemoteMediaWithAutoRetry(image, MEDIA_MAX_BYTES, 0));
+
+  it('a dead URL costs its two downloads once; a remounted row shows "tap to retry" without fetching', async () => {
+    jest.mocked(resolveRemoteMedia).mockRejectedValue(new Error('Remote fetch failed (404)'));
+    const first = mount();
+    await waitFor(() => expect(first.result.current.failed).toBe(true));
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(2); // load + automatic retry
+    expect(hasFailedMedia(image)).toBe(true);
+    first.unmount();
+
+    // A recycled / remounted row meeting the same URL.
+    const second = mount();
+    expect(second.result.current.failed).toBe(true);
+    expect(second.result.current.uri).toBeNull();
+    await act(async () => {});
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(2);
+  });
+
+  it('a retry tap on a remembered URL downloads once and forgets it on success', async () => {
+    jest.mocked(resolveRemoteMedia).mockRejectedValue(new Error('Remote fetch failed (404)'));
+    const first = mount();
+    await waitFor(() => expect(first.result.current.failed).toBe(true));
+    first.unmount();
+
+    jest.mocked(resolveRemoteMedia).mockReset().mockResolvedValueOnce('file:///back');
+    const second = mount();
+    act(() => second.result.current.retry());
+    expect(hasFailedMedia(image)).toBe(false);
+    await waitFor(() => expect(second.result.current.uri).toBe('file:///back'));
+    expect(second.result.current.failed).toBe(false);
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('a retry tap that fails again costs one download (no extra auto-retry) and is remembered again', async () => {
+    jest.mocked(resolveRemoteMedia).mockRejectedValue(new Error('Remote fetch failed (404)'));
+    const first = mount();
+    await waitFor(() => expect(first.result.current.failed).toBe(true));
+    first.unmount();
+
+    jest.mocked(resolveRemoteMedia).mockClear();
+    const second = mount();
+    act(() => second.result.current.retry());
+    await waitFor(() => expect(resolveRemoteMedia).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(second.result.current.failed).toBe(true));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(1);
+    expect(hasFailedMedia(image)).toBe(true);
+  });
+
+  it('remembers an undecodable image too, which already skips the automatic retry', async () => {
+    jest.mocked(resolveRemoteMedia).mockResolvedValue('file:///html-page');
+    const first = mount();
+    await waitFor(() => expect(first.result.current.uri).toBe('file:///html-page'));
+    act(() => first.result.current.reportBroken());
+    await waitFor(() => expect(first.result.current.failed).toBe(true));
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(1);
+    expect(hasFailedMedia(image)).toBe(true);
+    first.unmount();
+
+    const second = mount();
+    expect(second.result.current.failed).toBe(true);
+    await act(async () => {});
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('an offline / timeout failure is not remembered, so a remount loads by itself', async () => {
+    jest.mocked(resolveRemoteMedia).mockRejectedValue(new Error('Network request failed'));
+    const first = mount();
+    await waitFor(() => expect(first.result.current.failed).toBe(true));
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(2);
+    expect(hasFailedMedia(image)).toBe(false);
+    first.unmount();
+
+    jest.mocked(resolveRemoteMedia).mockReset().mockResolvedValueOnce('file:///online');
+    const second = mount();
+    await waitFor(() => expect(second.result.current.uri).toBe('file:///online'));
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('a recycled row re-decides per URL: after a retry tap, A → B → A skips A again', async () => {
+    const other = 'https://example.com/fine.jpg';
+    jest.mocked(resolveRemoteMedia).mockRejectedValue(new Error('Remote fetch failed (404)'));
+    const first = mount();
+    await waitFor(() => expect(first.result.current.failed).toBe(true));
+    first.unmount();
+
+    jest
+      .mocked(resolveRemoteMedia)
+      .mockReset()
+      .mockImplementation(async (u: string) => {
+        if (u === other) return 'file:///fine';
+        throw new Error('Remote fetch failed (404)');
+      });
+    const row = renderHook(
+      ({ u }: { u: string }) => useRemoteMediaWithAutoRetry(u, MEDIA_MAX_BYTES, 0),
+      { initialProps: { u: image } },
+    );
+    act(() => row.result.current.retry());
+    await waitFor(() => expect(row.result.current.failed).toBe(true));
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(1);
+    expect(hasFailedMedia(image)).toBe(true);
+
+    row.rerender({ u: other });
+    await waitFor(() => expect(row.result.current.uri).toBe('file:///fine'));
+    row.rerender({ u: image });
+    expect(row.result.current.failed).toBe(true);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(resolveRemoteMedia).toHaveBeenCalledTimes(2); // retry tap + B only
+  });
+
+  it('a transient failure that the automatic retry fixes is not remembered', async () => {
+    jest
+      .mocked(resolveRemoteMedia)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce('file:///ok');
+    const { result } = mount();
+    await waitFor(() => expect(result.current.uri).toBe('file:///ok'));
+    expect(hasFailedMedia(image)).toBe(false);
+  });
 });
