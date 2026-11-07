@@ -98,7 +98,7 @@ describe('sanitizeSharedText', () => {
   });
 
   it('removes every bidi mark, embedding, override and isolate', () => {
-    const bidi = ['\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e'];
+    const bidi = ['\u061c', '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e'];
     const isolates = ['\u2066', '\u2067', '\u2068', '\u2069'];
     expect(sanitizeSharedText(`x${[...bidi, ...isolates].join('')}y`)).toBe('xy');
   });
@@ -107,6 +107,12 @@ describe('sanitizeSharedText', () => {
     expect(sanitizeSharedText('\ufeffexa\u200bmple\u200c.com\u2060/\u200dpath')).toBe(
       'example.com/path',
     );
+  });
+
+  it('removes other invisible characters that could fake line breaks or hide text', () => {
+    const invisible = ['\u00ad', '\u180e', '\u2028', '\u2029', '\ufff9', '\ufffa', '\ufffb'];
+    const fillers = ['\u3164', '\uffa0'];
+    expect(sanitizeSharedText(`x${[...invisible, ...fillers].join('')}y`)).toBe('xy');
   });
 
   it('keeps the joiner inside an emoji sequence', () => {

@@ -133,10 +133,12 @@ export function renamedForMime(fileName: string, mime: SharedImageMime): string 
 // C0 controls except tab / newline, DEL, C1 controls, the bidi marks /
 // embeddings / overrides / isolates that can make text read differently from
 // what it says ("Trojan Source" style spoofing of a shared link), and
-// invisible zero-width / format characters (ZWSP, ZWNJ, word joiner, BOM).
+// invisible zero-width / format characters (ZWSP, ZWNJ, word joiner, BOM,
+// soft hyphen, Mongolian vowel separator, line / paragraph separators,
+// interlinear annotation marks, Hangul fillers).
 // Written as escapes so the source itself carries no invisible characters.
 const UNSAFE_TEXT_CHARS =
-  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b\u200c\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/g;
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b\u200c\u200e\u200f\u2028-\u202e\u2060\u2066-\u2069\u3164\ufeff\ufff9-\ufffb\uffa0]/g;
 
 const ZERO_WIDTH_JOINER = /\u200d/g;
 
