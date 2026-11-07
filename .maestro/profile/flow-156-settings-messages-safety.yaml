@@ -25,7 +25,7 @@ name: Messages and Safety — inspect pickers and independent info controls
     timeout: 15000
 - assertVisible:
     id: wot-tier-fof-chip
-    enabled: false
+    enabled: true
 - assertVisible:
     id: wot-tier-all-chip
 - tapOn:

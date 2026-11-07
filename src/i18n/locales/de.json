@@ -2237,17 +2237,25 @@
     "addWallet": "Wallet hinzufügen"
   },
   "webOfTrustBottomSheet": {
-    "locked": "Gesperrt. Bleib vorerst bei Freunden.",
     "title": "Vertrauensnetz",
     "close": "Schließen",
     "explainer": "Wir filtern nicht verifizierte Absender, Cache-Verstecker und Event-Veranstalter heraus – jeder könnte eine Phishing-Nachricht veröffentlichen oder einen physischen Köder auslegen, daher siehst du standardmäßig nur Inhalte von Personen in deinem Vertrauensnetz.",
     "friendsTitle": "Freunde",
     "friendsSubtitle": "Nur Personen, denen du folgst.",
     "fofTitle": "Freunde von Freunden",
-    "fofSubtitle": "Noch nicht umgesetzt – kommt bald. Wir arbeiten daran, das erweiterte Netz zu laden und zwischenzuspeichern, ohne die App einzufrieren.",
+    "fofSubtitle": "Personen, denen du folgst, und die Personen, denen sie am häufigsten folgen. Das Netz wird erstellt, wenn du diese Option wählst — beim ersten Mal dauert das einen Moment.",
+    "fofProgressStarting": "Freunde von Freunden werden gesucht…",
+    "fofProgress": "Freunde von Freunden werden gesucht… {{done}} von {{total}}",
+    "fofCancel": "Abbrechen",
+    "fofCancelA11y": "Suche nach Freunden von Freunden stoppen",
+    "fofFailed": "Die Relays konnten nicht erreicht werden, um Freunde von Freunden zu finden. Dein Filter wurde nicht geändert — versuche es gleich noch einmal.",
+    "fofCount": {
+      "one": "{{count}} Freund von Freunden in deinem Vertrauensnetz",
+      "other": "{{count}} Freunde von Freunden in deinem Vertrauensnetz"
+    },
     "allTitle": "Alle",
     "allSubtitle": "Alles von allen Relays. Standard, bis dein Vertrauensnetz bereit ist – wechsle zu „Freunde“, um strenger zu filtern.",
-    "gateHint": "„Freunde von Freunden“ ist vorübergehend deaktiviert, während wir die Berechnung des Vertrauensnetzes überarbeiten (#565). „Freunde“ ist der sicherste Feed; „Alle“ der breiteste.",
+    "gateHint": "„Freunde von Freunden“ enthält die {{max}} Personen, denen deine Freunde am häufigsten folgen, und aktualisiert die Liste einmal täglich. „Freunde“ ist der sicherste Feed; „Alle“ der breiteste.",
     "done": "Fertig"
   },
   "welcomeWalletPrompt": {

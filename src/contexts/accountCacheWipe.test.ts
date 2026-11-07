@@ -12,6 +12,7 @@ import {
   reviveBuyerOrderTitles,
 } from '../services/buyerOrderTitles';
 import { resetSellerStore } from '../services/sellerEventStore';
+import { fofCacheKey, LEGACY_FOF_CACHE_KEY } from '../services/friendsOfFriendsService';
 import { initialiseNotificationDefaults } from '../services/notificationDefaults';
 import * as marmotPush from '../services/marmotPushRegistration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
@@ -181,6 +182,15 @@ it('wipes market filters, checkout country and every follow scope only for the s
   expect(await readMarketSnapshot(`${PK}|follows-one`)).toBeUndefined();
   expect(getMarketSnapshot(`${OTHER_PK}|follows`)).toBeDefined();
   expect(JSON.parse((await AsyncStorage.getItem(MARKET_CACHE_KEY))!)).toHaveLength(1);
+});
+
+it('wipes every friends-of-friends cap for only the signed-out account, plus the legacy key (#565)', async () => {
+  const keys = [fofCacheKey(PK, 2000), fofCacheKey(PK, 1024), LEGACY_FOF_CACHE_KEY];
+  const otherKeys = [fofCacheKey(OTHER_PK, 2000), fofCacheKey(OTHER_PK, 1024)];
+  await AsyncStorage.multiSet([...keys, ...otherKeys].map((key) => [key, '{}']));
+  await wipeAccountCaches(PK);
+  expect(await AsyncStorage.multiGet(keys)).toEqual(keys.map((key) => [key, null]));
+  expect(await AsyncStorage.multiGet(otherKeys)).toEqual(otherKeys.map((key) => [key, '{}']));
 });
 
 it('wipes retry and exhausted kind-4 metadata only for the signed-out account', async () => {

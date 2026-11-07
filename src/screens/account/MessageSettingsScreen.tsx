@@ -1,11 +1,11 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Link2, ShieldCheck, KeyRound } from 'lucide-react-native';
 import SettingsRow from '../../components/SettingsRow';
 import AccountScreenLayout from './AccountScreenLayout';
 import type { AccountDrawerNavigation } from '../../navigation/types';
-import { useTranslation } from '../../contexts/LocaleContext';
-import { useTrustGraph } from '../../contexts/TrustGraphContext';
+import { useLocale } from '../../contexts/LocaleContext';
+import { useTrustGraph, WOT_FOF_MAX } from '../../contexts/TrustGraphContext';
 import { useNostr } from '../../contexts/NostrContext';
 import { useAccountState } from '../../contexts/useAccountState';
 import { getLinkPreviewEnabled, setLinkPreviewEnabled } from '../../services/linkPreviewPreference';
@@ -18,6 +18,7 @@ import { createSharedAccountStyles } from './sharedStyles';
 import type { WotTier } from '../../services/wotSettingsService';
 import AmberPermissionSection from '../../components/AmberPermissionSection';
 import SettingsSection from '../../components/SettingsSection';
+import WebOfTrustBottomSheet from '../../components/WebOfTrustBottomSheet';
 
 // Same names as the Web of Trust sheet this row opens (and the filter chip
 // on Messages, Map and Events).
@@ -34,7 +35,7 @@ const TIER_TITLE = {
  * content you see" filter, not as a rule about who may message you.
  */
 const MessageSettingsScreen: React.FC = () => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const colors = useThemeColors();
   const shared = useMemo(() => createSharedAccountStyles(colors), [colors]);
   const navigation = useNavigation<AccountDrawerNavigation>();
@@ -44,8 +45,13 @@ const MessageSettingsScreen: React.FC = () => {
   // for one we've switched away from.
   const [linkPreviewOn, setLinkPreviewOn] = useAccountState<boolean>(pubkey, true);
   const deviceSummary = invitationDeviceSummaryLabel(useInvitationDeviceSummary());
+  // Friends of friends is built on demand (#565): picking it starts the build
+  // and opens the Web of Trust sheet so its progress and Cancel are visible.
+  const [wotSheetVisible, setWotSheetVisible] = useState(false);
   const openPicker = useSettingsPicker(pubkey, (value) => {
-    if (value === 'friends' || value === 'all') setWotTier(value as WotTier);
+    if (value !== 'friends' && value !== 'fof' && value !== 'all') return;
+    setWotTier(value as WotTier);
+    if (value === 'fof' && wotTier !== 'fof') setWotSheetVisible(true);
   });
   useFocusEffect(
     useCallback(() => {
@@ -76,7 +82,7 @@ const MessageSettingsScreen: React.FC = () => {
           details={[
             t('messageSettingsScreen.trustHint'),
             t('webOfTrustBottomSheet.explainer'),
-            t('webOfTrustBottomSheet.gateHint'),
+            t('webOfTrustBottomSheet.gateHint', { max: WOT_FOF_MAX.toLocaleString(formatLocale) }),
           ].join('\n\n')}
           onPress={() =>
             openPicker({
@@ -87,7 +93,6 @@ const MessageSettingsScreen: React.FC = () => {
                 value,
                 label: t(TIER_TITLE[value]),
                 subtitle: t(`webOfTrustBottomSheet.${value}Subtitle`),
-                disabled: value === 'fof',
                 testID: `wot-tier-${value}-chip`,
               })),
             })
@@ -122,6 +127,7 @@ const MessageSettingsScreen: React.FC = () => {
         />
       </SettingsSection>
       <Text style={shared.fieldHint}>{t('settingsScreens.linkPrivacy')}</Text>
+      <WebOfTrustBottomSheet visible={wotSheetVisible} onClose={() => setWotSheetVisible(false)} />
     </AccountScreenLayout>
   );
 };

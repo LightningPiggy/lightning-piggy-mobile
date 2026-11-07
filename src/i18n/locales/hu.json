@@ -2237,17 +2237,25 @@
     "addWallet": "Pénztárca hozzáadása"
   },
   "webOfTrustBottomSheet": {
-    "locked": "Zárolva. Egyelőre maradj a Barátoknál.",
     "title": "Bizalmi háló",
     "close": "Bezárás",
     "explainer": "Kiszűrjük az ellenőrizetlen feladókat, geoláda-elrejtőket és eseményszervezőket – bárki közzétehet adathalász üzenetet vagy állíthat fizikai csapdát, ezért alapból csak a bizalmi hálódban lévő emberek tartalmát látod.",
     "friendsTitle": "Barátok",
     "friendsSubtitle": "Csak azok, akiket követsz.",
     "fofTitle": "Barátok barátai",
-    "fofSubtitle": "Még nem megvalósított – hamarosan. Azon dolgozunk, hogyan tölthetjük le és tárolhatjuk a kiterjesztett hálót az alkalmazás lefagyása nélkül.",
+    "fofSubtitle": "Az általad követett emberek és azok, akiket ők a legtöbben követnek. A háló akkor épül fel, amikor ezt választod — első alkalommal ez eltart egy kis ideig.",
+    "fofProgressStarting": "Barátok barátainak keresése…",
+    "fofProgress": "Barátok barátainak keresése… {{done}} / {{total}}",
+    "fofCancel": "Mégse",
+    "fofCancelA11y": "Barátok barátainak keresésének leállítása",
+    "fofFailed": "Nem sikerült elérni a reléket a barátok barátainak kereséséhez. A szűrőd nem változott — próbáld újra egy kis idő múlva.",
+    "fofCount": {
+      "one": "{{count}} barátok barátja a bizalmi hálódban",
+      "other": "{{count}} barátok barátja a bizalmi hálódban"
+    },
     "allTitle": "Mind",
     "allSubtitle": "Minden, minden relay-ről. Alapértelmezett, amíg a bizalmi hálód nem készül el – a szigorításhoz válts Barátokra.",
-    "gateHint": "A Barátok barátai ideiglenesen ki van kapcsolva, amíg átdolgozzuk a bizalmi háló számítását (#565). A Barátok a legbiztonságosabb hírfolyam; a Mind a legszélesebb.",
+    "gateHint": "A Barátok barátai a barátaid által legtöbbet követett {{max}} embert tartalmazza, és naponta egyszer frissíti a listát. A Barátok a legbiztonságosabb hírfolyam; a Mind a legszélesebb.",
     "done": "Kész"
   },
   "welcomeWalletPrompt": {

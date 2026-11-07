@@ -2239,17 +2239,27 @@
     "addWallet": "Dodaj portfel"
   },
   "webOfTrustBottomSheet": {
-    "locked": "Zablokowane. Na razie zostań przy Znajomych.",
     "title": "Sieć zaufania",
     "close": "Zamknij",
     "explainer": "Odfiltrowujemy niezweryfikowanych nadawców, osoby ukrywające skrytki i organizatorów wydarzeń — każdy mógłby opublikować wiadomość phishingową lub zastawić fizyczną pułapkę, więc domyślnie widzisz tylko treści od osób z twojego grafu zaufania.",
     "friendsTitle": "Znajomi",
     "friendsSubtitle": "Tylko osoby, które obserwujesz.",
     "fofTitle": "Znajomi znajomych",
-    "fofSubtitle": "Jeszcze niedostępne — wkrótce. Pracujemy nad tym, jak pobrać i zapisać w pamięci podręcznej rozszerzony graf bez zawieszania aplikacji.",
+    "fofSubtitle": "Osoby, które obserwujesz, oraz osoby obserwowane przez największą liczbę tych osób. Lista powstaje po wybraniu tej opcji — za pierwszym razem zajmie to chwilę.",
+    "fofProgressStarting": "Wyszukiwanie znajomych znajomych…",
+    "fofProgress": "Wyszukiwanie znajomych znajomych… {{done}} z {{total}}",
+    "fofCancel": "Anuluj",
+    "fofCancelA11y": "Zatrzymaj wyszukiwanie znajomych znajomych",
+    "fofFailed": "Nie udało się połączyć z przekaźnikami, aby znaleźć znajomych znajomych. Twój filtr się nie zmienił — spróbuj ponownie za chwilę.",
+    "fofCount": {
+      "one": "{{count}} znajomy znajomych w twoim grafie zaufania",
+      "few": "{{count}} znajomych znajomych w twoim grafie zaufania",
+      "many": "{{count}} znajomych znajomych w twoim grafie zaufania",
+      "other": "{{count}} znajomego znajomych w twoim grafie zaufania"
+    },
     "allTitle": "Wszyscy",
     "allSubtitle": "Wszystko ze wszystkich przekaźników. Ustawienie domyślne, dopóki twój graf zaufania nie będzie gotowy — przełącz na Znajomych, aby zaostrzyć filtr.",
-    "gateHint": "Znajomi znajomych są tymczasowo wyłączeni, dopóki przebudowujemy obliczanie grafu zaufania (#565). Znajomi to najbezpieczniejszy strumień; Wszyscy to najszerszy.",
+    "gateHint": "Opcja Znajomi znajomych obejmuje {{max}} osób obserwowanych przez największą liczbę twoich znajomych i odświeża listę raz dziennie. Znajomi to najbezpieczniejszy strumień; Wszyscy to najszerszy.",
     "done": "Gotowe"
   },
   "welcomeWalletPrompt": {

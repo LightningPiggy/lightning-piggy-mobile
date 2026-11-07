@@ -1,0 +1,100 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Web of Trust — build Friends of friends on demand, cancel, then select (#565)
+---
+# Verifies the re-enabled "Friends of friends" tier in the Web of Trust sheet
+# opened from the Messages chip (#565):
+#   - the row is selectable (no longer greyed out);
+#   - picking it shows the "Finding friends of friends… X of Y" panel with
+#     Cancel, and Cancel leaves the tier on Friends;
+#   - picking it again completes and the Friends of friends row becomes the
+#     selected tier;
+#   - switching back to Friends restores the original state.
+#
+# The active tier is read from the rows' `selected` accessibility state.
+# The cancel step only runs while the build is still in flight (a fresh 24 h
+# cache switches instantly, with no progress panel).
+#
+# Preconditions: logged in. Test accounts on the LAN relay have a tiny graph,
+# so the build is quick — this checks the flow, not graph size.
+#
+# Run: maestro test .maestro/messaging/flow-161-wot-friends-of-friends.yaml
+
+- waitForAnimationToEnd:
+    timeout: 10000
+
+- tapOn:
+    id: 'tab-messages'
+- extendedWaitUntil:
+    visible:
+      id: 'messages-wot-chip'
+    timeout: 20000
+
+# Baseline: Friends.
+- tapOn:
+    id: 'messages-wot-chip'
+- extendedWaitUntil:
+    visible:
+      id: 'wot-bottom-sheet'
+    timeout: 5000
+- tapOn:
+    id: 'wot-tier-friends-chip'
+- assertVisible:
+    id: 'wot-tier-friends-chip'
+    selected: true
+- assertVisible:
+    id: 'wot-tier-fof-chip'
+    enabled: true
+
+# Pick Friends of friends; cancel if the build is still running.
+- tapOn:
+    id: 'wot-tier-fof-chip'
+- runFlow:
+    when:
+      visible:
+        id: 'wot-fof-progress'
+    commands:
+      - tapOn:
+          id: 'wot-fof-cancel'
+      - assertNotVisible:
+          id: 'wot-fof-progress'
+      - assertVisible:
+          id: 'wot-tier-friends-chip'
+          selected: true
+      - tapOn:
+          id: 'wot-tier-fof-chip'
+
+# Let the build finish: the tier switches once the set is ready (the size
+# row, `wot-fof-meta`, only shows for a non-empty set).
+- extendedWaitUntil:
+    visible:
+      id: 'wot-tier-fof-chip'
+      selected: true
+    timeout: 90000
+- assertNotVisible:
+    id: 'wot-fof-progress'
+- assertNotVisible:
+    id: 'wot-fof-error'
+- tapOn:
+    id: 'wot-sheet-done'
+- assertNotVisible:
+    id: 'wot-bottom-sheet'
+
+# Reopen: still Friends of friends. Then restore Friends.
+- tapOn:
+    id: 'messages-wot-chip'
+- extendedWaitUntil:
+    visible:
+      id: 'wot-bottom-sheet'
+    timeout: 5000
+- assertVisible:
+    id: 'wot-tier-fof-chip'
+    selected: true
+- tapOn:
+    id: 'wot-tier-friends-chip'
+- assertVisible:
+    id: 'wot-tier-friends-chip'
+    selected: true
+- assertNotVisible:
+    id: 'wot-fof-meta'
+- tapOn:
+    id: 'wot-sheet-done'
