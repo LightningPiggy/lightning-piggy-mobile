@@ -28,6 +28,7 @@ import {
   verifyEventCached,
 } from './nostrVerifyCache';
 import { parseProfileContent } from '../utils/profileContent';
+import { recordVerifiedLud16 } from './verifiedLud16Cache';
 
 export type { DmSendResult };
 export { sendNip17ToManyWithNsec, sendNip17ToManyWithSigner } from './nostrNip17Send';
@@ -183,17 +184,18 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
     if (!event) return null;
     // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
     // fetch feeds payment destinations (`lud16`), so verify it for real here.
-    if (!verifyEventCached(event)) {
-      console.warn('Nostr profile failed signature verification, ignoring:', pubkey);
+    if (event.pubkey !== pubkey || !verifyEventCached(event)) {
+      console.warn('Nostr profile failed verification, ignoring:', pubkey);
       return null;
     }
 
     const parsed = parseProfileContent(event.content);
-    return {
-      pubkey,
-      npub: npubEncode(pubkey),
-      ...parsed,
-    };
+    // Cache the verified address so the next open shows it at once. Newest
+    // kind-0 wins, so an older relay copy can't resurrect a replaced address.
+    const lud16 = await recordVerifiedLud16(pubkey, parsed.lud16, event.created_at).catch(
+      () => parsed.lud16,
+    );
+    return { pubkey, npub: npubEncode(pubkey), ...parsed, lud16 };
   } catch (error) {
     console.warn('Failed to fetch Nostr profile:', error);
     return null;

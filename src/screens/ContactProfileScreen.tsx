@@ -68,10 +68,19 @@ import {
   fetchProfile,
 } from '../services/nostrService';
 import { setLightningAddress } from '../services/contactsService';
+import { getVerifiedLud16, peekVerifiedLud16 } from '../services/verifiedLud16Cache';
 import type { RootStackParamList } from '../navigation/types';
 
 type ContactProfileNavigation = NativeStackNavigationProp<RootStackParamList, 'ContactProfile'>;
 type ContactProfileRoute = RouteProp<RootStackParamList, 'ContactProfile'>;
+
+// Fills a missing Lightning address from the last verified kind-0, so a warm
+// profile shows it (and an enabled zap button) on the first frame (#1719).
+function withCachedLud16(contact: ContactProfileBodyData): ContactProfileBodyData {
+  if (!contact.pubkey || contact.lightningAddress) return contact;
+  const cached = peekVerifiedLud16(contact.pubkey);
+  return cached ? { ...contact, lightningAddress: cached } : contact;
+}
 
 // Full-page friends profile route. Layout follows Primal/Damus
 // convention: back chevron pinned top-left, the identity header
@@ -91,7 +100,9 @@ const ContactProfileScreen: React.FC = () => {
   const { contacts, followContact, unfollowContact } = useNostrContacts();
   const { hasWallets } = useWallet();
 
-  const [contact, setContact] = useState<ContactProfileBodyData>(route.params.contact);
+  const [contact, setContact] = useState<ContactProfileBodyData>(() =>
+    withCachedLud16(route.params.contact),
+  );
   const [following, setFollowing] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
   // Tap the avatar / a picture → view it full screen (#661 — same as the sheet).
@@ -128,7 +139,7 @@ const ContactProfileScreen: React.FC = () => {
   // showing the previous contact's data.
   const paramIdentityKey = paramContact.pubkey ?? route.params.phoneContactId ?? null;
   useEffect(() => {
-    setContact(paramContact);
+    setContact(withCachedLud16(paramContact));
     // Seller links open Shop; other profile entry points start on Posts.
     setTab(route.params.initialTab ?? 'posts');
     setPostsMode('posts');
@@ -164,49 +175,55 @@ const ContactProfileScreen: React.FC = () => {
     };
   }, []);
 
-  // Hydrate the `about` bio from kind-0 if it wasn't passed in the
-  // navigation params. Most entry points pre-build ContactProfileBodyData
-  // without the bio (it isn't shown on the row item), so we lazily
-  // fetch it here for the description block.
-  //
-  // The actual loop-breaker is `aboutFetchedFor.current === contact.pubkey` —
-  // the `about !== undefined && about !== null` early-return only short-
-  // circuits when a bio was passed in via params (i.e. about already set
-  // to a non-null string). Users whose kind-0 omits `about` write `null`
-  // back via `setContact`, which would re-trigger this effect (deps
-  // include `contact.about`); the ref blocks the re-fetch.
+  // Most entry points pre-build ContactProfileBodyData without the bio (it
+  // isn't shown on the row item), so it's lazily hydrated here too.
   // Resolves the *verified* profile once per pubkey to fill in the bio AND
   // the Lightning address. The contacts-list profile has its lud16 stripped
   // (anti-redirect slimming), so this verified single-fetch is what re-arms
-  // the zap button and yields a safe-to-pay address.
-  const profileFetchedFor = useRef<string | null>(null);
+  // the zap button and yields a safe-to-pay address. Meanwhile the address
+  // from the last verified fetch shows at once (#1719), so a slow network
+  // doesn't grey out a known address. Keyed on the pubkey alone, so seeding
+  // the address can't cancel the fetch.
+  const verifiedInputsRef = useRef({ contact, relays });
+  verifiedInputsRef.current = { contact, relays };
   useEffect(() => {
-    if (!contact.pubkey) return;
-    const needsAbout = contact.about === undefined || contact.about === null;
-    const needsLud16 = !contact.lightningAddress;
-    if (!needsAbout && !needsLud16) return;
-    if (profileFetchedFor.current === contact.pubkey) return;
-    profileFetchedFor.current = contact.pubkey;
+    const pubkey = contact.pubkey;
+    if (!pubkey) return;
     let cancelled = false;
-    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    fetchProfile(contact.pubkey, readRelays)
-      .then((profile) => {
+    const readRelays = verifiedInputsRef.current.relays.filter((r) => r.read).map((r) => r.url);
+    const cachedLud16 = getVerifiedLud16(pubkey).catch(() => null);
+    void cachedLud16.then((cached) => {
+      if (cancelled || !cached) return;
+      setContact((prev) =>
+        prev.pubkey === pubkey && !prev.lightningAddress
+          ? { ...prev, lightningAddress: cached }
+          : prev,
+      );
+    });
+    Promise.all([fetchProfile(pubkey, readRelays), cachedLud16])
+      .then(([profile, cached]) => {
         if (cancelled || !profile) return;
-        setContact((prev) => ({
-          ...prev,
-          // A profile opened from a bare reference (an @mention chip, a
-          // deep link) arrives as a stub named after its npub — fill the
-          // identity in too, never overwriting what the caller passed.
-          name:
-            prev.name.startsWith('npub1') && prev.name.endsWith('…')
-              ? (profile.displayName ?? profile.name ?? prev.name)
-              : prev.name,
-          picture: prev.picture ?? profile.picture ?? null,
-          banner: prev.banner ?? profile.banner ?? null,
-          nip05: prev.nip05 ?? profile.nip05 ?? null,
-          about: prev.about ?? profile.about ?? null,
-          lightningAddress: prev.lightningAddress ?? profile.lud16 ?? null,
-        }));
+        setContact((prev) => {
+          if (prev.pubkey !== pubkey) return prev;
+          // Authoritative over a cached address (since replaced or removed);
+          // an address the caller passed in still wins.
+          const keepAddress = !!prev.lightningAddress && prev.lightningAddress !== cached;
+          return {
+            ...prev,
+            // A profile opened from a bare reference (an @mention chip, a
+            // deep link) arrives as a stub named after its npub — fill the
+            // identity in too, never overwriting what the caller passed.
+            name:
+              prev.name.startsWith('npub1') && prev.name.endsWith('…')
+                ? (profile.displayName ?? profile.name ?? prev.name)
+                : prev.name,
+            picture: prev.picture ?? profile.picture ?? null,
+            banner: prev.banner ?? profile.banner ?? null,
+            nip05: prev.nip05 ?? profile.nip05 ?? null,
+            about: prev.about ?? profile.about ?? null,
+            lightningAddress: keepAddress ? prev.lightningAddress : (profile.lud16 ?? null),
+          };
+        });
       })
       .catch(() => {
         // best-effort — bio + address are non-critical to first paint
@@ -214,7 +231,7 @@ const ContactProfileScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [contact.pubkey, contact.about, contact.lightningAddress, relays]);
+  }, [contact.pubkey]);
 
   // Pull-to-refresh: unlike the gap-fill effect above (which only fills
   // missing about/lud16, once), this re-fetches the kind-0 from relays and
