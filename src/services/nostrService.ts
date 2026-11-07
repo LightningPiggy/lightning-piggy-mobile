@@ -28,7 +28,7 @@ import {
   verifyEventCached,
 } from './nostrVerifyCache';
 import { parseProfileContent } from '../utils/profileContent';
-import { recordVerifiedLud16 } from './verifiedLud16Cache';
+import { recordVerifiedLud16, verifiedLud16Generation } from './verifiedLud16Cache';
 
 export type { DmSendResult };
 export { sendNip17ToManyWithNsec, sendNip17ToManyWithSigner } from './nostrNip17Send';
@@ -176,6 +176,7 @@ export { parseProfileContent };
 export async function fetchProfile(pubkey: string, relays: string[]): Promise<NostrProfile | null> {
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
   trackRelays(allRelays);
+  const lud16Generation = verifiedLud16Generation(); // a wipe mid-fetch skips the cache
   try {
     const event = await pool.get(allRelays, {
       kinds: [0],
@@ -192,9 +193,12 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
     const parsed = parseProfileContent(event.content);
     // Cache the verified address so the next open shows it at once. Newest
     // kind-0 wins, so an older relay copy can't resurrect a replaced address.
-    const lud16 = await recordVerifiedLud16(pubkey, parsed.lud16, event.created_at).catch(
-      () => parsed.lud16,
-    );
+    const lud16 = await recordVerifiedLud16(
+      pubkey,
+      parsed.lud16,
+      event.created_at,
+      lud16Generation,
+    ).catch(() => parsed.lud16);
     return { pubkey, npub: npubEncode(pubkey), ...parsed, lud16 };
   } catch (error) {
     console.warn('Failed to fetch Nostr profile:', error);

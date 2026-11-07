@@ -4,6 +4,7 @@ import {
   __flushWritesForTests,
   __resetForTests,
   clearVerifiedLud16Cache,
+  verifiedLud16Generation,
   getVerifiedLud16,
   peekVerifiedLud16,
   recordVerifiedLud16,
@@ -104,6 +105,20 @@ describe('verifiedLud16Cache (#1719)', () => {
     const reading = getVerifiedLud16(PK);
     await clearVerifiedLud16Cache();
     expect(await reading).toBeNull();
+  });
+
+  it('a record that started before a wipe is not stored, even if the wipe lands mid-load', async () => {
+    const started = verifiedLud16Generation();
+    __resetForTests(); // cold mirror, so the record awaits a storage read
+    const recording = recordVerifiedLud16(PK, 'eden@example.com', 100, started);
+    await clearVerifiedLud16Cache();
+    expect(await recording).toBe('eden@example.com');
+    await __flushWritesForTests();
+    expect(peekVerifiedLud16(PK)).toBeNull();
+    expect(await AsyncStorage.getItem(__TEST__.STORAGE_KEY)).toBeNull();
+    // A stale generation passed after the wipe is refused up front too.
+    await recordVerifiedLud16(PK, 'eden@example.com', 100, started);
+    expect(await getVerifiedLud16(PK)).toBeNull();
   });
 
   it('starts empty when the stored blob is corrupt', async () => {

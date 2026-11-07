@@ -1,7 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { fetchProfile, pool } from './nostrService';
-import { __resetForTests, getVerifiedLud16 } from './verifiedLud16Cache';
+import {
+  __flushWritesForTests,
+  __resetForTests,
+  clearVerifiedLud16Cache,
+  getVerifiedLud16,
+} from './verifiedLud16Cache';
 
 // fetchProfile feeds payment destinations, so only a signature-verified
 // kind-0 BY the requested pubkey may reach the Lightning-address cache (#1719).
@@ -52,6 +57,23 @@ describe('fetchProfile → verified lud16 cache (#1719)', () => {
     await fetchProfile(pubkey, []);
     get.mockResolvedValueOnce(kind0('old@example.com', 100));
     expect((await fetchProfile(pubkey, []))?.lud16).toBe('new@example.com');
+  });
+
+  it('a fetch in flight across a logout wipe writes nothing into the next account', async () => {
+    let resolveGet!: (event: ReturnType<typeof kind0>) => void;
+    get.mockReturnValueOnce(new Promise((resolve) => (resolveGet = resolve)));
+    const fetching = fetchProfile(pubkey, []);
+    await clearVerifiedLud16Cache();
+    const { calls } = (AsyncStorage.setItem as jest.Mock).mock;
+    const before = calls.length;
+    resolveGet(kind0('eden@example.com', 100));
+    // The caller still gets the verified address; only the cache is skipped.
+    expect((await fetching)?.lud16).toBe('eden@example.com');
+    await __flushWritesForTests();
+    expect(calls.length).toBe(before);
+    expect(await getVerifiedLud16(pubkey)).toBeNull();
+    __resetForTests();
+    expect(await getVerifiedLud16(pubkey)).toBeNull();
   });
 
   it('clears the cached address when the newer kind-0 removed it', async () => {

@@ -44,6 +44,9 @@ type CacheShape = Record<string, Entry>;
 
 let memoryCache: CacheShape | null = null;
 let loading: Promise<CacheShape> | null = null;
+// Bumped by every wipe. A fetch that started before a wipe (logout / account
+// switch) must not write into the next account's cache.
+let generation = 0;
 // Writes run in call order, so a wipe can't be overtaken by an older snapshot.
 let writeChain: Promise<void> = Promise.resolve();
 
@@ -96,18 +99,29 @@ export async function getVerifiedLud16(pubkey: string): Promise<string | null> {
   return fresh((await load())[pubkey]);
 }
 
+/** Read before starting a fetch; pass to `recordVerifiedLud16`. */
+export function verifiedLud16Generation(): number {
+  return generation;
+}
+
 /**
  * Records the `lud16` of a signature-verified kind-0 by `pubkey`. Only call
  * with an event that passed verification and whose author is `pubkey`.
  * Returns the address from the NEWEST verified kind-0 seen so far, which
  * is `lud16` itself unless an older event arrived after a newer one.
+ * `startedAt` is `verifiedLud16Generation()` from before the fetch: if a wipe
+ * ran since, the address is returned but not stored.
  */
 export async function recordVerifiedLud16(
   pubkey: string,
   lud16: string | null,
   createdAt: number,
+  startedAt: number = generation,
 ): Promise<string | null> {
+  if (startedAt !== generation) return lud16;
   const cache = await load();
+  // A wipe may also land while the mirror loads.
+  if (startedAt !== generation) return lud16;
   const existing = cache[pubkey];
   if (existing && existing.createdAt > createdAt) return existing.lud16;
   const now = Date.now();
@@ -124,6 +138,7 @@ export async function recordVerifiedLud16(
 
 /** Drops every cached address (logout / account switch). */
 export async function clearVerifiedLud16Cache(): Promise<void> {
+  generation += 1;
   memoryCache = {};
   loading = null;
   await enqueueWrite(() => AsyncStorage.removeItem(STORAGE_KEY));
