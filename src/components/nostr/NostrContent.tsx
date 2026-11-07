@@ -163,7 +163,7 @@ const MediaThumb: React.FC<{
     autoLoad && checkRemoteUrl(item.url, { kind: 'media' }).ok,
   );
   const safe = checkRemoteUrl(item.url, { kind: 'media' }).ok;
-  const { uri, failed, retry } = useRemoteMediaWithAutoRetry(
+  const { uri, failed, retry, reportBroken } = useRemoteMediaWithAutoRetry(
     isImage && loadAllowed && safe ? item.url : null,
     MEDIA_MAX_BYTES,
   );
@@ -207,6 +207,10 @@ const MediaThumb: React.FC<{
           cachePolicy="memory-disk"
           recyclingKey={item.url}
           autoplay={false}
+          // Downloaded but undecodable (corrupt / not an image): treat like a
+          // failed download, with a fresh download on retry (#1698).
+          onError={reportBroken}
+          testID={`nostr-inline-image-img-${index}`}
         />
       ) : null}
       {loading ? (

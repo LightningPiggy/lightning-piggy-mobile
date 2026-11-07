@@ -123,3 +123,28 @@ it('retries a failed inline image once by itself, then offers tap to retry', asy
   expect(view.queryByTestId('nostr-inline-image-failed-0')).toBeNull();
   expect(view.queryByTestId('nostr-inline-image-loading-0')).toBeNull();
 });
+
+it('treats a downloaded image that cannot be decoded like a failed load, with a fresh download', async () => {
+  const BROKEN = 'https://image.example.com/broken.jpg';
+  mockFetch.mockImplementation(async () => ok());
+  const view = render(<NostrContent content={BROKEN} authorPubkey="author" />);
+  const waitIdle = async () => {
+    for (let i = 0; i < 20 && view.queryByTestId('nostr-inline-image-loading-0'); i++)
+      await settle();
+  };
+  await waitIdle();
+  expect(mockFetch).toHaveBeenCalledTimes(1);
+  // The renderer can't decode the cached bytes.
+  await act(async () => view.getByTestId('nostr-inline-image-img-0').props.onError?.({}));
+  await settle();
+  // One automatic retry, downloading afresh (the bad cache entry was evicted).
+  await act(async () => {
+    jest.advanceTimersByTime(3000);
+  });
+  await waitIdle();
+  expect(mockFetch).toHaveBeenCalledTimes(2);
+  // Undecodable again: the failed box, with tap to retry.
+  await act(async () => view.getByTestId('nostr-inline-image-img-0').props.onError?.({}));
+  await settle();
+  expect(view.getByTestId('nostr-inline-image-failed-0')).toBeTruthy();
+});
