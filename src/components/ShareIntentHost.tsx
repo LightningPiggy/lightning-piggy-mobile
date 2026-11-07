@@ -17,6 +17,7 @@ import {
   hasShareContent,
   normalizeShareIntent,
   shareCopies,
+  someSharedItemsSkipped,
   type IncomingShare,
 } from '../utils/incomingShare';
 
@@ -87,12 +88,11 @@ const ShareIntentHost: React.FC = () => {
     resetRef.current();
     const checked = verifySharedImages(normalizeShareIntent(shareIntent, shareDirUri()));
     deleteShareCopies(checked.discard);
-    const sharedFiles = shareIntent.files?.length ?? 0;
     if (!hasShareContent(checked)) {
       Toast.show({ type: 'info', text1: t('shareIntent.nothingToShare') });
       return;
     }
-    if (checked.images.length < sharedFiles) {
+    if (someSharedItemsSkipped(shareIntent, checked)) {
       Toast.show({ type: 'info', text1: t('shareIntent.someSkipped') });
     }
     // A second share while the picker is open replaces the first.

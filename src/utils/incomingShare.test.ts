@@ -11,6 +11,7 @@ import {
   sanitizeSharedText,
   shareCopies,
   sniffImageMime,
+  someSharedItemsSkipped,
   toFileUri,
 } from './incomingShare';
 
@@ -177,6 +178,60 @@ describe('normalizeShareIntent', () => {
     expect(share.images).toHaveLength(MAX_SHARED_IMAGES);
     expect(share.discard).toHaveLength(2);
     expect(shareCopies(share)).toHaveLength(MAX_SHARED_IMAGES + 2);
+  });
+});
+
+describe('someSharedItemsSkipped', () => {
+  const files = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ path: copy(i), mimeType: 'image/jpeg' }));
+  const kept = (n: number) => ({
+    text: null,
+    images: files(n).map((f) => ({ uri: f.path, mimeType: 'image/jpeg' })),
+    discard: [],
+  });
+
+  it('flags photos the native cap dropped before JS saw them (12 offered, 10 kept)', () => {
+    expect(someSharedItemsSkipped({ files: files(10), lpOfferedFileCount: 12 }, kept(10))).toBe(
+      true,
+    );
+  });
+
+  it('flags files the native type / size checks dropped', () => {
+    expect(someSharedItemsSkipped({ files: files(3), lpOfferedFileCount: 4 }, kept(3))).toBe(true);
+  });
+
+  it('stays quiet when everything offered was kept', () => {
+    expect(someSharedItemsSkipped({ files: files(10), lpOfferedFileCount: 10 }, kept(10))).toBe(
+      false,
+    );
+  });
+
+  it('counts native and JS rejections against one total, not twice', () => {
+    // 12 offered, 10 passed on, 1 of those failed the byte sniff: still one notice.
+    const intent = { files: files(10), lpOfferedFileCount: 12 };
+    expect(someSharedItemsSkipped(intent, kept(9))).toBe(true);
+  });
+
+  it('without the native count, behaves as before: kept vs passed on', () => {
+    expect(someSharedItemsSkipped({ files: files(10) }, kept(10))).toBe(false);
+    expect(someSharedItemsSkipped({ files: files(3) }, kept(2))).toBe(true);
+    expect(someSharedItemsSkipped({ files: files(3), lpOfferedFileCount: null }, kept(3))).toBe(
+      false,
+    );
+  });
+
+  it.each([NaN, -1, 2.5, Infinity])('ignores a nonsensical native count (%p)', (count) => {
+    expect(someSharedItemsSkipped({ files: files(3), lpOfferedFileCount: count }, kept(3))).toBe(
+      false,
+    );
+  });
+
+  it('never reports fewer offered than were passed on', () => {
+    expect(someSharedItemsSkipped({ files: files(3), lpOfferedFileCount: 1 }, kept(2))).toBe(true);
+  });
+
+  it('is quiet for a text-only share', () => {
+    expect(someSharedItemsSkipped({ text: 'hi' }, { ...kept(0), text: 'hi' })).toBe(false);
   });
 });
 

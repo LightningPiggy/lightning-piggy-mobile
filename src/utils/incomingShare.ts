@@ -51,6 +51,9 @@ export interface RawShareIntent {
   text?: string | null;
   webUrl?: string | null;
   files?: readonly { path: string; mimeType?: string | null }[] | null;
+  /** Files the sender offered, counted natively before the share module's
+   *  cap and checks dropped any. Absent on older payloads / single shares. */
+  lpOfferedFileCount?: number | null;
 }
 
 // `share-<uuid>.<ext>`, exactly as the native patch names its copies.
@@ -197,6 +200,25 @@ export function normalizeShareIntent(
 
 export function hasShareContent(share: IncomingShare): boolean {
   return !!share.text || share.images.length > 0;
+}
+
+/**
+ * True when some of what was shared won't reach the chat — for the "some
+ * items couldn't be added" notice. Compares the images that passed every check
+ * against what the sender offered: the native count taken before its 10-file
+ * cap and its type / size checks (so files dropped there count too), or, when
+ * that count is missing or nonsensical, the files the module passed on. One
+ * comparison against one total, so a file dropped natively and one rejected
+ * here are each counted once.
+ */
+export function someSharedItemsSkipped(intent: RawShareIntent, checked: IncomingShare): boolean {
+  const passedOn = intent.files?.length ?? 0;
+  const reported = intent.lpOfferedFileCount;
+  const offered =
+    typeof reported === 'number' && Number.isInteger(reported) && reported >= 0
+      ? Math.max(reported, passedOn)
+      : passedOn;
+  return checked.images.length < offered;
 }
 
 /** Every file a share holds, used or not — for deleting it. */

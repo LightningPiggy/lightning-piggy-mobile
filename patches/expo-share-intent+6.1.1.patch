@@ -1,5 +1,5 @@
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89..68f7f78 100644
+index 0153c89..664aff3 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 @@ -13,6 +13,8 @@ import android.content.ContentResolver
@@ -209,7 +209,7 @@ index 0153c89..68f7f78 100644
                  // text / urls
                  if (intent.action == Intent.ACTION_SEND) {
                      notifyShareIntent(mapOf(
-@@ -141,15 +230,19 @@ class ExpoShareIntentModule : Module() {
+@@ -141,15 +230,27 @@ class ExpoShareIntentModule : Module() {
                  // files / medias
                  if (intent.action == Intent.ACTION_SEND) {
                      val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
@@ -225,16 +225,24 @@ index 0153c89..68f7f78 100644
 -                    val uris = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM)
 -                    if (uris != null) {
 -                        notifyShareIntent(mapOf( "files" to uris.map { getFileInfo(it) }, "type" to "file"))
-+                    val infos = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM)
-+                        ?.take(LP_MAX_SHARED_FILES)
-+                        ?.mapNotNull { safeFileInfo(it) }
-+                        .orEmpty()
++                    val uris: List<Uri> = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM).orEmpty()
++                    val infos = uris
++                        .take(LP_MAX_SHARED_FILES)
++                        .mapNotNull { safeFileInfo(it) }
 +                    if (infos.isNotEmpty()) {
-+                        notifyShareIntent(mapOf( "files" to infos, "type" to "file"))
++                        // `lpOfferedFileCount`: how many streams the sender
++                        // offered, before the cap and the checks above dropped
++                        // any — so the app can say some were skipped. A count
++                        // only: no URI or name leaves this module.
++                        notifyShareIntent(mapOf(
++                            "files" to infos,
++                            "type" to "file",
++                            "lpOfferedFileCount" to uris.size,
++                        ))
                      } else {
                          notifyError("empty uris array for file sharing: " + intent.action)
                      }
-@@ -182,10 +275,9 @@ class ExpoShareIntentModule : Module() {
+@@ -182,10 +283,9 @@ class ExpoShareIntentModule : Module() {
          AsyncFunction("getShareIntent") { _: String ->
              // get the Intent from onCreate activity (app not running in background)
              ExpoShareIntentSingleton.isPending = false
@@ -248,7 +256,7 @@ index 0153c89..68f7f78 100644
          }
  
          Function("clearShareIntent") { _: String ->
-@@ -209,6 +301,50 @@ class ExpoShareIntentModule : Module() {
+@@ -209,6 +309,50 @@ class ExpoShareIntentModule : Module() {
          }
      }
  
@@ -299,7 +307,7 @@ index 0153c89..68f7f78 100644
      /**
       * Get a file path from a Uri. This will get the the path for Storage Access
       * Framework Documents, as well as the _data field for the MediaStore and
-@@ -300,8 +436,19 @@ class ExpoShareIntentModule : Module() {
+@@ -300,8 +444,19 @@ class ExpoShareIntentModule : Module() {
                  if (cursor != null && cursor.moveToFirst()) {
                      val columnIndex = cursor.getColumnIndexOrThrow(column)
                      val fileName = cursor.getString(columnIndex)
@@ -321,3 +329,40 @@ index 0153c89..68f7f78 100644
                  }
              } finally {
                  cursor?.close()
+diff --git a/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts b/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts
+index f2ebd1a..752846f 100644
+--- a/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts
++++ b/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts
+@@ -53,12 +53,16 @@ export type ShareIntent = BaseShareIntent & {
+     files: ShareIntentFile[] | null;
+     type: "media" | "file" | "text" | "weburl" | null;
+     webUrl: string | null;
++    /** Lightning Piggy patch (Android): files offered before the native cap
++     *  and checks dropped any. Absent when not reported. */
++    lpOfferedFileCount?: number;
+ };
+ /**
+  * Shared intent type for Android.
+  */
+ export interface AndroidShareIntent extends BaseShareIntent {
+     files?: AndroidShareIntentFile[];
++    lpOfferedFileCount?: number;
+     type: "file" | "text";
+ }
+ /**
+diff --git a/node_modules/expo-share-intent/build/utils.js b/node_modules/expo-share-intent/build/utils.js
+index 3d343c6..f47a6e6 100644
+--- a/node_modules/expo-share-intent/build/utils.js
++++ b/node_modules/expo-share-intent/build/utils.js
+@@ -112,6 +112,11 @@ export const parseShareIntent = (value, options) => {
+                 }, [])
+                 : null,
+             type: isMedia ? "media" : "file",
++            // Lightning Piggy patch: Android reports how many files were
++            // offered before its cap / checks dropped any (a count only).
++            ...(typeof shareIntent?.lpOfferedFileCount === "number"
++                ? { lpOfferedFileCount: shareIntent.lpOfferedFileCount }
++                : {}),
+         };
+     }
+     options.debug &&
