@@ -88,7 +88,10 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
       // this (reused) screen.
       let live = true;
       let answered = false;
+      // Every attempt (refocus, pull-to-refresh after a failure) loads afresh:
+      // never "No posts yet" while the new request is still unanswered.
       setUnavailable(false);
+      setLoading(true);
       const unsubscribe = subscribeAuthorFeed({
         authorPubkey,
         relays: readRelays,

@@ -55,6 +55,9 @@ const feedFilter = (authorPubkey: string, limit: number, until?: number): Filter
  * for these kinds, and the author is re-checked here (relays can ignore
  * `authors`).
  */
+/** How long a relay may stay silent before the SDK treats it as done (EOSE). */
+export const AUTHOR_FEED_EOSE_WAIT_MS = 20_000;
+
 export function subscribeAuthorFeed(input: {
   authorPubkey: string;
   relays: string[];
@@ -68,6 +71,12 @@ export function subscribeAuthorFeed(input: {
   trackRelays(input.relays);
   let eoseFired = false;
   let gotEvent = false;
+  // True once an EOSE has settled (a microtask later). The pool reports a
+  // relay that FAILED as EOSE and then, if every relay failed, closes in the
+  // same synchronous call; a relay that really answered and later dropped
+  // closes in a later tick. Only the former is "couldn't ask".
+  let answeredBeforeClose = false;
+  let closed = false;
   const sub = pool.subscribeMany(
     input.relays,
     feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE),
@@ -80,14 +89,22 @@ export function subscribeAuthorFeed(input: {
       oneose: () => {
         if (eoseFired) return;
         eoseFired = true;
+        queueMicrotask(() => {
+          if (!closed) answeredBeforeClose = true;
+        });
         input.onEose?.();
       },
       // A live subscription only closes when every relay has closed it: a
       // relay that answered stays open. Closing early with nothing received
       // means no relay was reachable. A close we asked for isn't reported.
       onclose: () => {
-        if (!closedByUs && !gotEvent) input.onUnavailable?.();
+        closed = true;
+        if (!closedByUs && !gotEvent && !answeredBeforeClose) input.onUnavailable?.();
       },
+      // Only a relay's real EOSE counts as an answer: without this the SDK
+      // fakes one after 4.4 s for a connected relay that never replies,
+      // which would read as "no posts" before the hook's grace period ends.
+      maxWait: AUTHOR_FEED_EOSE_WAIT_MS,
     },
   );
   let closedByUs = false;
