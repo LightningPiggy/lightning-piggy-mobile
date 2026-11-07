@@ -46,6 +46,7 @@ import {
 } from '../services/walletStorageService';
 import { deleteGroupMessagesForOwner } from '../services/groupMessagesStorageService';
 import { clearCacheStorage as clearNostrPlacesCache } from '../services/nostrPlacesStorage';
+import { clearVerifiedLud16Cache } from '../services/verifiedLud16Cache';
 import { clearNotificationHistory } from '../services/notificationHistory';
 import { PER_ACCOUNT_SETTING_BASES } from '../services/safetySettingsMigration';
 import { forgetAccountSettings } from '../services/accountSettingsCache';
@@ -247,4 +248,7 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   // this identity's own by-author Piglets — wipe it on logout / switch so
   // pins don't leak across accounts (the next live sub repopulates it).
   await clearNostrPlacesCache();
+  // Verified contact Lightning addresses: public, but they show whose
+  // profiles this account opened (#1719).
+  await clearVerifiedLud16Cache();
 }

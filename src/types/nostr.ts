@@ -6,7 +6,9 @@ export interface NostrProfile {
   picture: string | null;
   banner: string | null;
   about: string | null;
-  lud16: string | null; // lightning address
+  // Lightning address. From `fetchProfile`, the newest VERIFIED one seen for
+  // this pubkey, which may come from a newer kind-0 than the other fields.
+  lud16: string | null;
   nip05: string | null;
   // Set by slimDisplayProfile: records whether a lud16 was present before it
   // was stripped, so display surfaces can show/grey the zap affordance without
