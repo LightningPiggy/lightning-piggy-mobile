@@ -157,3 +157,47 @@ it('is unavailable when no relay answered within the grace period', async () => 
   });
   expect(h.result.current.unavailable).toBe(true);
 });
+
+it('a done signal with no real answer (failed / timed-out relays) stays unavailable', async () => {
+  subscribe.mockImplementation(({ onEose }) => {
+    setTimeout(onEose, 7000); // after the grace period, no relay ever answered
+    return jest.fn();
+  });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(7000);
+  });
+  expect(h.result.current.loading).toBe(false);
+  expect(h.result.current.unavailable).toBe(true);
+});
+
+it('recovers from unavailable on a late answer, a late post, or a retry', async () => {
+  let handlers!: {
+    onEvent: (e: unknown) => void;
+    onAnswered: () => void;
+    onUnavailable: () => void;
+  };
+  subscribe.mockImplementation((input) => {
+    handlers = input;
+    return jest.fn();
+  });
+  const h = renderHook(({ nonce }: { nonce: number }) => useProfileFeed(PK, nonce), {
+    initialProps: { nonce: 0 },
+  });
+  act(() => handlers.onUnavailable());
+  expect(h.result.current.unavailable).toBe(true);
+  act(() => handlers.onAnswered()); // a slow relay answers after all
+  expect(h.result.current.unavailable).toBe(false);
+
+  act(() => handlers.onUnavailable());
+  act(() =>
+    handlers.onEvent({ id: 'late', pubkey: PK, kind: 1, created_at: 1, content: '', tags: [] }),
+  );
+  expect(h.result.current.unavailable).toBe(false);
+
+  act(() => handlers.onUnavailable());
+  h.rerender({ nonce: 1 }); // pull to refresh
+  expect(h.result.current.unavailable).toBe(false);
+  expect(h.result.current.loading).toBe(true);
+  expect(subscribe).toHaveBeenCalledTimes(2);
+});

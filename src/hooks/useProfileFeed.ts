@@ -102,10 +102,10 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
           setUnavailable(false);
           enqueue(event.id, event);
         },
+        // Every relay is done, but that includes relays that failed or timed
+        // out: only onEvent / onAnswered count as an answer.
         onEose: () => {
           if (!live) return;
-          answered = true;
-          setUnavailable(false);
           flush();
           setLoading(false);
         },
