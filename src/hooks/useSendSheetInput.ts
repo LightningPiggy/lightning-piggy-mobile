@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   type Dispatch,
@@ -78,6 +79,17 @@ export function useSendSheetInput(opts: {
   const t = useTranslation();
   const invalidInvoiceAlertVisible = useRef(false);
   const sessionRef = useRef(0);
+  // Synchronous twin of `scanned`: the camera can deliver two different codes
+  // before React commits `scanned`, and the second must not replace the first.
+  const scanLockRef = useRef(false);
+  const markScanned = (v: boolean) => {
+    scanLockRef.current = v;
+    setScanned(v);
+  };
+  useEffect(() => {
+    // Released whenever the sheet clears `scanned` (scan another, reopen).
+    if (!scanned) scanLockRef.current = false;
+  }, [scanned]);
   useLayoutEffect(() => {
     sessionRef.current += 1;
     invalidInvoiceAlertVisible.current = false;
@@ -96,7 +108,7 @@ export function useSendSheetInput(opts: {
   const rejectInvoiceInput = (input: string, titleKey: string, bodyKey: string) => {
     setInvoiceData(null);
     setDecoded(null);
-    setScanned(false);
+    markScanned(false);
     setSatsValue('');
     setIsOnchainAddress(false);
     setIsLnurl(false);
@@ -137,13 +149,13 @@ export function useSendSheetInput(opts: {
       setIsLnurl(false);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: null, expiry: null });
-      setScanned(true);
+      markScanned(true);
     } else if (boltzService.isBitcoinAddress(input)) {
       setIsOnchainAddress(true);
       setIsLnurl(false);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: null, expiry: null });
-      setScanned(true);
+      markScanned(true);
       // Pre-fill amount from BIP-21 URI if present (fiat view is derived
       // inside AmountEntryScreen from satsValue when the user opens it).
       if (bip21Amount) {
@@ -170,7 +182,7 @@ export function useSendSheetInput(opts: {
       setIsLnurl(false);
       setInvoiceData(input);
       setDecoded(invoice);
-      setScanned(true);
+      markScanned(true);
     } else if (isLnurlString(input)) {
       // Raw LNURL (bech32 lnurl1… or cleartext lnurlp://). We can't tell
       // pay vs withdraw from the string alone, so stash it and let the
@@ -181,7 +193,7 @@ export function useSendSheetInput(opts: {
       setIsLnurl(true);
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: null, expiry: null });
-      setScanned(true);
+      markScanned(true);
     }
   };
 
@@ -197,7 +209,7 @@ export function useSendSheetInput(opts: {
   };
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
-    if (scanned) return;
+    if (scanned || scanLockRef.current) return;
     processInput(data);
   };
 
@@ -205,7 +217,7 @@ export function useSendSheetInput(opts: {
   // scanned QR. Withdraw codes and Nostr profiles aren't payable from
   // here, so say why instead of silently doing nothing.
   const handleNfcContent = (content: NfcTagContent) => {
-    if (scanned) return;
+    if (scanned || scanLockRef.current) return;
     switch (content.type) {
       case 'lnurl-withdraw':
         Alert.alert(t('sendSheet.claimCodeTitle'), t('sendSheet.claimCodeBody'));

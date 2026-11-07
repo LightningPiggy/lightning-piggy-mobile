@@ -184,3 +184,20 @@ it('drops a clipboard read that resolves after the sheet closes', async () => {
   });
   expect(opts.setInvoiceData).not.toHaveBeenCalled();
 });
+
+it('keeps the first of two codes the camera delivers before `scanned` commits', () => {
+  const { result, opts, rerender } = setup();
+  act(() => {
+    // Both arrive before React re-renders with scanned=true.
+    result.current.handleBarCodeScanned({ data: INVOICE_WITH_AMOUNT });
+    result.current.handleBarCodeScanned({ data: AMOUNTLESS_INVOICE });
+  });
+  expect(opts.setScanned).toHaveBeenCalledWith(true);
+  expect(opts.setInvoiceData).toHaveBeenCalledTimes(1);
+  expect(opts.setInvoiceData).toHaveBeenCalledWith(INVOICE_WITH_AMOUNT);
+  // "Scan another" clears `scanned`: the lock is released for a new code.
+  rerender({ ...opts, scanned: true });
+  rerender({ ...opts, scanned: false });
+  act(() => result.current.handleBarCodeScanned({ data: INVOICE_WITH_AMOUNT }));
+  expect(opts.setInvoiceData).toHaveBeenCalledTimes(2);
+});
