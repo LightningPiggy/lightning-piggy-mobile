@@ -17,6 +17,7 @@ jest.mock('./nostrPool', () => ({
 // Relays whose URL says "parked" count as parked by the health breaker (#1326).
 jest.mock('./relayHealth', () => ({
   selectHealthyRelays: (urls: string[]) => urls.filter((u) => !u.includes('parked')),
+  relayKey: (url: string) => url.replace(/\/+$/, '').toLowerCase(),
 }));
 jest.mock('./relayQuery', () => ({
   querySyncAbortable: (...args: unknown[]) => mockQuery(...args),

@@ -4,9 +4,8 @@
 // subscription fetches the newest page; older pages come from a bounded,
 // abortable `until` query. Every filter carries a `limit`.
 import type { Event, Filter } from 'nostr-tools';
-import { normalizeURL } from 'nostr-tools/utils';
 import { pool, trackRelays } from './nostrPool';
-import { selectHealthyRelays } from './relayHealth';
+import { relayKey, selectHealthyRelays } from './relayHealth';
 import { querySyncAbortable } from './relayQuery';
 import { PROFILE_FEED_KINDS } from '../utils/noteMedia';
 import { COMMENT_KIND } from '../utils/nip22';
@@ -83,8 +82,10 @@ export function subscribeAuthorFeed(input: {
   // and never a relay parked as dead (#1326): the pool's own health filter
   // always keeps a single-relay request, so apply it to the whole set here.
   const byKey = new Map<string, string>();
-  for (const url of input.relays)
-    if (!byKey.has(normalizeURL(url))) byKey.set(normalizeURL(url), url);
+  for (const url of input.relays) {
+    const key = relayKey(url); // the breaker's own key; never throws
+    if (!byKey.has(key)) byKey.set(key, url);
+  }
   const relays = selectHealthyRelays([...byKey.values()]);
   let gotEvent = false;
   let answered = false;

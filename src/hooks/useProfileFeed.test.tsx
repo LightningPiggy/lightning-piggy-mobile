@@ -221,3 +221,32 @@ it('does not flash the spinner when refocusing a profile that already answered',
   expect(subscribe).toHaveBeenCalledTimes(2);
   expect(h.result.current.loading).toBe(false); // still "No posts yet", no spinner
 });
+
+it('shows the spinner again after an answered profile later fails to load', async () => {
+  subscribe.mockImplementation(({ onAnswered, onEose }) => {
+    onAnswered();
+    onEose();
+    return jest.fn();
+  });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  // The next attempt never answers: after the grace period it's unavailable...
+  subscribe.mockImplementation(() => jest.fn());
+  mockFocused = false;
+  h.rerender({});
+  mockFocused = true;
+  h.rerender({});
+  await act(async () => {
+    jest.advanceTimersByTime(6000);
+  });
+  expect(h.result.current.unavailable).toBe(true);
+  // ...and the attempt after that shows the spinner, not the stale state.
+  mockFocused = false;
+  h.rerender({});
+  mockFocused = true;
+  h.rerender({});
+  expect(h.result.current.loading).toBe(true);
+  expect(h.result.current.unavailable).toBe(false);
+});
