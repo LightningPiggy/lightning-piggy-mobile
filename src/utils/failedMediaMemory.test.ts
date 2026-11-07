@@ -3,8 +3,32 @@ import {
   __resetFailedMediaForTests,
   forgetFailedMedia,
   hasFailedMedia,
+  isPermanentMediaFailure,
   rememberFailedMedia,
 } from './failedMediaMemory';
+
+describe('isPermanentMediaFailure', () => {
+  it.each([
+    ['Remote fetch failed (404)', true],
+    ['Remote fetch failed (410)', true],
+    ['Remote fetch failed (403)', true],
+    ['Remote body exceeds limit', true],
+    ['Remote fetch failed (408)', false],
+    ['Remote fetch failed (429)', false],
+    ['Remote fetch failed (500)', false],
+    ['Remote fetch failed (503)', false],
+    ['Remote fetch timed out', false],
+    ['Network request failed', false],
+    ['Media cache cancelled', false],
+  ])('%s → %s', (message, expected) => {
+    expect(isPermanentMediaFailure(new Error(message))).toBe(expected);
+  });
+
+  it('treats a non-Error rejection as transient', () => {
+    expect(isPermanentMediaFailure('404')).toBe(false);
+    expect(isPermanentMediaFailure(undefined)).toBe(false);
+  });
+});
 
 beforeEach(() => __resetFailedMediaForTests());
 

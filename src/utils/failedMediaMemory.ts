@@ -1,6 +1,9 @@
 /**
  * Per-session memory of remote media URLs that already ended in "tap to
- * retry" (failed after the automatic retry, or downloaded but undecodable).
+ * retry" for a reason retrying won't fix: an HTTP 4xx (404, 410…), a body over
+ * the size limit, or a file that downloaded but couldn't be decoded. Offline,
+ * timeout and 5xx failures are deliberately NOT remembered, so a brief outage
+ * can't pin images to "tap to retry" for the rest of the session.
  *
  * A permanently dead URL (404, gone host) otherwise costs a download plus the
  * automatic retry every time a list row showing it is recycled or remounted.
@@ -32,6 +35,21 @@ export function hasFailedMedia(url: string): boolean {
 
 export function forgetFailedMedia(url: string): void {
   failed.delete(url);
+}
+
+/**
+ * Whether a `resolveRemoteMedia` rejection will fail the same way next time.
+ * Keyed off `fetchBounded`'s messages (remoteUrlPolicy.ts): an HTTP 4xx other
+ * than 408 (timeout) / 429 (rate limited), or a body over the size limit.
+ * Anything else (no network, timeout, 5xx, cache cancelled) is transient.
+ */
+export function isPermanentMediaFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'Remote body exceeds limit') return true;
+  const status = /^Remote fetch failed \((\d{3})\)$/.exec(message);
+  if (!status) return false;
+  const code = Number(status[1]);
+  return code >= 400 && code < 500 && code !== 408 && code !== 429;
 }
 
 /** Test-only: start each test with an empty memory. */
