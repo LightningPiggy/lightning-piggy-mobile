@@ -76,18 +76,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     backgroundColor: '#e91e63',
   },
   // `lightningpiggy://` — LP's own deep-link scheme. Cross-platform.
-  // `lightning:` registration is **Android-only**, wired via the
-  // `intentFilters` block on the `android` config below. iOS is
-  // deliberately excluded: iOS doesn't show a chooser for custom URL
-  // schemes, so registering `lightning:` globally would silently
-  // hijack every bolt11 / LNURL-pay link into LP — but `App.tsx`'s
-  // Linking listener currently only routes the Hunt-eligible subset
-  // (`lnurl1…`, `lnurlw://`, `lnurl://`) into HuntFoundScreen and
-  // no-ops other payloads. Until full `lightning:` invoice/pay
-  // routing is in, leaving iOS off the scheme avoids dead-ends for
-  // TestFlight users (Copilot review #488).
+  // The Lightning payment schemes (`lightning:`, `lnurlw://`, `lnurl://`)
+  // are registered per platform: `ios.scheme` below for iOS, and the
+  // `android.intentFilters` block for Android. They are kept off this
+  // top-level key on purpose, because Expo would also merge them into
+  // Android's `lightningpiggy` intent filter, next to the dedicated ones.
   scheme: 'lightningpiggy',
   ios: {
+    // Lightning payment schemes on iOS, merged with the top-level
+    // `lightningpiggy` into CFBundleURLSchemes. `App.tsx`'s Linking router
+    // handles all of them: bolt11, Lightning Address and LNURL-pay open
+    // SendSheet; LNURL-withdraw opens LnurlWithdrawSheet; anything else
+    // under `lightning:` gets a "Link not supported" toast. Unlike Android,
+    // iOS shows no app chooser: when several installed apps claim the same
+    // scheme, iOS picks one (in practice the most recently installed), so
+    // another wallet may win on a given phone.
+    scheme: ['lightning', 'lnurlw', 'lnurl'],
     supportsTablet: true,
     bundleIdentifier: getIosBundleId(),
     infoPlist: {
@@ -295,8 +299,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // lightning-piggy-app-62493). Not a secret — Google's guidance is that
     // client config ships in the app. Used only for the opt-in Marmot push.
     googleServicesFile: './google-services.json',
-    // Android-only `lightning:` deep-link registration (see comment on
-    // top-level `scheme`). The intent filter wakes the app on an NFC
+    // Android `lightning:` deep-link registration (iOS registers it via
+    // `ios.scheme`; see the comment on the top-level `scheme`). The intent
+    // filter wakes the app on an NFC
     // tag tap or a `Linking.openURL('lightning:lnurl1…')`. Android
     // shows its standard chooser if multiple LN-aware wallets handle
     // the scheme, so this doesn't hijack other wallets' flows.
