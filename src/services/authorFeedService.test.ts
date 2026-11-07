@@ -128,4 +128,52 @@ describe('subscribeAuthorFeed', () => {
     ours.handlers.onclose();
     expect(ours.onUnavailable).not.toHaveBeenCalled();
   });
+
+  it('reports a real answer from one relay while another stays silent', async () => {
+    const closes = [jest.fn(), jest.fn()];
+    closes.forEach((close) => mockSubscribeMany.mockReturnValueOnce({ close }));
+    const calls = {
+      onEvent: jest.fn(),
+      onEose: jest.fn(),
+      onAnswered: jest.fn(),
+      onUnavailable: jest.fn(),
+    };
+    const unsubscribe = subscribeAuthorFeed({
+      authorPubkey: PK,
+      relays: ['wss://a.example', 'wss://b.example'],
+      ...calls,
+    });
+    // One subscription per relay, each for that relay only.
+    const [a, b] = mockSubscribeMany.mock.calls.slice(-2) as [string[], unknown, Handlers][];
+    expect([a[0], b[0]]).toEqual([['wss://a.example'], ['wss://b.example']]);
+    a[2].oneose(); // relay A: really answered, no posts
+    await Promise.resolve();
+    expect(calls.onAnswered).toHaveBeenCalledTimes(1);
+    expect(calls.onEose).not.toHaveBeenCalled(); // relay B is still silent
+    b[2].oneose();
+    expect(calls.onEose).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    closes.forEach((close) => expect(close).toHaveBeenCalled());
+  });
+
+  it('a relay that failed (EOSE and close together) is not an answer', async () => {
+    mockSubscribeMany.mockReturnValueOnce({ close: jest.fn() });
+    mockSubscribeMany.mockReturnValueOnce({ close: jest.fn() });
+    const calls = { onEvent: jest.fn(), onAnswered: jest.fn(), onUnavailable: jest.fn() };
+    subscribeAuthorFeed({
+      authorPubkey: PK,
+      relays: ['wss://a.example', 'wss://b.example'],
+      ...calls,
+    });
+    const [a, b] = mockSubscribeMany.mock.calls.slice(-2) as [string[], unknown, Handlers][];
+    a[2].oneose();
+    a[2].onclose();
+    await Promise.resolve();
+    expect(calls.onAnswered).not.toHaveBeenCalled();
+    expect(calls.onUnavailable).not.toHaveBeenCalled(); // relay B may still answer
+    b[2].oneose();
+    b[2].onclose();
+    await Promise.resolve();
+    expect(calls.onUnavailable).toHaveBeenCalledTimes(1);
+  });
 });

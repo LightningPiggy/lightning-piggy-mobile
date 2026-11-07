@@ -67,57 +67,70 @@ export function subscribeAuthorFeed(input: {
   relays: string[];
   limit?: number;
   onEvent: (event: AuthorFeedEvent) => void;
+  /** Every relay has sent its stored events (or failed). */
   onEose?: () => void;
+  /** The first relay really answered (a real EOSE, not a failure), even if
+   *  others are still silent: "no posts" is now a real answer. */
+  onAnswered?: () => void;
   /** Every relay closed the subscription (failed / unreachable) before any
    *  event arrived: "couldn't ask", which is not the same as "no posts". */
   onUnavailable?: () => void;
 }): () => void {
   trackRelays(input.relays);
-  let eoseFired = false;
+  const relays = [...new Set(input.relays)];
   let gotEvent = false;
-  // True once an EOSE has settled (a microtask later). The pool reports a
-  // relay that FAILED as EOSE and then, if every relay failed, closes in the
-  // same synchronous call; a relay that really answered and later dropped
-  // closes in a later tick. Only the former is "couldn't ask".
-  let answeredBeforeClose = false;
-  let closed = false;
-  const sub = pool.subscribeMany(
-    input.relays,
-    feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE),
-    {
+  let answered = false;
+  let eoseCount = 0;
+  let closedCount = 0;
+  let closedByUs = false;
+  const filter = feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE);
+  // One subscription per relay (still one REQ per relay on the wire), so a
+  // relay that really answered can be told apart while another stays silent:
+  // the pool only reports EOSE once EVERY relay has sent one.
+  const subs = relays.map((relay) => {
+    let eose = false;
+    let closed = false;
+    return pool.subscribeMany([relay], filter, {
       onevent: (ev: Event) => {
         if (ev.pubkey !== input.authorPubkey || !AUTHOR_FEED_KINDS.includes(ev.kind)) return;
         gotEvent = true;
         input.onEvent(toFeedEvent(ev));
       },
       oneose: () => {
-        if (eoseFired) return;
-        eoseFired = true;
+        if (eose) return;
+        eose = true;
+        // The pool reports a relay that FAILED as EOSE and closes it in the
+        // same synchronous call; a relay that really answered and later
+        // dropped closes in a later tick. Only the latter is an answer.
         queueMicrotask(() => {
-          if (!closed) answeredBeforeClose = true;
+          if (closed || closedByUs || answered) return;
+          answered = true;
+          input.onAnswered?.();
         });
-        input.onEose?.();
+        if (++eoseCount === relays.length) input.onEose?.();
       },
-      // A live subscription only closes when every relay has closed it: a
-      // relay that answered stays open. Closing early with nothing received
-      // means no relay was reachable. A close we asked for isn't reported.
+      // A live subscription only closes when the relay closes it: one that
+      // answered stays open. Every relay closing early with nothing received
+      // means none was reachable. A close we asked for isn't reported.
       onclose: () => {
+        if (closed) return;
         closed = true;
-        if (!closedByUs && !gotEvent && !answeredBeforeClose) input.onUnavailable?.();
+        if (++closedCount < relays.length) return;
+        if (!closedByUs && !gotEvent && !answered) input.onUnavailable?.();
       },
       // Only a relay's real EOSE counts as an answer: without this the SDK
-      // fakes one after 4.4 s for a connected relay that never replies,
-      // which would read as "no posts" before the hook's grace period ends.
+      // fakes one after 4.4 s for a connected relay that never replies.
       maxWait: AUTHOR_FEED_EOSE_WAIT_MS,
-    },
-  );
-  let closedByUs = false;
+    });
+  });
   return () => {
     closedByUs = true;
-    try {
-      sub.close();
-    } catch {
-      // best-effort — the sub may already be closed
+    for (const sub of subs) {
+      try {
+        sub.close();
+      } catch {
+        // best-effort — the sub may already be closed
+      }
     }
   };
 }
