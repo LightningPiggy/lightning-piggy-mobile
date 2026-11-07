@@ -16,6 +16,8 @@ const DEAD_RELAYS = ['relay.nostr.band', 'relay.nostr.net', 'relay.nsec.app'];
 const UNRELIABLE_RELAYS = ['nos.lol', 'nostr.mom'];
 /** In-memory relay with ~1 h retention: useless as a default store. */
 const NOT_A_STORE = ['relay.snort.social'];
+/** Paid relays that limit or reject reads from non-subscribers: only cost a connection. */
+const PAID_RELAYS = ['nostr.land'];
 
 const host = (url: string) => new URL(url).host.toLowerCase();
 
@@ -32,6 +34,10 @@ const LISTS: Record<string, readonly string[]> = {
 describe.each(Object.entries(LISTS))('%s', (_name, list) => {
   it('contains no dead relay', () => {
     expect(list.map(host).filter((h) => DEAD_RELAYS.includes(h))).toEqual([]);
+  });
+
+  it('contains no paid relay', () => {
+    expect(list.map(host).filter((h) => PAID_RELAYS.includes(h))).toEqual([]);
   });
 
   it('is never made up only of unreliable relays', () => {

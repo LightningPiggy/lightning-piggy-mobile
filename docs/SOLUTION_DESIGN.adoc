@@ -510,7 +510,7 @@ DEFAULT_RELAYS = [
 
 === Profile Relays
 
-Additional aggregator relays queried when fetching profiles for better coverage (nostr.land is read-only for non-members, so it's only used here):
+Additional aggregator relays queried when fetching profiles for better coverage. nostr.land isn't used: it's a paid relay that limits or rejects reads from non-subscribers, so it only added connections and timeouts:
 
 [source,typescript]
 ----
@@ -519,7 +519,8 @@ PROFILE_RELAYS = [
   'wss://user.kindpag.es',
   'wss://relay.primal.net',
   'wss://relay.damus.io',
-  'wss://nostr.land',
+  'wss://relay.eu.whitenoise.chat',
+  'wss://relay.us.whitenoise.chat',
 ]
 ----
 
@@ -1154,7 +1155,7 @@ Reusable kind-0 lookup with layered caching:
 
 . **In-memory `zapSenderProfileStorage`** — already populated for any pubkey the wallet has ever seen as a zap sender or contact.
 . **AsyncStorage fallback** — `zapSenderProfileStorage.get(pubkey)` reads from disk on miss.
-. **Relay fetch** — `nostrService.fetchProfile(pubkey, readRelays)` unions the user's NIP-65 read relays with `PROFILE_RELAYS` (purplepag.es / user.kindpag.es / primal.net / damus.io / nostr.land). Result is written back to the cache.
+. **Relay fetch** — `nostrService.fetchProfile(pubkey, readRelays)` unions the user's NIP-65 read relays with `PROFILE_RELAYS` (purplepag.es / user.kindpag.es / primal.net / damus.io / the White Noise relays). Result is written back to the cache.
 
 Consumers (hider chip on `HuntPiggyDetailScreen`, finder chip on each find-log row, organiser row on `EventDetailScreen`) all resolve instantly for any pubkey the user has interacted with before, and degrade gracefully to a pubkey-prefix fallback when neither cache nor relay yields a name.
 
