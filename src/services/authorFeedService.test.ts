@@ -176,4 +176,32 @@ describe('subscribeAuthorFeed', () => {
     await Promise.resolve();
     expect(calls.onUnavailable).toHaveBeenCalledTimes(1);
   });
+
+  it("a silent relay's SDK timeout EOSE is not an answer; a real empty EOSE is", async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      mockSubscribeMany.mockReturnValueOnce({ close: jest.fn() });
+      mockSubscribeMany.mockReturnValueOnce({ close: jest.fn() });
+      const calls = { onEvent: jest.fn(), onEose: jest.fn(), onAnswered: jest.fn() };
+      subscribeAuthorFeed({
+        authorPubkey: PK,
+        relays: ['wss://a.example', 'wss://b.example'],
+        ...calls,
+      });
+      const [a, b] = mockSubscribeMany.mock.calls.slice(-2) as [string[], unknown, Handlers][];
+      // Relay A stays connected and silent until the SDK fakes its EOSE.
+      now.mockReturnValue(AUTHOR_FEED_EOSE_WAIT_MS);
+      a[2].oneose();
+      await Promise.resolve();
+      expect(calls.onAnswered).not.toHaveBeenCalled();
+      // A real EOSE (well before the timeout) still counts.
+      now.mockReturnValue(AUTHOR_FEED_EOSE_WAIT_MS - 1);
+      b[2].oneose();
+      await Promise.resolve();
+      expect(calls.onAnswered).toHaveBeenCalledTimes(1);
+      expect(calls.onEose).toHaveBeenCalledTimes(1);
+    } finally {
+      now.mockRestore();
+    }
+  });
 });
