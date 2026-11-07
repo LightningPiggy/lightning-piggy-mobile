@@ -290,6 +290,9 @@ export function useMarketListings(enabled: boolean, scope?: MarketListingsScope)
           state.products.length > 0 ||
           !!getMarketSnapshot(key)),
       incomplete: state.key === key && state.incomplete,
+      // The last completed load reached no relay at all (offline, every relay
+      // down). Not `answeredRelays`: the All scope always reports [] there.
+      transportFailed: state.key === key && state.completed && !!state.transportFailed,
       sellersUnreachable:
         state.key === key && state.completed && !!state.unreachableSellers?.length,
       refresh,

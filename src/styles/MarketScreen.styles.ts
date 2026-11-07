@@ -42,4 +42,13 @@ export const createMarketScreenStyles = (colors: Palette) =>
       textAlign: 'center',
       lineHeight: 19,
     },
+    // Under the "Couldn't reach the Market relays" copy only.
+    retryButton: {
+      marginTop: 16,
+      paddingHorizontal: 20,
+      paddingVertical: 10,
+      borderRadius: 100,
+      backgroundColor: colors.brandPink,
+    },
+    retryButtonText: { color: colors.white, fontWeight: '700', fontSize: 14 },
   });

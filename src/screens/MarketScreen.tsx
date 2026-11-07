@@ -5,7 +5,7 @@ import { marketMerchants, resolveMerchantSelection } from '../utils/marketMercha
 import { useCollectionFilter } from '../hooks/useCollectionFilter';
 import MarketCollectionChips from '../components/MarketCollectionChips';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, FlatList, useWindowDimensions } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, useWindowDimensions } from 'react-native';
 import MarketProductCard from '../components/MarketProductCard';
 import MarketFilterBar from '../components/MarketFilterBar';
 import MarketScopePill from '../components/MarketScopePill';
@@ -223,6 +223,9 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
     [tileWidth, openProduct, shipping],
   );
 
+  // Nothing loaded because no relay answered at all (offline, every relay
+  // down): say so, with a Retry, rather than claiming there are no listings.
+  const relaysUnreachable = !live.loading && baseProducts.length === 0 && live.transportFailed;
   const emptyCopy =
     live.loading && baseProducts.length === 0
       ? mode === 'wotFof'
@@ -230,17 +233,19 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
         : mode === 'wotAll'
           ? t('market.live.loadingAll')
           : t('market.live.loading')
-      : merchantMissing
-        ? t('market.screen.emptyMerchantMissing', { name: merchantName ?? merchant ?? '' })
-        : filterActive
-          ? t('market.screen.emptyNoMatch')
-          : mode === 'wotFriends'
-            ? t('market.screen.emptyNoFriends')
-            : mode === 'wotFof'
-              ? t('market.screen.emptyNoFof')
-              : mode === 'wotAll'
-                ? t('market.screen.emptyNoAll')
-                : t('market.screen.emptyNone');
+      : relaysUnreachable
+        ? t('market.screen.relaysUnreachable')
+        : merchantMissing
+          ? t('market.screen.emptyMerchantMissing', { name: merchantName ?? merchant ?? '' })
+          : filterActive
+            ? t('market.screen.emptyNoMatch')
+            : mode === 'wotFriends'
+              ? t('market.screen.emptyNoFriends')
+              : mode === 'wotFof'
+                ? t('market.screen.emptyNoFof')
+                : mode === 'wotAll'
+                  ? t('market.screen.emptyNoAll')
+                  : t('market.screen.emptyNone');
 
   if (!ready) return <View style={styles.container} testID="market-screen" />;
 
@@ -275,8 +280,8 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
       />
 
       {/* Pull-to-refresh replaces the old status row; only a load that missed
-          some sellers says so, inline. */}
-      {live.sellersUnreachable && !live.loading ? (
+          some sellers says so, inline (the empty state covers missing them all). */}
+      {live.sellersUnreachable && !live.loading && !relaysUnreachable ? (
         <View style={styles.partialBanner} testID="market-partial-banner">
           <Text style={styles.partialBannerText}>{t('market.live.partialToast')}</Text>
         </View>
@@ -327,6 +332,17 @@ const MarketScreen: React.FC<Props> = ({ navigation, route }) => {
         ListEmptyComponent={
           <View style={styles.emptyWrap} testID="market-empty">
             <Text style={styles.emptyText}>{emptyCopy}</Text>
+            {relaysUnreachable ? (
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={live.refresh}
+                accessibilityRole="button"
+                accessibilityLabel={t('market.screen.retryAccessibility')}
+                testID="market-relays-retry"
+              >
+                <Text style={styles.retryButtonText}>{t('market.screen.retry')}</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         }
         renderItem={renderProduct}

@@ -2361,6 +2361,9 @@
       "fofBuildingStart": "Dein Netzwerk wird aufgebaut…",
       "fofFailed": "Dein Netzwerk konnte nicht aufgebaut werden – die Angebote deiner Freunde werden angezeigt.",
       "emptyNone": "Derzeit sind keine Produkte verfügbar.",
+      "relaysUnreachable": "Die Markt-Relays sind nicht erreichbar. Prüfe deine Verbindung und versuch es erneut.",
+      "retry": "Erneut versuchen",
+      "retryAccessibility": "Markt erneut laden",
       "myOrders": "Meine Bestellungen"
     },
     "card": {

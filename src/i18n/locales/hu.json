@@ -2361,6 +2361,9 @@
       "fofBuildingStart": "Hálózatod felépítése…",
       "fofFailed": "Nem sikerült felépíteni a hálózatodat – a barátaid hirdetései láthatók.",
       "emptyNone": "Jelenleg nincs elérhető termék.",
+      "relaysUnreachable": "Nem sikerült elérni a Piactér relay-eit. Ellenőrizd a kapcsolatot, és próbáld újra.",
+      "retry": "Újra",
+      "retryAccessibility": "A Piactér újratöltése",
       "myOrders": "Rendeléseim"
     },
     "card": {

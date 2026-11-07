@@ -2361,6 +2361,9 @@
       "fofBuildingStart": "正在构建你的网络……",
       "fofFailed": "无法构建你的网络——正在显示好友的商品。",
       "emptyNone": "目前没有可购买的商品。",
+      "relaysUnreachable": "无法连接到市集中继。请检查网络连接后重试。",
+      "retry": "重试",
+      "retryAccessibility": "重新加载市集",
       "myOrders": "我的订单"
     },
     "card": {
