@@ -14,6 +14,8 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
     // previous attempt's failure for the render before its effect runs.
     attempt: number;
     uri: string | null;
+    // The file downloaded but couldn't be decoded (see reportBroken).
+    broken?: boolean;
     // When `uri` was resolved, so reportBroken only evicts this copy.
     at: number;
     failed: boolean;
@@ -55,12 +57,12 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
   const reportBroken = useCallback(() => {
     if (!url || resolvedAt === undefined) return;
     // Mark the attempt failed even if the delete itself fails.
-    void evictRemoteMedia(url, maxBytes, resolvedAt)
+    void evictRemoteMedia(url, maxBytes, resolvedAt, owner)
       .catch(() => undefined)
       .then(() =>
         setResolved((prev) =>
           prev && prev.owner === owner && prev.url === url && prev.attempt === attempt
-            ? { ...prev, uri: null, failed: true }
+            ? { ...prev, uri: null, failed: true, broken: true }
             : prev,
         ),
       );
@@ -68,6 +70,7 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
   return {
     uri: current ? resolved.uri : null,
     failed: current && resolved.failed,
+    broken: current && !!resolved.broken,
     retry,
     reportBroken,
   };
@@ -85,20 +88,24 @@ export function useRemoteMediaUri(url: string | null, maxBytes: number): string 
  */
 export function useRemoteMediaWithAutoRetry(url: string | null, maxBytes: number, delayMs = 3000) {
   const media = useRemoteMedia(url, maxBytes);
-  const { failed, retry } = media;
+  const { failed, broken, retry } = media;
   const [autoRetried, setAutoRetried] = useState<string | null>(null);
   // Loading switched off (e.g. unfollowed): the next session gets its own retry.
   useEffect(() => {
     if (!url) setAutoRetried(null);
   }, [url]);
   useEffect(() => {
-    if (!failed || !url || autoRetried === url) return;
+    // An undecodable file usually stays undecodable (an HTML page, an
+    // unsupported format): re-downloading it unasked could cost up to the
+    // full size limit again on mobile data, so that goes straight to "tap
+    // to retry", which still downloads afresh.
+    if (!failed || broken || !url || autoRetried === url) return;
     const timer = setTimeout(() => {
       setAutoRetried(url);
       retry();
     }, delayMs);
     return () => clearTimeout(timer);
-  }, [failed, url, autoRetried, retry, delayMs]);
+  }, [failed, broken, url, autoRetried, retry, delayMs]);
   // Until the automatic retry has also failed, it's still loading.
-  return { ...media, failed: failed && autoRetried === url };
+  return { ...media, failed: failed && (broken || autoRetried === url) };
 }

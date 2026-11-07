@@ -101,10 +101,13 @@ export async function evictRemoteMedia(
   url: string,
   maxBytes = MEDIA_MAX_BYTES,
   resolvedAt = Infinity,
+  /** The account the broken copy belonged to: never evict another's. */
+  expectedOwner?: string | null,
 ): Promise<void> {
   const checked = checkRemoteUrl(url, { kind: 'media' });
   const owner = activeOwner;
   if (!checked.ok || !owner || !cacheDirectory) return;
+  if (expectedOwner !== undefined && expectedOwner?.toLowerCase() !== owner) return;
   const uri = `${ownerDirectory(owner)}${hash(`${maxBytes}:${checked.url}`)}`;
   if ((writtenAt.get(uri) ?? 0) > resolvedAt) return;
   writtenAt.delete(uri);
@@ -119,6 +122,8 @@ export async function wipeRemoteMediaForOwner(pubkey: string): Promise<void> {
   await Promise.allSettled([...(publishing.get(owner) ?? [])]);
   if (!cacheDirectory) return;
   await deleteAsync(ownerDirectory(owner), { idempotent: true });
+  for (const uri of [...writtenAt.keys()])
+    if (uri.startsWith(ownerDirectory(owner))) writtenAt.delete(uri);
   // Pre-account cache files cannot be attributed to an owner: remove on any logout.
   for (const name of await readDirectoryAsync(cacheDirectory)) {
     if (/^remote-[a-f0-9]{64}$/.test(name))

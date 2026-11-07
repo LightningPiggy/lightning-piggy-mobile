@@ -309,3 +309,13 @@ it("never lets a stale decode error delete another view's fresh download of the 
   expect(deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
   now.mockRestore();
 });
+
+it("never evicts another account's copy after an account switch", async () => {
+  jest.mocked(deleteAsync).mockClear();
+  // The broken copy belonged to "reader"; the active account is now "other".
+  setRemoteMediaOwner('other');
+  await evictRemoteMedia('https://example.com/switch.jpg', undefined, Infinity, 'reader');
+  expect(deleteAsync).not.toHaveBeenCalled();
+  await evictRemoteMedia('https://example.com/switch.jpg', undefined, Infinity, 'OTHER');
+  expect(deleteAsync).toHaveBeenCalledTimes(1);
+});
