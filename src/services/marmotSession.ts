@@ -73,7 +73,7 @@ import { boundGroupQueries } from './marmotGroupBackfill';
 import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
 import { marmotSendReceipt, type MarmotSendReceipt } from './marmotSendReceipt';
-import { createMarmotNetwork, createPushTransport } from './marmotNetwork';
+import { createMarmotNetwork, createPushTransport, verifyMarmotEvent } from './marmotNetwork';
 import {
   PUSH_TOKEN_LIST_KIND,
   PUSH_TOKEN_REMOVAL_KIND,
@@ -292,6 +292,7 @@ export class MarmotSession {
         onLive: (h) => this.noteGroupLive(h),
       }),
       cryptoProvider: marmotCryptoProvider,
+      verifyEvent: verifyMarmotEvent, // the pool's verified-event cache, not a 2nd Schnorr
       getSignatureKeyPair: async (ciphersuite) => {
         const slot = await this.installationSlot();
         return this.gate.guard(getInstallationSignatureKeyPair(this.pubkey, slot, ciphersuite));
