@@ -574,6 +574,7 @@
     "noShopItems": "Todavía no hay artículos en la tienda",
     "loadMore": "Cargar más",
     "shopUnavailable": "No se ha podido cargar la tienda. Desliza hacia abajo para reintentar.",
+    "feedUnavailable": "No se han podido cargar las publicaciones. Desliza hacia abajo para reintentar.",
     "filterPosts": "Publicaciones",
     "filterPostsAndReplies": "Publicaciones y respuestas",
     "replyingTo": "Respondiendo a",

@@ -45,6 +45,9 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
   const feed = useCoalescedMap<AuthorFeedEvent>({ flushMs: 150 });
   const { reset, enqueue, flush } = feed;
   const [loading, setLoading] = useState(true);
+  // No relay has answered yet (all failed, or none replied within the grace
+  // period): the profile says it couldn't load posts rather than "no posts".
+  const [unavailable, setUnavailable] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [reachedEnd, setReachedEnd] = useState(false);
   const pagesRef = useRef(0);
@@ -63,6 +66,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     pagesRef.current = 0;
     setReachedEnd(false);
     setLoading(true);
+    setUnavailable(false);
   }, [authorPubkey, reset]);
 
   // Pull-to-refresh re-opens paging, so an end reached during a relay outage
@@ -83,20 +87,45 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
       // them, so one person's posts never land on the next profile shown in
       // this (reused) screen.
       let live = true;
+      let answered = false;
+      // Every attempt (refocus, pull-to-refresh after a failure) loads afresh:
+      // never "No posts yet" while the new request is still unanswered.
+      setUnavailable(false);
+      setLoading(true);
       const unsubscribe = subscribeAuthorFeed({
         authorPubkey,
         relays: readRelays,
         limit: AUTHOR_FEED_PAGE_SIZE,
         onEvent: (event) => {
-          if (live) enqueue(event.id, event);
+          if (!live) return;
+          answered = true;
+          setUnavailable(false);
+          enqueue(event.id, event);
         },
+        // Every relay is done, but that includes relays that failed or timed
+        // out: only onEvent / onAnswered count as an answer.
         onEose: () => {
           if (!live) return;
           flush();
           setLoading(false);
         },
+        // One relay really answered: when the grace period ends with no
+        // posts, that's "No posts yet", even if another relay is still silent.
+        onAnswered: () => {
+          if (!live) return;
+          answered = true;
+          setUnavailable(false);
+        },
+        onUnavailable: () => {
+          if (!live) return;
+          setUnavailable(true);
+          setLoading(false);
+        },
       });
-      const grace = setTimeout(() => setLoading(false), FIRST_EVENT_GRACE_MS);
+      const grace = setTimeout(() => {
+        if (!answered) setUnavailable(true);
+        setLoading(false);
+      }, FIRST_EVENT_GRACE_MS);
       return () => {
         live = false;
         focusedRef.current = false;
@@ -180,6 +209,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     /** Every fetched event, hidden ones included — what paging depends on. */
     fetchedCount: fetched.length,
     loading,
+    unavailable,
     loadingMore,
     reachedEnd,
     loadMore,

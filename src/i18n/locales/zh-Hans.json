@@ -574,6 +574,7 @@
     "noShopItems": "商店里还没有商品",
     "loadMore": "加载更多",
     "shopUnavailable": "无法加载这个商店。下拉重试。",
+    "feedUnavailable": "无法加载帖子。下拉重试。",
     "filterPosts": "帖子",
     "filterPostsAndReplies": "帖子和回复",
     "replyingTo": "回复",
