@@ -38,3 +38,23 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
 export function useRemoteMediaUri(url: string | null, maxBytes: number): string | null {
   return useRemoteMedia(url, maxBytes).uri;
 }
+
+/**
+ * useRemoteMedia that retries a failed download once by itself after a short
+ * pause (a slow mobile link, or the app busy catching up on relays), then
+ * leaves further retries to the user via `retry`.
+ */
+export function useRemoteMediaWithAutoRetry(url: string | null, maxBytes: number, delayMs = 3000) {
+  const media = useRemoteMedia(url, maxBytes);
+  const { failed, retry } = media;
+  const [autoRetried, setAutoRetried] = useState<string | null>(null);
+  useEffect(() => {
+    if (!failed || !url || autoRetried === url) return;
+    const timer = setTimeout(() => {
+      setAutoRetried(url);
+      retry();
+    }, delayMs);
+    return () => clearTimeout(timer);
+  }, [failed, url, autoRetried, retry, delayMs]);
+  return media;
+}
