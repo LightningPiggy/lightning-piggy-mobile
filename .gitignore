@@ -92,3 +92,6 @@ modules/nostr-native/ios/Generated/
 
 # i18n:sync task files and drafts (scripts/i18n-sync.mjs)
 .i18n-todo/
+
+# Per-run Zapstore config (release-zapstore.yml pins the tag)
+.zapstore-ci.yaml
