@@ -64,16 +64,12 @@ it('falls back to verification when persistent storage is corrupt', async () => 
 });
 
 it('does not confer trust when storage cannot be read', async () => {
-  const read = jest
-    .spyOn(AsyncStorage, 'getItem')
-    .mockRejectedValue(new Error('storage unavailable'));
-  try {
-    await hydrateVerifiedEventCache();
-    expect(__verifiedEventCacheSize()).toBe(0);
-    expect(verifyEventCached({ ...signed(), sig: '0'.repeat(128) })).toBe(false);
-  } finally {
-    read.mockRestore();
-  }
+  // The AsyncStorage jest mock is already a jest.fn: never mockRestore() it
+  // (that would strip its implementation for every later test).
+  jest.spyOn(AsyncStorage, 'multiGet').mockRejectedValueOnce(new Error('storage unavailable'));
+  await hydrateVerifiedEventCache();
+  expect(__verifiedEventCacheSize()).toBe(0);
+  expect(verifyEventCached({ ...signed(), sig: '0'.repeat(128) })).toBe(false);
 });
 
 it('fully verifies distinct valid Schnorr signatures for the same canonical event and id', async () => {
@@ -99,4 +95,42 @@ it('fully verifies distinct valid Schnorr signatures for the same canonical even
   expect(verifyEventCached(second)).toBe(true);
   expect(verifyEventCached(first)).toBe(true);
   expect(__verifiedEventCacheSize()).toBe(1);
+});
+
+it('hydrates all 256 shards with ONE storage round trip, not 256 serial reads', async () => {
+  // One well-formed record per shard (a leading id byte each): hydration only
+  // checks shape here; a hit still re-hashes and compares the signature.
+  for (let i = 0; i < 256; i++) {
+    const bucket = i.toString(16).padStart(2, '0');
+    const record = [bucket + 'a'.repeat(62), 'b'.repeat(128)];
+    await AsyncStorage.setItem(`nostr_verified_v1_${bucket}`, JSON.stringify([record]));
+  }
+  const multiGet = jest.spyOn(AsyncStorage, 'multiGet');
+  const getItem = jest.spyOn(AsyncStorage, 'getItem');
+  multiGet.mockClear();
+  getItem.mockClear();
+  await hydrateVerifiedEventCache();
+  expect(multiGet).toHaveBeenCalledTimes(1);
+  expect(multiGet.mock.calls[0][0]).toHaveLength(256);
+  expect(getItem).not.toHaveBeenCalled();
+  expect(__verifiedEventCacheSize()).toBe(256);
+});
+
+it('ignores a shard stored under the wrong bucket', async () => {
+  const event = signed();
+  const wrong = event.id.slice(0, 2) === '00' ? '01' : '00';
+  await AsyncStorage.setItem(`nostr_verified_v1_${wrong}`, JSON.stringify([[event.id, event.sig]]));
+  await hydrateVerifiedEventCache();
+  expect(__verifiedEventCacheSize()).toBe(0);
+});
+
+it('does not resurrect trust when the cache is reset mid-hydration', async () => {
+  const event = signed();
+  expect(verifyEventCached(event)).toBe(true);
+  await flushVerifiedEventCache();
+  __resetVerifiedEventCache();
+  const pending = hydrateVerifiedEventCache();
+  __resetVerifiedEventCache(); // e.g. sign-out while the read is in flight
+  await pending;
+  expect(__verifiedEventCacheSize()).toBe(0);
 });
