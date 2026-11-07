@@ -7,7 +7,7 @@ import {
   deleteAsync,
   readDirectoryAsync,
 } from 'expo-file-system/legacy';
-import { resolveRemoteMedia, wipeRemoteMediaForOwner } from './remoteMediaCache';
+import { resolveRemoteMedia, evictRemoteMedia, wipeRemoteMediaForOwner } from './remoteMediaCache';
 import { PREVIEW_IMAGE_MAX_BYTES } from '../utils/remoteUrlPolicy';
 
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
@@ -239,4 +239,34 @@ it('removes legacy unscoped plaintext files on account removal', async () => {
   await wipeRemoteMediaForOwner('reader');
   expect(deleteAsync).toHaveBeenCalledWith(`file:///cache/${legacy}`, { idempotent: true });
   expect(deleteAsync).not.toHaveBeenCalledWith('file:///cache/other-cache', expect.anything());
+});
+
+it('evicts exactly the cached file for a URL, so the next resolve downloads it again', async () => {
+  const uri = await (async () => {
+    let sent = false;
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => null },
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (sent) return { done: true };
+            sent = true;
+            return { done: false, value: new Uint8Array([1, 2, 3]) };
+          },
+          cancel: async () => {},
+          releaseLock: () => {},
+        }),
+      },
+    });
+    return resolveRemoteMedia('https://example.com/broken.jpg');
+  })();
+  jest.mocked(deleteAsync).mockClear();
+  await evictRemoteMedia('https://example.com/broken.jpg');
+  expect(deleteAsync).toHaveBeenCalledTimes(1);
+  expect(deleteAsync).toHaveBeenCalledWith(uri, { idempotent: true });
+  // A blocked URL evicts nothing.
+  await evictRemoteMedia('https://127.0.0.1/x.jpg');
+  expect(deleteAsync).toHaveBeenCalledTimes(1);
 });
