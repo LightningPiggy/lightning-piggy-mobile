@@ -161,6 +161,27 @@ describe('buildProfileRows', () => {
     });
   });
 
+  it('says posts could not be loaded, never a false "no posts yet", when no relay answered', () => {
+    for (const tab of ['posts', 'media'] as const) {
+      expect(buildProfileRows({ ...base, tab, feedUnavailable: true })[0]).toMatchObject({
+        status: 'feedUnavailable',
+      });
+    }
+    // Still loading wins; a real answer with nothing in it is still "empty".
+    expect(
+      buildProfileRows({ ...base, tab: 'posts', feedLoading: true, feedUnavailable: true })[0],
+    ).toMatchObject({ status: 'loading' });
+    expect(buildProfileRows({ ...base, tab: 'posts' })[0]).toMatchObject({ status: 'emptyPosts' });
+    // Posts that did arrive are shown, whatever the flag says.
+    const shown = buildProfileRows({
+      ...base,
+      tab: 'posts',
+      feed: [ev('1', 1)],
+      feedUnavailable: true,
+    });
+    expect(shown[0]).toMatchObject({ type: 'post' });
+  });
+
   it('says listings could not be loaded rather than "nothing for sale"', () => {
     expect(buildProfileRows({ ...base, tab: 'shop', productsIncomplete: true })[0]).toMatchObject({
       status: 'shopUnavailable',

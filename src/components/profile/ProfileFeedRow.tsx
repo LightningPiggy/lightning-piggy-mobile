@@ -36,6 +36,7 @@ const STATUS_KEYS: Record<Exclude<ProfileStatus, 'loading'>, string> = {
   emptyMedia: 'profileTabs.noMedia',
   emptyShop: 'profileTabs.noShopItems',
   shopUnavailable: 'profileTabs.shopUnavailable',
+  feedUnavailable: 'profileTabs.feedUnavailable',
 };
 
 /**

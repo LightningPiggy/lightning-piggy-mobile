@@ -133,3 +133,120 @@ it('hides non-note comments but still pages past them (#1337)', async () => {
   // The hidden product comment is the oldest fetched event: the cursor.
   expect(fetchPage.mock.calls[0][0].until).toBe(80);
 });
+
+it('shows "no posts" rather than unavailable when one relay answered and another stays silent', async () => {
+  subscribe.mockImplementation(({ onAnswered }) => {
+    onAnswered(); // one relay: real EOSE, nothing stored; the other never replies
+    return jest.fn();
+  });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  expect(h.result.current.loading).toBe(true);
+  await act(async () => {
+    jest.advanceTimersByTime(6000); // the grace period ends
+  });
+  expect(h.result.current.loading).toBe(false);
+  expect(h.result.current.unavailable).toBe(false);
+  expect(h.result.current.events).toHaveLength(0);
+});
+
+it('is unavailable when no relay answered within the grace period', async () => {
+  subscribe.mockImplementation(() => jest.fn());
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(6000);
+  });
+  expect(h.result.current.unavailable).toBe(true);
+});
+
+it('a done signal with no real answer (failed / timed-out relays) stays unavailable', async () => {
+  subscribe.mockImplementation(({ onEose }) => {
+    setTimeout(onEose, 7000); // after the grace period, no relay ever answered
+    return jest.fn();
+  });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(7000);
+  });
+  expect(h.result.current.loading).toBe(false);
+  expect(h.result.current.unavailable).toBe(true);
+});
+
+it('recovers from unavailable on a late answer, a late post, or a retry', async () => {
+  let handlers!: {
+    onEvent: (e: unknown) => void;
+    onAnswered: () => void;
+    onUnavailable: () => void;
+  };
+  subscribe.mockImplementation((input) => {
+    handlers = input;
+    return jest.fn();
+  });
+  const h = renderHook(({ nonce }: { nonce: number }) => useProfileFeed(PK, nonce), {
+    initialProps: { nonce: 0 },
+  });
+  act(() => handlers.onUnavailable());
+  expect(h.result.current.unavailable).toBe(true);
+  act(() => handlers.onAnswered()); // a slow relay answers after all
+  expect(h.result.current.unavailable).toBe(false);
+
+  act(() => handlers.onUnavailable());
+  act(() =>
+    handlers.onEvent({ id: 'late', pubkey: PK, kind: 1, created_at: 1, content: '', tags: [] }),
+  );
+  expect(h.result.current.unavailable).toBe(false);
+
+  act(() => handlers.onUnavailable());
+  h.rerender({ nonce: 1 }); // pull to refresh
+  expect(h.result.current.unavailable).toBe(false);
+  expect(h.result.current.loading).toBe(true);
+  expect(subscribe).toHaveBeenCalledTimes(2);
+});
+
+it('does not flash the spinner when refocusing a profile that already answered', async () => {
+  subscribe.mockImplementation(({ onAnswered, onEose }) => {
+    onAnswered(); // a real answer: this profile has no posts
+    onEose();
+    return jest.fn();
+  });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  expect(h.result.current.loading).toBe(false);
+  subscribe.mockImplementation(() => jest.fn()); // the refocus attempt hasn't answered yet
+  mockFocused = false;
+  h.rerender({});
+  mockFocused = true;
+  h.rerender({});
+  expect(subscribe).toHaveBeenCalledTimes(2);
+  expect(h.result.current.loading).toBe(false); // still "No posts yet", no spinner
+});
+
+it('shows the spinner again after an answered profile later fails to load', async () => {
+  subscribe.mockImplementation(({ onAnswered, onEose }) => {
+    onAnswered();
+    onEose();
+    return jest.fn();
+  });
+  const h = renderHook(() => useProfileFeed(PK, 0));
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  // The next attempt never answers: after the grace period it's unavailable...
+  subscribe.mockImplementation(() => jest.fn());
+  mockFocused = false;
+  h.rerender({});
+  mockFocused = true;
+  h.rerender({});
+  await act(async () => {
+    jest.advanceTimersByTime(6000);
+  });
+  expect(h.result.current.unavailable).toBe(true);
+  // ...and the attempt after that shows the spinner, not the stale state.
+  mockFocused = false;
+  h.rerender({});
+  mockFocused = true;
+  h.rerender({});
+  expect(h.result.current.loading).toBe(true);
+  expect(h.result.current.unavailable).toBe(false);
+});

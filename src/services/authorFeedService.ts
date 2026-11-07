@@ -5,6 +5,7 @@
 // abortable `until` query. Every filter carries a `limit`.
 import type { Event, Filter } from 'nostr-tools';
 import { pool, trackRelays } from './nostrPool';
+import { relayKey, selectHealthyRelays } from './relayHealth';
 import { querySyncAbortable } from './relayQuery';
 import { PROFILE_FEED_KINDS } from '../utils/noteMedia';
 import { COMMENT_KIND } from '../utils/nip22';
@@ -55,35 +56,95 @@ const feedFilter = (authorPubkey: string, limit: number, until?: number): Filter
  * for these kinds, and the author is re-checked here (relays can ignore
  * `authors`).
  */
+/**
+ * How long a relay may stay silent before the SDK fakes EOSE for it. The feed
+ * is a live subscription, so this only stops a silent relay ever counting as
+ * an answer ("No posts yet"): effectively, only a relay's real EOSE does.
+ */
+export const AUTHOR_FEED_EOSE_WAIT_MS = 10 * 60_000;
+
 export function subscribeAuthorFeed(input: {
   authorPubkey: string;
   relays: string[];
   limit?: number;
   onEvent: (event: AuthorFeedEvent) => void;
+  /** Every relay has sent its stored events (or failed). */
   onEose?: () => void;
+  /** The first relay really answered (a real EOSE, not a failure), even if
+   *  others are still silent: "no posts" is now a real answer. */
+  onAnswered?: () => void;
+  /** Every relay closed the subscription (failed / unreachable) before any
+   *  event arrived: "couldn't ask", which is not the same as "no posts". */
+  onUnavailable?: () => void;
 }): () => void {
   trackRelays(input.relays);
-  let eoseFired = false;
-  const sub = pool.subscribeMany(
-    input.relays,
-    feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE),
-    {
+  // One per relay (deduped on the normalised URL, original spelling kept),
+  // and never a relay parked as dead (#1326): the pool's own health filter
+  // always keeps a single-relay request, so apply it to the whole set here.
+  const byKey = new Map<string, string>();
+  for (const url of input.relays) {
+    const key = relayKey(url); // the breaker's own key; never throws
+    if (!byKey.has(key)) byKey.set(key, url);
+  }
+  const relays = selectHealthyRelays([...byKey.values()]);
+  let gotEvent = false;
+  let answered = false;
+  let eoseCount = 0;
+  let closedCount = 0;
+  let closedByUs = false;
+  const filter = feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE);
+  // Monotonic, like the SDK's own timer: a wall-clock change can't skew it.
+  const startedAt = performance.now();
+  // One subscription per relay (still one REQ per relay on the wire), so a
+  // relay that really answered can be told apart while another stays silent:
+  // the pool only reports EOSE once EVERY relay has sent one.
+  const subs = relays.map((relay) => {
+    let eose = false;
+    let closed = false;
+    return pool.subscribeMany([relay], filter, {
       onevent: (ev: Event) => {
         if (ev.pubkey !== input.authorPubkey || !AUTHOR_FEED_KINDS.includes(ev.kind)) return;
+        gotEvent = true;
         input.onEvent(toFeedEvent(ev));
       },
       oneose: () => {
-        if (eoseFired) return;
-        eoseFired = true;
-        input.onEose?.();
+        if (eose) return;
+        eose = true;
+        // The pool reports a relay that FAILED as EOSE and closes it in the
+        // same synchronous call; a relay that really answered and later
+        // dropped closes in a later tick. Only the latter is an answer. And
+        // once maxWait has run out, the SDK fakes EOSE for a silent relay:
+        // no answer either.
+        const timedOut = performance.now() - startedAt >= AUTHOR_FEED_EOSE_WAIT_MS;
+        queueMicrotask(() => {
+          if (timedOut || closed || closedByUs || answered) return;
+          answered = true;
+          input.onAnswered?.();
+        });
+        if (++eoseCount === relays.length) input.onEose?.();
       },
-    },
-  );
+      // A live subscription only closes when the relay closes it: one that
+      // answered stays open. Every relay closing early with nothing received
+      // means none was reachable. A close we asked for isn't reported.
+      onclose: () => {
+        if (closed) return;
+        closed = true;
+        if (++closedCount < relays.length) return;
+        if (!closedByUs && !gotEvent && !answered) input.onUnavailable?.();
+      },
+      // Only a relay's real EOSE counts as an answer: without this the SDK
+      // fakes one after 4.4 s for a connected relay that never replies.
+      maxWait: AUTHOR_FEED_EOSE_WAIT_MS,
+    });
+  });
   return () => {
-    try {
-      sub.close();
-    } catch {
-      // best-effort — the sub may already be closed
+    closedByUs = true;
+    for (const sub of subs) {
+      try {
+        sub.close();
+      } catch {
+        // best-effort — the sub may already be closed
+      }
     }
   };
 }

@@ -574,6 +574,7 @@
     "noShopItems": "No shop items yet",
     "loadMore": "Load more",
     "shopUnavailable": "Couldn’t load this shop. Pull down to try again.",
+    "feedUnavailable": "Couldn’t load posts. Pull down to try again.",
     "filterPosts": "Posts",
     "filterPostsAndReplies": "Posts & replies",
     "replyingTo": "Replying to",

@@ -29,7 +29,8 @@ export type ProfileStatus =
   | 'onlyReplies'
   | 'emptyMedia'
   | 'emptyShop'
-  | 'shopUnavailable';
+  | 'shopUnavailable'
+  | 'feedUnavailable';
 
 export type ProfileRow =
   | {
@@ -79,6 +80,8 @@ export interface ProfileRowsInput {
   postsMode?: PostsMode;
   feed: readonly AuthorFeedEvent[];
   feedLoading: boolean;
+  /** No relay answered the feed query (all failed / none replied in time). */
+  feedUnavailable?: boolean;
   products: readonly MarketProduct[];
   productsLoading: boolean;
   /** The seller snapshot couldn't be completed (relays failed / timed out). */
@@ -106,7 +109,10 @@ export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
   }
   if (input.tab === 'media') {
     const tiles = collectMediaTiles(input.feed);
-    if (tiles.length === 0) return status(input.feedLoading ? 'loading' : 'emptyMedia');
+    if (tiles.length === 0)
+      return status(
+        input.feedLoading ? 'loading' : input.feedUnavailable ? 'feedUnavailable' : 'emptyMedia',
+      );
     return chunk(tiles, MEDIA_COLUMNS).map((row) => ({
       type: 'media',
       key: `media-${row[0].key}`,
@@ -120,6 +126,8 @@ export function buildProfileRows(input: ProfileRowsInput): ProfileRow[] {
   const posts = all ? dedupeReplyEchoes(notes) : notes.filter((e) => e.kind === 1 && !isReply(e));
   if (posts.length === 0) {
     if (input.feedLoading) return status('loading');
+    // No relay answered: "couldn't load", never a false "no posts yet".
+    if (input.feedUnavailable && notes.length === 0) return status('feedUnavailable');
     // Only replies loaded so far — point at the other mode.
     return status(notes.length > 0 ? 'onlyReplies' : 'emptyPosts');
   }
