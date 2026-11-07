@@ -41,6 +41,8 @@ export type AccountDrawerParamList = {
   AccountNostr: undefined;
   AccountInvitationKeys: undefined;
   AccountOnChain: undefined;
+  /** Experimental Ark wallet (signet), only in EXPO_PUBLIC_ENABLE_ARK=1 builds. */
+  AccountArk: undefined;
   AccountDisplayLanguage: undefined;
   /** Currency picker, pushed from Display & language. */
   AccountCurrency: undefined;

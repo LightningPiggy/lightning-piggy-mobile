@@ -168,6 +168,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // LocaleContext can default the in-app language to it (#137). No
     // permissions/options needed; just links the native module.
     'expo-localization',
+    // Experimental Ark wallet (bark, signet) — only in builds made with
+    // EXPO_PUBLIC_ENABLE_ARK=1; react-native.config.js skips its native
+    // libraries otherwise. See BARK_PLAN.md.
+    ...(process.env.EXPO_PUBLIC_ENABLE_ARK === '1' ? ['@secondts/bark-react-native'] : []),
     // expo-notifications config plugin sets the Android notification
     // small icon + colour. The small icon is a white PiggyBank silhouette
     // (lucide PiggyBank glyph) — Android renders the small icon as a flat
