@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useActivePubkey } from './useActivePubkey';
 import { evictRemoteMedia, resolveRemoteMedia } from '../services/remoteMediaCache';
+import { forgetFailedMedia, hasFailedMedia, rememberFailedMedia } from '../utils/failedMediaMemory';
 
 export function useRemoteMedia(url: string | null, maxBytes: number) {
   const owner = useActivePubkey();
@@ -85,10 +86,18 @@ export function useRemoteMediaUri(url: string | null, maxBytes: number): string 
  * useRemoteMedia that retries a failed download once by itself after a short
  * pause (a slow mobile link, or the app busy catching up on relays), then
  * leaves further retries to the user via `retry`.
+ *
+ * A URL that already ended in "tap to retry" this session (failedMediaMemory)
+ * isn't fetched again when a row showing it is recycled or remounted: it shows
+ * "tap to retry" straight away, and the tap downloads it afresh.
  */
 export function useRemoteMediaWithAutoRetry(url: string | null, maxBytes: number, delayMs = 3000) {
-  const media = useRemoteMedia(url, maxBytes);
-  const { failed, broken, retry } = media;
+  // Set by the user's retry tap, so this row loads the URL even though it is
+  // (or is about to be re-)remembered as failed.
+  const [retriedUrl, setRetriedUrl] = useState<string | null>(null);
+  const knownFailed = !!url && url !== retriedUrl && hasFailedMedia(url);
+  const media = useRemoteMedia(knownFailed ? null : url, maxBytes);
+  const { failed, broken, retry: retryMedia } = media;
   const [autoRetried, setAutoRetried] = useState<string | null>(null);
   // Loading switched off (e.g. unfollowed): the next session gets its own retry.
   useEffect(() => {
@@ -102,10 +111,26 @@ export function useRemoteMediaWithAutoRetry(url: string | null, maxBytes: number
     if (!failed || broken || !url || autoRetried === url) return;
     const timer = setTimeout(() => {
       setAutoRetried(url);
-      retry();
+      retryMedia();
     }, delayMs);
     return () => clearTimeout(timer);
-  }, [failed, broken, url, autoRetried, retry, delayMs]);
+  }, [failed, broken, url, autoRetried, retryMedia, delayMs]);
   // Until the automatic retry has also failed, it's still loading.
-  return { ...media, failed: failed && (broken || autoRetried === url) };
+  const gaveUp = failed && (broken || autoRetried === url);
+  useEffect(() => {
+    if (gaveUp && url) rememberFailedMedia(url);
+  }, [gaveUp, url]);
+  const retry = useCallback(() => {
+    if (url) forgetFailedMedia(url);
+    if (knownFailed && url) {
+      // Nothing was fetched for this row yet: load it now, and count the tap
+      // as this URL's one retry so a failure costs one download, not two.
+      setRetriedUrl(url);
+      setAutoRetried(url);
+      return;
+    }
+    retryMedia();
+  }, [url, knownFailed, retryMedia]);
+  if (knownFailed) return { ...media, uri: null, failed: true, broken: false, retry };
+  return { ...media, failed: gaveUp, retry };
 }
