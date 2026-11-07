@@ -18,6 +18,8 @@ import type { PickedFriend } from '../components/FriendPickerSheet';
 import { giphyEnvelope, type Gif } from '../services/giphyService';
 import { MARMOT_VOICE_MIME, marmotVoiceFilename, type MarmotImage } from '../services/marmotSend';
 import { sendClearingDraft } from '../utils/composerDraft';
+import { appendSharedText, type SharedImage } from '../utils/incomingShare';
+import { useStagedShare } from './useStagedShare';
 
 /**
  * The send-side behaviour that differs between the 1:1 and group composers —
@@ -64,6 +66,8 @@ export interface UseComposerActionsParams {
   setGifPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setContactPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setVoiceSheetOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  /** This chat's "Share to Lightning Piggy" key (#1692) — see `useStagedShare`. */
+  shareTarget?: string | null;
 }
 
 /**
@@ -82,8 +86,9 @@ export function useComposerActions({
   setGifPickerOpen,
   setContactPickerOpen,
   setVoiceSheetOpen,
+  shareTarget = null,
 }: UseComposerActionsParams) {
-  const { isLoggedIn, signEvent, relays } = useNostr();
+  const { isLoggedIn, signEvent, relays, pubkey } = useNostr();
   const { contacts } = useNostrContacts();
 
   const [sending, setSending] = useState(false);
@@ -130,7 +135,7 @@ export function useComposerActions({
   // fetches + decrypts. (Legacy plaintext image URLs from other clients still
   // render via parseImageMessage's plain branch — only the SEND side changed.)
   const uploadAndSendImage = useCallback(
-    async (localUri: string, pickerBase64?: string | null) => {
+    async (localUri: string, pickerBase64?: string | null): Promise<boolean> => {
       setUploadingImage(true);
       try {
         const scrubbed = await stripImageMetadata(localUri, pickerBase64);
@@ -143,13 +148,13 @@ export function useComposerActions({
             ? 'image/gif'
             : 'image/jpeg';
         if (strategy.sendImage) {
-          await strategy.sendImage({ uri: scrubbed.uri, base64: scrubbed.base64, mime });
-          return;
+          return await strategy.sendImage({ uri: scrubbed.uri, base64: scrubbed.base64, mime });
         }
         const file = await uploadEncryptedBlob(scrubbed.uri, signEvent, mime, scrubbed.base64);
-        await strategy.sendFile(file, 'image');
+        return await strategy.sendFile(file, 'image');
       } catch (error) {
         Alert.alert('Upload failed', error instanceof Error ? error.message : 'Please try again.');
+        return false;
       } finally {
         setUploadingImage(false);
       }
@@ -193,6 +198,33 @@ export function useComposerActions({
     if (result.canceled || !result.assets?.[0]) return;
     await uploadAndSendImage(result.assets[0].uri, result.assets[0].base64);
   }, [isLoggedIn, uploadingImage, sending, strategy, closeAttachPanel, uploadAndSendImage]);
+
+  // An image shared in from another app (#1692), sent only on the user's tap.
+  // Same path as the gallery (metadata stripped, re-encoded unless a GIF). Its
+  // type was sniffed from its bytes; GIFs pass through, so read them here the
+  // way the picker's `base64: true` would.
+  const sendSharedImage = useCallback(
+    async (image: SharedImage) => {
+      if (!isLoggedIn || sending || strategy.canSend?.() === false) return false;
+      const gifBase64 =
+        image.mimeType === 'image/gif' ? await readFileAsBase64(image.uri) : undefined;
+      return uploadAndSendImage(image.uri, gifBase64);
+    },
+    [isLoggedIn, sending, strategy, uploadAndSendImage],
+  );
+  const appendSharedTextToDraft = useCallback(
+    (text: string) => {
+      draftRef.current = appendSharedText(draftRef.current, text);
+      setDraft(draftRef.current);
+    },
+    [setDraft],
+  );
+  const stagedShare = useStagedShare({
+    target: shareTarget,
+    owner: pubkey,
+    appendText: appendSharedTextToDraft,
+    sendImage: sendSharedImage,
+  });
 
   const handleShareLocation = useCallback(async () => {
     if (sharingLocation || strategy.canSend?.() === false) return;
@@ -287,5 +319,6 @@ export function useComposerActions({
     handleSendGif,
     handleShareContactPicked,
     handleSendVoiceNote,
+    stagedShare,
   };
 }

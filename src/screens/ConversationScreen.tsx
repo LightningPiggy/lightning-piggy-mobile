@@ -322,6 +322,7 @@ const ConversationScreen: React.FC = () => {
     handleSendVoiceNote,
     shareNwcWallet,
     offerNip17ForText,
+    stagedShare,
   } = useConversationComposerActions({
     protocol,
     pubkey,
@@ -749,6 +750,7 @@ const ConversationScreen: React.FC = () => {
               notifyTyping();
             }}
             {...menu.composer}
+            stagedShare={stagedShare}
             onStartVoiceNote={() => setVoiceSheetOpen(true)}
             sending={sending}
             disabled={!isLoggedIn}

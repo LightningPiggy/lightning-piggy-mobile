@@ -21,7 +21,7 @@ import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useNostrContacts } from '../contexts/NostrContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import { createFriendPickerSheetStyles } from '../styles/FriendPickerSheet.styles';
 import AlphabetBar from './AlphabetBar';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 
@@ -69,6 +69,9 @@ interface Props {
   // GroupMembersSheet so existing members aren't selectable (otherwise
   // adding them silently no-ops in addMembersToGroup).
   excludePubkeys?: readonly string[];
+  // Optional. Extra rows above the friends, given the live search text —
+  // the "Share to Lightning Piggy" picker lists the user's groups here (#1692).
+  listHeader?: (query: string) => React.ReactNode;
 }
 
 const FriendPickerSheet: React.FC<Props> = ({
@@ -79,10 +82,11 @@ const FriendPickerSheet: React.FC<Props> = ({
   subtitle,
   onNewGroup,
   excludePubkeys,
+  listHeader,
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createFriendPickerSheetStyles(colors), [colors]);
   const resolvedTitle = title ?? t('friendPickerSheet.sendToFriend');
   const sheetRef = useRef<BottomSheetModal>(null);
   // BottomSheetFlatList's ref exposes the wrapped FlatList's scrollToIndex
@@ -356,21 +360,24 @@ const FriendPickerSheet: React.FC<Props> = ({
               keyExtractor={(f: PickedFriend) => f.pubkey}
               renderItem={renderItem}
               ListHeaderComponent={
-                onNewGroup ? (
-                  <TouchableOpacity
-                    style={styles.row}
-                    onPress={onNewGroup}
-                    accessibilityLabel={t('friendPickerSheet.createNewGroup')}
-                    testID="friend-picker-new-group"
-                  >
-                    <View style={styles.newGroupIcon}>
-                      <UsersRound size={28} color={colors.brandPink} />
-                    </View>
-                    <View style={styles.info}>
-                      <Text style={styles.newGroupName}>{t('friendPickerSheet.newGroup')}</Text>
-                    </View>
-                  </TouchableOpacity>
-                ) : null
+                <>
+                  {listHeader?.(deferredSearch)}
+                  {onNewGroup ? (
+                    <TouchableOpacity
+                      style={styles.row}
+                      onPress={onNewGroup}
+                      accessibilityLabel={t('friendPickerSheet.createNewGroup')}
+                      testID="friend-picker-new-group"
+                    >
+                      <View style={styles.newGroupIcon}>
+                        <UsersRound size={28} color={colors.brandPink} />
+                      </View>
+                      <View style={styles.info}>
+                        <Text style={styles.newGroupName}>{t('friendPickerSheet.newGroup')}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ) : null}
+                </>
               }
               contentContainerStyle={[
                 styles.listContent,
@@ -411,123 +418,5 @@ const FriendPickerSheet: React.FC<Props> = ({
     </BottomSheetModal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    container: {
-      flex: 1,
-    },
-    listWithBar: {
-      flex: 1,
-      flexDirection: 'row',
-      overflow: 'hidden',
-    },
-    list: {
-      flex: 1,
-    },
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-    },
-    titleText: {
-      flex: 1,
-    },
-    header: {
-      paddingHorizontal: 20,
-      paddingTop: 8,
-      paddingBottom: 12,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: colors.divider,
-    },
-    title: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    subtitle: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 4,
-      textAlign: 'center',
-    },
-    searchInput: {
-      marginTop: 12,
-      backgroundColor: colors.background,
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      fontSize: 15,
-      color: colors.textHeader,
-    },
-    listContent: {
-      paddingVertical: 8,
-    },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 20,
-      gap: 12,
-    },
-    avatar: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      overflow: 'hidden',
-      backgroundColor: colors.background,
-    },
-    avatarImage: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-    },
-    avatarFallback: {
-      width: 40,
-      height: 40,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    info: {
-      flex: 1,
-    },
-    name: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.textHeader,
-    },
-    newGroupIcon: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: colors.brandPinkLight,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    newGroupName: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: colors.brandPink,
-    },
-    address: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      marginTop: 2,
-    },
-    empty: {
-      padding: 24,
-      alignItems: 'center',
-    },
-    emptyText: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-    },
-  });
 
 export default FriendPickerSheet;

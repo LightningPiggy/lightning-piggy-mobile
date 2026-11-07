@@ -604,6 +604,30 @@
     "noSearchMatch": "No friends match your search.",
     "noResolvedProfiles": "No contacts with resolved profiles to send to."
   },
+  "shareIntent": {
+    "title": "Send to…",
+    "subtitlePhotos": {
+      "one": "Choose a chat for your photo. You can add a message before you send it.",
+      "other": "Choose a chat for your {{count}} photos. You can add a message before you send them."
+    },
+    "subtitleText": "Choose a chat. Your text goes into the message box, ready for you to send.",
+    "recentChats": "Recent chats",
+    "friends": "Friends",
+    "trayTitle": {
+      "one": "1 shared photo, ready to send",
+      "other": "{{count}} shared photos, ready to send"
+    },
+    "imageLabel": "Shared photo {{index}} of {{total}}",
+    "removeImage": "Remove shared photo {{index}} of {{total}}",
+    "sendImages": {
+      "one": "Send photo",
+      "other": "Send {{count}} photos"
+    },
+    "nothingToShare": "Lightning Piggy can receive text and photos (JPEG, PNG, GIF, WebP or HEIC, up to 25 MB each).",
+    "someSkipped": "Some items couldn't be added. Lightning Piggy shares up to 10 photos, 25 MB each.",
+    "signedOutTitle": "Sign in to share",
+    "signedOutMessage": "Sign in to Lightning Piggy, then share again. Nothing you shared was kept."
+  },
   "friendsScreen": {
     "title": "Friends",
     "searchPlaceholder": "Search...",

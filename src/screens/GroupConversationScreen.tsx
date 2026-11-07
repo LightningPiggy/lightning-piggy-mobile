@@ -278,6 +278,7 @@ const GroupConversationScreen: React.FC = () => {
     handleSendInvoiceToGroup,
     handleSendVoiceNote,
     resendText,
+    stagedShare,
   } = useGroupComposerActions({
     group,
     draft,
@@ -686,6 +687,7 @@ const GroupConversationScreen: React.FC = () => {
             value={draft}
             onChangeText={setDraft}
             {...menu.composer}
+            stagedShare={stagedShare}
             replying={replyQuote ? { quote: replyQuote, onCancel: cancelReply } : undefined}
             accessory={<MentionPicker candidates={mention.candidates} onPick={mention.pick} />}
             onSelectionChange={mention.onSelectionChange}

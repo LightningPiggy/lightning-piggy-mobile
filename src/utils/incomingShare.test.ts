@@ -1,0 +1,176 @@
+import {
+  appendSharedText,
+  dmShareTarget,
+  groupShareTarget,
+  hasShareContent,
+  isOwnedShareCopy,
+  MAX_SHARED_IMAGES,
+  MAX_SHARED_TEXT_CHARS,
+  normalizeShareIntent,
+  renamedForMime,
+  sanitizeSharedText,
+  shareCopies,
+  sniffImageMime,
+  toFileUri,
+} from './incomingShare';
+
+const DIR = 'file:///data/user/0/app/cache/lp-share/';
+const copy = (n: number, ext = 'jpg') =>
+  `${DIR}share-0000000${n}-aaaa-bbbb-cccc-0123456789ab.${ext}`;
+
+describe('isOwnedShareCopy', () => {
+  it('accepts a generated copy directly inside the share folder', () => {
+    expect(isOwnedShareCopy(copy(1), DIR)).toBe(true);
+    expect(isOwnedShareCopy(copy(1, 'PNG'), DIR.slice(0, -1))).toBe(true);
+  });
+
+  it.each([
+    ['another app-private file', 'file:///data/user/0/app/files/secret.jpg'],
+    [
+      'the cache root',
+      'file:///data/user/0/app/cache/share-00000001-aaaa-bbbb-cccc-0123456789ab.jpg',
+    ],
+    ['a content URI', 'content://media/external/images/media/1'],
+    ['traversal out of the folder', `${DIR}../files/x.jpg`],
+    ['encoded traversal', `${DIR}%2e%2e/files/x.jpg`],
+    ['a nested path', `${DIR}sub/share-00000001-aaaa-bbbb-cccc-0123456789ab.jpg`],
+    ['a sender-chosen name', `${DIR}holiday.jpg`],
+    ['an unexpected extension', `${DIR}share-00000001-aaaa-bbbb-cccc-0123456789ab.pdf`],
+  ])('rejects %s', (_label, uri) => {
+    expect(isOwnedShareCopy(uri, DIR)).toBe(false);
+  });
+
+  it('rejects everything when the folder is unknown', () => {
+    expect(isOwnedShareCopy(copy(1), null)).toBe(false);
+  });
+});
+
+describe('sniffImageMime', () => {
+  const bytes = (...parts: (number[] | string)[]) =>
+    Uint8Array.from(
+      parts.flatMap((p) => (typeof p === 'string' ? [...p].map((c) => c.charCodeAt(0)) : p)),
+    );
+
+  it('recognises the supported formats by their magic numbers', () => {
+    expect(sniffImageMime(bytes([0xff, 0xd8, 0xff, 0xe0], 'JFIF'))).toBe('image/jpeg');
+    expect(sniffImageMime(bytes([0x89], 'PNG', [0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]))).toBe(
+      'image/png',
+    );
+    expect(sniffImageMime(bytes('GIF89a', [1, 0, 1, 0]))).toBe('image/gif');
+    expect(sniffImageMime(bytes('GIF87a'))).toBe('image/gif');
+    expect(sniffImageMime(bytes('RIFF', [0, 0, 0, 0], 'WEBP'))).toBe('image/webp');
+    expect(sniffImageMime(bytes([0, 0, 0, 0x18], 'ftyp', 'heic'))).toBe('image/heic');
+    expect(sniffImageMime(bytes([0, 0, 0, 0x18], 'ftyp', 'mif1'))).toBe('image/heic');
+  });
+
+  it('rejects anything else, whatever it claims to be', () => {
+    expect(sniffImageMime(bytes('%PDF-1.7'))).toBeNull();
+    expect(sniffImageMime(bytes('<svg xmlns='))).toBeNull();
+    expect(sniffImageMime(bytes('RIFF', [0, 0, 0, 0], 'WAVE'))).toBeNull();
+    expect(sniffImageMime(bytes([0, 0, 0, 0x18], 'ftyp', 'mp42'))).toBeNull();
+    expect(sniffImageMime(bytes([0xff, 0xd8]))).toBeNull();
+    expect(sniffImageMime(new Uint8Array())).toBeNull();
+  });
+});
+
+describe('renamedForMime', () => {
+  it('fixes an extension that does not match the bytes', () => {
+    expect(renamedForMime('share-1.jpg', 'image/png')).toBe('share-1.png');
+    expect(renamedForMime('share-1.png', 'image/gif')).toBe('share-1.gif');
+  });
+
+  it('leaves a matching name alone', () => {
+    expect(renamedForMime('share-1.jpg', 'image/jpeg')).toBeNull();
+    expect(renamedForMime('share-1.HEIC', 'image/heic')).toBeNull();
+  });
+});
+
+describe('sanitizeSharedText', () => {
+  it('keeps plain text and links as plain text', () => {
+    expect(sanitizeSharedText('  look https://example.com/x?y=1  ')).toBe(
+      'look https://example.com/x?y=1',
+    );
+    expect(sanitizeSharedText('lightning:lnbc1...')).toBe('lightning:lnbc1...');
+  });
+
+  it('removes control and direction-override characters, normalises line endings', () => {
+    expect(sanitizeSharedText('a\u0000b‮c⁦d\r\ne\rf\tg')).toBe('abcd\ne\nf\tg');
+  });
+
+  it('caps the length and drops empty text', () => {
+    expect(sanitizeSharedText('x'.repeat(MAX_SHARED_TEXT_CHARS + 50))).toHaveLength(
+      MAX_SHARED_TEXT_CHARS,
+    );
+    expect(sanitizeSharedText('  \u0000 \n ')).toBeNull();
+    expect(sanitizeSharedText(null)).toBeNull();
+  });
+});
+
+describe('normalizeShareIntent', () => {
+  it('keeps text and owned image copies', () => {
+    const share = normalizeShareIntent(
+      {
+        text: ' hello ',
+        files: [{ path: copy(1).slice('file://'.length), mimeType: 'IMAGE/JPEG' }],
+      },
+      DIR,
+    );
+    expect(share).toEqual({
+      text: 'hello',
+      images: [{ uri: copy(1), mimeType: 'image/jpeg' }],
+      discard: [],
+    });
+    expect(hasShareContent(share)).toBe(true);
+  });
+
+  it('falls back to the web URL when there is no text', () => {
+    expect(normalizeShareIntent({ webUrl: 'https://example.com' }, DIR).text).toBe(
+      'https://example.com',
+    );
+  });
+
+  it('ignores paths it does not own — never even scheduling them for deletion', () => {
+    const share = normalizeShareIntent(
+      {
+        files: [
+          { path: 'file:///data/user/0/app/files/wallet.db', mimeType: 'image/jpeg' },
+          { path: 'content://evil/1', mimeType: 'image/png' },
+        ],
+      },
+      DIR,
+    );
+    expect(share.images).toEqual([]);
+    expect(share.discard).toEqual([]);
+    expect(hasShareContent(share)).toBe(false);
+  });
+
+  it('caps the number of images and discards the rest', () => {
+    const files = Array.from({ length: MAX_SHARED_IMAGES + 2 }, (_, i) => ({
+      path: copy(i % 10).replace('aaaa', `a${String(i).padStart(3, '0')}`),
+      mimeType: 'image/jpeg',
+    }));
+    const share = normalizeShareIntent({ files }, DIR);
+    expect(share.images).toHaveLength(MAX_SHARED_IMAGES);
+    expect(share.discard).toHaveLength(2);
+    expect(shareCopies(share)).toHaveLength(MAX_SHARED_IMAGES + 2);
+  });
+});
+
+describe('small helpers', () => {
+  it('toFileUri adds the scheme to absolute paths only', () => {
+    expect(toFileUri('/a/b.jpg')).toBe('file:///a/b.jpg');
+    expect(toFileUri('file:///a/b.jpg')).toBe('file:///a/b.jpg');
+    expect(toFileUri('content://x/1')).toBe('content://x/1');
+  });
+
+  it('appendSharedText keeps what was typed', () => {
+    expect(appendSharedText('', 'shared')).toBe('shared');
+    expect(appendSharedText('hi  \n', 'shared')).toBe('hi\nshared');
+  });
+
+  it('share targets are per thread', () => {
+    expect(dmShareTarget('ABC', 'marmot')).toBe('dm:marmot:abc');
+    expect(dmShareTarget('abc', 'nip17')).not.toBe(dmShareTarget('abc', 'marmot'));
+    expect(groupShareTarget('g1')).toBe('group:g1');
+  });
+});

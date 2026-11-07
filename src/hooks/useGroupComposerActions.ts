@@ -20,6 +20,7 @@ import { sendMarmotImage, type MarmotImage } from '../services/marmotSend';
 import { isMarmotGroupId } from '../services/marmotSession';
 import { trackGroupDelivery } from '../utils/groupDeliveryStore';
 import { parseVote } from '../utils/pollMessage';
+import { groupShareTarget } from '../utils/incomingShare';
 
 /**
  * Group GroupConversationScreen composer actions. A thin wrapper over the
@@ -515,6 +516,7 @@ export function useGroupComposerActions(params: {
     setGifPickerOpen,
     setContactPickerOpen,
     setVoiceSheetOpen,
+    shareTarget: group ? groupShareTarget(group.id) : null,
   });
 
   // Group-only: ReceiveSheet hands us a bolt11 via `onSendToGroup`. Post it
