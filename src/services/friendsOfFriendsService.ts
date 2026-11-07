@@ -249,6 +249,9 @@ export const computeFofSet = async (
   myFollows: readonly string[],
   opts: ComputeFofOptions,
 ): Promise<FofResult> => {
+  // A sign-out wipe that lands while this build runs retires the account:
+  // the finished build must not write the graph back afterwards.
+  const epoch = accountEpoch(userPubkey);
   const friendsLower = [...new Set(myFollows.map((p) => p.toLowerCase()))];
   if (friendsLower.length === 0) {
     return { set: new Set(), excludedFriends: 0, computedAt: Date.now() };
@@ -279,7 +282,7 @@ export const computeFofSet = async (
   );
   if (opts.signal?.aborted) throw abortError();
   const result: FofResult = { set, excludedFriends, computedAt: Date.now() };
-  await persistFofCache(userPubkey, friendsLower, result, opts.maxSize);
+  await writeFofCache(userPubkey, friendsLower, result, opts.maxSize, epoch);
   return result;
 };
 
@@ -316,6 +319,37 @@ export const loadFofCache = async (
   } catch {
     return null;
   }
+};
+
+// Sign-out retirement (#565 review). `retireFofCache` bumps the account's
+// epoch and drains writes already in flight; a build that started before
+// the bump then skips its write, so the wipe's key scan can't be outrun.
+// Builds started after it (a re-login) carry the new epoch and write normally.
+const fofEpochs = new Map<string, number>();
+const pendingWrites = new Set<Promise<void>>();
+const accountEpoch = (userPubkey: string | null): number =>
+  userPubkey ? (fofEpochs.get(userPubkey.toLowerCase()) ?? 0) : 0;
+
+/** Stop in-flight FoF builds of `userPubkey` from persisting; await writes already started. */
+export const retireFofCache = async (userPubkey: string): Promise<void> => {
+  const key = userPubkey.toLowerCase();
+  fofEpochs.set(key, accountEpoch(key) + 1);
+  await Promise.allSettled([...pendingWrites]);
+};
+
+const writeFofCache = (
+  userPubkey: string | null,
+  friends: readonly string[],
+  result: FofResult,
+  maxSize: number | undefined,
+  epoch: number,
+): Promise<void> => {
+  // Checked synchronously right before the write is registered, so a
+  // retirement either sees this write in `pendingWrites` or stops it here.
+  if (!userPubkey || accountEpoch(userPubkey) !== epoch) return Promise.resolve();
+  const write = persistFofCache(userPubkey, friends, result, maxSize);
+  pendingWrites.add(write);
+  return write.finally(() => pendingWrites.delete(write));
 };
 
 export const persistFofCache = async (

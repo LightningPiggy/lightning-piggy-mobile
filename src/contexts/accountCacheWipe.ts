@@ -8,7 +8,11 @@ import { drainOrderAdmission, orderBudgetKey } from '../services/orderAdmission'
 import { wipeRemoteMediaForOwner } from '../services/remoteMediaCache';
 import { retireBuyerOrderTitles, waitForBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
 import { FOLLOW_SNAPSHOT_KEY } from '../services/contactFollowFreshness';
-import { isFofCacheKeyFor, LEGACY_FOF_CACHE_KEY } from '../services/friendsOfFriendsService';
+import {
+  isFofCacheKeyFor,
+  LEGACY_FOF_CACHE_KEY,
+  retireFofCache,
+} from '../services/friendsOfFriendsService';
 /**
  * wipeAccountCaches — delete every per-account persisted artifact for a
  * signed-out identity: per-wallet secrets (SecureStore), all per-wallet
@@ -205,6 +209,9 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   forgetRevealedMedia(loggedOutPubkey);
   forgetAccountSettings(loggedOutPubkey);
   forgetReadPositions(loggedOutPubkey);
+  // A friends-of-friends build still running for this account must not write
+  // its graph back after the key scan below (#565).
+  await retireFofCache(loggedOutPubkey);
   const allKeys = await AsyncStorage.getAllKeys();
   const convPrefix = DM_CONV_CACHE_PREFIX + loggedOutPubkey + '_';
   const lastSeenPrefix = DM_CONV_LAST_SEEN_PREFIX + loggedOutPubkey + '_';

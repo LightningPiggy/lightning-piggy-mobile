@@ -1,6 +1,7 @@
 // #565: the friends-of-friends cache is per (account, ranked cap), bounded,
 // cancel-safe, and the build yields instead of tallying in one burst.
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as pacing from '../contexts/nostrDecryptPacing';
 import {
   buildFofSet,
   buildFofSetYielding,
@@ -9,6 +10,7 @@ import {
   FOF_CACHE_TTL_MS,
   isFofCacheKeyFor,
   loadFofCache,
+  retireFofCache,
 } from './friendsOfFriendsService';
 
 const pk = (label: string, n = 0) => `${label}_${n}`.padStart(64, '0').slice(-64);
@@ -108,6 +110,29 @@ describe('cancel safety', () => {
   });
 });
 
+describe('sign-out retirement', () => {
+  it('a build still running when the account is wiped never writes its graph back', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const slowFetch = jest.fn(async (batch: string[]) => {
+      await gate;
+      return fetchKind3(batch);
+    });
+    const build = computeFofSet(user, friends.slice(0, 10), {
+      fetchKind3: slowFetch,
+      maxSize: 2000,
+    });
+    await retireFofCache(user); // sign-out wipe runs mid-build
+    release();
+    await build;
+    expect(await AsyncStorage.getItem(fofCacheKey(user, 2000))).toBeNull();
+
+    // A build started after the wipe (re-login) persists as normal.
+    await computeFofSet(user, friends.slice(0, 10), { fetchKind3, maxSize: 2000 });
+    expect(await AsyncStorage.getItem(fofCacheKey(user, 2000))).not.toBeNull();
+  });
+});
+
 describe('buildFofSetYielding', () => {
   const lists = Object.fromEntries(friends.map((f) => [f, followsOf(f)]));
 
@@ -118,6 +143,22 @@ describe('buildFofSetYielding', () => {
       expect([...yielded.set]).toEqual([...sync.set]);
       expect(yielded.excludedFriends).toBe(sync.excludedFriends);
     }
+  });
+
+  it('offers the scheduler a yield per friend tallied and per 1024 candidates ranked', async () => {
+    const maybeYield = jest.fn(async () => {});
+    const spy = jest
+      .spyOn(pacing, 'createYieldScheduler')
+      .mockReturnValue({ maybeYield, yieldCount: 0, dispose: jest.fn() });
+    // 10 friends × 300 disjoint follows = 3000 distinct candidates.
+    const few = friends.slice(0, 10);
+    const disjoint = Object.fromEntries(
+      few.map((f, i) => [f, Array.from({ length: 300 }, (_, j) => pk(`d${i}`, j))]),
+    );
+    await buildFofSetYielding(user, few, disjoint, 2000);
+    // 10 (tally) + 1 (before ranking) + floor(3000 / 1024) = 2 (ranking).
+    expect(maybeYield).toHaveBeenCalledTimes(13);
+    spy.mockRestore();
   });
 
   it('rejects without a result once aborted', async () => {
