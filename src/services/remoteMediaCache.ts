@@ -15,6 +15,9 @@ import { checkRemoteUrl, fetchBounded, MEDIA_MAX_BYTES } from '../utils/remoteUr
 const pending = new Map<string, Promise<string>>();
 const publishing = new Map<string, Set<Promise<void>>>();
 const generations = new Map<string, number>();
+// When each cached file was last (re)written, so a decode error reported
+// against an older copy can't delete a newer download at the same path.
+const writtenAt = new Map<string, number>();
 let activeOwner: string | null = null;
 const hash = (value: string) => bytesToHex(sha256(utf8ToBytes(value)));
 const generation = (owner: string) => generations.get(owner) ?? 0;
@@ -61,6 +64,7 @@ export async function resolveRemoteMedia(url: string, maxBytes = MEDIA_MAX_BYTES
           });
           assertCurrent();
           await moveAsync({ from: tmp, to: uri });
+          writtenAt.set(uri, Date.now());
         } finally {
           await deleteAsync(tmp, { idempotent: true });
         }
@@ -90,14 +94,21 @@ export async function resolveRemoteMedia(url: string, maxBytes = MEDIA_MAX_BYTES
  * Forget the active account's cached copy of `url` (same key as
  * resolveRemoteMedia), so the next resolve downloads it again. For a file
  * that downloaded but couldn't be decoded: a retry must not reuse it.
+ * `resolvedAt` is when the caller got the file: if another view of the same
+ * URL has re-downloaded it since then, the newer copy stays.
  */
-export async function evictRemoteMedia(url: string, maxBytes = MEDIA_MAX_BYTES): Promise<void> {
+export async function evictRemoteMedia(
+  url: string,
+  maxBytes = MEDIA_MAX_BYTES,
+  resolvedAt = Infinity,
+): Promise<void> {
   const checked = checkRemoteUrl(url, { kind: 'media' });
   const owner = activeOwner;
   if (!checked.ok || !owner || !cacheDirectory) return;
-  await deleteAsync(`${ownerDirectory(owner)}${hash(`${maxBytes}:${checked.url}`)}`, {
-    idempotent: true,
-  });
+  const uri = `${ownerDirectory(owner)}${hash(`${maxBytes}:${checked.url}`)}`;
+  if ((writtenAt.get(uri) ?? 0) > resolvedAt) return;
+  writtenAt.delete(uri);
+  await deleteAsync(uri, { idempotent: true });
 }
 
 /** Retire the account immediately; late downloads cannot publish plaintext. */

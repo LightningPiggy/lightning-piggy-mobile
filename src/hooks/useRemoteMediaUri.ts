@@ -14,6 +14,8 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
     // previous attempt's failure for the render before its effect runs.
     attempt: number;
     uri: string | null;
+    // When `uri` was resolved, so reportBroken only evicts this copy.
+    at: number;
     failed: boolean;
   } | null>(null);
   useEffect(() => {
@@ -22,10 +24,20 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
     if (url)
       void resolveRemoteMedia(url, maxBytes).then(
         (uri) => {
-          if (!cancelled) setResolved({ owner, url, maxBytes, attempt, uri, failed: false });
+          if (!cancelled)
+            setResolved({
+              owner,
+              url,
+              maxBytes,
+              attempt,
+              uri,
+              at: Date.now(),
+              failed: false,
+            });
         },
         () => {
-          if (!cancelled) setResolved({ owner, url, maxBytes, attempt, uri: null, failed: true });
+          if (!cancelled)
+            setResolved({ owner, url, maxBytes, attempt, uri: null, at: Date.now(), failed: true });
         },
       );
     return () => {
@@ -39,10 +51,11 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
     resolved?.attempt === attempt;
   // The cached file downloaded but the renderer couldn't decode it: drop it so
   // a retry downloads afresh, and report this attempt as failed.
+  const resolvedAt = current ? resolved.at : undefined;
   const reportBroken = useCallback(() => {
-    if (!url) return;
+    if (!url || resolvedAt === undefined) return;
     // Mark the attempt failed even if the delete itself fails.
-    void evictRemoteMedia(url, maxBytes)
+    void evictRemoteMedia(url, maxBytes, resolvedAt)
       .catch(() => undefined)
       .then(() =>
         setResolved((prev) =>
@@ -51,7 +64,7 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
             : prev,
         ),
       );
-  }, [owner, url, maxBytes, attempt]);
+  }, [owner, url, maxBytes, attempt, resolvedAt]);
   return {
     uri: current ? resolved.uri : null,
     failed: current && resolved.failed,
