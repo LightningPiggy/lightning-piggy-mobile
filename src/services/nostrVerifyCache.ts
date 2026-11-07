@@ -94,18 +94,29 @@ export async function flushVerifiedEventCache(): Promise<void> {
   }
 }
 
+const SHARD_KEYS = Array.from({ length: 256 }, (_, i) =>
+  storageKey(i.toString(16).padStart(2, '0')),
+);
+
 /** All relay receive work awaits this single flight before any verification. */
 export function hydrateVerifiedEventCache(): Promise<void> {
   if (hydration) return hydration;
   const epoch = generation;
   hydration = (async () => {
+    let shards: readonly (readonly [string, string | null])[];
+    try {
+      // ONE native round trip: 256 serial getItems held every relay event
+      // behind 256 bridge hops at cold start.
+      shards = await AsyncStorage.multiGet(SHARD_KEYS);
+    } catch {
+      return; // A storage failure falls back to paced full verification.
+    }
     const pacing = createYieldScheduler({ safetyEvery: 16, coldStart: true });
     try {
-      for (let i = 0; i < 256; i++) {
-        const key = i.toString(16).padStart(2, '0');
+      for (const [storage, raw] of shards) {
+        if (epoch !== generation) return;
+        const key = storage.slice(PREFIX.length);
         try {
-          const raw = await AsyncStorage.getItem(storageKey(key));
-          if (epoch !== generation) return;
           // A malformed/oversized shard conveys no trust.
           if (raw && raw.length <= BUCKET_CAP * 205) {
             const records: unknown = JSON.parse(raw);
@@ -126,7 +137,7 @@ export function hydrateVerifiedEventCache(): Promise<void> {
             }
           }
         } catch {
-          // A storage failure/corrupt shard falls back to paced full verification.
+          // A corrupt shard falls back to paced full verification.
         }
         await pacing.maybeYield();
       }
