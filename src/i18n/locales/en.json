@@ -2237,17 +2237,25 @@
     "addWallet": "Add Wallet"
   },
   "webOfTrustBottomSheet": {
-    "locked": "Locked. Stick to Friends for now.",
     "title": "Web of Trust",
     "close": "Close",
     "explainer": "We filter out unverified senders, cache hiders, and event organisers — anyone could publish a phishing message or set up a physical lure, so by default you only see content from people in your trust graph.",
     "friendsTitle": "Friends",
     "friendsSubtitle": "Only people you follow.",
     "fofTitle": "Friends of friends",
-    "fofSubtitle": "Not yet implemented — coming soon. We're working out how to download and cache the extended graph without freezing the app.",
+    "fofSubtitle": "People you follow, plus the people they follow most. Built when you choose it — this takes a moment the first time.",
+    "fofProgressStarting": "Finding friends of friends…",
+    "fofProgress": "Finding friends of friends… {{done}} of {{total}}",
+    "fofCancel": "Cancel",
+    "fofCancelA11y": "Stop finding friends of friends",
+    "fofFailed": "Couldn't reach the relays to find friends of friends. Your filter hasn't changed — try again in a moment.",
+    "fofCount": {
+      "one": "{{count}} friend of friends in your trust graph",
+      "other": "{{count}} friends of friends in your trust graph"
+    },
     "allTitle": "All",
     "allSubtitle": "Everything from every relay. Default until your trust graph is ready — switch to Friends to tighten.",
-    "gateHint": "Friends-of-friends is temporarily disabled while we rework the trust-graph compute (#565). Friends is the safest feed; All is the broadest.",
+    "gateHint": "Friends of friends keeps the 2,000 people your friends follow most, and refreshes the list once a day. Friends is the safest feed; All is the broadest.",
     "done": "Done"
   },
   "welcomeWalletPrompt": {

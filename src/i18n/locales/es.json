@@ -2237,17 +2237,25 @@
     "addWallet": "Añadir cartera"
   },
   "webOfTrustBottomSheet": {
-    "locked": "Bloqueado. Quédate con Amigos por ahora.",
     "title": "Red de confianza",
     "close": "Cerrar",
     "explainer": "Filtramos a remitentes, escondedores de cachés y organizadores de eventos no verificados: cualquiera podría publicar un mensaje de phishing o montar un señuelo físico, así que de forma predeterminada solo ves contenido de personas de tu red de confianza.",
     "friendsTitle": "Amigos",
     "friendsSubtitle": "Solo las personas que sigues.",
     "fofTitle": "Amigos de amigos",
-    "fofSubtitle": "Aún no está disponible, llegará pronto. Estamos viendo cómo descargar y almacenar en caché la red ampliada sin que la app se congele.",
+    "fofSubtitle": "Las personas que sigues y las personas a las que más siguen. La red se crea cuando eliges esta opción — la primera vez tarda un momento.",
+    "fofProgressStarting": "Buscando amigos de amigos…",
+    "fofProgress": "Buscando amigos de amigos… {{done}} de {{total}}",
+    "fofCancel": "Cancelar",
+    "fofCancelA11y": "Dejar de buscar amigos de amigos",
+    "fofFailed": "No se pudo conectar con los relays para buscar amigos de amigos. Tu filtro no ha cambiado — inténtalo de nuevo en un momento.",
+    "fofCount": {
+      "one": "{{count}} amigo de amigos en tu red de confianza",
+      "other": "{{count}} amigos de amigos en tu red de confianza"
+    },
     "allTitle": "Todos",
     "allSubtitle": "Todo de cada relé. Es lo predeterminado hasta que tu red de confianza esté lista: cambia a Amigos para restringir.",
-    "gateHint": "Amigos de amigos está desactivado temporalmente mientras rehacemos el cálculo de la red de confianza (#565). Amigos es el feed más seguro; Todos es el más amplio.",
+    "gateHint": "Amigos de amigos incluye a las 2000 personas a las que más siguen tus amigos y actualiza la lista una vez al día. Amigos es el feed más seguro; Todos es el más amplio.",
     "done": "Listo"
   },
   "welcomeWalletPrompt": {

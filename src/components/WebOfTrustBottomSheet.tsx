@@ -1,27 +1,27 @@
 // Bottom-sheet explainer + tier picker for the Web of Trust filter (#535).
 //
-// Tapping any of the three WoT chips (Messages, Hunt, Events) opens this
-// sheet. Friends + All are both selectable post-#627; FoF stays gated
-// until #565 lands the foreground compute dialog. First-time selection
-// of FoF will then kick off the FoF compute (kind-3 batch fetch +
-// heuristics in `friendsOfFriendsService`) with a progress modal.
+// Tapping any of the WoT chips (Messages, Hunt, Events) opens this sheet.
+// Choosing "Friends of friends" builds the extended trust set on demand
+// (#565): a progress panel shows "X of Y" follow-list batches with Cancel,
+// and the tier only switches once the set is ready. Cancel or a relay
+// failure leaves the previous tier in place.
 
-import React, { useMemo, useRef } from 'react';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useMemo } from 'react';
+import { Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { ShieldCheck, ShieldOff, ShieldQuestion, X } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import BrandedSpinner from './BrandedSpinner';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTrustGraph } from '../contexts/TrustGraphContext';
+import {
+  useTrustGraph,
+  useTrustGraphL2Status,
+  type FofBuildProgress,
+} from '../contexts/TrustGraphContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import type { Palette } from '../styles/palettes';
+import {
+  createWebOfTrustBottomSheetStyles,
+  type WebOfTrustBottomSheetStyles,
+} from '../styles/WebOfTrustBottomSheet.styles';
 import type { WotTier } from '../services/wotSettingsService';
 
 interface Props {
@@ -41,38 +41,27 @@ interface TierRowProps {
   title: string;
   subtitle: string;
   active: boolean;
-  disabled: boolean;
   onSelect: () => void;
+  styles: WebOfTrustBottomSheetStyles;
 }
 
-const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabled, onSelect }) => {
+const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, onSelect, styles }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
   const Icon = tier === 'friends' ? ShieldCheck : tier === 'fof' ? ShieldQuestion : ShieldOff;
   return (
     <TouchableOpacity
-      style={[
-        styles.tierRow,
-        active ? styles.tierRowActive : null,
-        disabled ? styles.tierRowDisabled : null,
-      ]}
+      style={[styles.tierRow, active ? styles.tierRowActive : null]}
       onPress={onSelect}
-      disabled={disabled}
       testID={`wot-tier-${tier}-chip`}
       accessibilityRole="radio"
-      accessibilityState={{ selected: active, disabled }}
-      accessibilityLabel={`${title}. ${disabled ? t('webOfTrustBottomSheet.locked') : ''}`}
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={title}
     >
       <View style={styles.tierIcon}>
-        <Icon
-          size={20}
-          color={disabled ? colors.textSupplementary : colors.textHeader}
-          strokeWidth={2.5}
-        />
+        <Icon size={20} color={colors.textHeader} strokeWidth={2.5} />
       </View>
       <View style={styles.tierBody}>
-        <Text style={[styles.tierTitle, disabled ? styles.tierTitleDisabled : null]}>{title}</Text>
+        <Text style={styles.tierTitle}>{title}</Text>
         <Text style={styles.tierSubtitle}>{subtitle}</Text>
       </View>
       <View style={[styles.radioOuter, active ? styles.radioOuterActive : null]}>
@@ -82,31 +71,68 @@ const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, disabl
   );
 };
 
+interface FofProgressPanelProps {
+  progress: FofBuildProgress | null;
+  onCancel: () => void;
+  styles: WebOfTrustBottomSheetStyles;
+}
+
+// "Finding friends of friends… 3 of 12" + bar + Cancel. Re-renders once per
+// 50-friend follow-list batch.
+const FofProgressPanel: React.FC<FofProgressPanelProps> = ({ progress, onCancel, styles }) => {
+  const t = useTranslation();
+  const total = progress?.total ?? 0;
+  const done = progress?.done ?? 0;
+  const label =
+    total > 0
+      ? t('webOfTrustBottomSheet.fofProgress', { done, total })
+      : t('webOfTrustBottomSheet.fofProgressStarting');
+  const fraction = total > 0 ? Math.min(1, done / total) : 0;
+  return (
+    <View style={styles.fofPanel} testID="wot-fof-progress">
+      <View style={styles.fofPanelRow}>
+        <BrandedSpinner size="small" />
+        <Text
+          style={styles.fofPanelText}
+          testID="wot-fof-progress-text"
+          accessibilityLiveRegion="polite"
+        >
+          {label}
+        </Text>
+      </View>
+      <View style={styles.fofTrack}>
+        <View style={[styles.fofFill, { width: `${Math.round(fraction * 100)}%` }]} />
+      </View>
+      <TouchableOpacity
+        style={styles.fofCancelButton}
+        onPress={onCancel}
+        testID="wot-fof-cancel"
+        accessibilityRole="button"
+        accessibilityLabel={t('webOfTrustBottomSheet.fofCancelA11y')}
+      >
+        <Text style={styles.fofCancelText}>{t('webOfTrustBottomSheet.fofCancel')}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
 const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const insets = useSafeAreaInsets();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  const { wotTier, setWotTier } = useTrustGraph();
+  const styles = useMemo(() => createWebOfTrustBottomSheetStyles(colors), [colors]);
+  const { wotTier, setWotTier, l2Size } = useTrustGraph();
+  const { status, cancelL2 } = useTrustGraphL2Status();
   // `activeTier` is what the picker renders as "checked". Defaults to
   // the global persisted tier; a caller can pass `currentTier` to
   // override this when its chip surfaces a derived value (per-rail —
   // #636) so the sheet's active state matches what the user just tapped.
   const activeTier = currentTier ?? wotTier;
 
-  // `lastTierRef` is retained for the future FoF re-enable so the
-  // "compute now" affordance can compare incoming vs persisted tier
-  // without re-reading state.
-  const lastTierRef = useRef<WotTier>(wotTier);
-
+  // 'fof' starts the build (the tier switches when it completes); any other
+  // tier cancels a build in flight — both handled by the context.
   const handleSelect = (next: WotTier): void => {
-    // `fof` remains disabled until #565 lands the foreground compute
-    // dialog — `friends` and `all` are both selectable now that `all`
-    // is the new default for content surfaces (#627). Defensive guard
-    // so a future regression on the TierRow disabled prop can't
-    // silently switch into the unsupported tier.
-    if (next !== 'friends' && next !== 'all') return;
-    lastTierRef.current = next;
+    if (next === 'fof' && status.building) return;
     setWotTier(next);
   };
 
@@ -146,34 +172,42 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
             title={t('webOfTrustBottomSheet.friendsTitle')}
             subtitle={t('webOfTrustBottomSheet.friendsSubtitle')}
             active={activeTier === 'friends'}
-            disabled={false}
             onSelect={() => handleSelect('friends')}
+            styles={styles}
           />
           <TierRow
             tier="fof"
             title={t('webOfTrustBottomSheet.fofTitle')}
             subtitle={t('webOfTrustBottomSheet.fofSubtitle')}
-            active={false}
-            disabled
-            onSelect={() => {}}
+            active={activeTier === 'fof'}
+            onSelect={() => handleSelect('fof')}
+            styles={styles}
           />
+          {status.building ? (
+            <FofProgressPanel progress={status.progress} onCancel={cancelL2} styles={styles} />
+          ) : null}
+          {!status.building && status.failed ? (
+            <Text style={styles.errorText} testID="wot-fof-error" accessibilityLiveRegion="polite">
+              {t('webOfTrustBottomSheet.fofFailed')}
+            </Text>
+          ) : null}
+          {!status.building && !status.failed && activeTier === 'fof' ? (
+            <Text style={styles.metaText} testID="wot-fof-meta">
+              {t('webOfTrustBottomSheet.fofCount', { count: l2Size })}
+            </Text>
+          ) : null}
           <TierRow
             tier="all"
             title={t('webOfTrustBottomSheet.allTitle')}
             subtitle={t('webOfTrustBottomSheet.allSubtitle')}
             active={activeTier === 'all'}
-            disabled={false}
             onSelect={() => handleSelect('all')}
+            styles={styles}
           />
 
           <Text style={styles.gateHint} testID="wot-sheet-gate-hint">
             {t('webOfTrustBottomSheet.gateHint')}
           </Text>
-
-          {/* The computing banner + fof meta row + error row hang off L2 state
-              that's currently stubbed to empty / non-loading. They render as
-              no-ops while L2 is disabled and will come back when GH #565 lands
-              the foreground compute dialog. */}
         </ScrollView>
 
         <TouchableOpacity
@@ -188,156 +222,5 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
     </Modal>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    backdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    },
-    sheet: {
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      maxHeight: '85%',
-      backgroundColor: colors.background,
-      borderTopLeftRadius: 20,
-      borderTopRightRadius: 20,
-      paddingHorizontal: 20,
-      paddingBottom: 28,
-      paddingTop: 8,
-    },
-    handleBar: {
-      alignSelf: 'center',
-      width: 40,
-      height: 4,
-      borderRadius: 2,
-      backgroundColor: colors.divider,
-      marginBottom: 10,
-    },
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      marginBottom: 4,
-    },
-    title: {
-      flex: 1,
-      fontSize: 20,
-      fontWeight: '800',
-      color: colors.textHeader,
-    },
-    scroll: {
-      flexGrow: 0,
-    },
-    explainer: {
-      fontSize: 13,
-      lineHeight: 19,
-      color: colors.textBody,
-      marginTop: 10,
-      marginBottom: 18,
-    },
-    tierRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingVertical: 12,
-      paddingHorizontal: 12,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      marginBottom: 8,
-      backgroundColor: colors.surface,
-    },
-    tierRowActive: {
-      borderColor: colors.zapYellow,
-      backgroundColor: 'rgba(255, 193, 7, 0.10)',
-    },
-    tierRowDisabled: {
-      opacity: 0.5,
-    },
-    tierIcon: {
-      width: 28,
-      alignItems: 'center',
-    },
-    tierBody: {
-      flex: 1,
-    },
-    tierTitle: {
-      fontSize: 15,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    tierTitleDisabled: {
-      color: colors.textSupplementary,
-    },
-    tierSubtitle: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 2,
-      lineHeight: 16,
-    },
-    radioOuter: {
-      width: 20,
-      height: 20,
-      borderRadius: 10,
-      borderWidth: 2,
-      borderColor: colors.divider,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    radioOuterActive: {
-      borderColor: colors.zapYellow,
-    },
-    radioInner: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      backgroundColor: colors.zapYellow,
-    },
-    gateHint: {
-      marginTop: 8,
-      fontSize: 12,
-      color: colors.textSupplementary,
-      fontStyle: 'italic',
-      lineHeight: 17,
-    },
-    computeBanner: {
-      marginTop: 14,
-      padding: 12,
-      borderRadius: 10,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.zapYellow,
-    },
-    computeBannerText: {
-      fontSize: 12,
-      color: colors.textBody,
-      lineHeight: 17,
-    },
-    metaText: {
-      marginTop: 12,
-      fontSize: 12,
-      color: colors.textSupplementary,
-    },
-    errorText: {
-      marginTop: 12,
-      fontSize: 12,
-      color: colors.brandPink,
-    },
-    doneButton: {
-      marginTop: 16,
-      paddingVertical: 14,
-      borderRadius: 999,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-    },
-    doneText: {
-      color: colors.white,
-      fontSize: 15,
-      fontWeight: '700',
-    },
-  });
 
 export default WebOfTrustBottomSheet;
