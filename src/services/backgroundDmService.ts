@@ -68,6 +68,7 @@ import { buildNsecDecryptor, loadFollowedPubkeys, storeDecryptedWrap } from './b
 import {
   claimWrapNotification,
   isLiveDmSubArmed,
+  liveDmSubHasWrap,
   noteContentlessWrapAlert,
   wasWrapHandled,
 } from './dmWrapNotificationDedupe';
@@ -225,9 +226,10 @@ async function resolveSenderName(pubkey: string, readRelays: string[]): Promise<
  * (Signal sealed-sender style) — we still know a wrap addressed to us
  * arrived, we just can't read it off-screen.
  */
-/** How long the contentless path waits for a live sub to decrypt a wrap. A
- * remote signer answers in a second or two; a slower one still gets the
- * contentless alert, which the live sub replaces once it decrypts. */
+/** How long the watch waits for a live sub in this context to take a wrap
+ * before handling it itself. A remote signer answers in a second or two; a
+ * slower one still gets the contentless alert, which the live sub replaces
+ * once it decrypts. An nsec live sub takes a wrap within milliseconds. */
 export const LIVE_SUB_DECRYPT_GRACE_MS = 8_000;
 const waitMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -284,6 +286,21 @@ async function handleWrap(input: {
       data: { wrapId: ev.id },
     });
     return;
+  }
+
+  // The app's live sub runs in this JS context too, whether the app is in the
+  // foreground or the background, and decrypts and alerts for every wrap it
+  // takes in. Decrypting the same wrap here as well doubled the gift-wrap
+  // crypto on the one JS thread. Give it the same grace as above, then leave
+  // it any wrap it has. A wrap it doesn't have is decrypted and alerted here
+  // as before: one only this watch's relays carried, one sent while its socket
+  // was down, or one it dropped because it was torn down (its index goes with
+  // it). With no live sub (headless, after a swipe-away) nothing waits.
+  if (isLiveDmSubArmed()) {
+    await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
+    if (liveDmSubHasWrap(ev.id)) return;
+    // Signed out / switched account meanwhile: not this watch's to alert.
+    if (activeWatch?.viewerPubkey !== viewerPubkey) return;
   }
 
   const rumor = decryptWrap(ev);

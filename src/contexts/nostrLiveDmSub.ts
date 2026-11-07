@@ -23,6 +23,7 @@ import {
   claimWrapNotification,
   markWrapHandled,
   noteLiveDmSubArmed,
+  registerLiveDmWrapIndex,
   retractContentlessWrapAlert,
   takeContentlessWrapAlert,
 } from '../services/dmWrapNotificationDedupe';
@@ -138,6 +139,9 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     knownWrapIdsRef.current = { pubkey: viewerPubkey, set: new Set() };
   }
   const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
+  // The background watch in this context skips a wrap this sub already has
+  // instead of decrypting it a second time (see dmWrapNotificationDedupe).
+  const unregisterWrapIndex = registerLiveDmWrapIndex((id) => knownWrapIds.has(id));
   let cancelled = false;
   // Budget-gated yield scheduler for the live-sub receive path (#1035).
   // Created once per subscription lifetime — shared across re-arms so the
@@ -779,6 +783,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // Old queued cancellations must not remove claims owned by the new sub.
     for (const item of pendingReplays) releaseReplayClaim(item);
     noteLiveDmSubArmed(false);
+    unregisterWrapIndex();
     // Invalidate any in-flight close signal + pending reconnect FIRST (#934):
     // stopReconnecting() bumps the generation and stops the AppState-resume
     // re-arm BEFORE closeSubscription() below fires `onWrapsClose`

@@ -13,12 +13,18 @@
 // sub has decoded ("handled") is its call, not the watch's. A contentless
 // alert that still went out is remembered, so the live sub can replace it
 // with the real one — or retract it — once it has decrypted the wrap.
+//
+// The same goes for an nsec watch, which CAN decrypt: a wrap the live sub has
+// taken in (its wrap-id index, see registerLiveDmWrapIndex) is decrypted and
+// decided there, so the watch skips it instead of decrypting it a second time
+// on the one JS thread.
 import { removeNotificationsWhere } from './notificationHistory';
 import { cancelInFlightNotifications, dismissNotificationsFor } from './notificationService';
 
 const claimed = new Set<string>();
 const handled = new Set<string>();
 const contentless = new Set<string>();
+const liveWrapIndexes = new Set<(wrapId: string) => boolean>();
 let liveSubsArmed = 0;
 
 // Bounded so a long-lived watch session can't grow the sets unboundedly.
@@ -67,6 +73,25 @@ export function isLiveDmSubArmed(): boolean {
   return liveSubsArmed > 0;
 }
 
+/** A live DM sub registers its wrap-id index (every gift wrap it has stored
+ * or taken in to decrypt) for as long as it is armed. Returns the unregister,
+ * which its teardown calls. */
+export function registerLiveDmWrapIndex(has: (wrapId: string) => boolean): () => void {
+  const entry = (wrapId: string) => has(wrapId);
+  liveWrapIndexes.add(entry);
+  return () => {
+    liveWrapIndexes.delete(entry);
+  };
+}
+
+/** A live DM sub armed in this context has this wrap (stored, or decrypting
+ * it now): decrypting it again would only repeat that work. */
+export function liveDmSubHasWrap(wrapId: string): boolean {
+  if (!wrapId) return false;
+  for (const has of liveWrapIndexes) if (has(wrapId)) return true;
+  return false;
+}
+
 /** The background watch posted a contentless alert for this wrap. */
 export function noteContentlessWrapAlert(wrapId: string): void {
   if (wrapId) addBounded(contentless, wrapId);
@@ -92,5 +117,6 @@ export function __resetForTests(): void {
   claimed.clear();
   handled.clear();
   contentless.clear();
+  liveWrapIndexes.clear();
   liveSubsArmed = 0;
 }
