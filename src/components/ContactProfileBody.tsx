@@ -70,6 +70,8 @@ const ContactProfileBody: React.FC<Props> = ({
     [contact.pubkey],
   );
   const [avatarError, setAvatarError] = useState(false);
+  // A banner URL that fails to load (404 / offline) falls back to the gradient.
+  const [bannerError, setBannerError] = useState(false);
   // Tap the avatar → view the picture full screen (#661).
   const [fullscreenUrl, setFullscreenUrl] = useState<string | null>(null);
 
@@ -97,13 +99,16 @@ const ContactProfileBody: React.FC<Props> = ({
   useEffect(() => {
     setAvatarError(false);
   }, [contact.picture]);
+  useEffect(() => {
+    setBannerError(false);
+  }, [contact.banner]);
 
   return (
     <View style={styles.sheetContent}>
       <View style={styles.bannerContainer}>
         {/* No kind-0 banner: a plain brand gradient (not a picture), so it reads
             as "no banner set" rather than something the person chose (#18). */}
-        {contact.banner ? (
+        {contact.banner && !bannerError ? (
           <Image
             source={{ uri: contact.banner }}
             style={styles.bannerImage}
@@ -111,11 +116,10 @@ const ContactProfileBody: React.FC<Props> = ({
             cachePolicy="memory-disk"
             recyclingKey={contact.banner}
             autoplay={false}
+            onError={() => setBannerError(true)}
           />
         ) : (
-          <View style={styles.bannerImage}>
-            <BrandGradientBackground />
-          </View>
+          <BrandGradientBackground />
         )}
         <View style={styles.handleOverlay}>
           <View style={styles.handleBar} />
