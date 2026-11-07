@@ -1,5 +1,48 @@
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentApplicationLifecycleListener.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentApplicationLifecycleListener.kt
+new file mode 100644
+index 0000000..782266a
+--- /dev/null
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentApplicationLifecycleListener.kt
+@@ -0,0 +1,36 @@
++package expo.modules.shareintent
++
++import android.app.Activity
++import android.app.Application
++import android.os.Build
++import android.os.Bundle
++import expo.modules.core.interfaces.ApplicationLifecycleListener
++
++/**
++ * Lightning Piggy patch: tells the activity listener whether the activity was
++ * recreated from saved state. The Expo template MainActivity calls
++ * `super.onCreate(null)`, so every ReactActivityLifecycleListener sees a null
++ * `savedInstanceState` even when Android restored the activity (process killed
++ * then reopened from Recents or the launcher icon, a config change, "Don't
++ * keep activities"). `onActivityPreCreated` runs in `Activity.performCreate`
++ * with the bundle the system actually passed, before MainActivity drops it.
++ * API 29+; on older releases nothing is recorded and only the listener's own
++ * checks apply.
++ */
++class ExpoShareIntentApplicationLifecycleListener : ApplicationLifecycleListener {
++  override fun onCreate(application: Application) {
++    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
++    application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
++      override fun onActivityPreCreated(activity: Activity, savedInstanceState: Bundle?) {
++        ExpoShareIntentSingleton.notePreCreated(activity, savedInstanceState != null)
++      }
++      override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
++      override fun onActivityStarted(activity: Activity) {}
++      override fun onActivityResumed(activity: Activity) {}
++      override fun onActivityPaused(activity: Activity) {}
++      override fun onActivityStopped(activity: Activity) {}
++      override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
++      override fun onActivityDestroyed(activity: Activity) {}
++    })
++  }
++}
+\ No newline at end of file
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89..94dbc6d 100644
+index 0153c89..9fabcc1 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 @@ -13,6 +13,8 @@ import android.content.ContentResolver
@@ -150,7 +193,7 @@ index 0153c89..94dbc6d 100644
                      "fileName" to fileName,
                      "fileSize" to fileSize,
                      "mimeType" to mimeType,
-@@ -111,18 +167,64 @@ class ExpoShareIntentModule : Module() {
+@@ -111,18 +167,73 @@ class ExpoShareIntentModule : Module() {
              )
          }
  
@@ -185,8 +228,17 @@ index 0153c89..94dbc6d 100644
 +                    val newIntent = Intent(intent).apply {
 +                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 +                    }
-+                    activity.startActivity(newIntent)
-+                    activity.finish()
++                    // getShareIntent reaches here on the module's async queue:
++                    // activity transitions belong on the UI thread.
++                    activity.runOnUiThread {
++                        try {
++                            activity.startActivity(newIntent)
++                            activity.finish()
++                        } catch (e: Exception) {
++                            Log.w("ExpoShareIntent", "could not relaunch the share at the task root")
++                            notifyError(LP_GENERIC_ERROR)
++                        }
++                    }
 +                    return
                  }
 -                activity.startActivity(newIntent)
@@ -223,7 +275,7 @@ index 0153c89..94dbc6d 100644
                  // text / urls
                  if (intent.action == Intent.ACTION_SEND) {
                      notifyShareIntent(mapOf(
-@@ -141,15 +243,27 @@ class ExpoShareIntentModule : Module() {
+@@ -141,15 +252,27 @@ class ExpoShareIntentModule : Module() {
                  // files / medias
                  if (intent.action == Intent.ACTION_SEND) {
                      val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
@@ -256,7 +308,7 @@ index 0153c89..94dbc6d 100644
                      } else {
                          notifyError("empty uris array for file sharing: " + intent.action)
                      }
-@@ -179,17 +293,23 @@ class ExpoShareIntentModule : Module() {
+@@ -179,17 +302,23 @@ class ExpoShareIntentModule : Module() {
  
          Events("onChange", "onStateChange", "onError")
  
@@ -287,7 +339,7 @@ index 0153c89..94dbc6d 100644
          }
  
          Function("hasShareIntent") { _: String ->
-@@ -197,7 +317,12 @@ class ExpoShareIntentModule : Module() {
+@@ -197,7 +326,12 @@ class ExpoShareIntentModule : Module() {
          }
  
          OnNewIntent {
@@ -301,7 +353,7 @@ index 0153c89..94dbc6d 100644
          }
  
          OnCreate {
-@@ -209,6 +334,50 @@ class ExpoShareIntentModule : Module() {
+@@ -209,6 +343,50 @@ class ExpoShareIntentModule : Module() {
          }
      }
  
@@ -352,7 +404,7 @@ index 0153c89..94dbc6d 100644
      /**
       * Get a file path from a Uri. This will get the the path for Storage Access
       * Framework Documents, as well as the _data field for the MediaStore and
-@@ -300,8 +469,19 @@ class ExpoShareIntentModule : Module() {
+@@ -300,8 +478,19 @@ class ExpoShareIntentModule : Module() {
                  if (cursor != null && cursor.moveToFirst()) {
                      val columnIndex = cursor.getColumnIndexOrThrow(column)
                      val fileName = cursor.getString(columnIndex)
@@ -374,11 +426,32 @@ index 0153c89..94dbc6d 100644
                  }
              } finally {
                  cursor?.close()
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt
+index ff9f033..46be34c 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt
+@@ -1,10 +1,16 @@
+ package expo.modules.shareintent
+ 
+ import android.content.Context
++import expo.modules.core.interfaces.ApplicationLifecycleListener
+ import expo.modules.core.interfaces.Package
+ import expo.modules.core.interfaces.ReactActivityLifecycleListener
+ 
+ class ExpoShareIntentPackage : Package {
++  // Lightning Piggy patch: see ExpoShareIntentApplicationLifecycleListener.
++  override fun createApplicationLifecycleListeners(context: Context): List<ApplicationLifecycleListener> {
++    return listOf(ExpoShareIntentApplicationLifecycleListener())
++  }
++
+   override fun createReactActivityLifecycleListeners(activityContext: Context): List<ReactActivityLifecycleListener> {
+     return listOf(ExpoShareIntentReactActivityLifecycleListener(activityContext))
+   }
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
-index db573ec..47c301f 100644
+index db573ec..ca8751c 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
-@@ -13,10 +13,24 @@ import expo.modules.core.interfaces.ReactActivityLifecycleListener
+@@ -13,10 +13,38 @@ import expo.modules.core.interfaces.ReactActivityLifecycleListener
  class ExpoShareIntentReactActivityLifecycleListener(activityContext: Context) : ReactActivityLifecycleListener {
  
      override fun onCreate(activity: Activity?, savedInstanceState: Bundle?) {
@@ -387,10 +460,18 @@ index db573ec..47c301f 100644
 -            ExpoShareIntentSingleton.intent = activity?.intent
 -            ExpoShareIntentSingleton.isPending = true
 -        }
-+        val intent = activity?.intent ?: return
-+        // Lightning Piggy patch: reopened from Recents after the process died,
-+        // the activity is recreated with the intent that first started it — a
-+        // share the previous process already handled. Don't replay it.
++        // Lightning Piggy patch: `activity.intent` is always the intent that
++        // FIRST started the activity. When the activity is recreated rather
++        // than freshly launched — process killed then reopened from Recents or
++        // the launcher icon (the new MAIN arrives via onNewIntent), a config
++        // change, "Don't keep activities" — that is a share the previous
++        // instance already handled. Don't replay it. MainActivity passes
++        // `super.onCreate(null)`, so `savedInstanceState` is null here even
++        // then; `wasRestored` carries the bundle the system really passed.
++        if (savedInstanceState != null) return  // recreated, not freshly launched
++        if (activity == null || ExpoShareIntentSingleton.wasRestored(activity)) return
++        val intent = activity.intent ?: return
++        // Task relaunched fresh from Recents with its original (share) intent.
 +        if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
 +        // Share intents only (see ExpoShareIntentSingleton.isShareIntent).
 +        ExpoShareIntentSingleton.offer(intent)
@@ -402,6 +483,12 @@ index db573ec..47c301f 100644
 +     * killed in the background) is parked instead of lost. Never claims the
 +     * intent: the module's OnNewIntent still runs and hands it over at once
 +     * when JS is already listening.
++     *
++     * Relies on ReactActivityDelegateWrapper's loadAppReady completing
++     * synchronously, so this fan-out reaches listeners as soon as the activity
++     * exists. A delayed app load (e.g. adding expo-updates, whose
++     * getDelayLoadAppHandler defers it) would reopen the gap — re-check this
++     * path if that dependency is ever added.
 +     */
 +    override fun onNewIntent(intent: Intent?): Boolean {
 +        if (intent != null) ExpoShareIntentSingleton.offer(intent)
@@ -410,10 +497,19 @@ index db573ec..47c301f 100644
  }
 \ No newline at end of file
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
-index 7f93abe..526ce6b 100644
+index 7f93abe..3c1ff7d 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
-@@ -9,7 +9,51 @@ object ExpoShareIntentSingleton : SingletonModule {
+@@ -1,6 +1,8 @@
+ package expo.modules.shareintent
+ 
++import android.app.Activity
+ import android.content.Intent
++import java.lang.ref.WeakReference
+ import expo.modules.core.interfaces.SingletonModule
+ 
+ object ExpoShareIntentSingleton : SingletonModule {
+@@ -9,7 +11,66 @@ object ExpoShareIntentSingleton : SingletonModule {
      return "ExpoShareIntent"
    }
  
@@ -439,7 +535,9 @@ index 7f93abe..526ce6b 100644
 +  // Written on the main thread, taken on the module's async queue: guarded.
 +  private val lock = Any()
 +  private var pending: Intent? = null
-+  private var lastTaken: Intent? = null
++  // Weak: only an identity check, so the last share's text / URIs aren't kept
++  // alive for the rest of the process.
++  private var lastTaken: WeakReference<Intent>? = null
 +
 +  /** True for an ACTION_SEND / ACTION_SEND_MULTIPLE with a MIME type; never
 +   *  for the app's own `lightning:` / `nostr:` VIEW links or NFC intents. */
@@ -452,7 +550,7 @@ index 7f93abe..526ce6b 100644
 +  fun offer(intent: Intent) {
 +    if (!isShareIntent(intent)) return
 +    synchronized(lock) {
-+      if (intent === lastTaken) return
++      if (lastTaken?.get() === intent) return
 +      pending = intent
 +    }
 +  }
@@ -461,9 +559,22 @@ index 7f93abe..526ce6b 100644
 +  fun take(): Intent? = synchronized(lock) {
 +    val intent = pending
 +    pending = null
-+    if (intent != null) lastTaken = intent
++    if (intent != null) lastTaken = WeakReference(intent)
 +    intent
 +  }
++
++  // The activity most recently created FROM SAVED STATE (see
++  // ExpoShareIntentApplicationLifecycleListener). Main thread only; weak so a
++  // destroyed activity isn't kept.
++  private var restoredActivity: WeakReference<Activity>? = null
++
++  fun notePreCreated(activity: Activity, restored: Boolean) {
++    restoredActivity = if (restored) WeakReference(activity) else null
++  }
++
++  /** True if Android recreated [activity] from saved state, even though the
++   *  app's MainActivity hands `super.onCreate` a null bundle. */
++  fun wasRestored(activity: Activity): Boolean = restoredActivity?.get() === activity
 +
 +  val isPending: Boolean
 +    get() = synchronized(lock) { pending != null }
