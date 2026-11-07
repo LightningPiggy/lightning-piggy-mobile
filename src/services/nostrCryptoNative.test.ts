@@ -5,7 +5,7 @@
  * the EXPO_PUBLIC_NATIVE_CRYPTO_XCHECK mode; here we verify the routing,
  * fallback, memoisation, and cross-check reporting logic.
  */
-import { bytesToHex } from '@noble/hashes/utils.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import * as nip44 from 'nostr-tools/nip44';
 import {
   finalizeEvent,
@@ -68,7 +68,11 @@ function makeSignedEvent(): NostrEvent & { [verifiedSymbol]?: boolean } {
 function mockNative(overrides: Partial<NostrNativeApi> = {}): jest.Mocked<NostrNativeApi> {
   const native = {
     warmUp: jest.fn(async () => true),
-    nip44Encrypt: jest.fn(() => 'native-payload'),
+    nip44Encrypt: jest.fn((sk: string, _pk: string, text: string) =>
+      sk === NATIVE_CRYPTO_KAT.secretKeyHex
+        ? nip44.v2.encrypt(text, hexToBytes(NATIVE_CRYPTO_KAT.conversationKeyHex))
+        : 'native-payload',
+    ),
     nip44Decrypt: jest.fn((_sk: string, _pk: string, payload: string) =>
       payload === NATIVE_CRYPTO_KAT.payload ? NATIVE_CRYPTO_KAT.plaintext : 'native-plaintext',
     ),
@@ -168,6 +172,32 @@ describe('native routing (flag on, warmed up)', () => {
       'MAC failure',
     );
     expect(native.nip44Decrypt).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to JS when native encrypt throws mid-session, so a send never fails', () => {
+    const native = mockNative({
+      nip44Encrypt: jest.fn(() => {
+        throw new Error('native encrypt failed');
+      }),
+    });
+    const payload = nip44EncryptForRecipient(
+      plaintext,
+      counterpartySecret,
+      getPublicKey(secretKey),
+    );
+    expect(native.nip44Encrypt).toHaveBeenCalledTimes(1);
+    // A real NIP-44 payload the recipient can read (JS decrypt; routing off).
+    __setNostrCryptoFlagsForTests({ native: false });
+    expect(nip44DecryptFrom(payload, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+  });
+
+  it('still throws for invalid input when native encrypt throws (from JS)', () => {
+    mockNative({
+      nip44Encrypt: jest.fn(() => {
+        throw new Error('bad pubkey');
+      }),
+    });
+    expect(() => nip44EncryptForRecipient(plaintext, secretKey, 'not-a-pubkey')).toThrow();
   });
 
   it('nostrVerifyEvent routes the schnorr check natively and memoises via verifiedSymbol', () => {
@@ -429,6 +459,27 @@ describe('startup wiring: pref → setNativeCryptoEnabled → warm-up (#1057)', 
     native.schnorrVerify.mockClear();
     expect(nostrVerifyEvent(makeSignedEvent())).toBe(true); // JS verdict
     expect(native.schnorrVerify).not.toHaveBeenCalled();
+  });
+
+  it('a module whose encrypt is broken fails the self-test, so sends stay on JS', async () => {
+    const native = mockNative({
+      nip44Encrypt: jest.fn(() => {
+        throw new Error('UnsatisfiedLinkError');
+      }),
+    });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    setNativeCryptoEnabled(await loadNativeCryptoEnabled());
+    expect(await warmUpNativeCrypto()).toBe(false);
+    warn.mockRestore();
+    expect(isNativeCryptoActive()).toBe(false);
+    native.nip44Encrypt.mockClear();
+    const payload = nip44EncryptForRecipient(
+      plaintext,
+      counterpartySecret,
+      getPublicKey(secretKey),
+    );
+    expect(nip44DecryptFrom(payload, secretKey, counterpartyPubkeyHex)).toBe(plaintext);
+    expect(native.nip44Encrypt).not.toHaveBeenCalled();
   });
 
   it('a persisted opt-out (false) leaves routing on JS', async () => {

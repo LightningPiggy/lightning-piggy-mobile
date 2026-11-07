@@ -1596,7 +1596,7 @@
     "grantPermissionInAmber": "Pozwól Amber odblokować twoje wiadomości",
     "noProfilePubkey": "Brak klucza publicznego profilu — najpierw się zaloguj.",
     "amberRoundTripMismatch": "Niezgodność w teście Amber — uprawnienie może nie być ustawione.",
-    "nativeCryptoHint": "Do szyfrowania wiadomości i sprawdzania podpisów używa wbudowanego kodu telefonu zamiast kodu aplikacji. Jest to szybsze, dlatego jest domyślnie włączone. Wyłącz, jeśli wiadomości przestaną się wysyłać lub ładować.",
+    "nativeCryptoHint": "Szyfruje wiadomości i sprawdza podpisy szybszą biblioteką szyfrującą wbudowaną w aplikację. Domyślnie włączone. Wyłącz, jeśli wiadomości przestaną się wysyłać lub ładować.",
     "nativeCryptoLabel": "Szybsze szyfrowanie",
     "nativeCryptoRestartCaption": "Uruchom aplikację ponownie, aby zastosować.",
     "nativeCryptoUnavailable": "Niedostępne na tym urządzeniu",

@@ -1596,7 +1596,7 @@
     "grantPermissionInAmber": "Üzenetek feloldásának engedélyezése az Amberben",
     "noProfilePubkey": "Nincs nyilvános kulcs a profilhoz – előbb jelentkezz be.",
     "amberRoundTripMismatch": "Az Amber ellenőrzésének eredménye nem egyezik a várttal – lehet, hogy az engedély nincs beállítva.",
-    "nativeCryptoHint": "Az alkalmazás saját kódja helyett a telefonod beépített kódját használja az üzenetek titkosításához és az aláírások ellenőrzéséhez. Ez gyorsabb, ezért alapból be van kapcsolva. Kapcsold ki, ha az üzenetek nem mennek el vagy nem töltődnek be.",
+    "nativeCryptoHint": "Az üzeneteket egy gyorsabb, az alkalmazásba beépített titkosító könyvtárral titkosítja, és azzal ellenőrzi az aláírásokat. Alapból be van kapcsolva. Kapcsold ki, ha az üzenetek nem mennek el vagy nem töltődnek be.",
     "nativeCryptoLabel": "Gyorsabb titkosítás",
     "nativeCryptoRestartCaption": "Az érvényesítéshez indítsd újra az alkalmazást.",
     "nativeCryptoUnavailable": "Ezen az eszközön nem érhető el",

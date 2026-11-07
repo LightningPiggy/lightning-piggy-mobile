@@ -397,7 +397,15 @@ export function nip44EncryptForRecipient(
     return nip44Encrypt(plaintext, nip44GetConversationKey(senderSecretKey, pub));
   }
   const t0 = PERF_ENABLED ? performance.now() : 0;
-  const payload = native.nip44Encrypt(skHex(senderSecretKey), pub, plaintext);
+  let payload: string;
+  try {
+    payload = native.nip44Encrypt(skHex(senderSecretKey), pub, plaintext);
+  } catch {
+    // Unlike decrypt (where a throw can be a genuine MAC failure), encrypting
+    // valid input never legitimately fails: native must never sink a send.
+    // Invalid input still throws, from JS.
+    return nip44Encrypt(plaintext, nip44GetConversationKey(senderSecretKey, pub));
+  }
   if (PERF_ENABLED) {
     recordSample('nip44Encrypt', performance.now() - t0);
     scheduleSummary();

@@ -1596,7 +1596,7 @@
     "grantPermissionInAmber": "Permitir que Amber desbloquee tus mensajes",
     "noProfilePubkey": "Sin clave pública de perfil — inicia sesión primero.",
     "amberRoundTripMismatch": "Discrepancia en la verificación de Amber — puede que el permiso no esté configurado.",
-    "nativeCryptoHint": "Usa el código integrado de tu teléfono, en lugar del de la app, para cifrar mensajes y verificar firmas. Es más rápido, así que viene activado de forma predeterminada. Desactívalo si los mensajes dejan de enviarse o cargarse.",
+    "nativeCryptoHint": "Cifra los mensajes y verifica las firmas con una biblioteca de cifrado más rápida integrada en la app. Viene activado de forma predeterminada. Desactívalo si los mensajes dejan de enviarse o cargarse.",
     "nativeCryptoLabel": "Cifrado más rápido",
     "nativeCryptoRestartCaption": "Reinicia la app para aplicar.",
     "nativeCryptoUnavailable": "No disponible en este dispositivo",

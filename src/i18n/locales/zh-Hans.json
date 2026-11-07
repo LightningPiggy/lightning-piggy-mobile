@@ -1596,7 +1596,7 @@
     "grantPermissionInAmber": "让Amber解锁你的消息",
     "noProfilePubkey": "没有个人资料公钥——请先登录。",
     "amberRoundTripMismatch": "Amber往返校验不一致——权限可能尚未设置。",
-    "nativeCryptoHint": "使用手机自带的内置代码（而非应用自身的代码）来加密消息和校验签名，速度更快，因此默认开启。如果消息无法发送或加载，请将其关闭。",
+    "nativeCryptoHint": "使用应用内置的更快加密库来加密消息和校验签名，默认开启。如果消息无法发送或加载，请将其关闭。",
     "nativeCryptoLabel": "更快的加密",
     "nativeCryptoRestartCaption": "重启应用后生效。",
     "nativeCryptoUnavailable": "此设备不可用",
