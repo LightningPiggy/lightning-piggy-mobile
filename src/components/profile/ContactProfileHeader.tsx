@@ -10,6 +10,7 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import { useTranslation } from '../../contexts/LocaleContext';
 import type { ContactProfileBodyData } from '../ContactProfileBody';
 import type { ContactProfileScreenStyles } from '../../styles/ContactProfileScreen.styles';
+import BrandGradientBackground from '../BrandGradientBackground';
 
 interface Props {
   contact: ContactProfileBodyData;
@@ -59,6 +60,8 @@ const ContactProfileHeader: React.FC<Props> = ({
   const t = useTranslation();
   const colors = useThemeColors();
   const [avatarError, setAvatarError] = useState(false);
+  // A banner URL that fails to load (404 / offline) falls back to the gradient.
+  const [bannerError, setBannerError] = useState(false);
   const [editingLnAddress, setEditingLnAddress] = useState(false);
   const [lnAddressDraft, setLnAddressDraft] = useState(contact.lightningAddress ?? '');
   const [savingLnAddress, setSavingLnAddress] = useState(false);
@@ -69,6 +72,9 @@ const ContactProfileHeader: React.FC<Props> = ({
   useEffect(() => {
     setAvatarError(false);
   }, [contact.picture]);
+  useEffect(() => {
+    setBannerError(false);
+  }, [contact.banner]);
 
   useEffect(() => {
     setEditingLnAddress(false);
@@ -103,20 +109,22 @@ const ContactProfileHeader: React.FC<Props> = ({
 
   return (
     <View>
-      {/* Banner — the contact's own if set, else the brand pink-ostrich texture. */}
-      <View style={styles.bannerContainer}>
-        <Image
-          source={
-            contact.banner
-              ? { uri: contact.banner }
-              : require('../../../assets/images/friends-bg.png')
-          }
-          style={styles.bannerImage}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          recyclingKey={contact.banner ?? 'friends-bg'}
-          autoplay={false}
-        />
+      {/* Banner — the contact's own if set, else a plain brand gradient, so a
+          missing banner never looks like a picture the person chose. */}
+      <View style={styles.bannerContainer} testID="contact-profile-banner">
+        {contact.banner && !bannerError ? (
+          <Image
+            source={{ uri: contact.banner }}
+            style={styles.bannerImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={contact.banner}
+            autoplay={false}
+            onError={() => setBannerError(true)}
+          />
+        ) : (
+          <BrandGradientBackground />
+        )}
       </View>
 
       {/* Avatar left (overlapping the banner); buttons + Follow right, one row. */}
