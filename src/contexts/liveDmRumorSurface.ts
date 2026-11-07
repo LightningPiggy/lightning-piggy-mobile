@@ -92,7 +92,13 @@ export function createLiveRumorSurfacer(
   } = deps;
 
   const surfaceRumor = async (rumor: DecodedRumor, wrapId: string): Promise<void> => {
-    if (shouldAbort()) return;
+    // Torn down before deciding: give the wrap back (here and below) so a
+    // re-opened sub sharing knownWrapIds, or the background watch, still
+    // handles it instead of treating it as already taken.
+    if (shouldAbort()) {
+      releaseWrapClaim(wrapId);
+      return;
+    }
     // A contentless alert the background watch posted for this wrap (remote
     // signer, #279) is a placeholder — never deleted in the hope another alert
     // is written:
@@ -105,6 +111,10 @@ export function createLiveRumorSurfacer(
     // Each decided case is also marked handled, so neither the watch nor the
     // background sync pings for it; an undecided one is left to them.
     const placeholder = takeContentlessWrapAlert(wrapId);
+    const abandon = () => {
+      releaseWrapClaim(wrapId);
+      if (placeholder) noteContentlessWrapAlert(wrapId);
+    };
     const nothingToSee = () => {
       markWrapHandled(wrapId);
       if (placeholder) void retractContentlessWrapAlert(viewerPubkey, wrapId);
@@ -151,7 +161,10 @@ export function createLiveRumorSurfacer(
       releaseWrapClaim(wrapId);
       throw error;
     }
-    if (shouldAbort()) return;
+    if (shouldAbort()) {
+      abandon();
+      return;
+    }
     if (nip171) {
       nothingToSee();
       return;
@@ -167,7 +180,10 @@ export function createLiveRumorSurfacer(
         : await tryRouteGroupRumor(rumor, viewerPubkey, wrapId, shouldAbort, (pk) =>
             followPubkeysRef.current.has(pk),
           );
-    if (shouldAbort()) return;
+    if (shouldAbort()) {
+      abandon();
+      return;
+    }
     if (routeResult.kind !== 'not-group') {
       // OS notification (#279) — fired HERE (live path) not inside
       // tryRouteGroupRumor (which also runs on batch refresh). Only for
@@ -209,7 +225,10 @@ export function createLiveRumorSurfacer(
       viewerPubkey,
       partnerFromRumor(rumor, viewerPubkey),
     );
-    if (shouldAbort()) return;
+    if (shouldAbort()) {
+      abandon();
+      return;
+    }
     if (!partnership) {
       nothingToSee();
       if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} no-partnership`);
@@ -254,7 +273,10 @@ export function createLiveRumorSurfacer(
       });
       return;
     }
-    if (shouldAbort()) return;
+    if (shouldAbort()) {
+      abandon();
+      return;
+    }
     const showOrderInMessages =
       followPubkeysRef.current.has(partnership.partnerPubkey) || includeNonFollowOrders();
     // Our own sent self-copies never spend the inbound allowance (batch ingest

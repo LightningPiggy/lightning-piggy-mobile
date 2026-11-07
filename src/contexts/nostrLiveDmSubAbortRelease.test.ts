@@ -1,16 +1,18 @@
-// The live DM sub publishes its wrap-id index to the background watch in the
-// same JS context, so the watch skips wraps the sub already has instead of
-// decrypting them a second time. The index must cover stored wraps and wraps
-// the sub takes in live, and must go away with the sub.
+// A live sub torn down while it is still deciding a wrap (a relay-list change
+// re-opens the sub, an account switch, an unmount) must give the wrap back.
+// Re-opened subs share the same knownWrapIds set: an orphaned claim would make
+// the next sub treat a never-alerted wrap as "already stored" and mark it
+// handled, and the background watch then stays silent too.
 import { startLiveDmSubscription, type LiveDmSubscriptionParams } from './nostrLiveDmSub';
 import { createLiveSubFollowGateBuffer } from './liveSubFollowGate';
+import { tryRouteGroupRumor } from './nostrGroupRouting';
 import {
-  isLiveDmSubArmed,
-  liveDmSubHasWrap,
+  wasWrapHandled,
   __resetForTests as __resetDedupeForTests,
 } from '../services/dmWrapNotificationDedupe';
 
 jest.mock('../services/marmotWelcomeRouter', () => ({ routeMarmotWelcome: jest.fn() }));
+jest.mock('./nip171InboxRouting', () => ({ routeNip171Rumor: jest.fn(async () => false) }));
 
 let capturedOnEvent: ((ev: unknown) => void) | null = null;
 jest.mock('../services/dmLiveSubscription', () => ({
@@ -31,13 +33,12 @@ jest.mock('./dmStoreMigrationRunner', () => ({
   ensureDmStoreMigrated: jest.fn(async () => {}),
 }));
 jest.mock('./nostrEventBus', () => ({ notifyDmMessage: jest.fn() }));
+const mockFireNotification = jest.fn(async () => 'notif-id');
 jest.mock('../services/notificationService', () => ({
-  fireMessageNotification: jest.fn(),
+  fireMessageNotification: (...a: unknown[]) => mockFireNotification(...(a as [])),
   isThreadActivelyViewed: () => false,
 }));
-jest.mock('./nostrGroupRouting', () => ({
-  tryRouteGroupRumor: jest.fn(async () => ({ kind: 'not-group' })),
-}));
+jest.mock('./nostrGroupRouting', () => ({ tryRouteGroupRumor: jest.fn() }));
 jest.mock('./nostrDecryptPacing', () => ({
   createYieldScheduler: jest.fn(() => ({
     maybeYield: jest.fn(async () => {}),
@@ -76,19 +77,22 @@ jest.mock('./nostrDmCache', () => ({
 
 const VIEWER = 'f'.repeat(64);
 const ALICE = 'a'.repeat(64);
+const WRAP_ID = 'fresh-wrap';
 
 function flush(): Promise<void> {
   return new Promise((r) => setImmediate(r));
 }
 
-function makeParams(stored: string[]): LiveDmSubscriptionParams {
+function makeParams(
+  knownWrapIdsRef: LiveDmSubscriptionParams['knownWrapIdsRef'],
+): LiveDmSubscriptionParams {
   return {
     viewerPubkey: VIEWER,
     activeSigner: 'nsec',
     pubkey: VIEWER,
     signerType: 'nsec',
     readRelays: ['wss://relay.example'],
-    knownWrapIdsRef: { current: { pubkey: VIEWER, set: new Set<string>(stored) } },
+    knownWrapIdsRef,
     followPubkeysRef: { current: new Set([ALICE]) },
     followHydratedRef: { current: true },
     setDmInbox: jest.fn(),
@@ -98,42 +102,69 @@ function makeParams(stored: string[]): LiveDmSubscriptionParams {
   } as LiveDmSubscriptionParams;
 }
 
-beforeEach(() => {
-  jest.clearAllMocks();
-  __resetDedupeForTests();
-  capturedOnEvent = null;
-});
-
-it('exposes stored and live-taken wraps to the background watch while armed', async () => {
-  const stop = startLiveDmSubscription(makeParams(['stored-wrap']));
-  await flush();
-  expect(isLiveDmSubArmed()).toBe(true);
-  expect(liveDmSubHasWrap('stored-wrap')).toBe(true);
-  expect(liveDmSubHasWrap('fresh-wrap')).toBe(false);
-
-  capturedOnEvent!({
-    id: 'fresh-wrap',
+function freshWrap() {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    id: WRAP_ID,
     kind: 1059,
     pubkey: 'e'.repeat(64),
-    created_at: Math.floor(Date.now() / 1000),
+    created_at: now,
     tags: [['p', VIEWER]],
     content: 'ciphertext',
     rumor: {
       id: 'rumor-1',
       kind: 14,
       pubkey: ALICE,
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: now,
       content: 'hello',
       tags: [['p', VIEWER]],
       partnership: { partnerPubkey: ALICE, fromMe: false },
     },
-  });
-  expect(liveDmSubHasWrap('fresh-wrap')).toBe(true);
+  };
+}
 
-  stop();
-  // Torn down: the watch must handle every wrap itself again.
-  expect(isLiveDmSubArmed()).toBe(false);
-  expect(liveDmSubHasWrap('stored-wrap')).toBe(false);
-  expect(liveDmSubHasWrap('fresh-wrap')).toBe(false);
+beforeEach(() => {
+  jest.clearAllMocks();
+  __resetDedupeForTests();
+  capturedOnEvent = null;
+});
+
+it('gives a wrap back when torn down mid-decision, so the re-opened sub alerts for it', async () => {
+  const knownWrapIdsRef = { current: { pubkey: VIEWER, set: new Set<string>() } };
+
+  // Sub A takes the wrap and parks in group routing.
+  let releaseRouting: (v: { kind: 'not-group' }) => void = () => {};
+  jest.mocked(tryRouteGroupRumor).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        releaseRouting = resolve as typeof releaseRouting;
+      }) as ReturnType<typeof tryRouteGroupRumor>,
+  );
+  const stopA = startLiveDmSubscription(makeParams(knownWrapIdsRef));
+  await flush();
+  capturedOnEvent!(freshWrap());
+  await flush();
+  expect(knownWrapIdsRef.current.set.has(WRAP_ID)).toBe(true);
+
+  // Relay-list change: A is torn down before it decides, then routing resumes.
+  stopA();
+  releaseRouting({ kind: 'not-group' });
+  await flush();
+  expect(knownWrapIdsRef.current.set.has(WRAP_ID)).toBe(false);
+  expect(wasWrapHandled(WRAP_ID)).toBe(false);
+  expect(mockFireNotification).not.toHaveBeenCalled();
+
+  // Sub B (same knownWrapIds) gets the relay's redelivery and alerts for it.
+  jest
+    .mocked(tryRouteGroupRumor)
+    .mockResolvedValue({ kind: 'not-group' } as Awaited<ReturnType<typeof tryRouteGroupRumor>>);
+  const stopB = startLiveDmSubscription(makeParams(knownWrapIdsRef));
+  await flush();
+  capturedOnEvent!(freshWrap());
+  await flush();
+  await flush();
+  expect(mockFireNotification).toHaveBeenCalledTimes(1);
+  expect(wasWrapHandled(WRAP_ID)).toBe(true);
+  stopB();
   await flush();
 });

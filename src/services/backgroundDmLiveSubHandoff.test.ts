@@ -1,8 +1,9 @@
 // The nsec background watch and the app's live DM sub run in the same JS
-// context and see the same gift wraps. The live sub decrypts and alerts for
-// every wrap it takes in, so the watch must not decrypt those a second time,
-// yet must still alert for anything the live sub doesn't have: when no live
-// sub runs (headless, after a swipe-away) or when it was torn down mid-wrap.
+// context and see the same gift wraps. The watch must not decrypt a wrap the
+// live sub has already decided (alerted, or nothing to alert), yet must still
+// alert for every other wrap: when no live sub runs (headless, after a
+// swipe-away), when it never got the wrap, keeps it silent as not fresh to
+// it, or was torn down before deciding.
 import {
   runBackgroundDmWatch,
   stopBackgroundDmWatch,
@@ -11,8 +12,8 @@ import {
 } from './backgroundDmService';
 import {
   claimWrapNotification,
+  markWrapHandled,
   noteLiveDmSubArmed,
-  registerLiveDmWrapIndex,
   __resetForTests as __resetDedupeForTests,
 } from './dmWrapNotificationDedupe';
 
@@ -78,17 +79,18 @@ function deliver(id: string): void {
   call.onEvent({ id, kind: 1059, pubkey: 'd'.repeat(64), tags: [], content: '' });
 }
 
-/** The app's live sub as the watch sees it: armed, with a wrap-id index. */
+/** The app's live sub as the watch sees it: armed, deciding wraps. */
 function armLiveSub() {
-  const known = new Set<string>();
   noteLiveDmSubArmed(true);
-  const unregister = registerLiveDmWrapIndex((id) => known.has(id));
   return {
-    take: (id: string) => known.add(id),
-    tearDown: () => {
-      noteLiveDmSubArmed(false);
-      unregister();
+    /** Decided and alerted (claims the notification, marks it handled). */
+    alert: (id: string) => {
+      claimWrapNotification(id);
+      markWrapHandled(id);
     },
+    /** Decided there is nothing to alert (own copy, stranger, already stored). */
+    nothingToSee: (id: string) => markWrapHandled(id),
+    tearDown: () => noteLiveDmSubArmed(false),
   };
 }
 
@@ -116,23 +118,40 @@ afterEach(async () => {
   await stopBackgroundDmWatch();
 });
 
-it('does not decrypt a wrap the live sub has taken (app open)', async () => {
+it('does not decrypt a wrap the live sub decided and alerted for (app open)', async () => {
   const live = armLiveSub();
   deliver('w1');
-  live.take('w1'); // the live sub got the same wrap a moment later
+  live.alert('w1'); // the live sub got the same wrap a moment later
   await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
   expect(mockUnwrapWrapNsec).not.toHaveBeenCalled();
   expect(mockFireMessageNotification).not.toHaveBeenCalled();
 });
 
-it('skips the backlog the inbox already stored when the watch re-arms', async () => {
+it('stays silent without decrypting when the live sub decided there is nothing to alert', async () => {
+  const live = armLiveSub();
+  deliver('own-copy');
+  live.nothingToSee('own-copy'); // handled, never claimed
+  await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
+  expect(mockUnwrapWrapNsec).not.toHaveBeenCalled();
+  expect(mockFireMessageNotification).not.toHaveBeenCalled();
+});
+
+it('skips the backlog the live sub already handled when the watch re-arms', async () => {
   const live = armLiveSub();
   for (let i = 0; i < 50; i++) {
-    live.take(`old${i}`);
+    live.nothingToSee(`old${i}`); // known on receipt: already stored
     deliver(`old${i}`);
   }
   await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
   expect(mockUnwrapWrapNsec).not.toHaveBeenCalled();
+});
+
+it('still alerts for a wrap the live sub has but never decides (silent as not fresh to it)', async () => {
+  armLiveSub(); // stays armed, takes the wrap, never marks it handled
+  deliver('kept-silent');
+  await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
+  expect(mockUnwrapWrapNsec).toHaveBeenCalledTimes(1);
+  expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
 });
 
 it('decrypts and alerts, after the grace, for a wrap the live sub never got', async () => {
@@ -152,11 +171,10 @@ it('decrypts and alerts straight away with no live sub (headless / swiped away)'
   expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
 });
 
-it('takes over a wrap the live sub dropped when it was torn down mid-wrap', async () => {
+it('takes over a wrap the live sub dropped when it was torn down before deciding', async () => {
   const live = armLiveSub();
   deliver('w2');
-  live.take('w2');
-  live.tearDown(); // app closed before the live sub alerted
+  live.tearDown(); // app closed before the live sub decided
   await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
   expect(mockUnwrapWrapNsec).toHaveBeenCalledTimes(1);
   expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
@@ -165,11 +183,19 @@ it('takes over a wrap the live sub dropped when it was torn down mid-wrap', asyn
 it('never alerts twice when the live sub alerted before it was torn down', async () => {
   const live = armLiveSub();
   deliver('w3');
-  live.take('w3');
-  claimWrapNotification('w3'); // the live sub's alert
+  live.alert('w3');
   live.tearDown();
   await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
   expect(mockFireMessageNotification).not.toHaveBeenCalled();
+});
+
+it('never alerts twice when the live sub alerts after the watch took over', async () => {
+  armLiveSub();
+  deliver('late');
+  await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
+  expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
+  // The live sub's own claim for the same wrap now fails.
+  expect(claimWrapNotification('late')).toBe(false);
 });
 
 it('defers again once the app reopens and its live sub re-arms', async () => {
@@ -180,7 +206,7 @@ it('defers again once the app reopens and its live sub re-arms', async () => {
   expect(mockUnwrapWrapNsec).toHaveBeenCalledTimes(1);
   const reopened = armLiveSub();
   deliver('after-reopen');
-  reopened.take('after-reopen');
+  reopened.alert('after-reopen');
   await jest.advanceTimersByTimeAsync(LIVE_SUB_DECRYPT_GRACE_MS);
   expect(mockUnwrapWrapNsec).toHaveBeenCalledTimes(1);
 });

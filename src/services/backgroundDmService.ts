@@ -68,7 +68,6 @@ import { buildNsecDecryptor, loadFollowedPubkeys, storeDecryptedWrap } from './b
 import {
   claimWrapNotification,
   isLiveDmSubArmed,
-  liveDmSubHasWrap,
   noteContentlessWrapAlert,
   wasWrapHandled,
 } from './dmWrapNotificationDedupe';
@@ -226,10 +225,10 @@ async function resolveSenderName(pubkey: string, readRelays: string[]): Promise<
  * (Signal sealed-sender style) — we still know a wrap addressed to us
  * arrived, we just can't read it off-screen.
  */
-/** How long the watch waits for a live sub in this context to take a wrap
+/** How long the watch waits for a live sub in this context to decide a wrap
  * before handling it itself. A remote signer answers in a second or two; a
  * slower one still gets the contentless alert, which the live sub replaces
- * once it decrypts. An nsec live sub takes a wrap within milliseconds. */
+ * once it decrypts. An nsec live sub decides within milliseconds. */
 export const LIVE_SUB_DECRYPT_GRACE_MS = 8_000;
 const waitMs = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -289,16 +288,17 @@ async function handleWrap(input: {
   }
 
   // The app's live sub runs in this JS context too, whether the app is in the
-  // foreground or the background, and decrypts and alerts for every wrap it
-  // takes in. Decrypting the same wrap here as well doubled the gift-wrap
-  // crypto on the one JS thread. Give it the same grace as above, then leave
-  // it any wrap it has. A wrap it doesn't have is decrypted and alerted here
-  // as before: one only this watch's relays carried, one sent while its socket
-  // was down, or one it dropped because it was torn down (its index goes with
-  // it). With no live sub (headless, after a swipe-away) nothing waits.
+  // foreground or the background, and decrypts the same wraps. Decrypting each
+  // one here as well doubled the gift-wrap crypto on the one JS thread. Give
+  // it the same grace as above and leave it every wrap it has DECIDED (alerted,
+  // or nothing to alert: our own copy, a stranger, already stored). Any other
+  // wrap is decrypted and alerted here as before: one it never got, one it is
+  // keeping silent as not fresh to it, one it dropped on teardown. The claim
+  // below keeps that from becoming a second alert. With no live sub (headless,
+  // after a swipe-away) nothing waits.
   if (isLiveDmSubArmed()) {
     await waitMs(LIVE_SUB_DECRYPT_GRACE_MS);
-    if (liveDmSubHasWrap(ev.id)) return;
+    if (wasWrapHandled(ev.id)) return;
     // Signed out / switched account meanwhile: not this watch's to alert.
     if (activeWatch?.viewerPubkey !== viewerPubkey) return;
   }

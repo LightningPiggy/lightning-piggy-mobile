@@ -54,35 +54,3 @@ describe('live sub hand-off (contentless phantoms)', () => {
     expect(mod.takeContentlessWrapAlert('w2')).toBe(false);
   });
 });
-
-describe('live sub wrap index (no second decrypt in the background watch)', () => {
-  it('answers from every registered index until it is unregistered', () => {
-    const a = new Set(['w1']);
-    const b = new Set(['w2']);
-    const unregisterA = mod.registerLiveDmWrapIndex((id) => a.has(id));
-    const unregisterB = mod.registerLiveDmWrapIndex((id) => b.has(id));
-    expect(mod.liveDmSubHasWrap('w1')).toBe(true);
-    expect(mod.liveDmSubHasWrap('w2')).toBe(true);
-    expect(mod.liveDmSubHasWrap('w3')).toBe(false);
-    unregisterA();
-    expect(mod.liveDmSubHasWrap('w1')).toBe(false);
-    expect(mod.liveDmSubHasWrap('w2')).toBe(true);
-    unregisterB();
-    expect(mod.liveDmSubHasWrap('w2')).toBe(false);
-  });
-
-  it('keeps two registrations of the same lookup apart', () => {
-    const has = (id: string) => id === 'w1';
-    const first = mod.registerLiveDmWrapIndex(has);
-    const second = mod.registerLiveDmWrapIndex(has);
-    first();
-    expect(mod.liveDmSubHasWrap('w1')).toBe(true);
-    second();
-    expect(mod.liveDmSubHasWrap('w1')).toBe(false);
-  });
-
-  it('never matches an empty id', () => {
-    mod.registerLiveDmWrapIndex(() => true);
-    expect(mod.liveDmSubHasWrap('')).toBe(false);
-  });
-});

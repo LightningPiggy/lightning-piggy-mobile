@@ -51,7 +51,6 @@ jest.mock('../services/dmWrapNotificationDedupe', () => ({
   claimWrapNotification: jest.fn(() => true),
   markWrapHandled: jest.fn(),
   noteLiveDmSubArmed: jest.fn(),
-  registerLiveDmWrapIndex: jest.fn(() => () => {}),
   takeContentlessWrapAlert: jest.fn(() => false),
   retractContentlessWrapAlert: jest.fn(),
 }));
