@@ -84,6 +84,7 @@ export function subscribeAuthorFeed(input: {
   let closedCount = 0;
   let closedByUs = false;
   const filter = feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE);
+  const startedAt = Date.now();
   // One subscription per relay (still one REQ per relay on the wire), so a
   // relay that really answered can be told apart while another stays silent:
   // the pool only reports EOSE once EVERY relay has sent one.
@@ -101,9 +102,12 @@ export function subscribeAuthorFeed(input: {
         eose = true;
         // The pool reports a relay that FAILED as EOSE and closes it in the
         // same synchronous call; a relay that really answered and later
-        // dropped closes in a later tick. Only the latter is an answer.
+        // dropped closes in a later tick. Only the latter is an answer. And
+        // once maxWait has run out, the SDK fakes EOSE for a silent relay:
+        // no answer either.
+        const timedOut = Date.now() - startedAt >= AUTHOR_FEED_EOSE_WAIT_MS;
         queueMicrotask(() => {
-          if (closed || closedByUs || answered) return;
+          if (timedOut || closed || closedByUs || answered) return;
           answered = true;
           input.onAnswered?.();
         });
