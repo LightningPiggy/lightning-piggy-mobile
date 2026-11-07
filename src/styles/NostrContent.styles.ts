@@ -62,6 +62,14 @@ export const createNostrContentStyles = (colors: Palette) =>
       width: '100%',
       height: '100%',
     },
+    // Loading / failed box (MediaStatusBox): fill the whole thumb edge to
+    // edge, not the box's default square, with the thumb's own corners.
+    thumbStatus: {
+      width: '100%',
+      height: '100%',
+      aspectRatio: undefined,
+      borderRadius: 10,
+    },
     playBadge: {
       position: 'absolute',
       width: 36,

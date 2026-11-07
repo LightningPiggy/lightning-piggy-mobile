@@ -19,11 +19,12 @@ import {
 } from '../../utils/nostrContentBlocks';
 import { isSupportedImageUrl } from '../../utils/imageUrl';
 import { checkRemoteUrl, MEDIA_MAX_BYTES } from '../../utils/remoteUrlPolicy';
-import { useRemoteMediaUri } from '../../hooks/useRemoteMediaUri';
+import { useRemoteMediaWithAutoRetry } from '../../hooks/useRemoteMediaUri';
 import type { NoteMediaItem } from '../../utils/noteMedia';
 import { useIsTrustedAuthor } from '../../hooks/useFollowedPubkeys';
 import { useTapToReveal } from '../../hooks/useTapToReveal';
 import TapToLoadMedia from '../TapToLoadMedia';
+import MediaStatusBox from '../MediaStatusBox';
 
 interface Props {
   content: string;
@@ -162,11 +163,19 @@ const MediaThumb: React.FC<{
     autoLoad && checkRemoteUrl(item.url, { kind: 'media' }).ok,
   );
   const safe = checkRemoteUrl(item.url, { kind: 'media' }).ok;
-  const uri = useRemoteMediaUri(isImage && loadAllowed && safe ? item.url : null, MEDIA_MAX_BYTES);
+  const { uri, failed, retry } = useRemoteMediaWithAutoRetry(
+    isImage && loadAllowed && safe ? item.url : null,
+    MEDIA_MAX_BYTES,
+  );
   const gated = isImage && (!loadAllowed || !safe);
+  // A download in flight shows a spinner; a failed one (after one automatic
+  // retry) says so and retries on tap, instead of a silent empty box.
+  const loading = isImage && !gated && !uri && !failed;
+  const loadFailed = isImage && !gated && failed;
   const onPress = () => {
     if (!safe) return;
     if (gated) reveal();
+    else if (loadFailed) retry();
     else if (isVideo || !isImage) openUrl(item.url);
     else if (uri) onImagePress(uri);
   };
@@ -180,8 +189,13 @@ const MediaThumb: React.FC<{
           ? t('nostrContent.playVideo')
           : gated
             ? t('messageBubble.tapToLoadImage')
-            : t('nostrContent.viewImage')
+            : loadFailed
+              ? `${t('messageBubble.imageLoadFailed')}. ${t('messageBubble.tapToRetry')}`
+              : loading
+                ? t('messageBubble.loading')
+                : t('nostrContent.viewImage')
       }
+      accessibilityState={{ busy: loading, disabled: loading }}
       testID={`nostr-inline-${item.type}-${index}`}
       activeOpacity={0.85}
     >
@@ -193,6 +207,21 @@ const MediaThumb: React.FC<{
           cachePolicy="memory-disk"
           recyclingKey={item.url}
           autoplay={false}
+        />
+      ) : null}
+      {loading ? (
+        <MediaStatusBox
+          status="loading"
+          style={styles.thumbStatus}
+          testID={`nostr-inline-image-loading-${index}`}
+        />
+      ) : null}
+      {loadFailed ? (
+        <MediaStatusBox
+          status="failed"
+          label={t('messageBubble.imageLoadFailed')}
+          style={styles.thumbStatus}
+          testID={`nostr-inline-image-failed-${index}`}
         />
       ) : null}
       {gated ? (
