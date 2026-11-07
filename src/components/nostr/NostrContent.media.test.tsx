@@ -80,7 +80,13 @@ it('shows a spinner while an inline image downloads', async () => {
 });
 
 it('retries a failed inline image once by itself, then offers tap to retry', async () => {
-  mockFetch.mockRejectedValue(new Error('network down'));
+  // First download fails; the automatic retry's download is held open so
+  // the moment it starts can be checked, then it fails too.
+  let failRetry: (e: Error) => void = () => {};
+  mockFetch
+    .mockRejectedValueOnce(new Error('network down'))
+    .mockReturnValueOnce(new Promise((_, reject) => (failRetry = reject)))
+    .mockRejectedValue(new Error('network down'));
   const view = render(<NostrContent content={IMAGE} authorPubkey="author" />);
   await settle();
   expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -91,6 +97,11 @@ it('retries a failed inline image once by itself, then offers tap to retry', asy
   await act(async () => {
     jest.advanceTimersByTime(3000);
   });
+  // While the automatic retry is in flight, the old failure must not show.
+  expect(mockFetch).toHaveBeenCalledTimes(2);
+  expect(view.queryByTestId('nostr-inline-image-failed-0')).toBeNull();
+  expect(view.getByTestId('nostr-inline-image-loading-0')).toBeTruthy();
+  await act(async () => failRetry(new Error('network down')));
   await settle();
   expect(mockFetch).toHaveBeenCalledTimes(2);
   // Still failing: say so instead of a silent empty box, and stop retrying.

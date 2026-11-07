@@ -10,6 +10,9 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
     owner: string | null;
     url: string;
     maxBytes: number;
+    // The attempt this result belongs to: a retry must never show the
+    // previous attempt's failure for the render before its effect runs.
+    attempt: number;
     uri: string | null;
     failed: boolean;
   } | null>(null);
@@ -19,10 +22,10 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
     if (url)
       void resolveRemoteMedia(url, maxBytes).then(
         (uri) => {
-          if (!cancelled) setResolved({ owner, url, maxBytes, uri, failed: false });
+          if (!cancelled) setResolved({ owner, url, maxBytes, attempt, uri, failed: false });
         },
         () => {
-          if (!cancelled) setResolved({ owner, url, maxBytes, uri: null, failed: true });
+          if (!cancelled) setResolved({ owner, url, maxBytes, attempt, uri: null, failed: true });
         },
       );
     return () => {
@@ -30,7 +33,10 @@ export function useRemoteMedia(url: string | null, maxBytes: number) {
     };
   }, [owner, url, maxBytes, attempt]);
   const current =
-    resolved?.owner === owner && resolved?.url === url && resolved?.maxBytes === maxBytes;
+    resolved?.owner === owner &&
+    resolved?.url === url &&
+    resolved?.maxBytes === maxBytes &&
+    resolved?.attempt === attempt;
   return { uri: current ? resolved.uri : null, failed: current && resolved.failed, retry };
 }
 
