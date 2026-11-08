@@ -412,3 +412,29 @@ it('lets a completed lookup replace an EXPIRED find with absent', async () => {
   const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
   expect(result.status === 'ok' && result.lists.inbox).toBeNull();
 });
+
+it('a redirected (uncacheable) retry still returns fresh cached finds, writing nothing', async () => {
+  jest.useFakeTimers({ now: 13_000_000 });
+  setCurrentUserPubkey(viewer);
+  query.mockImplementationOnce(
+    incomplete([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]),
+  );
+  await getPeerRelayLists(alice, { viewerPubkey: viewer });
+
+  // The unknown 10002 expires; the retry is redirected to the test relay,
+  // which completes with nothing.
+  jest.setSystemTime(13_000_000 + PEER_LIST_FAILED_TTL_MS);
+  query.mockImplementationOnce(async (_relays, _filters, _maxWait, options) => {
+    setCurrentUserPubkey(TEST_ACCOUNT_KEYS.little);
+    options?.onClose?.(['closed automatically on eose']);
+    return [];
+  });
+  const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  // The fresh inbox isn't hidden by the redirected empty answer...
+  expect(result.status === 'ok' && result.lists.inbox).toEqual(['wss://inbox.example.com/']);
+  // ...and nothing was cached from it: the 10002 is still unknown, not absent.
+  expect(peekPeerRelayLists(alice, viewer)).toEqual({
+    status: 'ok',
+    lists: { inbox: ['wss://inbox.example.com/'], read: undefined, write: undefined },
+  });
+});

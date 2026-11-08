@@ -202,14 +202,19 @@ function mergeKind<T>(
   return next;
 }
 
-/** Store a lookup's states, merged with what's cached (see `mergeKind`). */
-function store(key: string, next: CacheEntry): CacheEntry {
+/** A lookup's states merged with what's cached (see `mergeKind`); writes nothing. */
+function mergedWithCache(key: string, next: CacheEntry): CacheEntry {
   const prev = cache.get(key);
-  const merged: CacheEntry = {
+  return {
     inbox: mergeKind(prev?.inbox, prev?.nip65, next.inbox),
     nip65: mergeKind(prev?.nip65, prev?.inbox, next.nip65),
     error: next.error,
   };
+}
+
+/** Store a lookup's states, merged with what's cached. */
+function store(key: string, next: CacheEntry): CacheEntry {
+  const merged = mergedWithCache(key, next);
   cache.delete(key);
   cache.set(key, merged);
   while (cache.size > MAX_CACHED_PEERS) cache.delete(cache.keys().next().value!);
@@ -410,7 +415,9 @@ export async function getManyPeerRelayLists(
       const run = batch
         .then(({ entries, cacheable }) => {
           const entry = entries.get(pubkey) ?? unknownEntry('missing result');
-          return toResult(cacheable ? store(key, entry) : entry);
+          // A redirected (uncacheable) answer still mustn't hide fresh cached
+          // finds: merge it the same way, just don't write it.
+          return toResult(cacheable ? store(key, entry) : mergedWithCache(key, entry));
         })
         .finally(() => {
           if (inFlight.get(key) === run) inFlight.delete(key);
