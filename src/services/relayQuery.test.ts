@@ -3,7 +3,7 @@ import type { SimplePool } from 'nostr-tools/pool';
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 
 // These fake-pool tests exercise completion policy; the signed-event backlog
-// and persistence barrier are covered in relayQuery.receiveQueue.test.ts.
+// and receive barrier are covered in relayQuery.receiveQueue.test.ts.
 jest.mock('./nostrVerifyCache', () => ({
   hydrateVerifiedEventCache: jest.fn(async () => {}),
   flushVerifiedEventCache: jest.fn(async () => {}),

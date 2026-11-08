@@ -1,23 +1,80 @@
-import type { AbstractRelay } from 'nostr-tools/abstract-relay';
+import type { AbstractRelay, Subscription } from 'nostr-tools/abstract-relay';
+import type { Filter } from 'nostr-tools/filter';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
-import { hydrateVerifiedEventCache, flushVerifiedEventCache } from './nostrVerifyCache';
+import { hydrateVerifiedEventCache } from './nostrVerifyCache';
+import {
+  maybeLogReceiveWindow,
+  recordInboxEoseLatency,
+  recordReceiveWait,
+  type ReceiveLane,
+} from './relayReceivePerf';
+
+export type { ReceiveLane } from './relayReceivePerf';
+
+/** Consecutive inbox jobs run while normal work waits before one normal job
+ * gets a turn: the inbox goes first, but a kind-4 backlog can't starve the rest. */
+export const INBOX_BURST = 4;
+export const RECEIVE_QUEUE_MAX_JOBS = 20_000;
+export const RECEIVE_QUEUE_MAX_BYTES = 8 * 1024 * 1024;
+
+type Job = {
+  run: () => void | Promise<void>;
+  bytes: number;
+  seq: number;
+  queuedAt: number;
+  /** Runs only once every job enqueued before it, in either lane, has run. */
+  barrier: boolean;
+};
+const head = (lane: Map<number, Job>): Job | undefined => lane.values().next().value;
 
 /** One queue for ALL sockets: per-relay schedulers could each spend a frame
  * budget in the same JS turn. Keep SDK verification/filter/dedup/delivery
- * together, in wire order, before EOSE. Never pretend an unverified event is
- * valid just to defer its signature check. */
+ * together, before EOSE. Never pretend an unverified event is valid just to
+ * defer its signature check.
+ *
+ * Two FIFO lanes share that budget. Inbox subscriptions (kind 4 / 1059 DMs)
+ * drain first, so a DM or its EOSE doesn't wait behind another feature's
+ * Schnorr-verified backlog (group backfill, zap receipts, reactions…). A
+ * subscription's frames all go to ONE lane, so its order (EVENT before its
+ * EOSE) holds; only different subscriptions are reordered. */
 export class RelayReceiveQueue {
-  private jobs = new Map<number, { run: () => void | Promise<void>; bytes: number }>();
+  private lanes: Record<ReceiveLane, Map<number, Job>> = { inbox: new Map(), normal: new Map() };
   private serial = 0;
   private bytes = 0;
+  private inboxStreak = 0;
   private draining = false;
 
-  enqueue(run: () => void | Promise<void>, bytes = 0): boolean {
-    if (this.jobs.size >= 20_000 || this.bytes + bytes > 8 * 1024 * 1024) return false;
-    this.jobs.set(this.serial++, { run, bytes });
+  get size(): number {
+    return this.lanes.inbox.size + this.lanes.normal.size;
+  }
+
+  enqueue(run: () => void | Promise<void>, bytes = 0, lane: ReceiveLane = 'normal'): boolean {
+    return this.push(lane, run, bytes, false);
+  }
+
+  /** `run` waits for every job already queued, in both lanes. */
+  enqueueBarrier(run: () => void | Promise<void>, bytes = 0): boolean {
+    return this.push('normal', run, bytes, true);
+  }
+
+  private push(lane: ReceiveLane, run: Job['run'], bytes: number, barrier: boolean): boolean {
+    if (this.size >= RECEIVE_QUEUE_MAX_JOBS || this.bytes + bytes > RECEIVE_QUEUE_MAX_BYTES)
+      return false;
+    const seq = this.serial++;
+    this.lanes[lane].set(seq, { run, bytes, seq, queuedAt: Date.now(), barrier });
     this.bytes += bytes;
     if (!this.draining) void this.drain();
     return true;
+  }
+
+  private next(): ReceiveLane {
+    const inbox = head(this.lanes.inbox);
+    const normal = head(this.lanes.normal);
+    if (!normal) return 'inbox';
+    if (!inbox) return 'normal';
+    // A barrier must not run ahead of older inbox work, nor hold newer.
+    if (normal.barrier) return inbox.seq < normal.seq ? 'inbox' : 'normal';
+    return this.inboxStreak < INBOX_BURST ? 'inbox' : 'normal';
   }
 
   private async drain(): Promise<void> {
@@ -25,15 +82,21 @@ export class RelayReceiveQueue {
     const pacing = createYieldScheduler({ safetyEvery: 64, budgetMs: 4, coldStart: true });
     try {
       await hydrateVerifiedEventCache();
-      while (this.jobs.size) {
+      while (this.size) {
         // Gate BEFORE every unit, including after await/hydration. A 34 ms
         // Schnorr is indivisible, but a second one never follows in the same
         // budget slice. Fast cached hashes share the 4 ms budget.
         await pacing.maybeYield();
-        const id = this.jobs.keys().next().value!;
-        const job = this.jobs.get(id)!;
-        this.jobs.delete(id);
+        // Pick after the yield: inbox frames that arrived meanwhile go first.
+        const lane = this.next();
+        const job = head(this.lanes[lane])!;
+        this.lanes[lane].delete(job.seq);
         this.bytes -= job.bytes;
+        this.inboxStreak =
+          lane === 'inbox' && this.lanes.normal.size > 0 ? this.inboxStreak + 1 : 0;
+        const started = Date.now();
+        if (!job.barrier) recordReceiveWait(lane, started - job.queuedAt);
+        maybeLogReceiveWindow(started);
         try {
           await job.run();
         } catch {
@@ -49,6 +112,18 @@ export class RelayReceiveQueue {
 
 const sharedQueue = new RelayReceiveQueue();
 const installed = new WeakSet<AbstractRelay>();
+
+/** Same rule as `reqPriority(filters) === 0` in `relayReqBudget` (kept local:
+ * that module imports this one). Covers the inbox fetch, the live inbox and
+ * Marmot Welcomes, which arrive as kind-1059 gift wraps too. */
+export const isInboxSubscription = (filters: Filter[]): boolean =>
+  filters.some((f) => f.kinds?.some((k) => k === 4 || k === 1059));
+const inboxSubs = new WeakSet<Subscription>();
+type Lane = ReceiveLane | 'barrier';
+
+/** `["EVENT"|"EOSE"|"CLOSED", "<sub id>"` with a plain (unescaped) type and
+ * id. Anchored: stops at the id's closing quote, never parses the event. */
+const FRAME_SUB_ID = /^\s*\[\s*"[A-Z]+"\s*,\s*"([^"\\]*)"/;
 
 /** How many raw frames ONE socket to a URL may receive, while outbox leases
  * hold that URL. Only URLs the app opened on someone else's behalf (outbox
@@ -106,19 +181,14 @@ function withinFrameBudget(relay: AbstractRelay): boolean {
 }
 
 /** Snapshot deadlines share the receive queue's boundary: finish only after
- * events already received have been verified, delivered and persisted. Explicit
- * cancellation must bypass this barrier so tab-blur still closes immediately. */
+ * events already received (in either lane) have been verified and delivered.
+ * Verification trust persists in the background (`nostrVerifyCache`), never
+ * on this path. Explicit cancellation must bypass this barrier so tab-blur
+ * still closes immediately. */
 export function finishAfterRelayReceive(finish: () => void): void {
-  const queued = sharedQueue.enqueue(async () => {
-    try {
-      await flushVerifiedEventCache();
-    } finally {
-      finish();
-    }
-  });
   // Overload already closes paced sockets; don't leave a query pending forever
   // if the bounded queue cannot accept its completion marker either.
-  if (!queued) finish();
+  if (!sharedQueue.enqueueBarrier(finish)) finish();
 }
 
 /** Install BEFORE connect(): nostr-tools binds _onmessage when opening WS.
@@ -132,14 +202,33 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
   const close = relay.close.bind(relay);
   let closed = false;
   let receiving = false;
-  let wireEose: (() => Promise<void>) | undefined;
-  const enqueue = (run: () => void | Promise<void>, bytes = 0) => {
+  let receivedAt = 0;
+  let wireEose: (() => void) | undefined;
+  /** A socket that sent a frame we can't attribute to a subscription cheaply
+   * (escaped JSON, binary) loses the inbox lane. That frame is a barrier, so
+   * it and everything the socket sends after it keep wire order behind the
+   * socket's earlier inbox frames. */
+  let fencedSocket: object | undefined;
+  const enqueue = (run: () => void | Promise<void>, bytes: number, lane: Lane) => {
+    const guarded = () => {
+      if (!closed) return run();
+    };
     if (
-      !queue.enqueue(() => {
-        if (!closed) return run();
-      }, bytes)
+      !(lane === 'barrier'
+        ? queue.enqueueBarrier(guarded, bytes)
+        : queue.enqueue(guarded, bytes, lane))
     )
       relay.close();
+  };
+  const unfenced = () => fencedSocket !== socketOf(relay);
+  const laneOf = (data: unknown): Lane => {
+    const id = typeof data === 'string' ? FRAME_SUB_ID.exec(data)?.[1] : undefined;
+    if (id === undefined) {
+      fencedSocket = socketOf(relay);
+      return 'barrier';
+    }
+    const sub = unfenced() ? relay.openSubs.get(id) : undefined;
+    return sub && inboxSubs.has(sub) ? 'inbox' : 'normal';
   };
   relay._onmessage = (message) => {
     if (closed) return;
@@ -150,39 +239,47 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
     // JSON too: an escaped "\\u0045VENT" also decodes to EVENT in the SDK.
     if (typeof data === 'string' && /^\s*\[\s*"(?:AUTH|OK|COUNT|NOTICE)"/.test(data)) {
       receive(message);
-    } else
-      enqueue(
-        () => {
-          receiving = true;
-          try {
-            receive(message);
-          } finally {
-            receiving = false;
-          }
-          const complete = wireEose;
-          wireEose = undefined;
-          return complete?.();
-        },
-        typeof data === 'string' ? data.length * 2 : 0,
-      );
+      return;
+    }
+    const arrivedAt = Date.now();
+    enqueue(
+      () => {
+        receiving = true;
+        receivedAt = arrivedAt;
+        try {
+          receive(message);
+        } finally {
+          receiving = false;
+        }
+        const complete = wireEose;
+        wireEose = undefined;
+        complete?.();
+      },
+      typeof data === 'string' ? data.length * 2 : 0,
+      laneOf(data),
+    );
   };
   relay.prepareSubscription = (...args) => {
     const sub = prepare(...args);
+    const inbox = isInboxSubscription(args[0]);
+    if (inbox) inboxSubs.add(sub);
     const eose = sub.receivedEose.bind(sub);
     // The SDK's wall-clock timeout may expire while a large valid backlog is
-    // being paced. Queue that timeout behind received events rather than close
-    // the subscription and discard events already received before the timeout.
+    // being paced. Queue that timeout behind received events (in this
+    // subscription's lane) rather than close the subscription and discard
+    // events already received before the timeout.
     sub.receivedEose = () => {
-      const complete = async () => {
-        // A completed snapshot has durable verification trust before its
-        // caller stores/decrypts the results. Live events also debounce writes.
-        await flushVerifiedEventCache();
-        if (!closed && relay.openSubs.get(sub.id) === sub) eose();
+      const since = receiving ? receivedAt : Date.now();
+      const complete = () => {
+        if (closed || relay.openSubs.get(sub.id) !== sub) return;
+        if (inbox) recordInboxEoseLatency(Date.now() - since);
+        eose();
       };
-      // Wire EOSE already occupies its ordered queue position. Await its flush
-      // there; only wall-clock timeouts need a new job behind received events.
+      // Wire EOSE already occupies its ordered queue position: complete it
+      // there, right after the SDK has parsed it. Only wall-clock timeouts
+      // need a new job behind received events.
       if (receiving) wireEose = complete;
-      else enqueue(complete);
+      else enqueue(complete, 0, inbox && unfenced() ? 'inbox' : 'normal');
     };
     return sub;
   };

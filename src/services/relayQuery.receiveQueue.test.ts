@@ -63,12 +63,10 @@ async function inboxQuery(params: { signal?: AbortSignal; rejectOnTimeout?: bool
 }
 
 it.each([false, true])(
-  'drains all 30 pre-deadline inbox events and persistence before completion (wire EOSE: %s)',
+  'drains all 30 pre-deadline inbox events before completion, never awaiting persistence (wire EOSE: %s)',
   async (wireEose) => {
-    let finishWrite!: () => void;
-    jest
-      .mocked(flushVerifiedEventCache)
-      .mockImplementationOnce(() => new Promise<void>((resolve) => (finishWrite = resolve)));
+    // Verify-cache writes run in the background (scheduled by
+    // verifyEventCached): completion never waits on one.
     const { relay, sub, events, result, verify } = await inboxQuery();
     if (wireEose) relay._onmessage(message(['EOSE', sub.id]));
     const completed = jest.fn();
@@ -87,10 +85,8 @@ it.each([false, true])(
     );
     await jest.advanceTimersByTimeAsync(8000);
     expect(verify).toHaveBeenCalledTimes(30);
-    expect(completed).not.toHaveBeenCalled();
-    finishWrite();
-    await jest.advanceTimersByTimeAsync(2000);
     expect((await result).map((event) => event.id)).toEqual(events.map((event) => event.id));
+    expect(flushVerifiedEventCache).not.toHaveBeenCalled();
     expect(relay.openSubs.size).toBe(0);
     relay.close();
   },

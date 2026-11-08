@@ -107,14 +107,8 @@ it('bounds queued receive memory', async () => {
   await jest.advanceTimersByTimeAsync(1);
 });
 
-it('holds EOSE until the successful verification records are durable', async () => {
-  let finishWrite!: () => void;
-  jest.mocked(flushVerifiedEventCache).mockImplementationOnce(
-    () =>
-      new Promise<void>((resolve) => {
-        finishWrite = resolve;
-      }),
-  );
+it('EOSE never awaits verify-cache persistence (it runs in the background)', async () => {
+  // The queue never waits on a storage write: verifyEventCached schedules it.
   const relay = new AbstractRelay('wss://test/', { verifyEvent: (e): e is VerifiedEvent => !!e });
   jest.spyOn(relay, 'send').mockResolvedValue();
   paceRelayReceive(relay, new RelayReceiveQueue());
@@ -122,21 +116,12 @@ it('holds EOSE until the successful verification records are durable', async () 
   const sub = relay.prepareSubscription([{ kinds: [4] }], { id: 'dm', oneose: eose });
   relay._onmessage(message(['EOSE', sub.id]));
   await jest.advanceTimersByTimeAsync(1);
-  expect(eose).not.toHaveBeenCalled();
-  finishWrite();
-  await jest.advanceTimersByTimeAsync(1);
   expect(eose).toHaveBeenCalledTimes(1);
+  expect(flushVerifiedEventCache).not.toHaveBeenCalled();
   relay.close();
 });
 
-it('preserves wire EOSE before later events, including while persistence is pending', async () => {
-  let finishWrite!: () => void;
-  jest.mocked(flushVerifiedEventCache).mockImplementationOnce(
-    () =>
-      new Promise<void>((resolve) => {
-        finishWrite = resolve;
-      }),
-  );
+it('preserves wire EOSE before later events', async () => {
   const relay = new AbstractRelay('wss://test/', {
     verifyEvent: verifyEventCached as (e: unknown) => e is VerifiedEvent,
   });
@@ -154,9 +139,7 @@ it('preserves wire EOSE before later events, including while persistence is pend
   relay._onmessage(message(['EVENT', sub.id, event('before')]));
   relay._onmessage(message(['EOSE', sub.id]));
   relay._onmessage(message(['EVENT', sub.id, event('after')]));
-  await jest.advanceTimersByTimeAsync(100);
-  expect(delivered).toEqual(['before']);
-  finishWrite();
+  expect(delivered).toEqual([]);
   await jest.advanceTimersByTimeAsync(100);
   expect(delivered).toEqual(['before', 'EOSE', 'after']);
   relay.close();
