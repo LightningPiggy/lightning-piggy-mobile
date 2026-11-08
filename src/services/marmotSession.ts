@@ -42,7 +42,9 @@ import {
   type MarmotMediaKeys,
 } from './marmotMedia';
 import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
-import { forgetMediaKeys, loadOrDeriveMediaKeys, rememberMediaKeys } from './marmotMediaKeyStore';
+import { loadOrDeriveMediaKeys, rememberMediaKeys } from './marmotMediaKeyStore';
+import { historyNamespace, replayGroupHistory } from './marmotHistoryReplay';
+import { MarmotStateSaves } from './marmotStateSaves';
 import {
   advertisesMediaV2,
   ensureKeyPackageSlot,
@@ -107,10 +109,6 @@ export const MARMOT_CHAT_KIND = 9;
 /** Marks our key packages (`client` tag) — NOT the slot id; see ensureKeyPackageSlot. */
 const CLIENT_NAME = 'Lightning Piggy';
 const DELIVERED_CACHE_SIZE = 2_000;
-// Startup replay window + retained history per group (see replayHistory).
-const HISTORY_REPLAY_SECS = 7 * 24 * 60 * 60;
-const HISTORY_KEEP = 500;
-const historyNamespace = (groupIdHex: string) => `history:${groupIdHex}`;
 type SessionGroup = MarmotGroup<GroupRumorHistory>;
 type CommitProposals = ReturnType<typeof spreadProposals>;
 // Sign-out waits at most this long for an in-flight key-package publish.
@@ -160,6 +158,8 @@ export interface MarmotSessionOptions {
   keyPackageDrainMs?: number;
   /** Test seam: a send's wait for adding a 1:1's new devices (default 5 s). */
   dmDeviceSyncWaitMs?: number;
+  /** Test seam: backoff between retries of a failed group-state save (#1754). */
+  stateSaveRetryMs?: readonly number[];
 }
 
 export type { InviteOutcome } from './marmotWelcomePayloads';
@@ -212,6 +212,7 @@ export class MarmotSession {
   readonly devices: MarmotDeviceTracker;
   /** Adds devices installed since a 1:1 began (#1559). */
   private readonly dmDevices: MarmotDmDeviceSync;
+  readonly stateSaves: MarmotStateSaves; // confirmed commits whose save failed (#1754)
   private readonly discovery: ReturnType<typeof keyPackageDiscovery>;
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
@@ -225,6 +226,12 @@ export class MarmotSession {
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
     this.superseded = new DmSuperseded(this.backend);
+    this.stateSaves = new MarmotStateSaves({
+      owner: opts.pubkey,
+      backend: this.backend,
+      stopped: () => this.gate.stopped,
+      retryMs: opts.stateSaveRetryMs,
+    });
 
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);
@@ -345,6 +352,7 @@ export class MarmotSession {
         // We're out of it: forget what we published there (MIP-05 state)
         // and its "delete for everyone" tombstones.
         this.pushRegistration.forgetGroup(bytesToHex(id));
+        void this.stateSaves.forget(bytesToHex(id));
         void this.welcomePayloads.drop(bytesToHex(id), { outbox: true }).catch(() => undefined);
         void forgetMarmotDeletionsForGroup(this.pubkey, toAppGroupId(bytesToHex(id))).catch(
           () => undefined,
@@ -362,10 +370,14 @@ export class MarmotSession {
       await this.superseded.load();
       const loaded = await groups.loadAll();
       loaded.forEach((g) => this.wireGroup(g));
+      await this.stateSaves.load(loaded).catch(() => undefined);
+      const replay = { backend: this.backend, activity: this.activity, viewer: this.pubkey };
       for (const g of loaded) {
-        await this.replayHistory(g).catch((e) => {
-          if (__DEV__) console.warn('[Marmot] history replay failed:', e);
-        });
+        await replayGroupHistory(g, { ...replay, deliver: (r) => this.deliver(g, r) }).catch(
+          (e) => {
+            if (__DEV__) console.warn('[Marmot] history replay failed:', e);
+          },
+        );
       }
     } finally {
       this.markReady();
@@ -404,6 +416,7 @@ export class MarmotSession {
     this.stopWelcomeRetries?.();
     this.replenisher.stop();
     clearFailedMarmotInvites(this.pubkey);
+    this.stateSaves.stop();
     const run = this.keyPackageRuns.current;
     const pushStopped = Promise.all([this.push.stop(), this.pushRegistration.stop()]);
     fence.trackStoppedSession(this.pubkey, this.gate);
@@ -678,13 +691,17 @@ export class MarmotSession {
   }
 
   /** Every outbound group intent goes through here: never queued inside
-   * marmot-ts, where a misfired settle check could strand it (#1280). */
+   * marmot-ts, where a misfired settle check could strand it (#1280), and
+   * every result's state save is checked (#1754). */
   private async sendIntent(mlsId: string, intent: GroupSendIntent, timeoutMs?: number) {
+    const group = await this.client.groups.get(mlsId);
     // Commits (invites included) realign the group for White Noise (#1309).
-    return submitWhenSettled(await this.client.groups.get(mlsId), alignCommitForMdk(intent), {
+    const results = await submitWhenSettled(group, alignCommitForMdk(intent), {
       timeoutMs,
       cancelled: () => this.gate.stopped,
     });
+    this.stateSaves.check(group, results);
+    return results;
   }
 
   private async commit(mlsId: string, extraProposals: CommitProposals): Promise<void> {
@@ -873,6 +890,7 @@ export class MarmotSession {
     this.wiredGroups.add(g.idStr);
     this.welcomePayloads.attach(g);
     this.devices.watch(g);
+    this.stateSaves.watch(g);
     // Membership / name changes (ours or another member's commit) move the epoch.
     g.on('stateChanged', () => {
       noteMarmotCommit(); // covers a push wake for it (never settles a placeholder)
@@ -944,31 +962,6 @@ export class MarmotSession {
       groupId: event.group.id,
       ...(event.group.isDm ? { conversationPubkey: event.group.memberPubkeys[0] } : {}),
     });
-  }
-
-  /**
-   * MLS delivers an app event exactly once: marmot-ts durably marks it
-   * processed before emitting it, so if the app dies before its own stores
-   * persist the message it is never re-delivered. The library saves it to
-   * the (durable) group history first, though — so on start, replay recent
-   * history into the listeners (their stores upsert idempotently by id; old
-   * messages are past the notification window). Also prunes the history.
-   */
-  private async replayHistory(g: SessionGroup): Promise<void> {
-    if (!g.history) return;
-    await dmChoice.seedActivityOnce(this.backend, this.activity, g, this.pubkey);
-    const since = Math.floor(Date.now() / 1000) - HISTORY_REPLAY_SECS;
-    const recent = (await g.history.queryRumors({ since })) as MarmotRumor[];
-    recent.sort((a, b) => a.created_at - b.created_at).forEach((r) => this.deliver(g, r));
-    const ns = historyNamespace(g.idStr);
-    const ids = await this.backend.keys(ns);
-    if (ids.length <= HISTORY_KEEP) return;
-    const all = (await g.history.queryRumors({})) as MarmotRumor[];
-    all.sort((a, b) => b.created_at - a.created_at);
-    for (const old of all.slice(HISTORY_KEEP)) {
-      await this.backend.remove(ns, old.id);
-      await forgetMediaKeys(this.backend, g.idStr, old.id);
-    }
   }
 
   private readonly liveGroups = new Set<string>();

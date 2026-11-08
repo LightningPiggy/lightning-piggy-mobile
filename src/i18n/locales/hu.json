@@ -3445,7 +3445,9 @@
     "repairTitle": "Javítod a biztonságos csevegést?",
     "repairMessage": "Használd, ha az üzeneteid nem mennek el, vagy {{name}} üzenetei nem érkeznek meg. Új biztonságos csevegés indul {{name}} eszközeivel, és az új üzenetek oda kerülnek. Az itteni üzeneteid megmaradnak.",
     "repairDone": "Új biztonságos csevegés elindult",
-    "repairFailed": "Nem sikerült javítani a csevegést"
+    "repairFailed": "Nem sikerült javítani a csevegést",
+    "stateUnsavedDm": "Ez az eszköz nem tudta menteni a biztonságos csevegés legutóbbi változását. Ha az app újraindítása után az üzenetek nem nyílnak meg, használd a „Biztonságos csevegés javítása” lehetőséget.",
+    "stateUnsavedGroup": "Ez az eszköz nem tudta menteni a csoport legutóbbi változását. Ha az app újraindítása után az üzenetek nem nyílnak meg, kérj meg egy adminisztrátort, hogy távolítson el, majd adjon hozzá újra."
   },
   "settingsRows": {
     "experimentalSubtitle": "Még tesztelés alatt álló funkciók",

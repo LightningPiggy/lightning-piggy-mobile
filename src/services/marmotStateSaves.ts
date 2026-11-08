@@ -1,0 +1,158 @@
+// A confirmed Marmot commit whose group state didn't save (#1754).
+//
+// Once a commit is published and acknowledged, marmot-ts saves the group's
+// new MLS state and reports how that went in `GroupPublishResult.persistence`.
+// If the save failed, the group in memory is at the new epoch but storage
+// still holds the old one: after a restart this device would load the old
+// epoch, unable to read anything sent since (and, for an invite, missing the
+// invitees' leaves). The commit itself is final — it must never be resent.
+//
+// So every publish result the session gets is checked here. A failed save is
+// retried in the background while the session is live, a few times with
+// backoff, via the group's own `save(true)` (the exact write marmot-ts made:
+// the fork-history tree, then the serialized state). If it still fails, the
+// chat is marked "not saved on this device" — recorded in our KV store and
+// published to the UI, which offers Repair. Any later successful save of the
+// group at that epoch or newer (a retry, our next commit, an inbound one)
+// clears the mark. Only persistence is handled here; no MLS logic changes.
+
+import type { GroupPublishResult } from '@internet-privacy/marmot-ts';
+
+import type { MarmotKvBackend } from './marmotStore';
+import { clearMarmotUnsavedState, publishMarmotUnsavedState } from './marmotUnsavedStateStore';
+
+/** Backoff between save retries (ms). Bounded: three tries, ~20 s in all. */
+export const STATE_SAVE_RETRY_MS: readonly number[] = [1_000, 4_000, 15_000];
+const NAMESPACE = 'unsavedState';
+
+/** The bit of a MarmotGroup this needs. */
+export interface SavableGroup {
+  readonly idStr: string;
+  readonly state: { groupContext: { epoch: bigint } };
+  save(force?: boolean): Promise<void>;
+  on(event: 'stateSaved', listener: () => void): unknown;
+}
+
+export interface MarmotStateSavesDeps {
+  owner: string;
+  backend: Pick<MarmotKvBackend, 'get' | 'set' | 'remove' | 'keys'>;
+  stopped: () => boolean;
+  /** Test seam: retry backoff (default STATE_SAVE_RETRY_MS). */
+  retryMs?: readonly number[];
+}
+
+const epochOf = (g: SavableGroup) => g.state.groupContext.epoch;
+const short = (id: string) => id.slice(0, 8);
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+export class MarmotStateSaves {
+  /** MLS group id → the epoch this device holds in memory but not on disk. */
+  private readonly unsaved = new Map<string, bigint>();
+  private readonly retries = new Map<string, Promise<void>>();
+
+  constructor(private readonly deps: MarmotStateSavesDeps) {}
+
+  /** Inspect one publish's results; a failed save is retried in the background. */
+  check(group: SavableGroup, results: readonly Pick<GroupPublishResult, 'persistence'>[]): void {
+    const failed = results.find((r) => r.persistence.kind === 'failed')?.persistence;
+    if (failed?.kind !== 'failed' || this.deps.stopped()) return;
+    if (__DEV__)
+      console.warn(`[PerfBlock] marmot state save failed ${short(group.idStr)}: ${failed.error}`);
+    // One retry loop per group: every try writes the group's CURRENT state.
+    if (this.retries.has(group.idStr)) return;
+    const run = this.retry(group).finally(() => this.retries.delete(group.idStr));
+    this.retries.set(group.idStr, run);
+  }
+
+  /** Resolves once `mlsId` has no retry in flight. */
+  settled(mlsId: string): Promise<void> {
+    return this.retries.get(mlsId) ?? Promise.resolve();
+  }
+
+  isUnsaved(mlsId: string): boolean {
+    return this.unsaved.has(mlsId);
+  }
+
+  /** Clear the mark once the group saves at (or past) the unsaved epoch. */
+  watch(group: SavableGroup): void {
+    group.on('stateSaved', () => {
+      const epoch = this.unsaved.get(group.idStr);
+      if (epoch !== undefined && epochOf(group) >= epoch) void this.clear(group.idStr);
+    });
+  }
+
+  /** On start: keep the marks whose epoch never reached storage, drop the rest. */
+  async load(groups: readonly SavableGroup[]): Promise<void> {
+    const byId = new Map(groups.map((g) => [g.idStr, g]));
+    for (const id of await this.deps.backend.keys(NAMESPACE)) {
+      const raw = await this.deps.backend.get(NAMESPACE, id);
+      const group = byId.get(id);
+      let epoch: bigint | null = null;
+      try {
+        epoch = raw === null ? null : BigInt(raw);
+      } catch {
+        epoch = null;
+      }
+      if (group && epoch !== null && epochOf(group) < epoch) this.unsaved.set(id, epoch);
+      else await this.deps.backend.remove(NAMESPACE, id);
+    }
+    this.publish();
+  }
+
+  /** The group is gone from this device (left / removed / destroyed). */
+  async forget(mlsId: string): Promise<void> {
+    await this.clear(mlsId);
+  }
+
+  stop(): void {
+    clearMarmotUnsavedState(this.deps.owner);
+  }
+
+  private async retry(group: SavableGroup): Promise<void> {
+    const delays = this.deps.retryMs ?? STATE_SAVE_RETRY_MS;
+    for (const [i, ms] of delays.entries()) {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+      if (this.deps.stopped()) return;
+      const started = Date.now();
+      try {
+        await group.save(true);
+        if (__DEV__)
+          console.log(
+            `[PerfBlock] marmot state save retry ${i + 1}/${delays.length} ok ` +
+              `${short(group.idStr)} ms=${Date.now() - started}`,
+          );
+        await this.clear(group.idStr);
+        return;
+      } catch (e) {
+        if (__DEV__)
+          console.warn(
+            `[PerfBlock] marmot state save retry ${i + 1}/${delays.length} failed ` +
+              `${short(group.idStr)} ms=${Date.now() - started}: ${message(e)}`,
+          );
+      }
+    }
+    if (!this.deps.stopped()) await this.mark(group);
+  }
+
+  private async mark(group: SavableGroup): Promise<void> {
+    const epoch = epochOf(group);
+    this.unsaved.set(group.idStr, epoch);
+    this.publish();
+    if (__DEV__)
+      console.warn(`[PerfBlock] marmot state unsaved ${short(group.idStr)} epoch=${epoch}`);
+    // Best effort: the same storage just failed, but the mark is what lets
+    // the chat offer Repair after a restart (when the old epoch loads).
+    await this.deps.backend.set(NAMESPACE, group.idStr, epoch.toString()).catch(() => undefined);
+  }
+
+  private async clear(mlsId: string): Promise<void> {
+    const had = this.unsaved.delete(mlsId);
+    if (had) this.publish();
+    await this.deps.backend.remove(NAMESPACE, mlsId).catch(() => undefined);
+  }
+
+  private publish(): void {
+    if (this.deps.stopped()) return;
+    publishMarmotUnsavedState(this.deps.owner, this.unsaved.keys());
+  }
+}

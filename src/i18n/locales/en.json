@@ -3445,7 +3445,9 @@
     "repairTitle": "Repair secure chat?",
     "repairMessage": "Use this if your messages fail or {{name}}'s stop arriving. A fresh secure chat is started with {{name}}'s devices and new messages go there. Your messages here stay.",
     "repairDone": "Fresh secure chat started",
-    "repairFailed": "Couldn't repair the chat"
+    "repairFailed": "Couldn't repair the chat",
+    "stateUnsavedDm": "This device couldn't save the latest change to this secure chat. If messages stop opening after the app restarts, use Repair secure chat.",
+    "stateUnsavedGroup": "This device couldn't save the latest change to this group. If messages stop opening after the app restarts, ask an admin to remove you and add you again."
   },
   "settingsRows": {
     "experimentalSubtitle": "Features still being tested",

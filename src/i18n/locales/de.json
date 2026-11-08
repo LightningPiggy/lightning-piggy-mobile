@@ -3445,7 +3445,9 @@
     "repairTitle": "Sicheren Chat reparieren?",
     "repairMessage": "Nutze das, wenn deine Nachrichten fehlschlagen oder die von {{name}} nicht mehr ankommen. Ein neuer sicherer Chat mit den Geräten von {{name}} wird gestartet, neue Nachrichten gehen dorthin. Deine Nachrichten hier bleiben erhalten.",
     "repairDone": "Neuer sicherer Chat gestartet",
-    "repairFailed": "Chat konnte nicht repariert werden"
+    "repairFailed": "Chat konnte nicht repariert werden",
+    "stateUnsavedDm": "Dieses Gerät konnte die letzte Änderung an diesem sicheren Chat nicht speichern. Wenn sich Nachrichten nach einem Neustart der App nicht mehr öffnen lassen, nutze „Sicheren Chat reparieren“.",
+    "stateUnsavedGroup": "Dieses Gerät konnte die letzte Änderung an dieser Gruppe nicht speichern. Wenn sich Nachrichten nach einem Neustart der App nicht mehr öffnen lassen, bitte eine Admin-Person, dich zu entfernen und wieder hinzuzufügen."
   },
   "settingsRows": {
     "experimentalSubtitle": "Funktionen, die noch getestet werden",

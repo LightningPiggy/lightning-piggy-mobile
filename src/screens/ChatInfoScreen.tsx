@@ -16,6 +16,7 @@ import { createChatToolsStyles } from '../styles/ChatTools.styles';
 import { useChatInfoContact } from '../hooks/useChatInfoContact';
 import { useChatInfoMembers } from '../hooks/useChatInfoMembers';
 import { useRepairMarmotDm } from '../hooks/useRepairMarmotDm';
+import { useMarmotUnsavedState } from '../hooks/useMarmotUnsavedState';
 import { canManageGroup } from '../utils/groupAdmins';
 import GroupMembersSheet from '../components/GroupMembersSheet';
 import DmMembersSheet from '../components/DmMembersSheet';
@@ -39,6 +40,8 @@ export default function ChatInfoScreen() {
   const counts = useMemo(() => new Map(params.deviceCounts), [params.deviceCounts]);
   const dmPeer = params.groupId ? undefined : (params.contact?.pubkey ?? undefined);
   const { repair, repairing } = useRepairMarmotDm(pubkey, dmPeer, params.name);
+  // This device couldn't save the chat's latest group state (#1754).
+  const unsaved = useMarmotUnsavedState(pubkey, params.chatId);
   const npub = useMemo(() => {
     try {
       return params.contact?.pubkey ? nip19.npubEncode(params.contact.pubkey) : null;
@@ -180,6 +183,15 @@ export default function ChatInfoScreen() {
               ) : (
                 <Text style={styles.muted}>{t('chatMenu.noRelays')}</Text>
               )}
+              {unsaved ? (
+                <Text
+                  style={styles.danger}
+                  testID="chat-info-state-unsaved"
+                  accessibilityRole="alert"
+                >
+                  {t(dmPeer ? 'chatMenu.stateUnsavedDm' : 'chatMenu.stateUnsavedGroup')}
+                </Text>
+              ) : null}
               {dmPeer ? (
                 <TouchableOpacity
                   style={styles.button}

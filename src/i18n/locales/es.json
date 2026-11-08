@@ -3445,7 +3445,9 @@
     "repairTitle": "¿Reparar chat seguro?",
     "repairMessage": "Úsalo si tus mensajes fallan o los de {{name}} dejan de llegar. Se inicia un chat seguro nuevo con los dispositivos de {{name}} y los mensajes nuevos van allí. Tus mensajes aquí se conservan.",
     "repairDone": "Nuevo chat seguro iniciado",
-    "repairFailed": "No se pudo reparar el chat"
+    "repairFailed": "No se pudo reparar el chat",
+    "stateUnsavedDm": "Este dispositivo no pudo guardar el último cambio de este chat seguro. Si los mensajes dejan de abrirse tras reiniciar la app, usa «Reparar chat seguro».",
+    "stateUnsavedGroup": "Este dispositivo no pudo guardar el último cambio de este grupo. Si los mensajes dejan de abrirse tras reiniciar la app, pide a un administrador que te quite y te vuelva a añadir."
   },
   "settingsRows": {
     "experimentalSubtitle": "Funciones aún en pruebas",

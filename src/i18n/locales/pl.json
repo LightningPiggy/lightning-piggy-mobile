@@ -3509,7 +3509,9 @@
     "repairTitle": "Naprawić bezpieczny czat?",
     "repairMessage": "Użyj tego, jeśli twoje wiadomości się nie wysyłają lub wiadomości od {{name}} przestały docierać. Zostanie rozpoczęty nowy bezpieczny czat z urządzeniami {{name}}, a nowe wiadomości trafią tam. Twoje wiadomości tutaj zostaną.",
     "repairDone": "Rozpoczęto nowy bezpieczny czat",
-    "repairFailed": "Nie udało się naprawić czatu"
+    "repairFailed": "Nie udało się naprawić czatu",
+    "stateUnsavedDm": "To urządzenie nie mogło zapisać ostatniej zmiany w tym bezpiecznym czacie. Jeśli po ponownym uruchomieniu aplikacji wiadomości przestaną się otwierać, użyj opcji „Napraw bezpieczny czat”.",
+    "stateUnsavedGroup": "To urządzenie nie mogło zapisać ostatniej zmiany w tej grupie. Jeśli po ponownym uruchomieniu aplikacji wiadomości przestaną się otwierać, poproś administratora, aby cię usunął i dodał ponownie."
   },
   "settingsRows": {
     "experimentalSubtitle": "Funkcje nadal w fazie testów",
