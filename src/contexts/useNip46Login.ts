@@ -34,9 +34,13 @@ import type { SignerType, Nip46Connection } from '../types/nostr';
  * logged-in pubkey (or null if there's nothing to restore / the blob is
  * corrupt). Called from NostrContext's auto-login effect — the counterpart to
  * the SecureStore writes `useNip46Login` makes on sign-in.
+ *
+ * `storedConn` lets cold start pass a connection it already read alongside
+ * the other identity slots; when omitted, it's read here.
  */
-export async function restoreNip46Session(): Promise<string | null> {
-  const storedConnRaw = await SecureStore.getItemAsync(NIP46_CONNECTION_KEY);
+export async function restoreNip46Session(storedConn?: string | null): Promise<string | null> {
+  const storedConnRaw =
+    storedConn === undefined ? await SecureStore.getItemAsync(NIP46_CONNECTION_KEY) : storedConn;
   if (!storedConnRaw) {
     // signer-type says nip46 but the connection object is gone (partial wipe)
     // — clear the stale slot so we don't repeat this no-op on every cold start.

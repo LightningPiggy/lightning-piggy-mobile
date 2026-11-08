@@ -51,7 +51,9 @@ import {
   type SendHooks,
 } from './useMessageSend';
 import { useContactActions } from './useContactActions';
-import { useNip46Login, restoreNip46Session } from './useNip46Login';
+import { useNip46Login } from './useNip46Login';
+import { readStoredLogin, registerRestoredSession } from './readStoredLogin';
+import { resolveStartupWalletOwner } from '../services/walletStorageService';
 import { nip46Sign } from './nip46DmDecrypt';
 import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
@@ -656,46 +658,25 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     perfLog('NostrProvider auto-login effect fires');
     (async () => {
       try {
-        // Hydrate the multi-account registry first so the switcher has
-        // something to render even before the active identity finishes
-        // loading. Empty array on a fresh install — the auto-login below
-        // populates it when the legacy single-account keys are migrated.
-        const blob = await loadIdentities();
-        setIdentities(blob.identities);
-
-        const storedSignerType = await SecureStore.getItemAsync(SIGNER_TYPE_KEY);
-        let pk: string | null = null;
-
-        let pendingNsec: string | null = null;
-        if (storedSignerType === 'nsec') {
-          const storedNsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (storedNsec) {
-            pk = nostrService.decodeNsec(storedNsec).pubkey;
-            pendingNsec = storedNsec;
-          }
-        } else if (storedSignerType === 'amber') {
-          const storedPubkey = await SecureStore.getItemAsync(PUBKEY_KEY);
-          if (storedPubkey) {
-            pk = storedPubkey;
-          }
-        } else if (storedSignerType === 'nip46') {
-          // Restore the persisted bunker connection (see useNip46Login).
-          pk = await restoreNip46Session();
-        }
-
-        if (!pk) return;
+        // Registry + active-identity slots in one concurrent SecureStore
+        // round. Empty registry on a fresh install — the backfill below
+        // populates it when the legacy single-account keys are restored.
+        const login = await readStoredLogin();
+        setIdentities(login.identities);
+        const { session } = login;
+        if (!session) return; // logged out: `finally` tells the wallet gate
+        const pk = session.pubkey;
 
         // One-time per-account storage migration (#288). MUST run before
-        // `setPubkey(pk)` below because `setPubkey` triggers the effect
-        // that calls `setActivePubkeyForWalletStorage(pubkey)` — which
-        // unblocks `awaitActivePubkeyHydrated()` in WalletContext. If
-        // the migration runs AFTER setPubkey, WalletContext can race
-        // ahead and read `wallet_list_${pk}` before the migration has
-        // copied legacy `wallet_list` → `wallet_list_${pk}` (#442
-        // Copilot review). Self-contained in
-        // `migrateToPerAccountStorage`: runs once, copies legacy global
-        // values to `${base}_${pk}`, sets a flag, short-circuits
-        // afterwards. Adds <50 ms to cold start.
+        // the wallet gate opens for `pk`: WalletContext's startup reads
+        // `wallet_list_${pk}` as soon as it does, so migrating later would
+        // let it read before legacy `wallet_list` → `wallet_list_${pk}` was
+        // copied (#442 Copilot review). The gate opens only once
+        // `resolveStartupWalletOwner(pk)` + `setPubkey(pk)` below have run
+        // (the publish happens in useActiveNostrAccount's layout effect).
+        // Self-contained in `migrateToPerAccountStorage`: runs once, copies
+        // legacy global values to `${base}_${pk}`, sets a flag,
+        // short-circuits afterwards. Adds <50 ms to cold start.
         try {
           const result = await migrateToPerAccountStorage(pk);
           if (__DEV__ && !result.alreadyDone) {
@@ -708,39 +689,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           console.warn('[Nostr] per-account storage migration failed:', e);
         }
 
-        // Now safe to publish the pubkey + signer type — WalletContext's
-        // gate will unblock and the per-account `wallet_list_${pk}` is
-        // already populated (whether by migration just above or by an
-        // earlier run that short-circuited).
+        // Now safe to hand `pk` to the wallet gate and publish it — the
+        // per-account `wallet_list_${pk}` is already populated (by the
+        // migration just above or an earlier run that short-circuited).
+        resolveStartupWalletOwner(pk);
         setPubkey(pk);
-        if (storedSignerType === 'nsec') {
-          setSignerType('nsec');
-          setIsLoggedIn(true);
-          if (!blob.identities.some((i) => i.pubkey === pk) && pendingNsec) {
-            const next = await upsertIdentity({
-              pubkey: pk,
-              signerType: 'nsec',
-              nsec: pendingNsec,
-              lastUsedAt: Date.now(),
-            });
-            setIdentities(next.identities);
-          }
-        } else if (storedSignerType === 'amber') {
-          setSignerType('amber');
-          setIsLoggedIn(true);
-          if (!blob.identities.some((i) => i.pubkey === pk)) {
-            const next = await upsertIdentity({
-              pubkey: pk,
-              signerType: 'amber',
-              lastUsedAt: Date.now(),
-            });
-            setIdentities(next.identities);
-          }
-        } else if (storedSignerType === 'nip46') {
-          // Not in the multi-account registry; connection is live above.
-          setSignerType('nip46');
-          setIsLoggedIn(true);
-        }
+        setSignerType(session.signerType);
+        setIsLoggedIn(true);
+        // nsec / Amber sessions missing from the registry; NIP-46 isn't in it.
+        const registered = await registerRestoredSession(login);
+        if (registered) setIdentities(registered.identities);
 
         // Eagerly hydrate cached state from disk in parallel — these
         // are all small per-account AsyncStorage reads (<100 ms each)
@@ -824,6 +782,10 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }, COLD_START_GRACE_MS);
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
+      } finally {
+        // Logged out (or auto-login failed before finding an account): the
+        // wallets load signed-out. A no-op once `pk` was handed over above.
+        resolveStartupWalletOwner(null);
       }
     })();
   }, [

@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as walletStorage from '../services/walletStorageService';
 import type { WalletState, WalletTransaction } from '../types/wallet';
+import { logWalletHydration } from './hydrateWalletStates';
 
 interface WalletIdentityHydrationDeps {
   setLastIncomingPayment?: (value: null) => void;
@@ -55,9 +56,12 @@ export function useWalletIdentityHydration({
   useEffect(() => {
     disposed.current = false;
     let lastSeenPubkey = walletStorage.getActivePubkey();
-    const unsubscribe = walletStorage.subscribeActivePubkey((nextPubkey) => {
+    const unsubscribe = walletStorage.subscribeActivePubkey((nextPubkey, change) => {
       if (nextPubkey === lastSeenPubkey) return;
       lastSeenPubkey = nextPubkey;
+      // The publish that opens the cold-start gate is hydrated once by
+      // useWalletStartup; loading it here too was the double hydration (#816).
+      if (change?.startup) return;
       generation.current++;
       const isCurrent = captureIdentity();
       // Disconnect every current NWC connection so we don't leak the
@@ -133,6 +137,7 @@ export function useWalletIdentityHydration({
           );
           if (!isCurrent()) return;
           setWallets(walletStates);
+          logWalletHydration('account-change', nextPubkey, walletStates.length);
           setWalletsHydrated?.(true);
           // Only matters on cold start: the startup hydration bails when an
           // identity lands mid-boot, so this completion ends the boot spinner.

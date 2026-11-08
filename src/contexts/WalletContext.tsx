@@ -2,7 +2,7 @@ import { perfLog } from '../utils/perfLog';
 import { useNwcConnectionWatchdog } from './useNwcConnectionWatchdog';
 import { appReadRelays } from '../services/appReadRelays';
 import { useWalletMetadataActions } from './useWalletMetadataActions';
-import { hydrateWalletStates } from './hydrateWalletStates';
+import { useWalletStartup } from './useWalletStartup';
 import { useLegacyOnchainMigration } from './useLegacyOnchainMigration';
 import React, {
   createContext,
@@ -23,7 +23,6 @@ import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
 import { singleFlight } from '../utils/singleFlight';
-import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { useAccountCurrency } from './useAccountCurrency';
@@ -47,16 +46,11 @@ import {
 import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import { applyResolverResults, mergeWalletUpdate } from '../utils/walletStateMerge';
 import { addNwcWalletForIdentity } from '../services/addNwcWalletForIdentity';
-import { parseNwcLud16 } from '../utils/nwcLud16';
 import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
 import { upsertPendingWalletTransaction } from '../utils/pendingWalletTransaction';
 
-// Captured at module-evaluation time, which is the closest proxy we have to "JS bundle started executing after app launch". Used by the [Perf] wallet-connect marker so perf scripts can report time-from-launch-to-first-NWC-connect without needing a separate launch timestamp source.
-const WALLET_MODULE_LOAD_T0 = Date.now();
-let firstWalletConnectLogged = false;
 perfLog('WalletContext module-eval');
 let __walletProviderFirstRenderLogged = false;
-let __walletProviderHydratedLogged = false;
 
 export type { IncomingPayment } from './incomingPayment';
 
@@ -331,173 +325,6 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setWallets((prev) => upsertPendingWalletTransaction(prev, walletId, tx));
   }, []);
 
-  // Startup: load prefs, migrate, reconnect all wallets
-  useEffect(() => {
-    let isStartupCurrent = captureWalletIdentity();
-    (async () => {
-      try {
-        // Check onboarding status (independent of wallet-list key —
-        // ONBOARDING_KEY isn't per-account namespaced).
-        const onboarded = await walletStorage.isOnboarded();
-        setIsOnboarded(onboarded);
-
-        // Wait for NostrContext to hydrate its identity BEFORE any
-        // wallet-list read or write. `migrateLegacy`, `getWalletList`,
-        // `saveWalletList` and `initialiseSendThresholdForNewInstall`
-        // all key off `walletStorageService._activePubkey` — running
-        // them while `_activePubkey` is still null would migrate /
-        // read / write against the legacy unsuffixed `wallet_list`
-        // key and then the per-account `wallet_list_${pubkey}` read
-        // below would see different data (#442 Copilot review).
-        // 2 s timeout means a wedged NostrContext still falls
-        // through to legacy-key behaviour matching pre-#288 installs.
-        await walletStorage.awaitActivePubkeyHydrated();
-        isStartupCurrent = captureWalletIdentity();
-
-        // Migrate legacy single-wallet data. A no-op while the identity is
-        // null; useWalletIdentityHydration retries once a pubkey lands.
-        await walletStorage.migrateLegacy();
-
-        // Re-check onboarding after migration (migration sets it). The
-        // onboarding flag isn't per-account, so this runs even if the
-        // identity changed while migrating.
-        if (!onboarded) {
-          const onboardedAfterMigration = await walletStorage.isOnboarded();
-          setIsOnboarded(onboardedAfterMigration);
-        }
-        if (!isStartupCurrent()) return;
-
-        // Load and reconnect all wallets
-        perfLog('WalletProvider startup: getWalletList begin');
-        const walletList = await walletStorage.getWalletList();
-        perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
-        const walletStates = await hydrateWalletStates(
-          walletList,
-          lastTxsJsonRef,
-          hydrateSeenReceipts,
-          isStartupCurrent,
-        );
-        if (!isStartupCurrent()) return;
-        setWallets(walletStates);
-        if (!__walletProviderHydratedLogged) {
-          __walletProviderHydratedLogged = true;
-          perfLog(`WalletProvider hydrated ${walletStates.length} wallets`);
-        }
-        // Only the current identity may publish hydration completion.
-        setWalletsHydrated(true);
-
-        if (isStartupCurrent() && walletStates.length > 0) {
-          setActiveWalletId(walletStates[0].id);
-        }
-
-        // Wallets are usable immediately with cached balance + tx
-        // history from AsyncStorage, so we can flip the app into
-        // "loaded" state BEFORE the (slow) NWC connect handshakes
-        // finish. Each handshake does `provider.enable()` with up to
-        // 3 retries × 2 s backoff + a 500 ms stabilise wait = 2-14 s
-        // per wallet. Serialising them behind the UI boot meant a
-        // user with 2 NWC wallets waited 10+ s on a pink screen.
-        // Kick connects off in parallel but DON'T await — state
-        // updates inside each `.then` patch the wallet individually
-        // as it comes online, and any `pay / makeInvoice / getBalance`
-        // call will auto-await the connect because `nwcService.connect`
-        // is idempotent and provider-map-keyed.
-        setIsLoading(false);
-        // No eager onchain `getBalance` at boot. Each call does
-        // `BDK.Wallet.create() + Electrum.sync()` — ~9 s of JS-thread
-        // time even for ONE wallet (measured on Big Piggy's AVD fixture
-        // with 230 NIP-17 wraps in the inbox). That 9 s landed inside
-        // the cold-start window where the user is most likely to tap
-        // Send, and tap events queued behind it — root cause of the
-        // "Send button feels frozen for 12 s" symptom. Cached balances
-        // from the previous session are hydrated above; fresh balances
-        // arrive on pull-to-refresh / wallet detail open / explicit
-        // `refreshBalanceForWallet` calls and useOnchainIncomingPoll's
-        // first sweep (30 s after launch, #1725), all of which lazily init
-        // BDK on demand (`bdkWallets` in onchainService memoises per id).
-        void Promise.all(
-          walletList.map(async (wallet) => {
-            try {
-              if (wallet.walletType === 'onchain') {
-                return;
-              }
-
-              // NWC wallet: connect via Nostr
-              const nwcUrl = await walletStorage.getNwcUrl(wallet.id);
-              if (!nwcUrl || !isStartupCurrent()) return;
-
-              const result = await nwcService.connect(
-                wallet.id,
-                nwcUrl,
-                () => {
-                  if (!isStartupCurrent()) return;
-                  setWallets((prev) =>
-                    !isStartupCurrent()
-                      ? prev
-                      : prev.map((w) => (w.id === wallet.id ? { ...w, isConnected: true } : w)),
-                  );
-                  if (!firstWalletConnectLogged) {
-                    firstWalletConnectLogged = true;
-                    console.log(
-                      `[Perf] wallet connected: ${wallet.id.slice(0, 8)} in ${Date.now() - WALLET_MODULE_LOAD_T0}ms from JS bundle load`,
-                    );
-                  }
-                },
-                isStartupCurrent,
-              );
-              if (result.success && isStartupCurrent()) {
-                let info: Awaited<ReturnType<typeof nwcService.getInfo>> | null = null;
-                try {
-                  info = await nwcService.getInfo(wallet.id);
-                } catch (e) {
-                  if (__DEV__) console.warn(`[NWC] getInfo failed for ${wallet.id.slice(0, 8)}`, e);
-                }
-                if (!isStartupCurrent()) return;
-                const lud16 = parseNwcLud16(nwcUrl);
-
-                setWallets((prev) =>
-                  !isStartupCurrent()
-                    ? prev
-                    : prev.map((w) =>
-                        w.id === wallet.id
-                          ? {
-                              ...w,
-                              isConnected: true,
-                              balance: result.balance ?? w.balance ?? null,
-                              walletAlias: info?.alias || w.walletAlias || null,
-                              lightningAddress: w.lightningAddress || lud16 || info?.lud16 || null,
-                            }
-                          : w,
-                      ),
-                );
-              }
-            } catch (error) {
-              console.warn(`Failed to connect wallet ${wallet.alias} (${wallet.id}):`, error);
-            }
-          }),
-        );
-      } catch (error) {
-        console.warn('Wallet startup failed:', error);
-        if (!isStartupCurrent()) return;
-        // Order matches the success path: flip `walletsHydrated` first so consumers observing the loading-state change can already trust hydration is complete; only then unblock the UI via `setIsLoading(false)`. Idempotent; React bails on no-op state sets.
-        setWalletsHydrated(true);
-        setIsLoading(false);
-      } finally {
-        // Attempt to recover any pending Boltz swaps (e.g. reverse swap
-        // claims that were interrupted by pay_invoice timeout or app crash).
-        // Runs in background so it doesn't block UI. The swap index is global,
-        // not per identity, so this must run even when an identity switch
-        // (e.g. auto-login landing mid-startup) cut the hydration above short.
-        swapRecoveryService.recoverPendingSwaps().catch((e) => {
-          console.warn('[SwapRecovery] Background recovery failed:', e);
-        });
-      }
-    })();
-    // Mount-once startup. `hydrateSeenReceipts` is a stable useCallback; adding
-    // it would (wrongly) re-run the whole startup hydration.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Hold the latest wallets in a ref for consumers (the NWC watchdog, the
   // fire-and-forget tx fetch) that must read fresh state without re-keying
   // their effects on the constantly-churning wallets array.
@@ -515,6 +342,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setWallets,
     setActiveWalletId,
     setLastIncomingPayment,
+  });
+  // Cold start: hydrate the real owner's wallets once, then reconnect them.
+  useWalletStartup({
+    captureWalletIdentity,
+    lastTxsJsonRef,
+    hydrateSeenReceipts,
+    setIsOnboarded,
+    setIsLoading,
+    setWalletsHydrated,
+    setWallets,
+    setActiveWalletId,
   });
 
   // NWC connection watchdog: 30 s WebSocket-health check + reconnect —

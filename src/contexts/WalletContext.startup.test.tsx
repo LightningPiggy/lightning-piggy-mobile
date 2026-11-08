@@ -73,10 +73,11 @@ function Probe() {
 
 afterEach(() => jest.restoreAllMocks());
 
-it('still recovers swaps and re-checks onboarding when auto-login lands mid-startup', async () => {
-  // NostrContext's mount publishes null (opening the hydration gate) and
-  // auto-login publishes the real pubkey later — here, while migrating.
+it('still recovers swaps and re-checks onboarding when an identity lands mid-startup', async () => {
+  // The gate opens signed-out (auto-login found no account, or it timed out)
+  // and an identity is published later — here, while migrating.
   walletStorage.setActivePubkeyForWalletStorage(null);
+  walletStorage.resolveStartupWalletOwner(null);
   const migrating = deferred<void>();
   jest.spyOn(walletStorage, 'migrateLegacy').mockImplementation(() => migrating.promise);
   jest.spyOn(walletStorage, 'isOnboarded').mockResolvedValueOnce(false).mockResolvedValue(true);
