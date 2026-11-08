@@ -105,9 +105,32 @@ it('a barrier (snapshot deadline) runs only after every earlier job in both lane
   const at = (name: string) => order.indexOf(name);
   expect(at('barrier')).toBeGreaterThan(at('normal-1'));
   expect(at('barrier')).toBeGreaterThan(at('inbox-1'));
-  // Normal work queued after the barrier never overtakes it.
+  // Work queued after the barrier, in either lane, never overtakes it.
   expect(at('normal-2')).toBeGreaterThan(at('barrier'));
+  expect(at('inbox-2')).toBeGreaterThan(at('barrier'));
   expect(order).toHaveLength(5);
+});
+
+it('a barrier BEHIND a normal backlog holds newer inbox work until it has run', async () => {
+  // e.g. a snapshot deadline queued behind a 500-event zap / group backfill:
+  // post-deadline inbox frames must not run 4:1 ahead of that backlog,
+  // extending the snapshot and delaying finish().
+  const queue = new RelayReceiveQueue();
+  const order: string[] = [];
+  queue.enqueue(() => void order.push('inbox-old'), 0, 'inbox');
+  for (let i = 0; i < 10; i++) queue.enqueue(() => void order.push(`normal-${i}`), 0, 'normal');
+  queue.enqueueBarrier(() => void order.push('barrier'));
+  for (let i = 0; i < 10; i++) queue.enqueue(() => void order.push(`inbox-new-${i}`), 0, 'inbox');
+  queue.enqueue(() => void order.push('normal-after'), 0, 'normal');
+  await jest.advanceTimersByTimeAsync(10);
+  expect(order.slice(0, 12)).toEqual([
+    'inbox-old',
+    ...Array.from({ length: 10 }, (_, i) => `normal-${i}`),
+    'barrier',
+  ]);
+  // Past the barrier, the inbox goes first again.
+  expect(order[12]).toBe('inbox-new-0');
+  expect(order).toHaveLength(23);
 });
 
 it('a barrier at the head of the normal lane waits for OLDER inbox work only', async () => {
@@ -138,6 +161,28 @@ it('an unattributable (escaped) frame fences its socket: later frames cannot ove
     'dm:escaped',
     'dm:EOSE',
   ]);
+  relay.close();
+});
+
+it('the fence survives a reconnect while the demoted frames are still queued', async () => {
+  const { relay, order, open } = pacedRelay();
+  open('group', [445]);
+  open('dm', [1059]);
+  for (let i = 0; i < 5; i++) relay._onmessage(message(['EVENT', 'group', event(445, `${i}`)]));
+  relay._onmessage({
+    data: JSON.stringify(['EVENT', 'dm', event(1059, 'escaped')]).replace('EVENT', '\\u0045VENT'),
+  } as MessageEvent);
+  // connect() assigns a fresh WebSocket; the escaped frame is still queued.
+  (relay as unknown as { ws: object }).ws = {};
+  relay._onmessage(message(['EOSE', 'dm']));
+  await jest.advanceTimersByTimeAsync(10);
+  expect(only(order, 'dm')).toEqual(['dm:escaped', 'dm:EOSE']);
+  // Once every demoted frame has run, the relay's inbox frames go first again.
+  order.length = 0;
+  for (let i = 0; i < 5; i++) relay._onmessage(message(['EVENT', 'group', event(445, `x${i}`)]));
+  relay._onmessage(message(['EVENT', 'dm', event(1059, 'later')]));
+  await jest.advanceTimersByTimeAsync(10);
+  expect(order[0]).toBe('dm:later');
   relay.close();
 });
 

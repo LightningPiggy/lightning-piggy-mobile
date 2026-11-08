@@ -43,6 +43,8 @@ export class RelayReceiveQueue {
   private bytes = 0;
   private inboxStreak = 0;
   private draining = false;
+  /** Seqs of queued barriers, oldest first (they're pushed in seq order). */
+  private barriers = new Set<number>();
 
   get size(): number {
     return this.lanes.inbox.size + this.lanes.normal.size;
@@ -52,7 +54,8 @@ export class RelayReceiveQueue {
     return this.push(lane, run, bytes, false);
   }
 
-  /** `run` waits for every job already queued, in both lanes. */
+  /** `run` waits for every job already queued, in both lanes; inbox jobs
+   * queued after it wait for it too. */
   enqueueBarrier(run: () => void | Promise<void>, bytes = 0): boolean {
     return this.push('normal', run, bytes, true);
   }
@@ -62,6 +65,7 @@ export class RelayReceiveQueue {
       return false;
     const seq = this.serial++;
     this.lanes[lane].set(seq, { run, bytes, seq, queuedAt: Date.now(), barrier });
+    if (barrier) this.barriers.add(seq);
     this.bytes += bytes;
     if (!this.draining) void this.drain();
     return true;
@@ -71,9 +75,12 @@ export class RelayReceiveQueue {
     const inbox = head(this.lanes.inbox);
     const normal = head(this.lanes.normal);
     if (!normal) return 'inbox';
-    if (!inbox) return 'normal';
-    // A barrier must not run ahead of older inbox work, nor hold newer.
-    if (normal.barrier) return inbox.seq < normal.seq ? 'inbox' : 'normal';
+    // While a barrier is queued (anywhere in the normal lane), only inbox work
+    // OLDER than it may run: newer inbox frames must not overtake the normal
+    // backlog ahead of the barrier and delay (or extend) its snapshot.
+    const barrier: number | undefined = this.barriers.values().next().value;
+    if (!inbox || (barrier !== undefined && inbox.seq > barrier)) return 'normal';
+    if (normal.barrier) return 'inbox'; // older inbox work runs before it
     return this.inboxStreak < INBOX_BURST ? 'inbox' : 'normal';
   }
 
@@ -91,6 +98,7 @@ export class RelayReceiveQueue {
         const lane = this.next();
         const job = head(this.lanes[lane])!;
         this.lanes[lane].delete(job.seq);
+        if (job.barrier) this.barriers.delete(job.seq);
         this.bytes -= job.bytes;
         this.inboxStreak =
           lane === 'inbox' && this.lanes.normal.size > 0 ? this.inboxStreak + 1 : 0;
@@ -204,30 +212,36 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
   let receiving = false;
   let receivedAt = 0;
   let wireEose: (() => void) | undefined;
-  /** A socket that sent a frame we can't attribute to a subscription cheaply
+  /** A relay that sent a frame we can't attribute to a subscription cheaply
    * (escaped JSON, binary) loses the inbox lane. That frame is a barrier, so
-   * it and everything the socket sends after it keep wire order behind the
-   * socket's earlier inbox frames. */
-  let fencedSocket: object | undefined;
-  const enqueue = (run: () => void | Promise<void>, bytes: number, lane: Lane) => {
-    const guarded = () => {
-      if (!closed) return run();
-    };
-    if (
-      !(lane === 'barrier'
+   * it and everything the relay sends after it keep wire order behind its
+   * earlier inbox frames. The fence lifts only once every demoted job has run
+   * (never merely on reconnect), so no later inbox frame can overtake one. */
+  let demotedPending = 0;
+  const fenced = () => demotedPending > 0;
+  const enqueue = (run: () => void | Promise<void>, bytes: number, lane: Lane, demoted = false) => {
+    const guarded = demoted
+      ? async () => {
+          try {
+            if (!closed) await run();
+          } finally {
+            demotedPending--;
+          }
+        }
+      : () => {
+          if (!closed) return run();
+        };
+    const queued =
+      lane === 'barrier'
         ? queue.enqueueBarrier(guarded, bytes)
-        : queue.enqueue(guarded, bytes, lane))
-    )
-      relay.close();
+        : queue.enqueue(guarded, bytes, lane);
+    if (queued && demoted) demotedPending++;
+    if (!queued) relay.close();
   };
-  const unfenced = () => fencedSocket !== socketOf(relay);
   const laneOf = (data: unknown): Lane => {
     const id = typeof data === 'string' ? FRAME_SUB_ID.exec(data)?.[1] : undefined;
-    if (id === undefined) {
-      fencedSocket = socketOf(relay);
-      return 'barrier';
-    }
-    const sub = unfenced() ? relay.openSubs.get(id) : undefined;
+    if (id === undefined) return 'barrier';
+    const sub = fenced() ? undefined : relay.openSubs.get(id);
     return sub && inboxSubs.has(sub) ? 'inbox' : 'normal';
   };
   relay._onmessage = (message) => {
@@ -242,6 +256,7 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
       return;
     }
     const arrivedAt = Date.now();
+    const lane = laneOf(data);
     enqueue(
       () => {
         receiving = true;
@@ -256,7 +271,8 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
         complete?.();
       },
       typeof data === 'string' ? data.length * 2 : 0,
-      laneOf(data),
+      lane,
+      lane === 'barrier' || fenced(),
     );
   };
   relay.prepareSubscription = (...args) => {
@@ -279,7 +295,8 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
       // there, right after the SDK has parsed it. Only wall-clock timeouts
       // need a new job behind received events.
       if (receiving) wireEose = complete;
-      else enqueue(complete, 0, inbox && unfenced() ? 'inbox' : 'normal');
+      else if (inbox && !fenced()) enqueue(complete, 0, 'inbox');
+      else enqueue(complete, 0, 'normal', fenced());
     };
     return sub;
   };
