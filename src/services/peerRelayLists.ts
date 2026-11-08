@@ -5,7 +5,7 @@ import { sanitizePeerRelayUrls, MAX_PEER_RELAY_CANDIDATES } from '../utils/peerR
 import { normalizeRelayUrl } from '../utils/relayListKey';
 import { isRelayUrl, RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 import { enabledAppRelays } from './appRelayPrefs';
-import { getCurrentUserPubkey } from './nostrActiveAccount';
+import { getCurrentUserPubkey, onCurrentUserPubkeyChange } from './nostrActiveAccount';
 import { pool, pooledRelayUrls, releaseNewIdleRelays, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS } from './nostrRelayDefaults';
 import { pickLatestReplaceable } from './nostrRelayLists';
@@ -151,15 +151,31 @@ export function peerListsFromEvents(events: readonly Event[], pubkey: string): P
   };
 }
 
+interface LookupBatch {
+  results: Map<string, PeerRelayListResult>;
+  /** False when the reads were redirected for another account (don't cache). */
+  cacheable: boolean;
+}
+
 async function lookupBatch(
   pubkeys: string[],
   viewer: string | null | undefined,
   lookupRelays: readonly string[] | undefined,
-): Promise<Map<string, PeerRelayListResult>> {
+): Promise<LookupBatch> {
   const relays = peerLookupRelays(viewer, lookupRelays);
   const started = Date.now();
   const out = new Map<string, PeerRelayListResult>();
   let before: ReadonlySet<string> | undefined;
+  // The pool routes reads by the ACTIVE account: if a test account is (or
+  // becomes) active while an ordinary viewer's lookup runs, its reads go to the
+  // test relay, and that answer must not be cached as the viewer's.
+  const viewerLocked = isTestRelayLockdown(viewer);
+  let redirected = !viewerLocked && isTestRelayLockdown(getCurrentUserPubkey());
+  const stopWatching = viewerLocked
+    ? undefined
+    : onCurrentUserPubkeyChange((pubkey) => {
+        if (isTestRelayLockdown(pubkey)) redirected = true;
+      });
   try {
     before = pooledRelayUrls();
     trackRelays(relays);
@@ -177,6 +193,7 @@ async function lookupBatch(
     const message = error instanceof Error ? error.message : String(error);
     for (const pubkey of pubkeys) out.set(pubkey, { status: 'failed', error: message });
   } finally {
+    stopWatching?.();
     // Indexers are usually one-off sockets: release the ones this lookup opened
     // once idle. Sockets that were already pooled are left alone.
     try {
@@ -190,7 +207,7 @@ async function lookupBatch(
     `peerRelayLists lookup owner=${perfOwnerTag(viewer ?? null)} n=${pubkeys.length} ` +
       `ok=${found} relays=${relays.length} ${Date.now() - started}ms`,
   );
-  return out;
+  return { results: out, cacheable: !redirected };
 }
 
 /** A fresh cached result, without any network. */
@@ -212,10 +229,11 @@ export async function getManyPeerRelayLists(
   const viewer = options.viewerPubkey === undefined ? getCurrentUserPubkey() : options.viewerPubkey;
   const pending = new Map<string, Promise<PeerRelayListResult>>();
   const toFetch: string[] = [];
+  const queued = new Set<string>();
   let hits = 0;
   for (const raw of pubkeys) {
     const pubkey = raw.trim().toLowerCase();
-    if (pending.has(pubkey)) continue;
+    if (pending.has(pubkey) || queued.has(pubkey)) continue;
     if (!HEX_PUBKEY.test(pubkey)) {
       pending.set(pubkey, Promise.resolve({ status: 'failed', error: 'invalid pubkey' }));
       continue;
@@ -232,6 +250,7 @@ export async function getManyPeerRelayLists(
       pending.set(pubkey, shared);
       continue;
     }
+    queued.add(pubkey);
     toFetch.push(pubkey);
   }
   for (let i = 0; i < toFetch.length; i += MAX_AUTHORS_PER_LOOKUP) {
@@ -240,9 +259,9 @@ export async function getManyPeerRelayLists(
     for (const pubkey of chunk) {
       const key = cacheKey(pubkey, viewer);
       const run = batch
-        .then((results) => {
+        .then(({ results, cacheable }) => {
           const result = results.get(pubkey) ?? { status: 'failed', error: 'missing result' };
-          store(key, result);
+          if (cacheable) store(key, result);
           return result;
         })
         .finally(() => {

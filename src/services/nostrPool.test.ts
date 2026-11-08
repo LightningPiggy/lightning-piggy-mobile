@@ -125,3 +125,53 @@ it('releases only the sockets a batch opened, never ones pooled before it', () =
   releaseNewIdleRelays(['wss://already', 'wss://one-off', 'wss://busy'], before);
   expect([...relays.keys()].sort()).toEqual(['wss://already/', 'wss://busy/']);
 });
+
+it('never prunes a socket that is still connecting', () => {
+  const relay = addRelay('wss://connecting/');
+  const state = relay as unknown as { connectionPromise?: Promise<void> };
+  state.connectionPromise = new Promise(() => {});
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(true);
+  state.connectionPromise = undefined;
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(false);
+});
+
+it("releases a one-off socket when another send's last publish to it settles", async () => {
+  const relay = addRelay('wss://shared-outbox/');
+  const pending: ((message: string) => void)[] = [];
+  const publish = jest
+    .spyOn(SimplePool.prototype, 'publish')
+    .mockImplementation((urls) => urls.map(() => new Promise((resolve) => pending.push(resolve))));
+  try {
+    // Send A opened the socket; send B publishes to it too.
+    const first = pool.publish(['wss://shared-outbox'], {} as Event)[0];
+    const second = pool.publish(['wss://shared-outbox'], {} as Event)[0];
+    pending[0]('saved');
+    await first;
+    // A finishes and releases what it opened, but B is still publishing.
+    releaseNewIdleRelays(['wss://shared-outbox'], new Set());
+    expect(relays.has(relay.url)).toBe(true);
+    pending[1]('saved');
+    await second;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(relays.has(relay.url)).toBe(false);
+  } finally {
+    pending.forEach((resolve) => resolve('cleanup'));
+    publish.mockRestore();
+  }
+});
+
+it('leaves sockets never marked for release open after their publishes drain', async () => {
+  const relay = addRelay('wss://long-lived/');
+  const publish = jest
+    .spyOn(SimplePool.prototype, 'publish')
+    .mockImplementation((urls) => urls.map(() => Promise.resolve('saved')));
+  try {
+    await pool.publish(['wss://long-lived'], {} as Event)[0];
+    await new Promise((r) => setTimeout(r, 0));
+    expect(relays.has(relay.url)).toBe(true);
+  } finally {
+    publish.mockRestore();
+  }
+});

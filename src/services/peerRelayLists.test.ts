@@ -2,6 +2,7 @@ import type { Event } from 'nostr-tools';
 import { TEST_RELAY_URL } from '../config/testRelayLockdown';
 import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
 import { pool, releaseNewIdleRelays } from './nostrPool';
 import {
   clearPeerRelayListCache,
@@ -40,6 +41,8 @@ const listEvent = (
   createdAt = 100,
   id = `${kind}-${createdAt}`,
 ): Event => ({ id, pubkey, kind, created_at: createdAt, tags, content: '', sig: '' });
+
+afterEach(() => setCurrentUserPubkey(null));
 
 beforeEach(() => {
   clearPeerRelayListCache();
@@ -234,4 +237,37 @@ it('keeps a test account lookup on the test relay, cached apart from public look
   // A public viewer doesn't get the locked lookup's entry.
   expect(peekPeerRelayLists(alice, viewer)).toBeUndefined();
   expect(peekPeerRelayLists(alice, TEST_ACCOUNT_KEYS.little)).toBeDefined();
+});
+
+it('fetches a pubkey repeated in one call only once', async () => {
+  query.mockResolvedValue([]);
+  const results = await getManyPeerRelayLists([alice, alice, alice.toUpperCase(), ` ${alice} `], {
+    viewerPubkey: viewer,
+  });
+  expect(query).toHaveBeenCalledTimes(1);
+  expect(query.mock.calls[0][1][0].authors).toEqual([alice]);
+  expect([...results.keys()]).toEqual([alice]);
+});
+
+it("doesn't cache a lookup redirected because a test account became active mid-lookup", async () => {
+  setCurrentUserPubkey(viewer);
+  query.mockImplementationOnce(async () => {
+    // The pool routes reads by the active account: this answer came from the test relay.
+    setCurrentUserPubkey(TEST_ACCOUNT_KEYS.little);
+    return [];
+  });
+  const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  expect(result.status).toBe('ok');
+  expect(peekPeerRelayLists(alice, viewer)).toBeUndefined();
+
+  // Also when a test account was already active as the lookup started.
+  query.mockResolvedValueOnce([]);
+  await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  expect(peekPeerRelayLists(alice, viewer)).toBeUndefined();
+
+  // Back on the viewer's own account, the answer is cached again.
+  setCurrentUserPubkey(viewer);
+  query.mockResolvedValueOnce([]);
+  await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  expect(peekPeerRelayLists(alice, viewer)).toBeDefined();
 });
