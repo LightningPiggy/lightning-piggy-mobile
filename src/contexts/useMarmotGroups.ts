@@ -31,8 +31,8 @@ import {
 } from '../services/marmotSession';
 import { fireMessageNotification } from '../services/notificationService';
 import { Toast } from '../components/BrandedToast';
-import { t } from '../i18n';
 import type { Group } from '../types/groups';
+import { undeliveredInviteNotice, type UndeliveredInvites } from '../utils/marmotInviteNotice';
 import { notifyGroupMessage } from './nostrEventBus';
 
 const EMPTY_SUMMARIES: MarmotGroupSummary[] = [];
@@ -71,6 +71,8 @@ export function useMarmotGroups(
   pubkey: string | null,
   /** Display name for a pubkey (for "invitation not delivered yet"). */
   nameOf: (pubkey: string) => string = (pk) => pk.slice(0, 8),
+  /** Amber / NIP-46: retries wait for a send, so the notice says that. */
+  remoteSigner = false,
 ): MarmotGroupsApi {
   const [summaries, setSummaries] = useAccountState(pubkey, EMPTY_SUMMARIES);
 
@@ -277,22 +279,18 @@ export function useMarmotGroups(
     [session],
   );
 
-  // Their Welcome is retried automatically; just say so.
+  // Their Welcome is retried; say when (and why it waits, #1402).
   const reportUndelivered = useCallback(
-    (people: string[]) => {
-      if (people.length === 0) return;
-      Toast.show({
-        type: 'info',
-        text1: t('marmotInvite.notReachedTitle'),
-        text2: t('marmotInvite.notReachedBody', { names: people.map(nameOf).join(', ') }),
-      });
+    (outcome: UndeliveredInvites) => {
+      const notice = undeliveredInviteNotice(outcome, nameOf, remoteSigner);
+      if (notice) Toast.show({ type: 'info', text1: notice.title, text2: notice.body });
     },
-    [nameOf],
+    [nameOf, remoteSigner],
   );
   const create = useCallback(
     async (name: string, memberPubkeys: string[]) => {
       const group = await session().createGroup(name.trim(), [...new Set(memberPubkeys)]);
-      reportUndelivered(group.undelivered);
+      reportUndelivered(group);
       return toGroup(group);
     },
     [session, reportUndelivered],

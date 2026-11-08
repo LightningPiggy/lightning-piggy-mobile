@@ -4,7 +4,7 @@ import { forgetAppRelayPrefs, setAppRelayEnabled } from './appRelayPrefs';
 import { DEFAULT_RELAYS } from './nostrRelayDefaults';
 import type { Event } from 'nostr-tools';
 import { AppState, type AppStateStatus } from 'react-native';
-import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
+import { MarmotWelcomeOutbox, WELCOME_RETRY_BACKOFF_MS } from './marmotWelcomeOutbox';
 import { createMemoryMarmotBackend } from './marmotStore';
 import { boundGroupQueries } from './marmotGroupBackfill';
 import { trackKeyPackageAcceptance } from './marmotKeyPackageLifecycle';
@@ -26,6 +26,8 @@ import {
   TEST_RELAY_URL,
 } from '../config/testRelayLockdown';
 import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { NO_KEY_PACKAGE_LISTS } from './marmotPeerRelayLists';
+import { clearPeerRelayListCache } from './peerRelayLists';
 
 const mockQuerySync = jest.fn();
 const mockPublish = jest.fn();
@@ -41,6 +43,8 @@ jest.mock('./nostrPool', () => ({
     resetTransports: jest.fn().mockResolvedValue(undefined),
   },
   trackRelays: jest.fn(),
+  pooledRelayUrls: () => new Set<string>(),
+  releaseNewIdleRelays: jest.fn(),
 }));
 
 const SERVER = 'ee'.repeat(32);
@@ -52,6 +56,7 @@ const inboxEvent = (relays: string[], createdAt = 100) => ({
 
 beforeEach(() => {
   setCurrentUserPubkey(null);
+  clearPeerRelayListCache();
   mockQuerySync.mockReset();
   jest.useRealTimers();
 });
@@ -264,14 +269,19 @@ describe('createMarmotNetwork().publish', () => {
     expect(failed).toHaveLength(1);
     expect(await outbox.resend(failed)).toEqual(failed);
     await outbox.enqueue('group', failed);
+    // Retries wait out each wrap's backoff (1 min, then 2 min).
+    const start = Date.now();
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(start + WELCOME_RETRY_BACKOFF_MS);
     await outbox.flush();
     expect(await outbox.pending()).toHaveLength(1);
     mockPublish.mockReturnValue([
       Promise.resolve('connection failure: offline'),
       Promise.resolve('saved'),
     ]);
+    clock.mockReturnValue(start + 3 * WELCOME_RETRY_BACKOFF_MS);
     await outbox.flush();
     expect(await outbox.pending()).toHaveLength(0);
+    clock.mockRestore();
   });
 });
 
@@ -565,37 +575,34 @@ test("the session's wrapped network keeps requireAnswer on key-package lookups (
     { watermarks: new Map(), persist: jest.fn() },
   );
   mockQuerySync.mockReset().mockResolvedValue([]);
-  await fetchKeyPackageEvents(sessionNetwork, ['wss://relay.primal.net'], 'b'.repeat(64));
+  await fetchKeyPackageEvents(
+    sessionNetwork,
+    ['wss://relay.primal.net'],
+    'b'.repeat(64),
+    NO_KEY_PACKAGE_LISTS,
+  );
   const keyPackageCall = mockQuerySync.mock.calls.find(([, filters]) =>
     (filters as { kinds?: number[] }[]).some((f) => f.kinds?.includes(30443)),
   );
   expect(keyPackageCall?.[3]).toEqual({ requireAnswer: true });
-  // The 10051 / 10002 list read before it stays lenient.
-  expect(mockQuerySync.mock.calls[0]).toHaveLength(3);
 });
 
 test('session-owned Welcome lookup and anonymous publications stay on LAN after an account switch', async () => {
   const owner = [...TEST_ACCOUNT_PUBKEYS][0];
   setCurrentUserPubkey(owner);
   const network = createMarmotNetwork(() => ['wss://public.example'], undefined, owner);
-  let finishLookup!: (events: ReturnType<typeof inboxEvent>[]) => void;
-  mockQuerySync.mockReset().mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finishLookup = resolve;
-      }),
-  );
   mockPublish.mockReset().mockReturnValue([Promise.resolve('saved')]);
-  const pending = network.getUserInboxRelays(SERVER);
-  expect(mockQuerySync.mock.calls[0][0]).toEqual([TEST_RELAY_URL]);
   setCurrentUserPubkey('a'.repeat(64));
-  finishLookup([inboxEvent(['wss://public.example'])]);
-  const inbox = await pending;
-  expect(inbox).toEqual([TEST_RELAY_URL]);
+  // A locked session's Welcomes go to the LAN relay without a public lookup.
+  expect(await network.getUserInboxRelays(SERVER)).toEqual([TEST_RELAY_URL]);
+  expect(mockQuerySync).not.toHaveBeenCalled();
   for (const kind of [1059, 445, 443, 30443, 10051]) {
     await network.publish(['wss://public.example'], { kind, pubkey: SERVER } as Event);
     expect(mockPublish.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
   }
+  // Even a gift wrap with no relays at all.
+  await network.publish([], { kind: 1059, pubkey: SERVER } as Event);
+  expect(mockPublish.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
   mockQuerySync.mockResolvedValue([]);
   await network.request(
     ['wss://public.example'],
@@ -607,7 +614,7 @@ test('session-owned Welcome lookup and anonymous publications stay on LAN after 
   expect(mockQuerySync.mock.calls.at(-1)[0]).toEqual([TEST_RELAY_URL]);
 });
 
-test('session and push fallbacks retain owner preferences across an account switch', async () => {
+test('session and push lookups retain owner preferences across an account switch', async () => {
   const owner = 'c'.repeat(64);
   await forgetAppRelayPrefs(owner);
   await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], false);
@@ -615,7 +622,8 @@ test('session and push fallbacks retain owner preferences across an account swit
   const push = createPushTransport(() => [], owner);
   setCurrentUserPubkey(null);
   mockQuerySync.mockResolvedValue([]);
-  await network.getUserInboxRelays(SERVER);
+  // No relay completed (no EOSE): the lookup is unknown, so it rejects.
+  await expect(network.getUserInboxRelays(SERVER)).rejects.toThrow();
   const networkTargets = mockQuerySync.mock.calls.at(-1)[0];
   expect(networkTargets).not.toContain(DEFAULT_RELAYS[0]);
   expect(networkTargets).toContain(DEFAULT_RELAYS[1]);
@@ -626,17 +634,77 @@ test('session and push fallbacks retain owner preferences across an account swit
   await forgetAppRelayPrefs(owner);
 });
 
-it('invalidates cached fallback inbox targets after hydration and preference changes', async () => {
-  const owner = 'a'.repeat(64);
-  await forgetAppRelayPrefs(owner);
-  setCurrentUserPubkey(owner);
-  mockQuerySync.mockResolvedValue([]);
-  const network = createMarmotNetwork(() => [], undefined, owner);
-  expect(await network.getUserInboxRelays(SERVER)).toEqual([]);
-  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], true);
-  expect(await network.getUserInboxRelays(SERVER)).toContain(DEFAULT_RELAYS[0]);
-  await setAppRelayEnabled(owner, 'default', DEFAULT_RELAYS[0], false);
-  expect(await network.getUserInboxRelays(SERVER)).not.toContain(DEFAULT_RELAYS[0]);
-  setCurrentUserPubkey(null);
-  await forgetAppRelayPrefs(owner);
+describe('createMarmotNetwork().getUserInboxRelays (#1402)', () => {
+  const owner = 'd'.repeat(64);
+  /** A lookup a relay completed (EOSE), returning `events`. */
+  type Opts = { onClose?: (reasons: string[], urls?: string[]) => void };
+  /** Every relay asked (indexers included) completed. */
+  const answered =
+    (events: unknown[]) => async (r: string[], _f: unknown, _w: number, o?: Opts) => {
+      o?.onClose?.(
+        r.map(() => 'closed automatically on eose'),
+        r,
+      );
+      return events;
+    };
+
+  it('returns the invitee 10050 from the shared cache: sanitised, looked up once', async () => {
+    mockQuerySync.mockImplementation(
+      answered([
+        {
+          ...inboxEvent(['wss://inbox.example.com', 'ws://lan.example.com', 'wss://10.0.0.1']),
+          id: 'inbox',
+          pubkey: SERVER,
+        },
+      ]),
+    );
+    const network = createMarmotNetwork(() => ['wss://mine.example.com'], undefined, null);
+    expect(await network.getUserInboxRelays(SERVER)).toEqual(['wss://inbox.example.com/']);
+    expect(await network.getUserInboxRelays(SERVER)).toEqual(['wss://inbox.example.com/']);
+    expect(mockQuerySync).toHaveBeenCalledTimes(1);
+    const [relays, filters] = mockQuerySync.mock.calls[0];
+    expect(filters).toEqual([
+      { kinds: [10050], authors: [SERVER], limit: 1 },
+      { kinds: [10002], authors: [SERVER], limit: 1 },
+    ]);
+    // Marmot lookups also ask the well-known Marmot relays and the viewer's own.
+    expect(relays).toEqual(
+      expect.arrayContaining(['wss://relay.eu.whitenoise.chat', 'wss://mine.example.com']),
+    );
+  });
+
+  it('returns [] when an indexer confirms there is no 10050 — never the defaults', async () => {
+    mockQuerySync.mockImplementation(answered([]));
+    const network = createMarmotNetwork(() => [], undefined, null);
+    expect(await network.getUserInboxRelays(SERVER)).toEqual([]);
+  });
+
+  it('rejects (unknown) when only a fast non-indexer relay answered and the indexers were slow', async () => {
+    mockQuerySync.mockImplementation(async (r: string[], _f: unknown, _w: number, o?: Opts) => {
+      o?.onClose?.(
+        r.map((url) =>
+          url.includes('purplepag.es') || url.includes('kindpag.es')
+            ? 'relay connection timed out'
+            : 'closed automatically on eose',
+        ),
+        r,
+      );
+      return [];
+    });
+    const network = createMarmotNetwork(() => ['wss://fast.example.com'], undefined, null);
+    await expect(network.getUserInboxRelays(SERVER)).rejects.toThrow();
+  });
+
+  it('rejects (unknown, not "none") when no relay answered', async () => {
+    mockQuerySync.mockImplementation(() => Promise.reject(new Error('No relay answered')));
+    const network = createMarmotNetwork(() => [], undefined, owner);
+    await expect(network.getUserInboxRelays(SERVER)).rejects.toThrow();
+  });
+
+  it('publishes a gift wrap only where asked — no default fallback for an empty set', async () => {
+    mockPublish.mockReset().mockReturnValue([]);
+    const network = createMarmotNetwork(() => ['wss://lookup.example.com'], undefined, owner);
+    expect(await network.publish([], { kind: 1059, pubkey: SERVER } as Event)).toEqual({});
+    expect(mockPublish).toHaveBeenCalledWith([], expect.anything());
+  });
 });

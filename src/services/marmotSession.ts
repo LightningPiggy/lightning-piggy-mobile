@@ -57,13 +57,8 @@ import { MarmotDmDeviceSync } from './marmotDmDeviceSync';
 import * as dmChoice from './marmotDmChoice';
 import { summariseGroup, type MarmotGroupSummary } from './marmotGroupSummary';
 import { installMarmotSameClientRule } from './marmotSameClient';
-import {
-  fetchDevices,
-  fetchKeyPackageEvents,
-  inviteDevices,
-  MarmotWelcomeDeliveryError,
-  resolveInvitees,
-} from './marmotInvitees';
+import { inviteDevices, keyPackageDiscovery } from './marmotInvitees';
+import { marmotPeerLists, NO_PEER_LISTS } from './marmotPeerRelayLists';
 import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
 import { KeyPackageReplenisher } from './marmotKeyPackageReplenisher';
 import { alignCommitForMdk, spreadProposals } from './marmotProposals';
@@ -87,6 +82,8 @@ import { isMarmotMessageKind } from './marmotKinds';
 import { noteMarmotCommit, noteMarmotGroupTraffic, setMarmotCatchingUp } from './marmotPushWake';
 import { createMarmotSigner } from './marmotSigner';
 import * as fence from './marmotSessionFence';
+import { pushDrains } from './marmotSessionRegistry';
+import { toAppGroupId, toMlsGroupId } from './marmotGroupIds';
 import { MarmotWelcomeJoin } from './marmotWelcomeJoin';
 import {
   loadFailedInvites,
@@ -107,8 +104,6 @@ export { buildMarmotRumor } from './marmotRumor';
 
 /** Marmot's default chat-message kind (foundation/application-messages.md). */
 export const MARMOT_CHAT_KIND = 9;
-/** App-level group id prefix, distinguishing Marmot groups from NIP-17 ones. */
-export const MARMOT_GROUP_ID_PREFIX = 'marmot:';
 /** Marks our key packages (`client` tag) — NOT the slot id; see ensureKeyPackageSlot. */
 const CLIENT_NAME = 'Lightning Piggy';
 const DELIVERED_CACHE_SIZE = 2_000;
@@ -167,9 +162,12 @@ export interface MarmotSessionOptions {
   dmDeviceSyncWaitMs?: number;
 }
 
-export const toAppGroupId = (mlsGroupIdHex: string) => `${MARMOT_GROUP_ID_PREFIX}${mlsGroupIdHex}`;
-export const isMarmotGroupId = (id: string) => id.startsWith(MARMOT_GROUP_ID_PREFIX);
-const toMlsGroupId = (appGroupId: string) => appGroupId.slice(MARMOT_GROUP_ID_PREFIX.length);
+/** The people an invite didn't reach yet; `waitingForRelays` of them publish
+ * no inbox relays yet, the rest are retried for other reasons (#1402). */
+export interface InviteOutcome {
+  undelivered: string[];
+  waitingForRelays: string[];
+}
 
 export class MarmotSession {
   readonly pubkey: string;
@@ -219,6 +217,7 @@ export class MarmotSession {
   readonly devices: MarmotDeviceTracker;
   /** Adds devices installed since a 1:1 began (#1559). */
   private readonly dmDevices: MarmotDmDeviceSync;
+  private readonly discovery: ReturnType<typeof keyPackageDiscovery>;
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
   readonly ready = new Promise<void>((resolve) => (this.markReady = resolve));
@@ -238,6 +237,9 @@ export class MarmotSession {
       opts.network ??
         createMarmotNetwork(opts.getLookupRelays, this.connection.reconnect, opts.pubkey),
     );
+    // Peers' relay lists from the shared cache (none on a test's injected network).
+    const peers = opts.network ? NO_PEER_LISTS : marmotPeerLists(opts.pubkey, opts.getLookupRelays);
+    this.discovery = keyPackageDiscovery(network, opts.getLookupRelays, peers);
     this.push = new MarmotPushNotifier({
       pubkey: opts.pubkey,
       backend: this.backend,
@@ -276,7 +278,7 @@ export class MarmotSession {
     this.dmDevices = new MarmotDmDeviceSync({
       self: opts.pubkey,
       backend: this.backend,
-      fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
+      fetchKeyPackages: this.discovery.events,
       groupState: async (mlsId) => (await this.client.groups.get(mlsId)).state,
       invite: (mlsId, devices) => this.inviteAll(mlsId, devices, { partial: true }),
       silentSigner: opts.signerType === 'nsec',
@@ -316,6 +318,7 @@ export class MarmotSession {
       this.outbox,
       this.dmDevices,
       cancelled,
+      peers.read,
     );
     this.welcomeJoins = new MarmotWelcomeJoin({
       client: this.client,
@@ -328,7 +331,7 @@ export class MarmotSession {
     this.devices = new MarmotDeviceTracker({
       backend: this.backend,
       groups: () => this.client.groups.loaded,
-      fetchKeyPackages: (pk) => fetchKeyPackageEvents(network, opts.getLookupRelays(), pk),
+      fetchKeyPackages: this.discovery.events,
       ownClient: CLIENT_NAME,
     });
   }
@@ -347,7 +350,7 @@ export class MarmotSession {
         // We're out of it: forget what we published there (MIP-05 state)
         // and its "delete for everyone" tombstones.
         this.pushRegistration.forgetGroup(bytesToHex(id));
-        void this.welcomePayloads.drop(bytesToHex(id)).catch(() => undefined);
+        void this.welcomePayloads.drop(bytesToHex(id), { outbox: true }).catch(() => undefined);
         void forgetMarmotDeletionsForGroup(this.pubkey, toAppGroupId(bytesToHex(id))).catch(
           () => undefined,
         );
@@ -383,11 +386,11 @@ export class MarmotSession {
     // user may never open — so for them it waits for first Marmot use (or an
     // account that has used Marmot before and needs its package kept fresh).
     void this.keepKeyPackageFresh();
-    this.stopWelcomeRetries = startPendingWelcomeRetries(this.backend, (w) =>
-      this.acceptWelcome(w),
-    );
-    void this.outbox.flush().catch(() => undefined);
-    if (this.opts.signerType === 'nsec') void this.welcomePayloads.flush().catch(() => undefined);
+    const stopJoins = startPendingWelcomeRetries(this.backend, (w) => this.acceptWelcome(w));
+    // Invitations we send, staggered after start and on each resume (#1402);
+    // a remote signer's are only re-checked here, never signed.
+    const stopInvites = this.welcomePayloads.scheduleRetries(this.opts.signerType === 'nsec');
+    this.stopWelcomeRetries = () => (stopJoins(), stopInvites());
     void this.failedInvites.run();
     void this.keyPackageLookup()
       .then((lookup) => reverifyWelcomeOutcomes(this.backend, lookup))
@@ -525,8 +528,7 @@ export class MarmotSession {
 
   /** Whether `peer` has a key package to invite; throws on a failed lookup / only unusable keys. */
   async canMessage(peer: string): Promise<boolean> {
-    const lookup = this.opts.getLookupRelays();
-    return (await fetchDevices(this.client.network, lookup, peer)).length > 0;
+    return (await this.discovery.devices(peer)).length > 0;
   }
 
   async getOrCreateDm(peer: string): Promise<MarmotGroupSummary> {
@@ -560,7 +562,7 @@ export class MarmotSession {
     name: string,
     members: string[],
     opts: { description?: string; adminPubkeys?: string[] } = {},
-  ): Promise<MarmotGroupSummary & { undelivered: string[] }> {
+  ): Promise<MarmotGroupSummary & InviteOutcome> {
     await this.ready;
     // First Marmot use: become reachable ourselves BEFORE resolving the
     // invitees — otherwise two remote-signer accounts that both deferred
@@ -578,18 +580,25 @@ export class MarmotSession {
       ),
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
+    const createdEpoch = group.state.groupContext.epoch;
     try {
-      const { undelivered } = await this.inviteAll(group.idStr, devices);
-      // Nobody can join: drop it so a retry starts clean (no queued Welcomes).
-      if (undelivered.length === devices.size) throw new MarmotWelcomeDeliveryError(undelivered);
+      // Undelivered Welcomes stay queued (with their reason) and are retried:
+      // the chat is kept, its members sheet shows who hasn't joined (#1402).
+      const { undelivered, waitingForRelays } = await this.inviteAll(group.idStr, devices);
       this.activity.note(group.idStr, Date.now()); // we just made it: it's the live one here
-      return { ...this.summarise(group), undelivered };
+      return { ...this.summarise(group), undelivered, waitingForRelays };
     } catch (e) {
-      // Don't leave an empty, invisible group (and its relay sub) behind —
-      // a retry would otherwise create another one each time.
-      await this.client.groups.destroy(group.id).catch(() => undefined);
-      await this.outbox.drop(group.idStr).catch(() => undefined);
-      await this.welcomePayloads.drop(group.idStr).catch(() => undefined);
+      // Undo only an Add that never committed (so a retry leaves no empty
+      // group). After it, the invitees hold leaves and their queued Welcomes
+      // are the only way in.
+      const epoch = await this.client.groups.get(group.idStr).then(
+        (g) => g.state.groupContext.epoch,
+        () => createdEpoch,
+      );
+      if (epoch === createdEpoch) {
+        await this.client.groups.destroy(group.id).catch(() => undefined);
+        await this.welcomePayloads.drop(group.idStr, { outbox: true }).catch(() => undefined);
+      }
       this.emitGroupsChanged();
       throw e;
     }
@@ -597,11 +606,24 @@ export class MarmotSession {
 
   /** Invite `members`' devices; resolves with the people not reached yet
    * (their invitations are retried automatically — no re-invite needed). */
-  async addMembers(appGroupId: string, members: string[]): Promise<string[]> {
+  async addMembers(appGroupId: string, members: string[]): Promise<InviteOutcome> {
     const devices = await this.invitees(members);
-    const { undelivered } = await this.inviteAll(toMlsGroupId(appGroupId), devices);
+    const { undelivered, waitingForRelays } = await this.inviteAll(
+      toMlsGroupId(appGroupId),
+      devices,
+    );
     this.emitGroupsChanged();
-    return undelivered;
+    return { undelivered, waitingForRelays };
+  }
+
+  /** Members whose invitation hasn't reached them yet, and why (#1402). */
+  pendingInvites(chatId: string) {
+    return this.welcomePayloads.inviteStatus(toMlsGroupId(chatId));
+  }
+
+  /** A chat's queued invitations changed (coalesced); the listener gets its MLS id. */
+  onInvitesChanged(listener: (mlsGroupId: string) => void): () => void {
+    return this.outbox.changes.subscribe(listener);
   }
 
   private async inviteAll(
@@ -626,22 +648,26 @@ export class MarmotSession {
       opts,
     );
     await this.dmDevices.noteInvited(mlsId, result.invited).catch(() => undefined);
-    return result;
+    const waiting = await this.welcomePayloads.waitingForRelays(mlsId).catch(() => new Set());
+    return { ...result, waitingForRelays: result.undelivered.filter((p) => waiting.has(p)) };
+  }
+
+  /** A user's open / send retries a chat's invitations (#1402); remote signers: sends only. */
+  retryInvites(appGroupId: string, reason: 'send' | 'open' = 'send'): void {
+    if (reason === 'send' || this.opts.signerType === 'nsec')
+      void this.welcomePayloads.retry(toMlsGroupId(appGroupId));
   }
 
   /** Before a send / on open: add devices the 1:1's contact installed
    * since it began (#1559). Bounded; never throws, never blocks for long. */
   async syncDmDevices(appGroupId: string, reason: 'send' | 'open' = 'send'): Promise<void> {
+    this.retryInvites(appGroupId, reason);
     const dm = this.getGroup(appGroupId);
     // Adds are admin-only; in a DM both people are admins.
     if (!dm?.isDm || !dm.memberPubkeys[0] || !dm.adminPubkeys.includes(this.pubkey.toLowerCase()))
       return;
     const mlsId = toMlsGroupId(appGroupId);
     const active = reason === 'send' || this.opts.signerType === 'nsec';
-    if (active) {
-      void this.outbox.flush().catch(() => undefined);
-      void this.welcomePayloads.flush(mlsId).catch(() => undefined);
-    }
     await this.dmDevices.sync(mlsId, dm.memberPubkeys[0], reason);
     if (active)
       await this.relayTopUps.sync(mlsId, dm.relays, dmChoice.groupRelayFallbacks(this.pubkey));
@@ -830,8 +856,7 @@ export class MarmotSession {
 
   /** Each invitee's devices; throws for anyone with none we can invite. */
   private invitees(members: string[]) {
-    const lookup = this.opts.getLookupRelays();
-    return resolveInvitees(this.client.network, lookup, this.pubkey, members);
+    return this.discovery.invitees(this.pubkey, members);
   }
 
   private summarise(g: SessionGroup): MarmotGroupSummary {
@@ -962,39 +987,10 @@ export {
   MarmotUnusableKeyPackageError,
 } from './marmotKeyPackages';
 
-// --- active-session registry ---------------------------------------------------
-
-let active: MarmotSession | null = null;
-const activeListeners = new Set<(s: MarmotSession | null) => void>();
-// Per-owner promise for a stopped session's push work to settle.
-const pushDrains = new Map<string, Promise<void>>();
-
-/**
- * Before wiping `owner`'s Marmot storage: stop their session if it is still
- * active and wait for its queued push-state writes to settle, so none lands
- * after the wipe.
- */
-export async function quiesceMarmotSession(owner: string): Promise<void> {
-  if (active?.pubkey === owner) active.stop();
-  await pushDrains.get(owner)?.catch(() => undefined);
-  pushDrains.delete(owner);
-  // Anything still running past the bounded wait must not touch the wipe.
-  fence.fenceStoppedSessions(owner);
-}
-
-export function getMarmotSession(): MarmotSession | null {
-  return active;
-}
-
-export function setMarmotSession(session: MarmotSession | null): void {
-  if (active && active !== session) active.stop();
-  active = session;
-  for (const l of activeListeners) l(session);
-}
-
-/** Listen for the active session; fires immediately with the current one. */
-export function subscribeMarmotSession(listener: (s: MarmotSession | null) => void): () => void {
-  activeListeners.add(listener);
-  listener(active);
-  return () => activeListeners.delete(listener);
-}
+export {
+  getMarmotSession,
+  quiesceMarmotSession,
+  setMarmotSession,
+  subscribeMarmotSession,
+} from './marmotSessionRegistry';
+export * from './marmotGroupIds';

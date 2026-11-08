@@ -17,6 +17,8 @@ import type { GroupMembersSheetStyles } from '../styles/GroupMembersSheet.styles
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 import { isSupportedImageUrl } from '../utils/imageUrl';
 import type { DeviceInfo } from '../services/marmotDeviceTracker';
+import type { InviteStatus } from '../services/marmotWelcomePayloads';
+import { inviteStatusTextKey } from '../utils/marmotInviteNotice';
 import MemberDeviceList from './MemberDeviceList';
 
 interface Props {
@@ -44,6 +46,10 @@ interface Props {
   /** Their devices (null while loading); read only when expanded. */
   devices?: readonly DeviceInfo[] | null;
   onToggleDevices?: (member: GroupMemberRow) => void;
+  /** Marmot: their invitation hasn't reached them yet, and why (#1402). */
+  inviteStatus?: InviteStatus;
+  /** Amber / NIP-46: the status line says it waits for the next send. */
+  remoteSigner?: boolean;
 }
 
 /**
@@ -71,6 +77,8 @@ const GroupMemberListRow: React.FC<Props> = ({
   devicesExpanded = false,
   devices = null,
   onToggleDevices,
+  inviteStatus,
+  remoteSigner = false,
 }) => {
   const t = useTranslation();
   const tid = member.pubkey.slice(0, 12);
@@ -179,6 +187,17 @@ const GroupMemberListRow: React.FC<Props> = ({
           </TouchableOpacity>
         ) : null}
       </View>
+      {inviteStatus ? (
+        <Text
+          style={styles.inviteStatus}
+          testID={`group-member-invite-status-${tid}`}
+          accessibilityLabel={t(inviteStatusTextKey(inviteStatus, remoteSigner), {
+            name: member.name,
+          })}
+        >
+          {t(inviteStatusTextKey(inviteStatus, remoteSigner), { name: member.name })}
+        </Text>
+      ) : null}
       {showDevices ? (
         <TouchableOpacity
           style={styles.deviceToggle}

@@ -22,6 +22,7 @@ import {
   sendMarmotGroupRumor,
 } from './marmotSend';
 import { MarmotKeyPackageLookupError } from './marmotKeyPackages';
+import { MarmotInviteesUnreachableError } from './marmotWelcomeRelays';
 import * as marmotSigner from './marmotSigner';
 import { markDmSetup } from './marmotDmSetupTrace';
 import { marmotReplyTags } from './marmotEdits';
@@ -38,6 +39,7 @@ function fakeSession(overrides: Partial<MarmotSession> = {}) {
     stop: () => undefined,
     getOrCreateDm: async () => ({ id: 'marmot:dm', relays: ['wss://r1', 'wss://r2'] }),
     syncDmDevices: async () => undefined,
+    retryInvites: () => undefined,
     sendRumor: async (groupId: string, rumor: (typeof sent)[number]['rumor']) => {
       sent.push({ groupId, rumor });
       return { 'wss://r1': true, 'wss://r2': false };
@@ -374,4 +376,33 @@ it.each([false, true])('bounds Repair and preserves Amber guidance (open=%s)', a
     amber.mockRestore();
     jest.useRealTimers();
   }
+});
+
+describe('invitations with nowhere to go (#1402)', () => {
+  it('offers NIP-17 for a 1:1 whose peer publishes no inbox relays — no chat was created', async () => {
+    fakeSession({
+      getOrCreateDm: async () => {
+        throw new MarmotInviteesUnreachableError([PEER]);
+      },
+    });
+    const result = await sendMarmotDm(ME, PEER, { kind: 14, content: 'hi' });
+    expect(result).toEqual({
+      success: false,
+      error: expect.stringMatching(/hasn't published any relays/),
+      marmotUnreachable: 'noInbox',
+    });
+  });
+
+  it('explains a group nobody in it can be invited into (not a connection problem)', () => {
+    const message = marmotSendError(new MarmotInviteesUnreachableError([PEER, ME]));
+    expect(message).toMatch(/None of these people have published relays/);
+    expect(message).not.toMatch(/connection/);
+  });
+
+  it("retries the group's queued invitations on a user send", async () => {
+    const retryInvites = jest.fn();
+    fakeSession({ retryInvites } as Partial<MarmotSession>);
+    await sendMarmotGroupRumor(ME, 'marmot:group', { kind: 14, content: 'hi' });
+    expect(retryInvites).toHaveBeenCalledWith('marmot:group');
+  });
 });

@@ -5,7 +5,6 @@
 // ranking / relay rules are unit-tested in marmotDmChoice.test.ts.
 import * as dmChoice from './marmotDmChoice';
 import { DM_DEVICE_SYNC_COOLDOWN_MS } from './marmotDmDeviceSync';
-import { MarmotWelcomeDeliveryError } from './marmotInvitees';
 import { buildMarmotRumor, MARMOT_CHAT_KIND, type MarmotSession } from './marmotSession';
 import {
   RELAY,
@@ -123,10 +122,10 @@ describe('MarmotSession: a split 1:1 converges (no WebCrypto)', () => {
     }
   }, 180_000);
 
-  it('a create retried after its Welcome went unacknowledged still converges', async () => {
+  it('a create whose Welcome went unacknowledged keeps the chat and delivers it on a send (#1402)', async () => {
     // Relays reachable one way only (flaky mobile data / VPN): the Welcome is
-    // stored, but no relay acknowledges it. The sender drops that group and
-    // creates another on retry — while the peer did join the first.
+    // stored, but no relay acknowledges it. The Add has committed, so the chat
+    // and its queued invitation are kept: no second group, no split.
     const relay = makeRelay();
     const publish = relay.network.publish;
     let acklessWraps = false;
@@ -141,34 +140,26 @@ describe('MarmotSession: a split 1:1 converges (no WebCrypto)', () => {
       await Promise.all([ben.session.start(), emily.session.start()]);
       await waitFor(() => slots(relay, emily.pubkey) === 1 && slots(relay, ben.pubkey) === 1);
       acklessWraps = true;
-      await expect(ben.session.getOrCreateDm(emily.pubkey)).rejects.toBeInstanceOf(
-        MarmotWelcomeDeliveryError,
-      );
-      expect(ben.session.findDm(emily.pubkey)).toBeUndefined();
-      // ...but Emily got that Welcome, joined, and even wrote into it.
-      const first = await emily.session.acceptWelcome(unwrapWelcomes(relay, emily)[0]);
-      expect(first).not.toBeNull();
-      later();
-      await say(emily, ben.pubkey, 'into the dropped group');
+      const dm = await ben.session.getOrCreateDm(emily.pubkey);
+      expect(ben.session.findDm(emily.pubkey)?.id).toBe(dm.id);
+      expect(await ben.session.pendingInvites(dm.id)).toEqual(new Map([[emily.pubkey, 'pending']]));
 
-      // Connection back: Ben's retry makes a second group; Emily joins it too.
+      // Connection back: Ben's next send republishes the same Welcome.
       acklessWraps = false;
       later();
-      const second = await ben.session.getOrCreateDm(emily.pubkey);
-      expect(second.id).not.toBe(first!.id);
-      const welcomes = unwrapWelcomes(relay, emily);
-      expect(await emily.session.acceptWelcome(welcomes[welcomes.length - 1])).toMatchObject({
-        id: second.id,
-      });
-      // The retry was for a send: that message is newer than anything in the
-      // dropped group, so once Emily reads it both sides use the new group.
-      later();
       await say(ben, emily.pubkey, 'retry message');
+      for (let i = 0; i < 200 && (await ben.session.pendingInvites(dm.id)).size > 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(await ben.session.pendingInvites(dm.id)).toEqual(new Map());
+      expect(await emily.session.acceptWelcome(unwrapWelcomes(relay, emily)[0])).toMatchObject({
+        id: dm.id,
+      });
       await waitFor(() => got(emily, 'retry message'));
-      expect(emily.session.findDm(ben.pubkey)?.id).toBe(second.id);
       later();
       await say(emily, ben.pubkey, 'after retry');
       await waitFor(() => got(ben, 'after retry'));
+      expect(ben.session.listGroups()).toHaveLength(1);
     } finally {
       [ben, emily].forEach((d) => d.session.stop());
     }

@@ -36,7 +36,7 @@ const bob = 'b'.repeat(64);
 
 const listEvent = (
   pubkey: string,
-  kind: 10050 | 10002,
+  kind: 10050 | 10002 | 10051,
   tags: string[][],
   createdAt = 100,
   id = `${kind}-${createdAt}`,
@@ -500,5 +500,144 @@ describe('cancellation (signal)', () => {
     await cancellable;
     const otherResult = await other;
     expect(otherResult.status === 'ok' && otherResult.lists.inbox).toEqual(['wss://in.example/']);
+  });
+});
+
+describe('kind 10051 (Marmot KeyPackage relays, #1402)', () => {
+  const withKp = { viewerPubkey: viewer, withKeyPackageRelays: true };
+  const kpList = listEvent(alice, 10051, [['relay', 'wss://key.example.com']]);
+
+  it('is only looked up when asked, in the same bounded REQ', async () => {
+    query.mockImplementation(answered([kpList]));
+    const result = await getPeerRelayLists(alice, withKp);
+    expect(result).toEqual({
+      status: 'ok',
+      lists: {
+        inbox: null,
+        read: null,
+        write: null,
+        keyPackage: ['wss://key.example.com/'],
+        // Same lookup found their 10051: the missing 10050 is confirmed.
+        inboxAbsenceConfirmed: true,
+      },
+    });
+    expect(query.mock.calls[0][1]).toEqual([
+      { kinds: [10050], authors: [alice], limit: 1 },
+      { kinds: [10002], authors: [alice], limit: 1 },
+      { kinds: [10051], authors: [alice], limit: 1 },
+    ]);
+  });
+
+  it('keeps the newest 10051 across relays', async () => {
+    query.mockImplementation(
+      answered([
+        listEvent(alice, 10051, [['relay', 'wss://old.example.com']], 100),
+        listEvent(alice, 10051, [['relay', 'wss://new.example.com']], 200),
+      ]),
+    );
+    const result = await getPeerRelayLists(alice, withKp);
+    expect(result.status === 'ok' && result.lists.keyPackage).toEqual(['wss://new.example.com/']);
+  });
+
+  it('a DM lookup records nothing about it, so a 10051 caller still looks it up', async () => {
+    query.mockImplementation(answered([]));
+    await getPeerRelayLists(alice, { viewerPubkey: viewer });
+    const dmView = peekPeerRelayLists(alice, viewer);
+    expect(dmView?.status === 'ok' && 'keyPackage' in dmView.lists).toBe(false);
+    query.mockImplementation(answered([kpList]));
+    const result = await getPeerRelayLists(alice, withKp);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(result.status === 'ok' && result.lists.keyPackage).toEqual(['wss://key.example.com/']);
+    // ...and once known, both kinds of caller are served from the cache.
+    await getPeerRelayLists(alice, withKp);
+    await getPeerRelayLists(alice, { viewerPubkey: viewer });
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  it('a 10051 caller does not share an in-flight DM lookup; a DM caller shares a 10051 one', async () => {
+    const pending: ((events: Event[]) => void)[] = [];
+    query.mockImplementation(
+      (_relays, _filters, _maxWait, options) =>
+        new Promise((resolve) => {
+          pending.push((events) => {
+            options?.onClose?.(['closed automatically on eose']);
+            resolve(events);
+          });
+        }),
+    );
+    const dm = getPeerRelayLists(alice, { viewerPubkey: viewer });
+    const marmot = getPeerRelayLists(alice, withKp);
+    const dmAgain = getPeerRelayLists(alice, { viewerPubkey: viewer });
+    expect(query).toHaveBeenCalledTimes(2);
+    pending.forEach((finish) => finish([kpList]));
+    const [, m, d] = await Promise.all([dm, marmot, dmAgain]);
+    expect(m.status === 'ok' && m.lists.keyPackage).toEqual(['wss://key.example.com/']);
+    expect(d).toEqual(m);
+  });
+
+  it('caches an absent 10051 like the other kinds, and a failed lookup as unknown', async () => {
+    jest.useFakeTimers({ now: 20_000_000 });
+    query.mockImplementation(answered([]));
+    const absent = await getPeerRelayLists(alice, withKp);
+    expect(absent.status === 'ok' && absent.lists.keyPackage).toBeNull();
+    jest.setSystemTime(20_000_000 + PEER_LIST_ABSENT_TTL_MS - 1);
+    await getPeerRelayLists(alice, withKp);
+    expect(query).toHaveBeenCalledTimes(1);
+
+    query.mockRejectedValueOnce(new Error('No relay answered'));
+    expect(await getPeerRelayLists(bob, withKp)).toEqual({
+      status: 'failed',
+      error: 'No relay answered',
+    });
+  });
+
+  it('a later DM lookup leaves a fresh cached 10051 in place', async () => {
+    jest.useFakeTimers({ now: 30_000_000 });
+    query.mockImplementationOnce(incomplete([kpList]));
+    await getPeerRelayLists(alice, withKp);
+    // 10050 / 10002 are unknown: a DM caller re-asks after the short TTL.
+    jest.setSystemTime(30_000_000 + PEER_LIST_FAILED_TTL_MS);
+    query.mockImplementationOnce(answered([]));
+    await getPeerRelayLists(alice, { viewerPubkey: viewer });
+    const view = peekPeerRelayLists(alice, viewer);
+    expect(view?.status === 'ok' && view.lists.keyPackage).toEqual(['wss://key.example.com/']);
+  });
+});
+
+describe('inboxAbsenceConfirmed (Welcome routing only, #1402)', () => {
+  type CloseWithUrls = { onClose?: (reasons: string[], urls?: string[]) => void } | undefined;
+  const closeWith =
+    (reasonFor: (url: string) => string, events: Event[] = []) =>
+    async (relays: string[], _f: unknown, _w: number, options?: CloseWithUrls) => {
+      options?.onClose?.(relays.map(reasonFor), relays);
+      return events;
+    };
+  const EOSE = 'closed automatically on eose';
+
+  it('is set by an indexer EOSE, not by a fast non-indexer one; DM fields are unchanged', async () => {
+    query.mockImplementation(
+      closeWith((url) => (RELAY_LIST_INDEXERS.includes(url) ? 'relay connection timed out' : EOSE)),
+    );
+    const fast = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+    // NIP-17 delivery still reads a completed lookup's absence as absent.
+    expect(fast).toEqual({ status: 'ok', lists: { inbox: null, read: null, write: null } });
+
+    query.mockImplementation(closeWith(() => EOSE));
+    const indexed = await getPeerRelayLists(bob, { viewerPubkey: viewer });
+    expect(indexed).toEqual({
+      status: 'ok',
+      lists: { inbox: null, read: null, write: null, inboxAbsenceConfirmed: true },
+    });
+  });
+
+  it('is set when the same lookup found their 10002', async () => {
+    query.mockImplementation(
+      closeWith(
+        (url) => (RELAY_LIST_INDEXERS.includes(url) ? 'relay connection timed out' : EOSE),
+        [listEvent(alice, 10002, [['r', 'wss://read.example.com', 'read']])],
+      ),
+    );
+    const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+    expect(result.status === 'ok' && result.lists.inboxAbsenceConfirmed).toBe(true);
   });
 });

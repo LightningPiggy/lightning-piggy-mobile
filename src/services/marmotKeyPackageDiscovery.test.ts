@@ -8,6 +8,7 @@ import { fetchKeyPackageEvents } from './marmotInvitees';
 import { maintainKeyPackage } from './marmotKeyPackageLifecycle';
 import { maintainDiscoverableKeyPackage } from './marmotKeyPackageDiscovery';
 import { MARMOT_KEY_PACKAGE_RELAYS } from './marmotKeyPackageRelays';
+import { NO_KEY_PACKAGE_LISTS } from './marmotPeerRelayLists';
 import { createMemoryMarmotBackend } from './marmotStore';
 
 jest.mock('./marmotKeyPackageLifecycle', () => ({
@@ -114,57 +115,41 @@ it('publishes both the key and list to LAN only for locked owners', async () => 
   ).toBe(true);
   expect(t.signEvent.mock.calls[0][0].tags).toEqual([['relay', TEST_RELAY_URL]]);
 });
-it('reads newest peer 10051 first, then NIP-65 write relays, then well-known relays, bounded', async () => {
-  const lists = [
-    { ...event, kind: 10051, id: 'old', created_at: 1, tags: [['relay', 'wss://stale.example']] },
-    { ...event, kind: 10051, id: 'new', created_at: 2, tags: [['relay', 'wss://key.example']] },
-    {
-      ...event,
-      kind: 10002,
-      tags: [
-        ['r', 'wss://write.example', 'write'],
-        ['r', 'wss://read.example', 'read'],
-      ],
-    },
-  ];
-  const request = jest.fn(async (_relays: string[], filter: Filter | Filter[]) =>
-    Array.isArray(filter) ? lists : [event],
-  );
-  expect(await fetchKeyPackageEvents({ request }, ['wss://lookup.example'], owner)).toEqual([
+it('queries peer 10051 relays first, then NIP-65 write relays, then well-known relays', async () => {
+  const lists = jest.fn(async () => ({
+    keyPackage: ['wss://key.example/'],
+    write: ['wss://write.example/'],
+  }));
+  const request = jest.fn(async (_relays: string[], _filters: unknown) => [event]);
+  expect(await fetchKeyPackageEvents({ request }, ['wss://lookup.example'], owner, lists)).toEqual([
     event,
   ]);
-  expect(request.mock.calls[0][0]).toContain('wss://purplepag.es');
-  expect(request.mock.calls[0][1]).toEqual([
-    { kinds: [10051], authors: [owner], limit: 1 },
-    { kinds: [10002], authors: [owner], limit: 1 },
-  ]);
-  expect(request.mock.calls[1][0]).toEqual([
+  // The lists come from the shared lookup — the network only reads key packages.
+  expect(lists).toHaveBeenCalledWith(owner);
+  expect(request).toHaveBeenCalledTimes(1);
+  expect(request.mock.calls[0][0]).toEqual([
     'wss://key.example',
     'wss://write.example',
     ...MARMOT_KEY_PACKAGE_RELAYS,
     'wss://lookup.example',
   ]);
-  expect(request.mock.calls[1][1]).toEqual({ kinds: [30443], authors: [owner], limit: 50 });
+  expect(request.mock.calls[0][1]).toEqual({ kinds: [30443], authors: [owner], limit: 50 });
+});
+
+it('falls back to well-known and lookup relays when the peer publishes no lists', async () => {
+  const request = jest.fn(async (_relays: string[], _filters: unknown) => [event]);
+  await fetchKeyPackageEvents({ request }, ['wss://lookup.example'], owner, NO_KEY_PACKAGE_LISTS);
+  expect(request.mock.calls[0][0]).toEqual([...MARMOT_KEY_PACKAGE_RELAYS, 'wss://lookup.example']);
 });
 
 it('retains well-known destinations even when peer relay lists are oversized', async () => {
   const many = (prefix: string) =>
     Array.from({ length: 100 }, (_, i) => `wss://${prefix}${i}.example`);
-  const request = jest.fn(async (_relays: string[], filters: Filter | Filter[]) =>
-    Array.isArray(filters)
-      ? [
-          { ...event, kind: 10051, tags: many('key').map((r) => ['relay', r]) },
-          { ...event, kind: 10002, tags: many('write').map((r) => ['r', r]) },
-        ]
-      : [],
-  );
-  await fetchKeyPackageEvents({ request }, many('lookup'), owner);
-  expect(request.mock.calls[0][0].length).toBeLessThanOrEqual(12);
-  expect(request.mock.calls[0][0]).toEqual(
-    expect.arrayContaining(['wss://purplepag.es', 'wss://user.kindpag.es']),
-  );
-  expect(request.mock.calls[1][0]).toHaveLength(27);
-  expect(request.mock.calls[1][0]).toEqual(expect.arrayContaining(MARMOT_KEY_PACKAGE_RELAYS));
+  const lists = async () => ({ keyPackage: many('key'), write: many('write') });
+  const request = jest.fn(async (_relays: string[], _filters: Filter | Filter[]) => []);
+  await fetchKeyPackageEvents({ request }, many('lookup'), owner, lists);
+  expect(request.mock.calls[0][0]).toHaveLength(27);
+  expect(request.mock.calls[0][0]).toEqual(expect.arrayContaining(MARMOT_KEY_PACKAGE_RELAYS));
 });
 it('checks cancellation after storage waits before asking a signer', async () => {
   const t = setup();

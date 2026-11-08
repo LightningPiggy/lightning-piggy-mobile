@@ -714,6 +714,10 @@
     "removeMember": "Remove {{name}}",
     "addMembers": "Add members",
     "pickFriendSubtitle": "Pick a friend to add to this group",
+    "inviteWaitingForRelays": "Invitation waiting: {{name}} hasn't published inbox relays yet. It'll be sent once they do.",
+    "invitePending": "Invitation not delivered yet. Lightning Piggy will keep trying.",
+    "inviteWaitingForRelaysRemote": "Invitation waiting: {{name}} hasn't published inbox relays yet. It'll be sent the next time you send a message here after they do.",
+    "invitePendingRemote": "Invitation not delivered yet. It'll be retried the next time you send a message here.",
     "follow": "Follow",
     "following": "Following",
     "followMember": "Follow {{name}}",
@@ -3016,6 +3020,7 @@
   "marmotFallback": {
     "titleNoKeyPackage": "{{name}} isn't on Marmot yet",
     "titleOutdated": "{{name}}'s Marmot app needs opening or updating",
+    "titleNoInbox": "Can't reach {{name}} on Marmot yet",
     "body": "Send this with NIP-17 instead? It's still end-to-end encrypted, but Marmot hides more about who you're talking to.",
     "willNotify": "We'll also let them know you tried Marmot.",
     "cancel": "Cancel",
@@ -3025,6 +3030,8 @@
   "marmotSend": {
     "noKeyPackage": "We couldn't find a Marmot key package on this person's relays. They may need to open their Marmot app so it can publish one — or use NIP-17 for now.",
     "outdatedKeyPackage": "This person's Marmot key package has expired, or uses an older version of Marmot that Lightning Piggy can't talk to yet. Opening or updating their Marmot app should fix it — use NIP-17 for now.",
+    "noInbox": "This person hasn't published any relays where a Marmot invitation can reach them, so no chat was started. Once their messaging relays are set up you can try again — or use NIP-17 for now.",
+    "noInboxGroup": "None of these people have published relays where a Marmot invitation can reach them, so nothing was created. Try again once their messaging relays are set up — or use NIP-17 for now.",
     "sendFailedTitle": "Send failed",
     "couldNotSendVoice": "Could not send voice note.",
     "couldNotSendPhoto": "Could not send image.",
@@ -3170,7 +3177,12 @@
     "progressTitle": "Inviting devices… {{done}} of {{total}}",
     "progressBody": "Approve each request in your signer — every phone or app this person uses needs its own invitation.",
     "notReachedTitle": "Invitation not delivered yet",
-    "notReachedBody": "We couldn't deliver the invitation to {{names}} yet. Lightning Piggy will keep trying automatically."
+    "notReachedBody": "We couldn't deliver the invitation to {{names}} yet. Lightning Piggy will keep trying automatically.",
+    "notReachedBodyRemote": "We couldn't deliver the invitation to {{names}} yet. It'll be retried the next time you send a message here.",
+    "waitingForRelaysBodyOne": "{{names}} hasn't published inbox relays yet. Lightning Piggy will send the invitation once they do.",
+    "waitingForRelaysBodyOther": "{{names}} haven't published inbox relays yet. Lightning Piggy will send their invitations once they do.",
+    "waitingForRelaysBodyOneRemote": "{{names}} hasn't published inbox relays yet. The invitation will be sent the next time you send a message here after they do.",
+    "waitingForRelaysBodyOtherRemote": "{{names}} haven't published inbox relays yet. Their invitations will be sent the next time you send a message here after they do."
   },
   "invitationKeys": {
     "title": "Devices for new chats",

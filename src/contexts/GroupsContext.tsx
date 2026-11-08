@@ -53,6 +53,7 @@ import { isMarmotGroupId } from '../services/marmotSession';
 import { isNip171GroupId } from '../utils/nip171';
 import { useNip171Groups } from './useNip171Groups';
 import { useMarmotGroups } from './useMarmotGroups';
+import { isRemoteSigner } from '../utils/marmotInviteNotice';
 import { useStableRelayList } from '../hooks/useStableRelayList';
 
 const FOLLOWING_ONLY_KEY_BASE = 'groups_following_only';
@@ -149,7 +150,8 @@ const EMPTY_ACTIVITY: Record<string, GroupActivity> = {};
 
 export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // NIP-17 groups (AsyncStorage-persisted). Marmot groups are merged in below.
-  const { publishGroupState, pubkey, relays, isLoggedIn, sendDirectMessage } = useNostr();
+  const { publishGroupState, pubkey, relays, isLoggedIn, sendDirectMessage, signerType } =
+    useNostr();
   // Re-activating a signed-out account lifts its group-history write guard
   // (#1240). Layout effect: before any child effect can write its history.
   useLayoutEffect(() => reviveGroupHistoryOwner(pubkey), [pubkey]);
@@ -181,7 +183,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     },
     [contacts],
   );
-  const marmot = useMarmotGroups(pubkey, contactName);
+  const marmot = useMarmotGroups(pubkey, contactName, isRemoteSigner(signerType));
   const nip171 = useNip171Groups(isLoggedIn ? pubkey : null);
   const groups = useMemo(
     () => [...storedGroups, ...marmot.groups, ...nip171.groups].map(groupDisplay),

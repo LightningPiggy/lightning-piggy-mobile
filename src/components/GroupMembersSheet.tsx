@@ -20,7 +20,8 @@ import GroupMemberListRow from './GroupMemberListRow';
 import type { GroupMemberRow } from '../utils/groupMemberRows';
 import { useGroupAdminActions } from '../hooks/useGroupAdminActions';
 import { canManageGroup } from '../utils/groupAdmins';
-import { useMarmotDeviceDetails } from '../hooks/useMarmotDevices';
+import { useMarmotDeviceDetails, useMarmotPendingInvites } from '../hooks/useMarmotDevices';
+import { isRemoteSigner } from '../utils/marmotInviteNotice';
 import type { DeviceInfo } from '../services/marmotDeviceTracker';
 
 const NO_DEVICES: DeviceInfo[] = [];
@@ -91,7 +92,7 @@ const GroupMembersSheet: React.FC<Props> = ({
   const t = useTranslation();
   const styles = useMemo(() => createGroupMembersSheetStyles(colors), [colors]);
   const { getGroup, addMembersToGroup, removeMemberFromGroup } = useGroups();
-  const { pubkey: selfPubkey } = useNostr();
+  const { pubkey: selfPubkey, signerType } = useNostr();
   const { followContact } = useNostrContacts();
   const sheetRef = useRef<BottomSheetModal>(null);
   const snapPoints = useMemo(() => ['85%'], []);
@@ -132,6 +133,8 @@ const GroupMembersSheet: React.FC<Props> = ({
     });
   }, []);
   const deviceDetails = useMarmotDeviceDetails(chatId, visible && expanded.size > 0);
+  // Members whose invitation hasn't reached them yet (#1402).
+  const pendingInvites = useMarmotPendingInvites(chatId, visible);
   const reportFailure = useCallback(
     (e: unknown) => {
       if (__DEV__) console.warn('[Group] membership change failed:', e);
@@ -279,6 +282,8 @@ const GroupMembersSheet: React.FC<Props> = ({
               canRemove={canManage}
               isAdmin={!readOnly && isMarmot && adminSet.has(m.pubkey.toLowerCase())}
               deviceCount={deviceCounts?.get(m.pubkey.toLowerCase())}
+              inviteStatus={pendingInvites?.get(m.pubkey.toLowerCase())}
+              remoteSigner={isRemoteSigner(signerType)}
               devicesExpanded={expanded.has(m.pubkey)}
               devices={
                 expanded.has(m.pubkey) && deviceDetails

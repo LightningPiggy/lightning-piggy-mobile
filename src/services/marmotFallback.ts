@@ -9,9 +9,16 @@ import type { BrandedAlertButton, BrandedAlertOptions } from '../components/Bran
 import { t } from '../i18n';
 import type { DmProtocol } from '../utils/dmProtocol';
 
-/** Why Marmot can't reach a peer: they published no key package, or only
- * ones this library can't use (expired, or an older Marmot format). */
-export type MarmotUnreachableReason = 'noKeyPackage' | 'outdatedKeyPackage';
+/** Why Marmot can't reach a peer: they published no key package, only ones
+ * this library can't use (expired, or an older Marmot format), or no relays an
+ * invitation can be delivered to (#1402). */
+export type MarmotUnreachableReason = 'noKeyPackage' | 'outdatedKeyPackage' | 'noInbox';
+
+const FALLBACK_TITLE: Record<MarmotUnreachableReason, string> = {
+  noKeyPackage: 'marmotFallback.titleNoKeyPackage',
+  outdatedKeyPackage: 'marmotFallback.titleOutdated',
+  noInbox: 'marmotFallback.titleNoInbox',
+};
 
 /** The reason to offer NIP-17 for a failed send, or null when the failure
  * isn't "Marmot can't reach them" (or the thread isn't Marmot at all). */
@@ -72,12 +79,7 @@ export function marmotFallbackPromptCopy(
 ): MarmotFallbackPromptCopy {
   const body = t('marmotFallback.body');
   return {
-    title: t(
-      reason === 'outdatedKeyPackage'
-        ? 'marmotFallback.titleOutdated'
-        : 'marmotFallback.titleNoKeyPackage',
-      { name },
-    ),
+    title: t(FALLBACK_TITLE[reason], { name }),
     message: noteAlreadySent ? body : `${body} ${t('marmotFallback.willNotify')}`,
     cancel: t('marmotFallback.cancel'),
     confirm: t('marmotFallback.confirm'),

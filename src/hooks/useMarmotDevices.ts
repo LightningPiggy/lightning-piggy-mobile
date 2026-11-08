@@ -20,9 +20,11 @@ import {
   subscribeDeviceNoticesEnabled,
 } from '../services/deviceNoticesPreference';
 import type { DeviceNoticeView, GroupDevices } from '../services/marmotDeviceTracker';
+import type { InviteStatus } from '../services/marmotWelcomePayloads';
 import {
   MARMOT_GROUP_ID_PREFIX,
   subscribeMarmotSession,
+  toMlsGroupId,
   type MarmotSession,
 } from '../services/marmotSession';
 
@@ -185,6 +187,69 @@ export function useMarmotDeviceDetails(
   const clear = useCallback(() => setDevices(null), []);
   useActiveSession(bind, clear);
   return devices && devices.chatId === chatId ? devices.view : null;
+}
+
+const sameInvites = (a: ReadonlyMap<string, InviteStatus>, b: ReadonlyMap<string, InviteStatus>) =>
+  a.size === b.size && [...a].every(([k, v]) => b.get(k) === v);
+
+/**
+ * Members whose invitation hasn't reached them yet, and why (#1402) — read
+ * only while `enabled` (the member list is open), and again when the chat's
+ * invitation queues change (coalesced by the session) or a commit changes
+ * the chat. Local storage only: no relay traffic.
+ */
+export function useMarmotPendingInvites(
+  chatId: string | null,
+  enabled: boolean,
+): ReadonlyMap<string, InviteStatus> | null {
+  const [state, setState] = useState<{
+    chatId: string;
+    invites: ReadonlyMap<string, InviteStatus>;
+  } | null>(null);
+  const bind = useCallback(
+    (session: MarmotSession) => {
+      setState(null);
+      if (!enabled || !chatId) return;
+      let live = true;
+      let latest = 0;
+      let loadedEpoch: number | null = null;
+      const load = () => {
+        const request = ++latest;
+        loadedEpoch = session.devices.epochOf(chatId);
+        session
+          .pendingInvites(chatId)
+          .then((invites) => {
+            if (!live || request !== latest) return;
+            setState((prev) =>
+              prev?.chatId === chatId && sameInvites(prev.invites, invites)
+                ? prev
+                : { chatId, invites },
+            );
+          })
+          .catch(() => undefined);
+      };
+      load();
+      const unsubscribe = session.subscribe({
+        onGroupsChanged: () => {
+          if (session.devices.epochOf(chatId) !== loadedEpoch) load();
+        },
+      });
+      // One id form at this boundary: the queues key chats by MLS id.
+      const mlsId = toMlsGroupId(chatId);
+      const unsubscribeInvites = session.onInvitesChanged((id) => {
+        if (id === mlsId) load();
+      });
+      return () => {
+        live = false;
+        unsubscribe();
+        unsubscribeInvites();
+      };
+    },
+    [chatId, enabled],
+  );
+  const clear = useCallback(() => setState(null), []);
+  useActiveSession(bind, clear);
+  return state && state.chatId === chatId ? state.invites : null;
 }
 
 /** Whether the "Show device changes in chats" developer switch is on. */

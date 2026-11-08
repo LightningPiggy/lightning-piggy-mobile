@@ -37,15 +37,14 @@ import {
   cleanKeyPackageRelays,
   MAX_KEY_PACKAGE_RELAYS,
   MARMOT_KEY_PACKAGE_RELAYS,
-  parseKeyPackageRelayList,
 } from './marmotKeyPackageRelays';
-import { RELAY_LIST_INDEXERS, relayListFromTags } from '../utils/relayListEvents';
+import type { KeyPackageListLookup, MarmotPeerLists } from './marmotPeerRelayLists';
+import { requireWelcomeDestination } from './marmotWelcomeRelays';
 import {
   isUsableKeyPackage,
   MarmotKeyPackageLookupError,
   MarmotNoKeyPackageError,
   MarmotUnusableKeyPackageError,
-  newestEvent,
   newestKeyPackagePerSlot,
 } from './marmotKeyPackages';
 import { advertisesMediaV2 } from './marmotKeyPackageLifecycle';
@@ -85,41 +84,26 @@ type KeyPackageRequest = (
 type Yield = () => Promise<void> | void;
 
 /**
- * A peer's kind-30443 events via their newest 10051, NIP-65 and well-known
- * Marmot relays. Bounded: `limit` on
- * both filters, and the network resolves each request on EOSE or timeout.
+ * A peer's kind-30443 events via their newest 10051, NIP-65 write and
+ * well-known Marmot relays. The lists come from `lists` (the shared, cached
+ * peer relay-list lookup — marmotPeerRelayLists); the key-package read is
+ * bounded by `limit` and the network resolves it on EOSE or timeout.
  */
 export async function fetchKeyPackageEvents(
   network: Pick<NostrNetworkInterface, 'request'>,
   lookupRelays: string[],
   peer: string,
+  lists: KeyPackageListLookup,
 ): Promise<NostrEvent[]> {
   const author = peer.toLowerCase();
-  const lookup = cleanKeyPackageRelays([
-    ...cleanKeyPackageRelays(lookupRelays, 6),
-    ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS),
-    ...enabledAppRelays('indexers', RELAY_LIST_INDEXERS),
-  ]);
-  const lists = (await network.request(lookup, [
-    { kinds: [10051], authors: [author], limit: 1 },
-    { kinds: [10002], authors: [author], limit: 1 },
-  ])) as NostrEvent[];
-  const latest = (kind: number) =>
-    newestEvent(lists.filter((e) => e.kind === kind && e.pubkey === author));
-  const keyRelays = latest(10051);
-  const nip65 = latest(10002);
+  const { keyPackage, write } = await lists(author);
   // A single bounded request keeps all device slots visible, in preference
   // order: advertised key-package relays, NIP-65 writes, well-known relays.
+  // Each list is capped so the well-known relays always keep their room.
   const targets = cleanKeyPackageRelays(
     [
-      ...(keyRelays ? parseKeyPackageRelayList(keyRelays.tags) : []),
-      ...(nip65
-        ? cleanKeyPackageRelays(
-            relayListFromTags(nip65.tags)
-              .filter((r) => r.write)
-              .map((r) => r.url),
-          )
-        : []),
+      ...cleanKeyPackageRelays(keyPackage),
+      ...cleanKeyPackageRelays(write),
       ...enabledAppRelays('marmot', MARMOT_KEY_PACKAGE_RELAYS),
       ...lookupRelays,
     ],
@@ -292,8 +276,9 @@ export async function fetchDevices(
   network: Pick<NostrNetworkInterface, 'request'>,
   lookupRelays: string[],
   peer: string,
+  lists: KeyPackageListLookup,
 ): Promise<NostrEvent[]> {
-  const events = await fetchKeyPackageEvents(network, lookupRelays, peer);
+  const events = await fetchKeyPackageEvents(network, lookupRelays, peer, lists);
   const scheduler = createYieldScheduler({ safetyEvery: 4 });
   try {
     return await selectDeviceKeyPackages(peer, events, { yieldNow: scheduler.maybeYield });
@@ -311,13 +296,14 @@ export async function resolveInvitees(
   lookupRelays: string[],
   self: string,
   members: string[],
+  lists: KeyPackageListLookup,
 ): Promise<Map<string, NostrEvent[]>> {
   const me = self.toLowerCase();
   const peers = [...new Set(members.map((m) => m.toLowerCase()))].filter((m) => m !== me);
   markDmSetup(`lookup start peers=${peers.length}`);
-  const lists = await Promise.all(
+  const found = await Promise.all(
     peers.map((p) =>
-      fetchDevices(network, lookupRelays, p).then(
+      fetchDevices(network, lookupRelays, p, lists).then(
         (devices) => (markDmSetup(`lookup ${p.slice(0, 8)} devices=${devices.length}`), devices),
         (e: unknown) => {
           markDmSetup(`lookup ${p.slice(0, 8)} failed ${(e as Error)?.name ?? 'error'}`);
@@ -327,9 +313,29 @@ export async function resolveInvitees(
     ),
   );
   peers.forEach((p, i) => {
-    if (lists[i].length === 0) throw new MarmotNoKeyPackageError(p);
+    if (found[i].length === 0) throw new MarmotNoKeyPackageError(p);
   });
-  return new Map(peers.map((p, i) => [p, lists[i]]));
+  return new Map(peers.map((p, i) => [p, found[i]]));
+}
+
+/** One session's key-package discovery: its network, its live lookup relays
+ * and its peers' relay lists (marmotPeerRelayLists), bound once. `invitees`
+ * also refuses an invite nobody in it could receive (requireWelcomeDestination). */
+export function keyPackageDiscovery(
+  network: Pick<NostrNetworkInterface, 'request' | 'getUserInboxRelays'>,
+  getLookupRelays: () => string[],
+  peers: MarmotPeerLists,
+) {
+  const lists = peers.keyPackage;
+  return {
+    events: (peer: string) => fetchKeyPackageEvents(network, getLookupRelays(), peer, lists),
+    devices: (peer: string) => fetchDevices(network, getLookupRelays(), peer, lists),
+    invitees: async (self: string, members: string[]) => {
+      const devices = await resolveInvitees(network, getLookupRelays(), self, members, lists);
+      await requireWelcomeDestination(network, devices, peers.read);
+      return devices;
+    },
+  };
 }
 
 export interface InviteResult {
@@ -349,7 +355,7 @@ export interface InviteResult {
  */
 export async function inviteDevices(
   groups: Pick<MarmotClient['groups'], 'get' | 'send'>,
-  outbox: Pick<MarmotWelcomeOutbox, 'capture' | 'resend' | 'enqueue'>,
+  outbox: Pick<MarmotWelcomeOutbox, 'capture' | 'resend' | 'enqueue' | 'generation'>,
   mlsId: string,
   actorPubkey: string,
   devices: Map<string, NostrEvent[]>,
@@ -368,15 +374,17 @@ export async function inviteDevices(
   onProgress?.(0, total);
   // "queued" → "sending": a gap means an earlier invite still holds the outbox.
   markDmSetup(`invite queued welcomes=${total}`);
+  // Leaving / losing the chat mid-invite stops its retries here too (#1402).
+  const guard = { groupIdHex: mlsId, generation: outbox.generation(mlsId) };
   const { result, failed } = await outbox.capture(
     () => (markDmSetup('invite sending'), groups.send(mlsId, intent)),
     () => (markDmSetup(`welcome ${done + 1}/${total} published`), onProgress?.(++done, total)),
   );
   markDmSetup(`invite sent failedWelcomes=${failed.length}`);
   const delivered = deliveredAccounts(result);
-  const stillFailed = failed.length > 0 ? await outbox.resend(failed) : [];
+  const stillFailed = failed.length > 0 ? await outbox.resend(failed, guard) : [];
   for (const w of failed) if (!stillFailed.includes(w)) delivered.add(w.recipient);
-  if (stillFailed.length > 0) await outbox.enqueue(mlsId, stillFailed);
+  if (stillFailed.length > 0) await outbox.enqueue(mlsId, stillFailed, guard.generation);
   if (failed.length > 0) markDmSetup(`welcome resend stillFailed=${stillFailed.length}`);
   const undelivered = [...batch.devices.keys()].filter((p) => !delivered.has(p));
   if (__DEV__) {

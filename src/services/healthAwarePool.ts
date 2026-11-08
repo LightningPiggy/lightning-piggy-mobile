@@ -264,6 +264,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
         onReqOpen?: () => void;
         /** See `openRelayReq`: report auth-required instead of signing. */
         noAuth?: boolean;
+        /** Also given each reason's relay (normalised), in the same order. */
+        onclose?: (reasons: string[], urls?: string[]) => void;
       },
     ): ReturnType<AbstractSimplePool['subscribeMap']> {
       requests = activeAccountRelayRequests(requests);
@@ -287,13 +289,15 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
         closed = true;
         params.abort?.removeEventListener('abort', abort);
         handles.forEach((handle) => handle.close(reason));
+        const urls = [...grouped.keys()];
         notifyClose(
-          [...grouped.keys()].map((url) => reasons.get(url) ?? reason),
+          urls.map((url) => reasons.get(url) ?? reason),
           deferNotification,
+          urls,
         );
       };
       const abort = () => close('aborted', false);
-      const notifyClose = (errors: string[], deferNotification = false) => {
+      const notifyClose = (errors: string[], deferNotification = false, urls: string[] = []) => {
         if (notifiedClose) return;
         notifiedClose = true;
         closed = true;
@@ -301,8 +305,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
         // Match the SDK pool's asynchronous caller-close notification. NIP-46
         // fromURI closes its pairing REQ before marking the handshake successful.
         // Retire the REQ immediately, but let that caller finish before notifying.
-        if (deferNotification) void Promise.resolve().then(() => params.onclose?.(errors));
-        else params.onclose?.(errors);
+        if (deferNotification) void Promise.resolve().then(() => params.onclose?.(errors, urls));
+        else params.onclose?.(errors, urls);
       };
       const eose = (url: string) => {
         eosed.add(url);
@@ -342,7 +346,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
                     if (options.mode === 'oneshot') {
                       handle?.close('closed automatically on eose');
                       reasons.set(url, 'closed automatically on eose');
-                      if (reasons.size === grouped.size) notifyClose([...reasons.values()]);
+                      if (reasons.size === grouped.size)
+                        notifyClose([...reasons.values()], false, [...reasons.keys()]);
                     }
                   }
                 }
@@ -356,7 +361,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
                 reasons.set(url, errors.join('; '));
                 handle?.close();
                 eose(url);
-                if (reasons.size === grouped.size) notifyClose([...reasons.values()]);
+                if (reasons.size === grouped.size)
+                  notifyClose([...reasons.values()], false, [...reasons.keys()]);
               },
             });
             return {
@@ -369,7 +375,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
           (reason) => {
             reasons.set(url, reason);
             eose(url);
-            if (!closed && reasons.size === grouped.size) notifyClose([...reasons.values()]);
+            if (!closed && reasons.size === grouped.size)
+              notifyClose([...reasons.values()], false, [...reasons.keys()]);
           },
           options,
         );
@@ -446,12 +453,13 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
        * timed out in the REQ budget, or were skipped), so the caller can tell
        * "nothing published" from "couldn't ask". Timing is unchanged. */
       /** `onClose`: every relay's close reason, before the read settles — a
-       * real EOSE reads `closed automatically on eose`. */
+       * real EOSE reads `closed automatically on eose` — and (same order) the
+       * relay each came from. */
       options: {
         abort?: AbortSignal;
         requireEose?: boolean;
         requireAnswer?: boolean;
-        onClose?: (reasons: string[]) => void;
+        onClose?: (reasons: string[], urls?: string[]) => void;
       } = {},
     ): Promise<NostrEvent[]> {
       return new Promise((resolve, reject) => {
@@ -472,13 +480,13 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
               timeoutMs,
             },
             onevent: (event) => events.push(event),
-            onclose: (reasons) => {
+            onclose: (reasons: string[], relayUrls: string[] = []) => {
               // A read is authoritative once ANY relay served its history to
               // EOSE. Group relay lists routinely carry a dead, AUTH-gated or
               // slow relay (and the health layer always keeps two), so demanding
               // EOSE from every relay would hold live delivery for ever. Only a
               // read that no relay completed (failed, timed out, skipped) rejects.
-              options.onClose?.(reasons);
+              options.onClose?.(reasons, relayUrls);
               const eosed = reasons.filter((reason) => reason === 'closed automatically on eose');
               if (options.requireEose && !options.abort?.aborted && eosed.length === 0)
                 reject(new Error('Group recovery did not reach EOSE: ' + reasons.join('; ')));

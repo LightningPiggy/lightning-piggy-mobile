@@ -201,7 +201,7 @@ test('aborting a queued REQ cancels it without opening and each socket has its o
   await tick();
   expect(otherPool.active.size).toBe(1);
   abort.abort();
-  expect(onclose).toHaveBeenCalledWith(['aborted']);
+  expect(onclose).toHaveBeenCalledWith(['aborted'], ['wss://relay.primal.net/']);
   pool.destroy();
   otherPool.destroy();
   await tick();

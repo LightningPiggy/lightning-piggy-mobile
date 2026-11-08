@@ -714,6 +714,10 @@
     "removeMember": "{{name}} entfernen",
     "addMembers": "Mitglieder hinzufügen",
     "pickFriendSubtitle": "Wähle einen Freund, der zur Gruppe hinzugefügt werden soll",
+    "inviteWaitingForRelays": "Einladung wartet: {{name}} hat noch keine Posteingangs-Relays veröffentlicht. Sie wird gesendet, sobald das passiert.",
+    "invitePending": "Einladung noch nicht zugestellt. Lightning Piggy versucht es weiter.",
+    "inviteWaitingForRelaysRemote": "Einladung wartet: {{name}} hat noch keine Posteingangs-Relays veröffentlicht. Sie wird gesendet, wenn du hier danach das nächste Mal eine Nachricht schickst.",
+    "invitePendingRemote": "Einladung noch nicht zugestellt. Sie wird erneut versucht, wenn du hier das nächste Mal eine Nachricht schickst.",
     "follow": "Folgen",
     "following": "Du folgst",
     "followMember": "{{name}} folgen",
@@ -3016,6 +3020,7 @@
   "marmotFallback": {
     "titleNoKeyPackage": "{{name}} ist noch nicht auf Marmot",
     "titleOutdated": "Die Marmot-App von {{name}} muss geöffnet oder aktualisiert werden",
+    "titleNoInbox": "{{name}} ist auf Marmot noch nicht erreichbar",
     "body": "Stattdessen mit NIP-17 senden? Es ist weiterhin Ende-zu-Ende-verschlüsselt, aber Marmot verbirgt mehr darüber, mit wem du sprichst.",
     "willNotify": "Wir lassen die Person auch wissen, dass du es mit Marmot versucht hast.",
     "cancel": "Abbrechen",
@@ -3025,6 +3030,8 @@
   "marmotSend": {
     "noKeyPackage": "Auf den Relays dieser Person wurde kein Marmot-Key-Package gefunden. Sie muss vielleicht ihre Marmot-App öffnen, damit sie eines veröffentlicht – oder nutze vorerst NIP-17.",
     "outdatedKeyPackage": "Das Marmot-Key-Package dieser Person ist abgelaufen oder nutzt eine ältere Marmot-Version, mit der Lightning Piggy noch nicht sprechen kann. Das Öffnen oder Aktualisieren ihrer Marmot-App sollte helfen – nutze vorerst NIP-17.",
+    "noInbox": "Diese Person hat keine Relays veröffentlicht, über die eine Marmot-Einladung sie erreichen kann, deshalb wurde kein Chat gestartet. Sobald ihre Nachrichten-Relays eingerichtet sind, kannst du es erneut versuchen – oder nutze vorerst NIP-17.",
+    "noInboxGroup": "Keine dieser Personen hat Relays veröffentlicht, über die eine Marmot-Einladung sie erreichen kann, deshalb wurde nichts erstellt. Versuche es erneut, sobald ihre Nachrichten-Relays eingerichtet sind – oder nutze vorerst NIP-17.",
     "sendFailedTitle": "Senden fehlgeschlagen",
     "couldNotSendVoice": "Die Sprachnachricht konnte nicht gesendet werden.",
     "couldNotSendPhoto": "Das Bild konnte nicht gesendet werden.",
@@ -3170,7 +3177,12 @@
     "progressTitle": "Geräte werden eingeladen… {{done}} von {{total}}",
     "progressBody": "Bestätige jede Anfrage in deinem Signer – jedes Handy und jede App dieser Person braucht eine eigene Einladung.",
     "notReachedTitle": "Einladung noch nicht zugestellt",
-    "notReachedBody": "Wir konnten die Einladung an {{names}} noch nicht zustellen. Lightning Piggy versucht es automatisch weiter."
+    "notReachedBody": "Wir konnten die Einladung an {{names}} noch nicht zustellen. Lightning Piggy versucht es automatisch weiter.",
+    "notReachedBodyRemote": "Die Einladung an {{names}} konnte noch nicht zugestellt werden. Sie wird erneut versucht, wenn du hier das nächste Mal eine Nachricht schickst.",
+    "waitingForRelaysBodyOne": "{{names}} hat noch keine Posteingangs-Relays veröffentlicht. Lightning Piggy sendet die Einladung, sobald das passiert.",
+    "waitingForRelaysBodyOther": "{{names}} haben noch keine Posteingangs-Relays veröffentlicht. Lightning Piggy sendet ihre Einladungen, sobald das passiert.",
+    "waitingForRelaysBodyOneRemote": "{{names}} hat noch keine Posteingangs-Relays veröffentlicht. Die Einladung wird gesendet, wenn du hier danach das nächste Mal eine Nachricht schickst.",
+    "waitingForRelaysBodyOtherRemote": "{{names}} haben noch keine Posteingangs-Relays veröffentlicht. Ihre Einladungen werden gesendet, wenn du hier danach das nächste Mal eine Nachricht schickst."
   },
   "invitationKeys": {
     "title": "Geräte für neue Chats",
