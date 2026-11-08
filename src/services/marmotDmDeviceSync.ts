@@ -36,7 +36,7 @@ import type { Event as NostrEvent } from 'nostr-tools';
 
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { amberFailureKind } from './amberErrors';
-import { NostrConnectError } from './signerErrors';
+import { NostrConnectError, SignerTimeoutError } from './signerErrors';
 import { keyPackageSignatureKey, readGroupLeaves, type GroupLeaf } from './marmotDevices';
 import { MAX_DEVICES_PER_PERSON, selectDeviceKeyPackages } from './marmotInvitees';
 import type { MarmotKvBackend } from './marmotStore';
@@ -159,10 +159,6 @@ export class MarmotDmDeviceSync {
     };
   }
 
-  isDeclined(mlsId: string, packageId: string): boolean {
-    return this.declined.has(`${mlsId}:${packageId}`);
-  }
-
   /**
    * A queued Welcome whose signature the user declined for one of THIS
    * sync's automatic top-ups: not asked again this session, so a busy 1:1
@@ -178,6 +174,7 @@ export class MarmotDmDeviceSync {
     if (
       !this.opts.silentSigner &&
       (amberFailureKind(error) === 'declined' ||
+        error instanceof SignerTimeoutError ||
         (error instanceof NostrConnectError && error.kind === 'permission'))
     ) {
       for (const kp of packages) this.declined.add(`${mlsId}:${kp.id}`);

@@ -60,6 +60,7 @@ export type WelcomeWaitReason = NoWelcomeRelaysReason | 'signerDenied' | 'signer
 
 /** A signer refusal / timeout while sealing a Welcome, or null. */
 export function signerFailureReason(e: unknown): 'signerDenied' | 'signerTimeout' | null {
+  if (e instanceof WelcomeSignerSkippedError) return e.reason;
   if (e instanceof SignerTimeoutError || amberFailureKind(e) === 'no-response')
     return 'signerTimeout';
   if (
@@ -68,6 +69,17 @@ export function signerFailureReason(e: unknown): 'signerDenied' | 'signerTimeout
   )
     return 'signerDenied';
   return null;
+}
+
+/** Not asked: the signer declined / went quiet on an earlier Welcome of the
+ * same batch, so this one is recorded the same way (one wait per batch). */
+export class WelcomeSignerSkippedError extends Error {
+  constructor(readonly reason: 'signerDenied' | 'signerTimeout') {
+    super(
+      `Welcome not signed: the signer ${reason === 'signerDenied' ? 'declined' : 'timed out'} on this invite`,
+    );
+    this.name = 'WelcomeSignerSkippedError';
+  }
 }
 
 /** The people an invite didn't reach yet, and why (#1402). */
@@ -96,6 +108,14 @@ export class MarmotWelcomePayloads {
   private readonly running = new Map<string, ReturnType<NostrWelcomeDelivery['deliver']>>();
   /** Payloads that had nowhere to go: when to try them again (in memory). */
   private readonly backoff = new Map<string, { at: number; delayMs: number }>();
+  /** Welcome signatures run one at a time (the signer queue is serial anyway). */
+  private signing: Promise<unknown> = Promise.resolve();
+  /** Per chat: the signer declined / timed out at `at` (seconds); its Welcomes
+   * queued no later aren't asked again until the user's next send (`retry`). */
+  private readonly signerGaveUp = new Map<
+    string,
+    { reason: 'signerDenied' | 'signerTimeout'; at: number }
+  >();
 
   constructor(
     private readonly backend: MarmotKvBackend,
@@ -200,7 +220,9 @@ export class MarmotWelcomePayloads {
 
   /** Back off a Welcome with nowhere to go and record why. */
   private async noteWaiting(id: string, item: PendingPayload, reason: WelcomeWaitReason) {
-    this.backoff.set(id, nextRetryBackoff(this.backoff.get(id)));
+    // Waiting on our signer: a fixed first step, so "you'll be asked again the
+    // next time you send" holds after a minute. Lookups back off, doubling.
+    this.backoff.set(id, nextRetryBackoff(signerReason(reason) ? undefined : this.backoff.get(id)));
     await this.recordReason(id, item, reason);
   }
 
@@ -223,7 +245,9 @@ export class MarmotWelcomePayloads {
     const relays = await welcomeRelays(delivery.network, item.keyPackage, this.readRelays);
     current();
     const signer = this.devices.observeSigner(delivery.signer, item.groupId, [item.keyPackage]);
-    const event = await GiftWrapFactory.create(signer, item.keyPackage.pubkey, item.rumor);
+    const event = await this.signInTurn(item, current, () =>
+      GiftWrapFactory.create(signer, item.keyPackage.pubkey, item.rumor),
+    );
     current();
     // Promote to the signed outbox before publishing: further retries need
     // no approval, and a thrown publish cannot lose the invitation either.
@@ -242,6 +266,30 @@ export class MarmotWelcomePayloads {
     const response = await delivery.network.publish(relays, event);
     if (Object.values(response).some((r) => r.ok)) await this.outbox.remove(event.id);
     return response;
+  }
+
+  /**
+   * One Welcome signature at a time. Once the signer declines or doesn't
+   * answer one, the rest of that chat's Welcomes queued no later are recorded
+   * the same way without asking: a silent bunker costs one wait per invite
+   * batch, not one per device (#1402).
+   */
+  private signInTurn<T>(item: PendingPayload, current: () => void, sign: () => Promise<T>) {
+    const run = this.signing.then(async (): Promise<T> => {
+      current(); // dropped / stopped while waiting its turn
+      const gaveUp = this.signerGaveUp.get(item.groupId);
+      if (gaveUp && item.queuedAt <= gaveUp.at) throw new WelcomeSignerSkippedError(gaveUp.reason);
+      try {
+        return await sign();
+      } catch (e) {
+        const reason = signerFailureReason(e);
+        const at = Math.floor(Date.now() / 1000);
+        if (reason) this.signerGaveUp.set(item.groupId, { reason, at });
+        throw e;
+      }
+    });
+    this.signing = run.catch(() => undefined);
+    return run;
   }
 
   /** Forget a group's queued Welcomes — with `outbox`, its signed ones too. */
@@ -264,6 +312,7 @@ export class MarmotWelcomePayloads {
    * send), so a signer prompt never comes out of nowhere. Never rejects.
    */
   retry(groupId: string): Promise<void> {
+    this.signerGaveUp.delete(groupId); // the user's send: ask the signer again
     return Promise.all([this.outbox.flush(groupId), this.flush(groupId)]).then(
       () => undefined,
       () => undefined,

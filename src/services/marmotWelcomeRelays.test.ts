@@ -6,6 +6,7 @@ import type { Event as NostrEvent } from 'nostr-tools';
 import { AppState, type AppStateStatus } from 'react-native';
 
 import { MarmotDmDeviceSync } from './marmotDmDeviceSync';
+import { NostrConnectError, SignerTimeoutError } from './signerErrors';
 import { createMemoryMarmotBackend } from './marmotStore';
 import { INVITE_CHANGE_COALESCE_MS, MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
 import {
@@ -244,6 +245,44 @@ describe('MarmotWelcomePayloads routing and retries', () => {
     expect(t.publish).not.toHaveBeenCalled();
     expect(await t.outbox.pending()).toEqual([]);
     expect(await t.backend.keys('welcomePayloads')).toEqual([]);
+  });
+
+  it('a silent signer costs one wait per batch: later devices are recorded without asking', async () => {
+    const t = setup([INBOX]);
+    t.signEvent.mockRejectedValueOnce(new SignerTimeoutError());
+    const results = await Promise.allSettled([
+      t.deliver(keyPackage([], INVITEE, 'phone')),
+      t.deliver(keyPackage([], INVITEE, 'tablet')),
+    ]);
+    expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected']);
+    expect(t.signEvent).toHaveBeenCalledTimes(1); // the tablet's Welcome never asked
+    const reasons = await Promise.all(
+      (await t.backend.keys('welcomePayloads')).map(
+        async (k) => JSON.parse((await t.backend.get('welcomePayloads', k)) ?? '{}').reason,
+      ),
+    );
+    expect(reasons).toEqual(['signerTimeout', 'signerTimeout']);
+    expect(await t.payloads.inviteStatus(GROUP)).toEqual(new Map([[INVITEE, 'needsSigner']]));
+  });
+
+  it('a declined Welcome is asked again on every send a minute apart (no doubling backoff)', async () => {
+    const t = setup([INBOX]);
+    t.signEvent.mockRejectedValue(new NostrConnectError('permission', 'denied'));
+    await t.deliver(hinted).catch(() => undefined);
+    expect(t.signEvent).toHaveBeenCalledTimes(1);
+    const now = Date.now();
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now + NO_RELAYS_RETRY_MS - 1);
+    await t.payloads.retry(GROUP); // inside the minute: not asked
+    expect(t.signEvent).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(now + NO_RELAYS_RETRY_MS);
+    await t.payloads.retry(GROUP); // declined again
+    expect(t.signEvent).toHaveBeenCalledTimes(2);
+    // Still one minute later, not two: the next send asks again.
+    clock.mockReturnValue(now + 2 * NO_RELAYS_RETRY_MS);
+    t.signEvent.mockResolvedValue(wrap);
+    await t.payloads.retry(GROUP);
+    expect(t.signEvent).toHaveBeenCalledTimes(3);
+    expect(t.publish).toHaveBeenCalledWith([INBOX], wrap);
   });
 
   it('publishes to the invitee inbox', async () => {

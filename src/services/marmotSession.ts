@@ -594,19 +594,19 @@ export class MarmotSession {
    * declined / silent signer or refusing relays leave the Welcomes queued with
    * their reason, and the invitees come back as undelivered (#1402). */
   private async inviteKept(mlsId: string, devices: Map<string, NostrEvent[]>) {
-    const epochOf = () =>
-      this.client.groups.get(mlsId).then(
-        (g) => g.state.groupContext.epoch,
-        () => null,
-      );
-    const before = await epochOf();
     try {
       const { undelivered } = await this.inviteAll(mlsId, devices);
       return await this.welcomePayloads.outcome(mlsId, undelivered);
     } catch (e) {
-      const after = await epochOf();
-      if (after === null || after === before) throw e;
-      return this.welcomePayloads.outcome(mlsId, [...devices.keys()]);
+      // Committed = the invitees hold leaves now (an epoch change alone may be
+      // another member's commit while ours was refused and rolled back).
+      const state = await this.client.groups.get(mlsId).then(
+        (g) => g.state,
+        () => null,
+      );
+      const people = [...devices.keys()];
+      if (!state || !people.every((pk) => getPubkeyLeafNodeIndexes(state, pk).length > 0)) throw e;
+      return this.welcomePayloads.outcome(mlsId, people);
     }
   }
 

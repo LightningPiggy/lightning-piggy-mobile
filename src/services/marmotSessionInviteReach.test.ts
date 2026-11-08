@@ -221,3 +221,35 @@ test('a chat dropped while its first Welcome publish is pending is neither resen
   alice.session.stop();
   bob.session.stop();
 });
+
+test("an Add refused while another member's commit lands is a real failure, not 'not delivered yet'", async () => {
+  const relay = makeRelay();
+  const alice = makeSession(relay);
+  const bob = makeSession(relay);
+  const carol = makeSession(relay);
+  for (const s of [alice, bob, carol]) await s.session.start();
+  await bob.session.ensureKeyPackage();
+  await carol.session.ensureKeyPackage();
+  const group = await alice.session.createGroup('group', [bob.pubkey], {
+    adminPubkeys: [alice.pubkey, bob.pubkey],
+  });
+  await bob.session.acceptWelcome(unwrapWelcomes(relay, bob)[0]);
+  // Our Add is refused (marmot-ts rolls it back) while Bob's rename commit is
+  // processed: the epoch moves on, but Carol never became a member.
+  jest
+    .spyOn(alice.session as unknown as { inviteAll: () => Promise<never> }, 'inviteAll')
+    .mockImplementationOnce(async () => {
+      await bob.session.rename(group.id, 'renamed');
+      for (let i = 0; i < 200 && alice.session.getGroup(group.id)?.name !== 'renamed'; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(alice.session.getGroup(group.id)?.name).toBe('renamed');
+      throw new Error('commit refused');
+    });
+  await expect(alice.session.addMembers(group.id, [carol.pubkey])).rejects.toThrow(
+    'commit refused',
+  );
+  expect(alice.session.getGroup(group.id)?.memberPubkeys).not.toContain(carol.pubkey);
+  expect(await alice.session.pendingInvites(group.id)).toEqual(new Map());
+  for (const s of [alice, bob, carol]) s.session.stop();
+});
