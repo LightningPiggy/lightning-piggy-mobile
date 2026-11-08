@@ -14,6 +14,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   persistMergedProfileCache,
   PROFILES_CACHE_KEY_BASE,
+  profilePersisterFor,
   retireProfilePersists,
 } from './nostrCacheKeys';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -130,6 +131,20 @@ describe('persistMergedProfileCache (#852)', () => {
     // A persist after the wipe (signed back in) writes as usual.
     await persistMergedProfileCache(PK, {}, new Map([['c', profile('c')]]));
     expect(Object.keys(await readCache())).toEqual(['c']);
+  });
+
+  it('a load that STARTED before sign-out writes nothing back when it finishes after (#1390)', async () => {
+    // The contacts load starts (and binds its persister) while signed in...
+    const persist = profilePersisterFor(PK);
+    // ...sign-out wipes the account before the load's fetch has finished...
+    await retireProfilePersists(PK);
+    await AsyncStorage.removeItem(key);
+    // ...then the fetch finishes and persists: nothing comes back.
+    await persist({}, new Map([['a', profile('a')]]));
+    expect(await AsyncStorage.getItem(key)).toBeNull();
+    // A load started after the wipe persists as usual.
+    await profilePersisterFor(PK)({}, new Map([['b', profile('b')]]));
+    expect(Object.keys(await readCache())).toEqual(['b']);
   });
 
   it('falls back to the caller snapshot when the on-disk cache is corrupt', async () => {

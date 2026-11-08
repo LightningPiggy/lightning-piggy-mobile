@@ -79,7 +79,7 @@ import {
   CACHE_MAX_AGE_MS,
   MISSING_PROFILE_RETRY_MS,
   readCachedWithTtl,
-  persistMergedProfileCache,
+  profilePersisterFor,
 } from './nostrCacheKeys';
 import type { SignedEvent, ConversationMessage } from './nostrContextTypes';
 import { useOwnProfile } from './useOwnProfile';
@@ -545,6 +545,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       opts?: { force?: boolean; awaitProfiles?: boolean },
     ) => {
       const setContacts = contactsSetterFor(pk);
+      // Bound to the cache epoch NOW: a load that outlives a sign-out writes nothing back.
+      const persist = profilePersisterFor(pk);
       const finishFollowHydration = followHydratedSetterFor(pk);
       const { fetchedContacts, cachedProfileMap, cacheAgeMs } = await reconcileCachedContactFollows(
         pk,
@@ -609,16 +611,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           relayUrls,
           (partial) =>
             startTransition(() => setContacts((prev) => mergeContactProfiles(prev, partial))),
-          {
-            owner: pk,
-            onLateProfiles: (late) => void persistMergedProfileCache(pk, cachedProfileMap, late),
-          },
+          { owner: pk, onLateProfiles: (late) => void persist(cachedProfileMap, late) },
         );
         if (__DEV__)
           console.log(
             `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
           );
-        await persistMergedProfileCache(pk, cachedProfileMap, profileMap);
+        await persist(cachedProfileMap, profileMap);
       };
 
       if (opts?.awaitProfiles === false) {

@@ -372,3 +372,32 @@ it('a new set of read relays starts the viewer cursor afresh and re-opens paging
     { relays: ['wss://mine.example/', 'wss://new.example/'], until: 500 },
   ]);
 });
+
+it('a new set of read relays gets a fresh page budget, even after all 10 pages were used', async () => {
+  const page = jest.mocked(fetchAuthorFeedPage);
+  let t = 1000;
+  // Every page advances, so only the per-visit budget (10 pages) ends paging.
+  page.mockImplementation(async () => ({ events: [note(`p${t}`, (t -= 10))], complete: true }));
+  const { result, rerender } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    main.onEvent(note('newest', 1000), 'wss://mine.example/');
+  });
+  for (let i = 0; i < 11; i++) {
+    await act(async () => {
+      await result.current.loadMore();
+    });
+  }
+  expect(page).toHaveBeenCalledTimes(10);
+  expect(result.current.reachedEnd).toBe(true);
+  // The viewer changes their read relays: the new source must be asked.
+  mockRelays = [...mockDefaultRelays, { url: 'wss://new.example/', read: true, write: false }];
+  rerender({});
+  act(() => {
+    main.onEvent(note('fresh', 2000), 'wss://new.example/');
+  });
+  page.mockClear();
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(page).toHaveBeenCalledTimes(1);
+});

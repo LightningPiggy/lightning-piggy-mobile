@@ -8,10 +8,12 @@ import {
   FALLBACK_RETRY_THROTTLE_MS,
   FALLBACK_START_DELAY_MS,
   MAX_FALLBACK_PEOPLE,
+  MAX_VERIFIED_CANDIDATES,
   scheduleMissingProfileFallback,
 } from './profileOutboxFallback';
 import { setCurrentUserOwnRelays, setCurrentUserPubkey } from './nostrActiveAccount';
 import { querySyncAbortable } from './relayQuery';
+import { verifyEventCached } from './nostrVerifyCache';
 
 jest.mock('./nostrPool', () => ({
   pool: {},
@@ -28,6 +30,10 @@ jest.mock('./relayQuery', () => ({ querySyncAbortable: jest.fn() }));
 // The test events carry no signatures: "forged" ones are named so.
 jest.mock('./nostrVerifyCache', () => ({
   verifyEventCached: jest.fn((ev: { id: string }) => !ev.id.startsWith('forged')),
+}));
+const mockMaybeYield = jest.fn(async () => {});
+jest.mock('../contexts/nostrDecryptPacing', () => ({
+  createYieldScheduler: () => ({ maybeYield: mockMaybeYield, yieldCount: 0, dispose: () => {} }),
 }));
 
 const viewer = 'f'.repeat(64);
@@ -136,6 +142,50 @@ it("never LEASES the viewer's own relays, but asks one the caller didn't (on the
     alreadyAsked: [relay('dm-inbox')],
   });
   expect(query).not.toHaveBeenCalled();
+});
+
+it('a relay that ignores `limit` costs at most a few Schnorr checks per person', async () => {
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const verify = jest.mocked(verifyEventCached);
+  verify.mockClear();
+  // Twenty forged copies, newest first, with the genuine one oldest of all.
+  query.mockResolvedValue([
+    ...Array.from(
+      { length: 20 },
+      (_, i) => ({ ...(kind0(alice, 100 + i) as object), id: `forged-${i}` }) as never,
+    ),
+    kind0(alice, 1),
+  ]);
+  const found = await fetchMissingProfileEvents([alice], { ...opts, purpose: 'verified' });
+  expect(verify).toHaveBeenCalledTimes(MAX_VERIFIED_CANDIDATES);
+  // Paced: the budget-gated scheduler runs between Schnorr checks.
+  expect(mockMaybeYield).toHaveBeenCalledTimes(MAX_VERIFIED_CANDIDATES - 1);
+  // Only the newest few were checked: the buried genuine copy isn't reached.
+  expect(found.has(alice)).toBe(false);
+  // Events by someone else or of another kind are never verified.
+  verify.mockClear();
+  query.mockResolvedValue([
+    { ...(kind0(bob, 9) as object), id: 'other-author' } as never,
+    { ...(kind0(alice, 9) as object), id: 'other-kind', kind: 1 } as never,
+    kind0(alice, 5),
+  ]);
+  expect(
+    (await fetchMissingProfileEvents([alice], { ...opts, purpose: 'verified' })).get(alice)
+      ?.created_at,
+  ).toBe(5);
+  expect(verify).toHaveBeenCalledTimes(1);
+});
+
+it("an unasked own relay is never crowded out by the person's other relays (cap after filter)", async () => {
+  setCurrentUserOwnRelays([relay('dm-inbox')], true);
+  writeLists({ [alice]: ok([relay('w1'), relay('w2'), relay('w3'), relay('dm-inbox')]) });
+  await fetchMissingProfileEvents([alice], { ...opts, alreadyAsked: [] });
+  expect(query.mock.calls[0][1]).toEqual([
+    relay('w1'),
+    relay('w2'),
+    relay('w3'),
+    relay('dm-inbox'),
+  ]);
 });
 
 it('a forged newer copy never displaces a genuine one from another relay (CodeRabbit)', async () => {

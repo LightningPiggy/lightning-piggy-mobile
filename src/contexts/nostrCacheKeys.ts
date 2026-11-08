@@ -81,8 +81,10 @@ export function persistMergedProfileCache(
   pk: string,
   existing: Record<string, NostrProfile>,
   fetched: Map<string, NostrProfile>,
+  /** The account's cache epoch when the PRODUCER started (see
+   * profilePersisterFor); defaults to now, at queue time. */
+  epoch: number = persistEpochs.get(pk) ?? 0,
 ): Promise<void> {
-  const epoch = persistEpochs.get(pk) ?? 0;
   const run = (persistChains.get(pk) ?? Promise.resolve()).then(() =>
     persistMergedProfileCacheNow(pk, existing, fetched, epoch),
   );
@@ -104,6 +106,18 @@ const persistEpochs = new Map<string, number>();
  * persist already queued or running for it is retired — none writes after
  * this — and one mid-write finishes first, so the wipe removes what it wrote.
  */
+/**
+ * A profile-cache persist bound to `pk`'s cache epoch NOW — take it when the
+ * producer starts (e.g. a contacts load), so a fetch that began before a
+ * sign-out but finishes after it writes nothing back (#1390).
+ */
+export function profilePersisterFor(
+  pk: string,
+): (existing: Record<string, NostrProfile>, fetched: Map<string, NostrProfile>) => Promise<void> {
+  const epoch = persistEpochs.get(pk) ?? 0;
+  return (existing, fetched) => persistMergedProfileCache(pk, existing, fetched, epoch);
+}
+
 export async function retireProfilePersists(pk: string): Promise<void> {
   persistEpochs.set(pk, (persistEpochs.get(pk) ?? 0) + 1);
   await persistChains.get(pk);

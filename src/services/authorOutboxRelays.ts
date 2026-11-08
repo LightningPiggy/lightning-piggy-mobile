@@ -122,14 +122,22 @@ export async function authorWriteRelays(
 
 /**
  * The relays one person's lookup may use: their write relays, then the
- * (untrusted, so sanitised) hints, minus the viewer's relays, capped.
+ * (untrusted, so sanitised) hints, minus the relays already asked, kept by
+ * `only` (if given) — and THEN capped, so a filter never loses a relay to the
+ * cap.
  */
 export function personOutboxRelays(
   writeRelays: readonly string[],
   hints: readonly unknown[],
   alreadyAsked: readonly string[],
+  only?: (url: string) => boolean,
 ): string[] {
-  return withoutRelays([...writeRelays, ...sanitizePeerRelayUrls(hints)], alreadyAsked);
+  const all = withoutRelays(
+    [...writeRelays, ...sanitizePeerRelayUrls(hints)],
+    alreadyAsked,
+    Infinity,
+  );
+  return (only ? all.filter(only) : all).slice(0, MAX_AUTHOR_OUTBOX_RELAYS);
 }
 
 /**

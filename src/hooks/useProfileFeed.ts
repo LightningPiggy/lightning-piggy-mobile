@@ -120,6 +120,8 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
   // effect, so it runs first), and paging re-opens.
   useEffect(() => {
     cursorsRef.current.delete(VIEWER_SOURCE);
+    // A fresh per-visit page budget too, or a new source after 10 pages is never asked.
+    pagesRef.current = 0;
     if (reachedEndRef.current) setReachedEnd(false);
   }, [readRelays, setReachedEnd]);
 

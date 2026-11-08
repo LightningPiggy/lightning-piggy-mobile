@@ -13,6 +13,7 @@ import { getManyPeerRelayLists } from './peerRelayLists';
 import { querySyncAbortable } from './relayQuery';
 import { verifyEventCached } from './nostrVerifyCache';
 import { normalizeRelayUrl } from '../utils/relayListKey';
+import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 
 // The missing-profile fallback (#1390): someone whose kind-0 the viewer's
 // relays and the profile indexers don't have may still publish it on their
@@ -108,17 +109,39 @@ function recordMiss(key: string, now: number): void {
     recentMisses.delete(recentMisses.keys().next().value!);
 }
 
+/** Most kind-0 candidates per person that get a full signature check — a
+ * relay can ignore `limit: 1` and send many (forged) events. */
+export const MAX_VERIFIED_CANDIDATES = 3;
+
 /**
  * The newest kind-0 BY `pubkey` (relays can ignore `authors`) that passes a
  * full signature check: a forged newer copy from one relay never displaces a
  * genuine one from another, and every result can be trusted for its
- * `created_at` (newest-wins merging). At most one per asked relay (`limit: 1`).
+ * `created_at` (newest-wins merging). Bounded and paced: a cheap pubkey/kind
+ * filter first, then at most MAX_VERIFIED_CANDIDATES newest are verified,
+ * with the budget-gated yield scheduler between Schnorr checks (CLAUDE.md:
+ * heavy loops yield) so they never run back to back on the JS thread.
  */
-function newestProfile(events: readonly Event[], pubkey: string): Event | undefined {
-  return events
+async function newestProfile(
+  events: readonly Event[],
+  pubkey: string,
+  signal: AbortSignal | undefined,
+): Promise<Event | undefined> {
+  const candidates = events
     .filter((ev) => ev.pubkey === pubkey && ev.kind === 0)
     .sort((a, b) => b.created_at - a.created_at)
-    .find((ev) => verifyEventCached(ev));
+    .slice(0, MAX_VERIFIED_CANDIDATES);
+  const scheduler = createYieldScheduler({ signal, safetyEvery: MAX_VERIFIED_CANDIDATES + 1 });
+  try {
+    for (let i = 0; i < candidates.length; i++) {
+      if (i > 0) await scheduler.maybeYield();
+      if (signal?.aborted) return undefined;
+      if (verifyEventCached(candidates[i])) return candidates[i];
+    }
+    return undefined;
+  } finally {
+    scheduler.dispose();
+  }
 }
 
 /** `skipped`: over the app-wide relay ceiling, or cancelled — not a miss, just not now. */
@@ -145,7 +168,7 @@ async function lookupOne(
       { maxWait: FALLBACK_QUERY_MAX_WAIT_MS, signal },
     );
     if (signal?.aborted) return 'skipped';
-    return newestProfile(events, pubkey) ?? 'miss';
+    return (await newestProfile(events, pubkey, signal)) ?? (signal?.aborted ? 'skipped' : 'miss');
   } catch {
     return signal?.aborted ? 'skipped' : 'miss';
   } finally {
@@ -208,7 +231,9 @@ export async function fetchMissingProfileEvents(
     const hints = options.hints?.get(pubkey) ?? [];
     // Capped after dropping the relays already asked (personOutboxRelays).
     const relays = personOutboxRelays(write, hints, asked);
-    const ownUnasked = personOutboxRelays(write, hints, options.alreadyAsked).filter((url) =>
+    // Filtered to the viewer's own relays BEFORE the cap (inside), so an
+    // unasked own relay is never crowded out by the person's other relays.
+    const ownUnasked = personOutboxRelays(write, hints, options.alreadyAsked, (url) =>
       ownSet.has(url),
     );
     // Nothing new to ask (no list, or only relays already asked): a miss —
