@@ -24,11 +24,11 @@ import {
   subscribeAuthorOutboxFeed,
   type AuthorFeedEvent,
 } from '../services/authorFeedService';
+import { AUTHOR_FEED_MAX_PAGES as MAX_PAGES } from '../services/authorFeedLimits';
+import { isOutboxRelayQuarantined } from '../services/authorOutboxRelays';
 
 /** Grace before an author with no events shows the empty state. */
 const FIRST_EVENT_GRACE_MS = 6000;
-/** Older pages a user can pull in on one visit — bounds memory and relay load. */
-const MAX_PAGES = 10;
 
 /**
  * One author's profile feed (notes, note comments, picture / video events)
@@ -45,7 +45,13 @@ const MAX_PAGES = 10;
  * relay set pages from its own cursor and ends on its own (utils/feedCursors).
  */
 export function useProfileFeed(authorPubkey: string | null, reloadNonce: number) {
-  const { relays } = useNostr();
+  const { relays, dmInboxRelays } = useNostr();
+  // The viewer's own DM inbox relays are never leased as author relays (their
+  // live DM sub must never share a budgeted outbox socket). Read when armed.
+  const dmInboxRef = useRef<readonly string[]>(dmInboxRelays ?? []);
+  useEffect(() => {
+    dmInboxRef.current = dmInboxRelays ?? [];
+  }, [dmInboxRelays]);
   // Stable on the read-relay URL set, so a fresh `relays` array with the same
   // URLs doesn't tear the subscription down.
   const readRelaysKey = useMemo(
@@ -179,14 +185,18 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
       const unsubscribeOutbox = subscribeAuthorOutboxFeed({
         authorPubkey,
         currentRelays: readRelays,
+        excludeRelays: [...dmInboxRef.current],
         limit: AUTHOR_FEED_PAGE_SIZE,
         onEvent: (event, relay) => onEvent(outboxSource(relay), event),
         onAnswered,
         onRelays: (urls) => {
           if (!live) return;
+          const before = new Set(outboxRelaysRef.current);
           outboxRelaysRef.current = urls;
-          // Late-found author relays re-open their paging.
-          const reopened = reopenFeedCursors(cursorsRef.current, urls.map(outboxSource));
+          // Only NEWLY found author relays re-open paging: a shrink (a relay
+          // dropped) must not re-open relays that legitimately ended.
+          const added = urls.filter((url) => !before.has(url)).map(outboxSource);
+          const reopened = added.length > 0 && reopenFeedCursors(cursorsRef.current, added);
           if (reopened && reachedEndRef.current) setReachedEnd(false);
         },
       });
@@ -234,11 +244,15 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     }
     const cursors = cursorsRef.current;
     // The viewer's relays page together; each author relay pages on its own.
+    // Sources with relays NOW (author relays can be dropped mid-load).
+    const currentCandidates = () => [
+      ...(readRelays.length > 0 ? [VIEWER_SOURCE] : []),
+      ...outboxRelaysRef.current.map(outboxSource),
+    ];
     const relaysBySource = new Map<FeedSource, string[]>();
     if (readRelays.length > 0) relaysBySource.set(VIEWER_SOURCE, readRelays);
     for (const url of outboxRelaysRef.current) relaysBySource.set(outboxSource(url), [url]);
-    const candidates = [...relaysBySource.keys()];
-    const sources = pageableSources(cursors, candidates);
+    const sources = pageableSources(cursors, currentCandidates());
     if (sources.length === 0) {
       if (hasAnyCursor(cursors)) setReachedEnd(true);
       return;
@@ -257,14 +271,22 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     // If a whole page is stuck on that one second, step past it rather than
     // stall — merging that first page AS SOON AS it arrives, since it can hold
     // unseen posts whatever happens to the step request.
+    // An author relay dropped (revoked, flooded) or quarantined meanwhile is
+    // never asked again: a request would open a fresh, unleased socket to it.
+    const usable = (source: FeedSource, relays: readonly string[]) =>
+      source === VIEWER_SOURCE ||
+      (outboxRelaysRef.current.includes(relays[0]) && !isOutboxRelayQuarantined(relays[0]));
     const pageSource = async (source: FeedSource) => {
       const from = cursorOf(cursors, source).oldest!;
       const relays = relaysBySource.get(source)!;
+      const nothing = { source, from, page: { events: [] as AuthorFeedEvent[], complete: false } };
+      if (!usable(source, relays)) return nothing;
       const first = await fetchAuthorFeedPage({ authorPubkey, relays, until: from, signal });
       if (signal.aborted || !isStuckPage(first.events, from, AUTHOR_FEED_PAGE_SIZE)) {
         return { source, from, page: first };
       }
       merge(first.events);
+      if (!usable(source, relays)) return { ...nothing, page: { ...first, complete: false } };
       try {
         const next = await fetchAuthorFeedPage({ authorPubkey, relays, until: from - 1, signal });
         const page = { events: [...first.events, ...next.events], complete: next.complete };
@@ -289,7 +311,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         merge(page.events);
       }
       flush();
-      if (pageableSources(cursors, candidates).length === 0) setReachedEnd(true);
+      if (pageableSources(cursors, currentCandidates()).length === 0) setReachedEnd(true);
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);

@@ -103,3 +103,53 @@ it('another lease tops up the same budget', async () => {
   await jest.advanceTimersByTimeAsync(50);
   expect(onExceeded).toHaveBeenCalledTimes(1);
 });
+
+it('a blown budget dies with its socket: the next socket to that URL receives normally', async () => {
+  const first = await connect('wss://outbox-flood/');
+  const onExceeded = jest.fn();
+  addRelayFrameBudget(first.relay.url, 5, onExceeded);
+  first.relay.subscribe([{ kinds: [1] }], { id: 'feed', onevent: jest.fn() });
+  for (let n = 1; n <= 50; n++) first.socket.onmessage!({ data: escapedEvent(n) } as MessageEvent);
+  await jest.advanceTimersByTimeAsync(50);
+  expect(onExceeded).toHaveBeenCalledTimes(1);
+  expect(first.socket.close).toHaveBeenCalled();
+  // Even before its leases are forgotten (the grant still stands), a fresh
+  // socket to the same URL — e.g. a DM delivery or a read — receives: the
+  // blown budget belonged to the closed socket, not to the URL.
+  verify.mockClear();
+  const second = await connect('wss://outbox-flood/');
+  expect(second.relay).not.toBe(first.relay);
+  second.relay.subscribe([{ kinds: [1] }], { id: 'feed', onevent: jest.fn() });
+  for (let n = 1; n <= 5; n++) second.socket.onmessage!({ data: escapedEvent(n) } as MessageEvent);
+  await jest.advanceTimersByTimeAsync(50);
+  expect(verify).toHaveBeenCalledTimes(5);
+  expect(second.socket.close).not.toHaveBeenCalled();
+  // Once the leases are gone (forget clears the grant), nothing is counted at all.
+  clearRelayFrameBudget('wss://outbox-flood/');
+  for (let n = 6; n <= 30; n++) second.socket.onmessage!({ data: escapedEvent(n) } as MessageEvent);
+  await jest.advanceTimersByTimeAsync(50);
+  expect(verify).toHaveBeenCalledTimes(30);
+  expect(second.socket.close).not.toHaveBeenCalled();
+});
+
+it("a closed socket's partial count never carries over to the next socket", async () => {
+  const onExceeded = jest.fn();
+  addRelayFrameBudget('wss://outbox-flood/', 5, onExceeded);
+  const first = await connect('wss://outbox-flood/');
+  first.relay.subscribe([{ kinds: [1] }], { id: 'feed', onevent: jest.fn() });
+  // 4 of 5 used, then the socket closes for an unrelated reason.
+  for (let n = 1; n <= 4; n++) first.socket.onmessage!({ data: escapedEvent(n) } as MessageEvent);
+  await jest.advanceTimersByTimeAsync(50);
+  first.relay.close();
+  // The grant still stands (a lease is open): the new socket gets all 5 afresh.
+  verify.mockClear();
+  const second = await connect('wss://outbox-flood/');
+  second.relay.subscribe([{ kinds: [1] }], { id: 'feed', onevent: jest.fn() });
+  for (let n = 1; n <= 5; n++) second.socket.onmessage!({ data: escapedEvent(n) } as MessageEvent);
+  await jest.advanceTimersByTimeAsync(50);
+  expect(verify).toHaveBeenCalledTimes(5);
+  expect(onExceeded).not.toHaveBeenCalled();
+  second.socket.onmessage!({ data: escapedEvent(6) } as MessageEvent);
+  await jest.advanceTimersByTimeAsync(50);
+  expect(onExceeded).toHaveBeenCalledTimes(1);
+});

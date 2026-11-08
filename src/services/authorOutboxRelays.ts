@@ -1,4 +1,5 @@
 import { isTestRelayLockdown } from '../config/testRelayLockdown';
+import { OUTBOX_FRAMES_PER_LEASE } from './authorFeedLimits';
 import { sanitizePeerRelayUrls } from '../utils/peerRelayUrls';
 import { normalizeRelayUrl } from '../utils/relayListKey';
 import { getCurrentUserPubkey } from './nostrActiveAccount';
@@ -162,14 +163,13 @@ interface Leased {
 
 const leased = new Map<string, Leased>();
 
-/**
- * Raw frames (any message type, counted before any parsing) an owned socket
- * may receive per lease before it's cut off — hardening, sized so honest use
- * never trips it: a lease covers one person's live feed (at most
- * 4 × 30 events, see authorFeedService) plus up to 10 older pages of 30, plus
- * EOSE / CLOSED / NOTICE frames. Only owned sockets are counted.
- */
-export const OUTBOX_FRAMES_PER_LEASE = 480;
+// Raw frames an owned socket may receive per lease (derived in ./authorFeedLimits).
+export { OUTBOX_FRAMES_PER_LEASE };
+
+/** Whether `url` is quarantined (not to be asked again for now). */
+export function isOutboxRelayQuarantined(url: string, now = Date.now()): boolean {
+  return isQuarantined(normalizeRelayUrl(url), now);
+}
 
 /** An owned socket blew its frame budget: quarantine it, report it, and have
  * every holder drop its lease (the receive hook has closed the socket). */

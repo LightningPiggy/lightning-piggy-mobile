@@ -209,3 +209,14 @@ it('a socket that blows its raw-frame budget is dropped from the feed and from p
   expect(releaseNewIdleRelays).toHaveBeenCalledWith(['wss://noisy.example/'], new Set());
   expect(leaseOutboxRelays(['wss://noisy.example/']).relays).toEqual([]);
 });
+
+it("never leases the viewer's DM inbox relays, even when they're the author's write relays", async () => {
+  write(['wss://dm-inbox.example/', 'wss://alice1.example/']);
+  arm({ excludeRelays: ['wss://DM-inbox.example'] });
+  await jest.runAllTimersAsync();
+  const subscribed = mockSubscribeMany.mock.calls.map(([[r]]) => r);
+  expect(subscribed).toEqual(['wss://alice1.example/']);
+  // Not leased (so never frame-budgeted) either.
+  expect(mockFrameBudgets.has('wss://dm-inbox.example/')).toBe(false);
+  expect(leasedOutboxRelayCount()).toBe(1);
+});

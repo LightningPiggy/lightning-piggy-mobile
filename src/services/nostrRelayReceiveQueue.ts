@@ -50,47 +50,58 @@ export class RelayReceiveQueue {
 const sharedQueue = new RelayReceiveQueue();
 const installed = new WeakSet<AbstractRelay>();
 
-interface FrameBudget {
-  left: number;
-  exceeded: boolean;
-  onExceeded: () => void;
-}
-/** Raw-frame budgets, by normalised relay URL. Only sockets the app opened on
- * someone else's behalf (outbox reads, #1390) ever have one: the viewer's own
- * relays are never counted. */
-const frameBudgets = new Map<string, FrameBudget>();
+/** How many raw frames ONE socket to a URL may receive, while outbox leases
+ * hold that URL. Only URLs the app opened on someone else's behalf (outbox
+ * reads, #1390) ever have one: the viewer's own relays are never counted. */
+const frameGrants = new Map<string, { frames: number; onExceeded: () => void }>();
+/** Frames each socket has received, keyed by the WebSocket itself (a relay
+ * that reconnects gets a new one) — never per URL: a closed socket's count
+ * (or blown budget) never touches the next socket to that URL. */
+const framesUsed = new WeakMap<object, number>();
+const socketOf = (relay: AbstractRelay): object =>
+  (relay as unknown as { ws?: object }).ws ?? relay;
 
 /**
- * Give `url`'s socket `frames` more frames (any type, counted on arrival,
- * before any parsing) before it's closed and `onExceeded` runs once. A second
- * call tops up the same budget.
+ * Let each socket to `url` receive `frames` more frames (any type, counted on
+ * arrival, before any parsing); past that, the socket is closed and
+ * `onExceeded` runs, once per socket. A second call tops up the grant.
  */
 export function addRelayFrameBudget(url: string, frames: number, onExceeded: () => void): void {
-  const budget = frameBudgets.get(url);
-  if (budget && !budget.exceeded) budget.left += frames;
-  else frameBudgets.set(url, { left: frames, exceeded: false, onExceeded });
+  const grant = frameGrants.get(url);
+  if (grant) grant.frames += frames;
+  else frameGrants.set(url, { frames, onExceeded });
 }
 
-/** Stop counting `url`'s frames. */
+/** Stop counting frames for `url` (its leases are gone). */
 export function clearRelayFrameBudget(url: string): void {
-  frameBudgets.delete(url);
+  frameGrants.delete(url);
+}
+
+/** This socket closed (for any reason): forget its count. */
+export function forgetRelayFrames(relay: AbstractRelay): void {
+  framesUsed.delete(socketOf(relay));
+  framesUsed.delete(relay);
 }
 
 /** False when this frame is over its socket's budget (drop it). */
 function withinFrameBudget(relay: AbstractRelay): boolean {
-  const budget = frameBudgets.get(relay.url);
-  if (!budget) return true;
-  if (budget.exceeded) return false;
-  if (--budget.left >= 0) return true;
-  budget.exceeded = true;
-  // Out of the socket's message handler before closing it.
-  void Promise.resolve().then(() => {
-    try {
-      relay.close();
-    } finally {
-      budget.onExceeded();
-    }
-  });
+  const grant = frameGrants.get(relay.url);
+  if (!grant) return true;
+  const socket = socketOf(relay);
+  const used = (framesUsed.get(socket) ?? 0) + 1;
+  framesUsed.set(socket, used);
+  if (used <= grant.frames) return true;
+  if (used === grant.frames + 1) {
+    // Out of the socket's message handler before closing it. Frames that
+    // arrive meanwhile are dropped; once closed, the socket drops the rest.
+    void Promise.resolve().then(() => {
+      try {
+        relay.close();
+      } finally {
+        grant.onExceeded();
+      }
+    });
+  }
   return false;
 }
 
@@ -133,7 +144,7 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
   relay._onmessage = (message) => {
     if (closed) return;
     // One Map lookup, only non-empty while outbox sockets are open.
-    if (frameBudgets.size > 0 && !withinFrameBudget(relay)) return;
+    if (frameGrants.size > 0 && !withinFrameBudget(relay)) return;
     const data = message.data;
     // Only explicit crypto-free control types bypass pacing. Queue ambiguous
     // JSON too: an escaped "\\u0045VENT" also decodes to EVENT in the SDK.

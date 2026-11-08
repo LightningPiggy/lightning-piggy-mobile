@@ -5,7 +5,7 @@ import {
   type RelayConnectionParams,
 } from './testRelayRouting';
 import { AbstractRelay } from 'nostr-tools/abstract-relay';
-import { paceRelayReceive } from './nostrRelayReceiveQueue';
+import { forgetRelayFrames, paceRelayReceive } from './nostrRelayReceiveQueue';
 import { SimplePool } from 'nostr-tools/pool';
 import { normalizeURL } from 'nostr-tools/utils';
 import { withRelayHealth } from './healthAwarePool';
@@ -35,6 +35,8 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
       paceRelayReceive(relay);
       relay.onclose = () => {
         if (this.relays.get(key) === relay) this.relays.delete(key);
+        // Its outbox frame count goes with it: the next socket starts fresh.
+        forgetRelayFrames(relay);
       };
       this.relays.set(key, relay);
     }

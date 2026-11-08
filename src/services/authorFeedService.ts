@@ -4,6 +4,7 @@
 // subscription fetches the newest page; older pages come from a bounded,
 // abortable `until` query. Every filter carries a `limit`.
 import type { Event, Filter } from 'nostr-tools';
+import { AUTHOR_FEED_PAGE_SIZE, OUTBOX_FEED_EVENT_BUDGET_FACTOR } from './authorFeedLimits';
 import {
   authorWriteRelays,
   leaseOutboxRelays,
@@ -21,7 +22,8 @@ export type AuthorFeedEvent = Pick<
   'id' | 'pubkey' | 'kind' | 'created_at' | 'content' | 'tags'
 >;
 
-export const AUTHOR_FEED_PAGE_SIZE = 30;
+// The feed's bounds live in ./authorFeedLimits (shared with the outbox budgets).
+export { AUTHOR_FEED_PAGE_SIZE, OUTBOX_FEED_EVENT_BUDGET_FACTOR };
 const PAGE_TIMEOUT_MS = 6000;
 
 const toFeedEvent = (ev: Event): AuthorFeedEvent => ({
@@ -230,11 +232,6 @@ export async function fetchAuthorFeedPage(input: {
   };
 }
 
-/** A relay the viewer didn't choose may send this many × `limit` events per
- * subscription before it's cut off (hardening; a real author feed sends at
- * most `limit` stored events plus a few live posts). */
-export const OUTBOX_FEED_EVENT_BUDGET_FACTOR = 4;
-
 /**
  * The same live feed on the AUTHOR's own write relays (#1390), for people who
  * publish where the viewer doesn't read. Never delays the main feed: the
@@ -251,6 +248,8 @@ export const OUTBOX_FEED_EVENT_BUDGET_FACTOR = 4;
 export function subscribeAuthorOutboxFeed(input: {
   authorPubkey: string;
   currentRelays: string[];
+  /** The viewer's other relays (e.g. their DM inbox relays): never leased either. */
+  excludeRelays?: readonly string[];
   viewerPubkey?: string | null;
   limit?: number;
   /** `relay`: which of the author's relays it came from (each pages on its own). */
@@ -269,7 +268,10 @@ export function subscribeAuthorOutboxFeed(input: {
     signal: lookup.signal,
   }).then((write) => {
     if (closed) return;
-    for (const url of withoutRelays(write, input.currentRelays)) {
+    for (const url of withoutRelays(write, [
+      ...input.currentRelays,
+      ...(input.excludeRelays ?? []),
+    ])) {
       // Drop this relay: its sub, its lease, and from the relays older pages ask.
       const drop = () => {
         open.get(url)?.();

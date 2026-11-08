@@ -9,12 +9,14 @@ import {
 
 // The profile feed is the union of the viewer's relays and the author's own
 // write relays (#1390); the author relays never hold up the first posts.
+const mockDmInbox = ['wss://dm-inbox.example/'];
 jest.mock('../contexts/NostrContext', () => ({
   useNostr: () => ({
     relays: [
       { url: 'wss://mine.example/', read: true, write: true },
       { url: 'wss://write-only.example/', read: false, write: true },
     ],
+    dmInboxRelays: mockDmInbox,
   }),
 }));
 jest.mock('@react-navigation/native', () => ({
@@ -281,4 +283,49 @@ it('one author relay ending leaves the others paging', async () => {
   });
   expect(pageCalls()).toEqual([{ relays: ['wss://b.example/'], until: 900 }]);
   expect(result.current.reachedEnd).toBe(false);
+});
+
+it("excludes the viewer's DM inbox relays from the author's relays", () => {
+  renderHook(() => useProfileFeed(alice, 0));
+  expect(outbox.excludeRelays).toEqual(['wss://dm-inbox.example/']);
+});
+
+it('a relay dropped mid-page is never asked again, and a shrink re-opens nothing that ended', async () => {
+  const page = jest.mocked(fetchAuthorFeedPage);
+  let answerB!: (p: { events: AuthorFeedEvent[]; complete: boolean }) => void;
+  page.mockImplementation(({ relays }) =>
+    relays[0] === 'wss://b.example/'
+      ? new Promise((resolve) => (answerB = resolve))
+      : Promise.resolve({ events: [], complete: true }),
+  );
+  const { result } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    outbox.onRelays?.(['wss://a.example/', 'wss://b.example/']);
+    outbox.onEvent(note('a100', 100), 'wss://a.example/');
+    outbox.onEvent(note('b971', 971), 'wss://b.example/');
+  });
+  let loading!: Promise<void>;
+  act(() => {
+    loading = result.current.loadMore();
+  });
+  // B floods / is revoked while its page is still in flight.
+  act(() => outbox.onRelays?.(['wss://a.example/']));
+  // B's page then lands stuck on its second — the step past it must not go out.
+  await act(async () => {
+    answerB({
+      events: Array.from({ length: 30 }, (_, i) => note(`b${i}`, 971)),
+      complete: true,
+    });
+    await loading;
+  });
+  expect(pageCalls().filter((c) => c.relays[0] === 'wss://b.example/')).toEqual([
+    { relays: ['wss://b.example/'], until: 971 },
+  ]);
+  // A ended on its complete empty page; the shrink didn't re-open it.
+  expect(result.current.reachedEnd).toBe(true);
+  page.mockClear();
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(page).not.toHaveBeenCalled();
 });
