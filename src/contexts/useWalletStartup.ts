@@ -74,43 +74,56 @@ export function useWalletStartup({
         await walletStorage.awaitActivePubkeyHydrated();
         isStartupCurrent = captureWalletIdentity();
 
-        // Migrate legacy single-wallet data. A no-op while the identity is
-        // null; useWalletIdentityHydration retries once a pubkey lands.
-        await walletStorage.migrateLegacy();
+        const loadOwnerWallets = async (usablePrefetch: typeof prefetch) => {
+          // Migrate legacy single-wallet data. A no-op while the identity is
+          // null; useWalletIdentityHydration retries once a pubkey lands.
+          await walletStorage.migrateLegacy();
 
-        // Re-check onboarding after migration (migration sets it). The
-        // onboarding flag isn't per-account, so this runs even if the
-        // identity changed while migrating.
-        if (!onboarded) {
-          const onboardedAfterMigration = await walletStorage.isOnboarded();
-          setIsOnboarded(onboardedAfterMigration);
-        }
-        if (!isStartupCurrent()) return;
+          // Re-check onboarding after migration (migration sets it). The
+          // onboarding flag isn't per-account, so this runs even if the
+          // identity changed while migrating.
+          if (!onboarded) {
+            setIsOnboarded(await walletStorage.isOnboarded().catch(() => onboarded));
+          }
+          if (!isStartupCurrent()) return null;
 
-        // Load and reconnect all wallets
-        const owner = walletStorage.getActivePubkey();
-        perfLog('WalletProvider startup: getWalletList begin');
-        const walletList = await walletStorage.getWalletList(owner);
-        perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
-        const prefetched = await takeWalletPrefetch(
-          prefetch,
-          owner,
-          walletList,
-          lastTxsJsonRef,
-          hydrateSeenReceipts,
-          isStartupCurrent,
-        );
-        const walletStates =
-          prefetched ??
-          (await hydrateWalletStates(
+          const owner = walletStorage.getActivePubkey();
+          perfLog('WalletProvider startup: getWalletList begin');
+          const walletList = await walletStorage.getWalletList(owner);
+          perfLog(`WalletProvider startup: getWalletList -> ${walletList.length} wallets`);
+          const prefetched = await takeWalletPrefetch(
+            usablePrefetch,
+            owner,
             walletList,
             lastTxsJsonRef,
             hydrateSeenReceipts,
             isStartupCurrent,
-          ));
-        if (!isStartupCurrent()) return;
+          );
+          const walletStates =
+            prefetched ??
+            (await hydrateWalletStates(
+              walletList,
+              lastTxsJsonRef,
+              hydrateSeenReceipts,
+              isStartupCurrent,
+            ));
+          return { owner, walletList, walletStates, fromPrefetch: prefetched !== null };
+        };
+        // Nothing else retries this load: the identity hydration skips the
+        // gate-opening publish. So a transient storage error gets one more
+        // attempt before startup gives up (see the catch below).
+        const loaded = await loadOwnerWallets(prefetch).catch((error: unknown) => {
+          console.warn('[Wallet] startup hydration failed, retrying once:', error);
+          return isStartupCurrent() ? loadOwnerWallets(null) : null;
+        });
+        if (!loaded || !isStartupCurrent()) return;
+        const { owner, walletList, walletStates, fromPrefetch } = loaded;
         setWallets(walletStates);
-        logWalletHydration(prefetched ? 'startup-prefetch' : 'startup', owner, walletStates.length);
+        logWalletHydration(
+          fromPrefetch ? 'startup-prefetch' : 'startup',
+          owner,
+          walletStates.length,
+        );
         if (!walletProviderHydratedLogged) {
           walletProviderHydratedLogged = true;
           perfLog(`WalletProvider hydrated ${walletStates.length} wallets`);
@@ -211,8 +224,12 @@ export function useWalletStartup({
       } catch (error) {
         console.warn('Wallet startup failed:', error);
         if (!isStartupCurrent()) return;
-        // Order matches the success path: flip `walletsHydrated` first so consumers observing the loading-state change can already trust hydration is complete; only then unblock the UI via `setIsLoading(false)`. Idempotent; React bails on no-op state sets.
-        setWalletsHydrated(true);
+        // End the boot spinner but leave `walletsHydrated` false: the load
+        // failed, so `wallets=[]` is not a confirmed empty list. Home stays
+        // neutral instead of showing a signed-in user the new-user welcome,
+        // and WatcherPushBridge won't publish an empty NWC wallet set (which
+        // could unregister the payment watcher). The next account change or
+        // cold start hydrates again.
         setIsLoading(false);
       } finally {
         // Attempt to recover any pending Boltz swaps (e.g. reverse swap

@@ -210,6 +210,59 @@ it('still re-hydrates on account switch and logout after a single cold-start loa
   view.unmount();
 });
 
+it('retries a failed owner hydration once instead of confirming an empty list', async () => {
+  // A spy calls through to the real read after its one rejection.
+  jest.spyOn(walletStorage, 'getWalletList').mockRejectedValueOnce(new Error('storage busy'));
+  const view = renderProvider();
+  await autoLoginAs('A');
+  await waitFor(() => expect(latest?.walletsHydrated).toBe(true));
+  expect(latest?.wallets.map((w) => w.id)).toEqual(['A1']);
+  expect(latest?.isLoading).toBe(false);
+  view.unmount();
+});
+
+it('ends the spinner without claiming an empty list when the retry fails too', async () => {
+  jest.spyOn(walletStorage, 'getWalletList').mockRejectedValue(new Error('storage down'));
+  jest.spyOn(walletStorage, 'isOnboarded').mockResolvedValue(true);
+  const view = renderProvider();
+  await autoLoginAs('A');
+  await waitFor(() => expect(latest?.isLoading).toBe(false));
+  expect(walletStorage.getWalletList).toHaveBeenCalledTimes(2);
+  // Not hydrated: Home stays neutral (no new-user welcome) and the watcher
+  // bridge doesn't publish an empty NWC wallet set.
+  expect(latest?.walletsHydrated).toBe(false);
+  expect(latest?.wallets).toEqual([]);
+  view.unmount();
+});
+
+it('falls back to the signed-out list after 2 s, then loads the owner when it lands', async () => {
+  jest.useFakeTimers();
+  try {
+    const lists = readWalletList();
+    const view = renderProvider();
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(1999);
+    });
+    expect(lists).not.toHaveBeenCalled();
+    expect(latest?.isLoading).toBe(true);
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(1);
+    });
+    expect(latest?.isLoading).toBe(false);
+    expect(lists.mock.calls).toEqual([[null]]);
+    // The late owner is an ordinary account change, so it does hydrate.
+    await autoLoginAs('A');
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(0);
+    });
+    expect(latest?.wallets.map((w) => w.id)).toEqual(['A1']);
+    expect(lists.mock.calls).toEqual([[null], []]);
+    view.unmount();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it('still loads the owner’s wallets when the first onboarding read fails', async () => {
   // Startup owns the gate-opening load, so nothing before the gate may abort it.
   jest.spyOn(walletStorage, 'isOnboarded').mockRejectedValueOnce(new Error('storage busy'));

@@ -6,6 +6,7 @@ import {
   type IdentitiesBlob,
   type StoredIdentity,
 } from '../services/identitiesStore';
+import { resolveStartupWalletOwner } from '../services/walletStorageService';
 import type { SignerType } from '../types/nostr';
 import { perfLog } from '../utils/perfLog';
 import { NIP46_CONNECTION_KEY, NSEC_KEY, PUBKEY_KEY, SIGNER_TYPE_KEY } from './nostrAuthKeys';
@@ -18,51 +19,62 @@ export interface StoredLogin {
   session: { pubkey: string; signerType: SignerType; nsec: string | null } | null;
 }
 
-/** Defer a read's failure to the point its value is actually used. */
-function settle<T>(read: Promise<T>): Promise<() => T> {
-  return read.then(
-    (value) => () => value,
-    (error: unknown) => () => {
-      throw error;
-    },
-  );
+// The one legacy slot each signer restores from.
+const SIGNER_SLOT: Record<SignerType, string> = {
+  nsec: NSEC_KEY,
+  amber: PUBKEY_KEY,
+  nip46: NIP46_CONNECTION_KEY,
+};
+function isSignerType(value: string | null): value is SignerType {
+  return value === 'nsec' || value === 'amber' || value === 'nip46';
 }
 
 /**
- * Read the multi-account registry and every legacy active-identity slot in
- * one concurrent round instead of three serial SecureStore hops. Only the
- * slot matching the stored signer type is used; a failed read of an unused
- * slot is ignored, exactly as when it was never read.
+ * Read the multi-account registry alongside the signer type → that signer's
+ * slot chain: two SecureStore hops on the critical path instead of three
+ * serial ones. Only the active signer's slot is read, so another signer's
+ * secret (a stale nsec, a NIP-46 client key) never enters JS memory.
  */
 export async function readStoredLogin(): Promise<StoredLogin> {
   const t0 = Date.now();
-  const [blob, signerType, nsecSlot, pubkeySlot, nip46Slot] = await Promise.all([
-    loadIdentities(),
-    SecureStore.getItemAsync(SIGNER_TYPE_KEY),
-    settle(SecureStore.getItemAsync(NSEC_KEY)),
-    settle(SecureStore.getItemAsync(PUBKEY_KEY)),
-    settle(SecureStore.getItemAsync(NIP46_CONNECTION_KEY)),
-  ]);
-  perfLog(`identity reads done signer=${signerType ?? 'none'} in ${Date.now() - t0}ms`);
+  const readSigner = async () => {
+    const signerType = await SecureStore.getItemAsync(SIGNER_TYPE_KEY);
+    if (!isSignerType(signerType)) return null;
+    return { signerType, slot: await SecureStore.getItemAsync(SIGNER_SLOT[signerType]) };
+  };
+  const [blob, signer] = await Promise.all([loadIdentities(), readSigner()]);
+  perfLog(`identity reads done signer=${signer?.signerType ?? 'none'} in ${Date.now() - t0}ms`);
   const identities = blob.identities;
+  if (!signer) return { identities, session: null };
+  const { signerType, slot } = signer;
   if (signerType === 'nsec') {
-    const nsec = nsecSlot();
-    if (!nsec) return { identities, session: null };
+    if (!slot) return { identities, session: null };
     return {
       identities,
-      session: { pubkey: nostrService.decodeNsec(nsec).pubkey, signerType, nsec },
+      session: { pubkey: nostrService.decodeNsec(slot).pubkey, signerType, nsec: slot },
     };
   }
-  if (signerType === 'amber') {
-    const pubkey = pubkeySlot();
-    return { identities, session: pubkey ? { pubkey, signerType, nsec: null } : null };
+  // Amber: the slot is the pubkey. NIP-46: restore the persisted bunker
+  // connection from it (see useNip46Login).
+  const pubkey = signerType === 'amber' ? slot : await restoreNip46Session(slot);
+  return { identities, session: pubkey ? { pubkey, signerType, nsec: null } : null };
+}
+
+/**
+ * Cold-start auto-login's read. When it ends without an account (logged out,
+ * or the slots are unreadable) the wallet gate opens signed-out immediately
+ * rather than after its 2 s timeout. A found account is handed to the gate
+ * by the caller, once that account's storage migration has run.
+ */
+export async function readStartupLogin(): Promise<StoredLogin> {
+  try {
+    const login = await readStoredLogin();
+    if (!login.session) resolveStartupWalletOwner(null);
+    return login;
+  } catch (error) {
+    resolveStartupWalletOwner(null);
+    throw error;
   }
-  if (signerType === 'nip46') {
-    // Restore the persisted bunker connection (see useNip46Login).
-    const pubkey = await restoreNip46Session(nip46Slot());
-    return { identities, session: pubkey ? { pubkey, signerType, nsec: null } : null };
-  }
-  return { identities, session: null };
 }
 
 /**

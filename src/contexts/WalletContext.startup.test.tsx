@@ -7,6 +7,7 @@ import * as nostrService from '../services/nostrService';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import * as walletStorage from '../services/walletStorageService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
+import { __resetWalletOwnerHintForTests } from '../services/walletOwnerHint';
 import { WalletProvider, useWallet, useWalletLive } from './WalletContext';
 import { selectHomeWalletState } from '../utils/homeWalletState';
 import type { WalletMetadata } from '../types/wallet';
@@ -71,13 +72,25 @@ function Probe() {
   return null;
 }
 
+// Every test starts from a cold-start gate and opens it explicitly, as
+// NostrContext's auto-login would, so no test depends on an earlier one.
+beforeEach(async () => {
+  walletStorage.setActivePubkeyForWalletStorage(null);
+  walletStorage.__resetWalletOwnerGateForTests();
+  __resetWalletOwnerHintForTests();
+  await AsyncStorage.removeItem('wallet_owner_hint_v1');
+});
 afterEach(() => jest.restoreAllMocks());
+/** Auto-login's outcome plus its publish: opens the gate for `owner`. */
+function openGateFor(owner: string | null) {
+  walletStorage.resolveStartupWalletOwner(owner);
+  walletStorage.setActivePubkeyForWalletStorage(owner);
+}
 
 it('still recovers swaps and re-checks onboarding when an identity lands mid-startup', async () => {
   // The gate opens signed-out (auto-login found no account, or it timed out)
   // and an identity is published later — here, while migrating.
-  walletStorage.setActivePubkeyForWalletStorage(null);
-  walletStorage.resolveStartupWalletOwner(null);
+  openGateFor(null);
   const migrating = deferred<void>();
   jest.spyOn(walletStorage, 'migrateLegacy').mockImplementation(() => migrating.promise);
   jest.spyOn(walletStorage, 'isOnboarded').mockResolvedValueOnce(false).mockResolvedValue(true);
@@ -118,7 +131,7 @@ async function flushStartup() {
 
 it('migrates a legacy wallet into the identity that lands while its credential read waits', async () => {
   const LEGACY_URL = 'nostr+walletconnect://legacy-fixture';
-  walletStorage.setActivePubkeyForWalletStorage(null);
+  openGateFor(null);
   await AsyncStorage.clear();
   await SecureStore.setItemAsync('nwc_connection_url', LEGACY_URL);
   // Hold every read of the legacy credential until identity B has landed.
@@ -148,7 +161,7 @@ it('migrates a legacy wallet into the identity that lands while its credential r
 });
 
 it('drops balance and transaction reads that finish after a B → C → B round trip', async () => {
-  walletStorage.setActivePubkeyForWalletStorage(null);
+  openGateFor(null);
   await AsyncStorage.clear();
   const metadata = { id: 'W', alias: 'W', theme: 'lightning-piggy', order: 0 };
   await AsyncStorage.multiSet([
@@ -200,7 +213,7 @@ describe('deferred zap attribution after a transaction fetch', () => {
   // Hydrates B with W's cached history, fetches it, and holds the relay
   // receipt query that the deferred resolver pass issues.
   async function startResolvingUnderB() {
-    walletStorage.setActivePubkeyForWalletStorage(null);
+    openGateFor(null);
     await AsyncStorage.clear();
     zapResolverFingerprintStorage.__resetForTests();
     const metadata = { id: 'W', alias: 'W', theme: 'lightning-piggy', order: 0 };
@@ -280,7 +293,7 @@ describe('deferred zap attribution after a transaction fetch', () => {
 });
 
 it('ignores a pending expected-payment result after B → C → B', async () => {
-  walletStorage.setActivePubkeyForWalletStorage(null);
+  openGateFor(null);
   await AsyncStorage.clear();
   const metadata = {
     id: 'W',
@@ -329,7 +342,7 @@ function homeState() {
 }
 
 it('keeps Home neutral during delayed startup, then enables actions from the hydrated cards', async () => {
-  walletStorage.setActivePubkeyForWalletStorage('home-startup');
+  openGateFor('home-startup');
   const pending = deferred<WalletMetadata[]>();
   jest.spyOn(walletStorage, 'getWalletList').mockImplementation(() => pending.promise);
   const cards: WalletMetadata[] = ['home-a', 'home-b', 'home-c'].map((id, order) => ({
@@ -359,7 +372,7 @@ it('keeps Home neutral during delayed startup, then enables actions from the hyd
 });
 
 it('clears old cards during a delayed identity reload without flashing the new-user prompt', async () => {
-  walletStorage.setActivePubkeyForWalletStorage('home-old');
+  openGateFor('home-old');
   const oldCard: WalletMetadata = {
     id: 'home-old-card',
     order: 0,
@@ -392,7 +405,7 @@ it('clears old cards during a delayed identity reload without flashing the new-u
 });
 
 it('finishes cached hydration before legacy key checks, then enables Send and Move', async () => {
-  walletStorage.setActivePubkeyForWalletStorage('legacy-seed-profile');
+  openGateFor('legacy-seed-profile');
   await AsyncStorage.clear();
   const card: WalletMetadata = {
     id: 'legacy-seed-card',

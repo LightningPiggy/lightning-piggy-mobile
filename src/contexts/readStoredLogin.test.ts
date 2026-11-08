@@ -1,8 +1,9 @@
-/** Cold-start identity read: one concurrent SecureStore round, per signer. */
+/** Cold-start identity read: registry alongside the active signer's slot only. */
 import * as SecureStore from 'expo-secure-store';
 import { loadIdentities, upsertIdentity } from '../services/identitiesStore';
+import * as walletStorage from '../services/walletStorageService';
 import { restoreNip46Session } from './useNip46Login';
-import { readStoredLogin, registerRestoredSession } from './readStoredLogin';
+import { readStartupLogin, readStoredLogin, registerRestoredSession } from './readStoredLogin';
 
 const store = new Map<string, string>();
 jest.mock('expo-secure-store', () => ({
@@ -27,44 +28,44 @@ beforeEach(() => {
   jest.mocked(loadIdentities).mockResolvedValue({ identities: [], activePubkey: null });
 });
 
-it('issues every slot read before any of them resolves', async () => {
-  let release!: () => void;
-  const gate = new Promise<void>((r) => (release = r));
-  getItem.mockImplementation(async (key: string) => {
-    await gate;
-    return store.get(key) ?? null;
-  });
+const readKeys = () => getItem.mock.calls.map(([key]) => key);
+
+it('reads the registry alongside the signer chain, not after it', async () => {
+  let releaseIdentities!: () => void;
+  jest
+    .mocked(loadIdentities)
+    .mockReturnValue(
+      new Promise((r) => (releaseIdentities = () => r({ identities: [], activePubkey: null }))),
+    );
+  store.set('nostr_signer_type', 'amber');
+  store.set('nostr_pubkey', 'pk-amber');
   const reading = readStoredLogin();
-  await Promise.resolve();
-  expect(getItem.mock.calls.map(([key]) => key).sort()).toEqual([
-    'nostr_nip46_connection',
-    'nostr_nsec',
-    'nostr_pubkey',
-    'nostr_signer_type',
-  ]);
-  expect(loadIdentities).toHaveBeenCalledTimes(1);
-  release();
-  await expect(reading).resolves.toEqual({ identities: [], session: null });
+  // The registry read is still pending, yet the signer's slot was reached.
+  await new Promise((r) => setTimeout(r, 0));
+  expect(readKeys()).toEqual(['nostr_signer_type', 'nostr_pubkey']);
+  releaseIdentities();
+  await expect(reading).resolves.toMatchObject({ session: { pubkey: 'pk-amber' } });
 });
 
-it('restores an nsec session from the nsec slot', async () => {
+it('restores an nsec session from the nsec slot only', async () => {
   store.set('nostr_signer_type', 'nsec');
   store.set('nostr_nsec', 'nsec1fixture');
+  store.set('nostr_nip46_connection', '{"stale":1}');
   await expect(readStoredLogin()).resolves.toMatchObject({
     session: { pubkey: 'pk-from-nsec', signerType: 'nsec', nsec: 'nsec1fixture' },
   });
+  // Another signer's secret never enters JS memory.
+  expect(readKeys()).toEqual(['nostr_signer_type', 'nostr_nsec']);
 });
 
-it('restores an Amber session, ignoring a failed read of an unused slot', async () => {
+it('restores an Amber session without touching the secret slots', async () => {
   store.set('nostr_signer_type', 'amber');
   store.set('nostr_pubkey', 'pk-amber');
-  getItem.mockImplementation(async (key: string) => {
-    if (key === 'nostr_nsec') throw new Error('keystore entry unreadable');
-    return store.get(key) ?? null;
-  });
+  store.set('nostr_nsec', 'nsec1stale');
   await expect(readStoredLogin()).resolves.toMatchObject({
     session: { pubkey: 'pk-amber', signerType: 'amber', nsec: null },
   });
+  expect(readKeys()).toEqual(['nostr_signer_type', 'nostr_pubkey']);
 });
 
 it('fails when the slot the signer needs cannot be read', async () => {
@@ -76,22 +77,66 @@ it('fails when the slot the signer needs cannot be read', async () => {
   await expect(readStoredLogin()).rejects.toThrow('keystore entry unreadable');
 });
 
-it('restores NIP-46 from the connection read in the same round', async () => {
+it('restores NIP-46 from the connection slot it read, never the nsec slot', async () => {
   store.set('nostr_signer_type', 'nip46');
   store.set('nostr_nip46_connection', '{"conn":1}');
+  store.set('nostr_nsec', 'nsec1stale');
   await expect(readStoredLogin()).resolves.toMatchObject({
     session: { pubkey: 'pk-from-bunker', signerType: 'nip46' },
   });
   expect(restoreNip46Session).toHaveBeenCalledWith('{"conn":1}');
+  expect(readKeys()).toEqual(['nostr_signer_type', 'nostr_nip46_connection']);
+});
+
+it('passes a missing NIP-46 connection on as null so the restore self-heals', async () => {
+  jest.mocked(restoreNip46Session).mockResolvedValueOnce(null);
+  store.set('nostr_signer_type', 'nip46');
+  await expect(readStoredLogin()).resolves.toMatchObject({ session: null });
+  expect(restoreNip46Session).toHaveBeenCalledWith(null);
 });
 
 it('reports logged out when the signer slot is empty or its value is missing', async () => {
   await expect(readStoredLogin()).resolves.toMatchObject({ session: null });
   store.set('nostr_signer_type', 'amber');
   await expect(readStoredLogin()).resolves.toMatchObject({ session: null });
-  jest.mocked(restoreNip46Session).mockResolvedValueOnce(null);
-  store.set('nostr_signer_type', 'nip46');
+  store.set('nostr_signer_type', 'something-else');
   await expect(readStoredLogin()).resolves.toMatchObject({ session: null });
+});
+
+describe('readStartupLogin and the wallet gate', () => {
+  beforeEach(() => {
+    walletStorage.setActivePubkeyForWalletStorage(null);
+    walletStorage.__resetWalletOwnerGateForTests();
+    jest.useFakeTimers();
+  });
+  afterEach(() => jest.useRealTimers());
+
+  /** True if the wallet gate released its waiter without the 2 s fallback. */
+  async function gateReleasedWithoutTimeout(): Promise<boolean> {
+    let released = false;
+    void walletStorage.awaitActivePubkeyHydrated().then(() => (released = true));
+    await jest.advanceTimersByTimeAsync(0); // flush promises only, no timeout
+    return released;
+  }
+
+  it('opens the gate signed-out right away on a logged-out cold start', async () => {
+    await readStartupLogin();
+    expect(await gateReleasedWithoutTimeout()).toBe(true);
+  });
+
+  it('opens the gate signed-out right away when the read fails', async () => {
+    jest.mocked(loadIdentities).mockRejectedValueOnce(new Error('keystore unavailable'));
+    await expect(readStartupLogin()).rejects.toThrow('keystore unavailable');
+    expect(await gateReleasedWithoutTimeout()).toBe(true);
+  });
+
+  it('leaves a found account for the caller to hand over after its migration', async () => {
+    store.set('nostr_signer_type', 'amber');
+    store.set('nostr_pubkey', 'pk-amber');
+    await readStartupLogin();
+    expect(await gateReleasedWithoutTimeout()).toBe(false);
+    expect(walletStorage.isWalletOwnerGateOpen()).toBe(false);
+  });
 });
 
 describe('registerRestoredSession', () => {

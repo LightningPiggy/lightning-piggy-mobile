@@ -52,7 +52,7 @@ import {
 } from './useMessageSend';
 import { useContactActions } from './useContactActions';
 import { useNip46Login } from './useNip46Login';
-import { readStoredLogin, registerRestoredSession } from './readStoredLogin';
+import { readStartupLogin, registerRestoredSession } from './readStoredLogin';
 import { resolveStartupWalletOwner } from '../services/walletStorageService';
 import { nip46Sign } from './nip46DmDecrypt';
 import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
@@ -658,13 +658,14 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     perfLog('NostrProvider auto-login effect fires');
     (async () => {
       try {
-        // Registry + active-identity slots in one concurrent SecureStore
-        // round. Empty registry on a fresh install — the backfill below
-        // populates it when the legacy single-account keys are restored.
-        const login = await readStoredLogin();
+        // Registry + the active signer's slot, read concurrently. Empty
+        // registry on a fresh install — the backfill below populates it when
+        // the legacy single-account keys are restored. Finding no account
+        // (or failing to read) opens the wallet gate signed-out right away.
+        const login = await readStartupLogin();
         setIdentities(login.identities);
         const { session } = login;
-        if (!session) return; // logged out: `finally` tells the wallet gate
+        if (!session) return;
         const pk = session.pubkey;
 
         // One-time per-account storage migration (#288). MUST run before
@@ -782,10 +783,6 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }, COLD_START_GRACE_MS);
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
-      } finally {
-        // Logged out (or auto-login failed before finding an account): the
-        // wallets load signed-out. A no-op once `pk` was handed over above.
-        resolveStartupWalletOwner(null);
       }
     })();
   }, [
