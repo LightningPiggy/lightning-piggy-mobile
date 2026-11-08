@@ -1,5 +1,6 @@
 import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import * as nwcService from '../services/nwcService';
+import { scheduleStartupTask, STARTUP_SLOTS } from '../services/startupTasks';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import * as walletStorage from '../services/walletStorageService';
 import { readWalletOwnerHint } from '../services/walletOwnerHint';
@@ -237,8 +238,15 @@ export function useWalletStartup({
         // Runs in background so it doesn't block UI. The swap index is global,
         // not per identity, so this must run even when an identity switch
         // (e.g. auto-login landing mid-startup) cut the hydration above short.
-        swapRecoveryService.recoverPendingSwaps().catch((e) => {
-          console.warn('[SwapRecovery] Background recovery failed:', e);
+        // Its own startup-queue slot: a claim / refund has hours of slack, so
+        // it needn't land on the same frames as the NWC connects above.
+        scheduleStartupTask({
+          name: 'swapRecovery',
+          slotMs: STARTUP_SLOTS.swapRecovery,
+          run: () =>
+            swapRecoveryService.recoverPendingSwaps().catch((e) => {
+              console.warn('[SwapRecovery] Background recovery failed:', e);
+            }),
         });
       }
     })();

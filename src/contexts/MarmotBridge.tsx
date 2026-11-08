@@ -7,6 +7,7 @@ import { Toast } from '../components/BrandedToast';
 import { t } from '../i18n';
 import { startMarmotPushRegistration } from '../services/marmotPushRegistration';
 import { getMarmotSession, MarmotSession, setMarmotSession } from '../services/marmotSession';
+import { scheduleStartupTask, STARTUP_SLOTS } from '../services/startupTasks';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
 import { relayConfigListKey } from '../utils/relayListKey';
@@ -14,7 +15,8 @@ import { useNostr } from './NostrContext';
 
 // Defer the MLS bring-up past cold start: loading group state + opening one
 // relay sub per group is real JS-thread work, and nothing on first paint
-// needs it (#perf: stagger non-latency-sensitive startup work).
+// needs it. Both jobs run in their own slot of the serial startup queue
+// (startupTasks.ts); after a mid-session sign-in they still wait this long.
 const START_DELAY_MS = 3_000;
 
 /**
@@ -34,9 +36,13 @@ export function MarmotBridge(): null {
   // Staggered like the session itself — nothing on first paint needs it.
   useEffect(() => {
     let stop: (() => void) | null = null;
-    const timer = setTimeout(() => (stop = startMarmotPushRegistration()), START_DELAY_MS);
+    const cancel = scheduleStartupTask({
+      name: 'marmotPush',
+      slotMs: STARTUP_SLOTS.marmotPush,
+      run: () => (stop = startMarmotPushRegistration()),
+    });
     return () => {
-      clearTimeout(timer);
+      cancel();
       stop?.();
     };
   }, []);
@@ -79,7 +85,7 @@ export function MarmotBridge(): null {
       ]);
 
     let session: MarmotSession | null = null;
-    const timer = setTimeout(() => {
+    const startSession = () => {
       session = new MarmotSession({
         pubkey,
         signerType,
@@ -100,13 +106,19 @@ export function MarmotBridge(): null {
           },
         });
       }
-      session.start().catch((e) => {
+      return session.start().catch((e) => {
         if (__DEV__) console.warn('[Marmot] session start failed:', e);
       });
-    }, START_DELAY_MS);
+    };
+    const cancel = scheduleStartupTask({
+      name: 'marmotSession',
+      slotMs: STARTUP_SLOTS.marmotSession,
+      minDelayMs: START_DELAY_MS,
+      run: startSession,
+    });
 
     return () => {
-      clearTimeout(timer);
+      cancel();
       if (session) setMarmotSession(null);
     };
   }, [isLoggedIn, pubkey, signerType]);

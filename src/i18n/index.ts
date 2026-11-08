@@ -1,51 +1,31 @@
 import { I18n } from 'i18n-js';
 import type { Scope, TranslateOptions } from 'i18n-js';
-import enJson from './locales/en.json';
-import deJson from './locales/de.json';
-import esJson from './locales/es.json';
-import huJson from './locales/hu.json';
-import plJson from './locales/pl.json';
-import ukJson from './locales/uk.json';
-import hiJson from './locales/hi.json';
-import mrJson from './locales/mr.json';
-import zhHansJson from './locales/zh-Hans.json';
 import type { Translations } from './locales/types';
 import { pinCountlessSingulars, registerPluralRules } from './plurals';
+import { perfLog } from '../utils/perfLog';
 
 // #137 infra; languages added in batches since (#1312). Adding one: drop
-// `locales/<code>.json` next to en.json, import + register it below, add a
-// CLDR rule in plurals.ts and a native-name label in DisplayLanguageScreen.
-// catalogues.test.ts then guards key parity, placeholders and plural forms.
+// `locales/<code>.json` next to en.json, add it to SUPPORTED_LOCALES and
+// CATALOGUE_LOADERS below, add a CLDR rule in plurals.ts and a native-name
+// label in DisplayLanguageScreen. catalogues.test.ts then guards key parity,
+// placeholders and plural forms.
 //
 // Locale catalogues are plain JSON (not .ts) so a translation-only
 // contribution — the issue explicitly calls this out as a good first
 // contribution — never requires touching TypeScript. The `Translations`
-// type-check below is what keeps them honest: assigning a JSON import to
-// a `Translations`-typed const fails `tsc` if that file is missing (or
-// misspells) a key, same guarantee a hand-written .ts file would give.
-const en: Translations = enJson;
-const de: Translations = deJson;
-const es: Translations = esJson;
-const hu: Translations = huJson;
-const pl: Translations = plJson;
-const uk: Translations = ukJson;
-const hi: Translations = hiJson;
-const mr: Translations = mrJson;
-const zhHans: Translations = zhHansJson;
-
-/** Raw catalogue dict — exported so LocaleContext can build its own
- *  per-locale I18n instance for rendering (see the render-purity note
- *  there) without duplicating the JSON imports. */
-export const translations = { en, de, es, hu, pl, uk, hi, mr, 'zh-Hans': zhHans };
-
-/** What I18n instances actually load: the catalogues with singular-only `one`
- *  forms pinned to `=1` where CLDR `one` covers other numbers (plurals.ts). */
-const runtimeTranslations = Object.fromEntries(
-  Object.entries(translations).map(([locale, catalogue]) => [
-    locale,
-    pinCountlessSingulars(locale as keyof typeof translations, catalogue),
-  ]),
-);
+// check on CATALOGUE_LOADERS is what keeps them honest: a catalogue that is
+// missing (or misspells) a key fails `tsc`, same guarantee a hand-written .ts
+// file would give.
+//
+// Only English (the fallback every lookup ends in) is loaded eagerly. Each
+// other catalogue is 200-350 KB of JSON: building all of them at module load,
+// and deep-merging all of them into every I18n instance, was cold-start work
+// for languages nobody on the phone uses. A catalogue now loads the first time
+// an instance for its locale is built (`createI18nInstance` /
+// `setSharedLocale`). The requires stay static string literals because Metro
+// only bundles what it can see; they are just evaluated lazily.
+const loadStartedAt = Date.now();
+const en: Translations = require('./locales/en.json') as typeof import('./locales/en.json');
 
 export const SUPPORTED_LOCALES = [
   'en',
@@ -59,6 +39,62 @@ export const SUPPORTED_LOCALES = [
   'zh-Hans',
 ] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
+
+/** One static require per catalogue; `satisfies` keeps this map and
+ *  SUPPORTED_LOCALES in step and type-checks every catalogue's keys. */
+const CATALOGUE_LOADERS = {
+  en: () => en,
+  de: () => require('./locales/de.json') as typeof import('./locales/de.json'),
+  es: () => require('./locales/es.json') as typeof import('./locales/es.json'),
+  hu: () => require('./locales/hu.json') as typeof import('./locales/hu.json'),
+  pl: () => require('./locales/pl.json') as typeof import('./locales/pl.json'),
+  uk: () => require('./locales/uk.json') as typeof import('./locales/uk.json'),
+  hi: () => require('./locales/hi.json') as typeof import('./locales/hi.json'),
+  mr: () => require('./locales/mr.json') as typeof import('./locales/mr.json'),
+  'zh-Hans': () => require('./locales/zh-Hans.json') as typeof import('./locales/zh-Hans.json'),
+} satisfies Record<SupportedLocale, () => Translations>;
+
+const loaded = new Map<SupportedLocale, Translations>([['en', en]]);
+const pinned = new Map<SupportedLocale, Translations>();
+
+/** A locale's raw catalogue, loaded (and cached) on first use. */
+export function loadCatalogue(locale: SupportedLocale): Translations {
+  let catalogue = loaded.get(locale);
+  if (!catalogue) {
+    const t0 = Date.now();
+    catalogue = CATALOGUE_LOADERS[locale]();
+    loaded.set(locale, catalogue);
+    perfLog(`i18n catalogue ${locale} loaded in ${Date.now() - t0}ms`);
+  }
+  return catalogue;
+}
+
+/** Locales whose catalogue has been loaded this session, in load order. */
+export function loadedLocales(): SupportedLocale[] {
+  return [...loaded.keys()];
+}
+
+/**
+ * Every catalogue, keyed by locale. Loads them ALL, so it is for tests and
+ * catalogue tooling only, never an app code path.
+ */
+export function loadAllCatalogues(): Record<SupportedLocale, Translations> {
+  return Object.fromEntries(
+    SUPPORTED_LOCALES.map((locale) => [locale, loadCatalogue(locale)]),
+  ) as Record<SupportedLocale, Translations>;
+}
+
+/** What I18n instances actually load: the catalogue with singular-only `one`
+ *  forms pinned to `=1` where CLDR `one` covers other numbers (plurals.ts).
+ *  Pinned once per locale, then shared by every instance. */
+function runtimeCatalogue(locale: SupportedLocale): Translations {
+  let catalogue = pinned.get(locale);
+  if (!catalogue) {
+    catalogue = pinCountlessSingulars(locale, loadCatalogue(locale));
+    pinned.set(locale, catalogue);
+  }
+  return catalogue;
+}
 
 export function isSupportedLocale(code: string): code is SupportedLocale {
   return (SUPPORTED_LOCALES as readonly string[]).includes(code);
@@ -98,9 +134,18 @@ export function intlLocaleFor(locale: SupportedLocale): string {
 
 /** Shared config every I18n instance in the app uses — kept in one place
  *  so the module-level singleton below and LocaleContext's per-locale
- *  render instances can't drift apart. */
+ *  render instances can't drift apart. Starts with just `en` (the
+ *  fallback); a catalogue is loaded into the instance the first time its
+ *  `.locale` is set to that language (i18n-js runs `onChange` synchronously
+ *  inside the setter, so it's there before the next `t()`). */
 export function createI18nInstance(locale: SupportedLocale): I18n {
-  const instance = new I18n(runtimeTranslations);
+  const instance = new I18n({ en: runtimeCatalogue('en') });
+  instance.onChange(() => {
+    const active = instance.locale;
+    if (isSupportedLocale(active) && !instance.translations[active]) {
+      instance.store({ [active]: runtimeCatalogue(active) });
+    }
+  });
   instance.defaultLocale = 'en';
   instance.enableFallback = true;
   instance.locale = locale;
@@ -115,6 +160,7 @@ export function createI18nInstance(locale: SupportedLocale): I18n {
 // in the render phase ever depends on this object's mutable state. See the
 // comment on `t()` below and the render-purity note in LocaleContext.tsx.
 const i18n = createI18nInstance('en');
+perfLog(`i18n module load ${Date.now() - loadStartedAt}ms (en)`);
 
 export default i18n;
 

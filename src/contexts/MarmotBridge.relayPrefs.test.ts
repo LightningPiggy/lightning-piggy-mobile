@@ -39,7 +39,8 @@ it('refreshes existing group subscriptions after hydration or edits without rest
   jest.useFakeTimers();
   const { unmount } = renderHook(() => MarmotBridge());
   await act(async () => {
-    jest.advanceTimersByTime(3000);
+    // The session slot (3 s, startupTasks.ts) plus the idle wait (<= 1 s).
+    jest.advanceTimersByTime(4000);
   });
   expect(MarmotSession).toHaveBeenCalledTimes(1);
   await act(async () => loadAppRelayPrefs(mockOwner));

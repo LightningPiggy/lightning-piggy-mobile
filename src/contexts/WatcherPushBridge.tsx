@@ -1,11 +1,9 @@
 import { useEffect, useMemo } from 'react';
 
+import { scheduleStartupTask, STARTUP_SLOTS } from '../services/startupTasks';
 import { setWatcherContext, startWatcherPush } from '../services/watcherPush';
 import { useNostr } from './NostrContext';
 import { useWallet } from './WalletContext';
-
-// Nothing on first paint needs it — stagger past cold start like MarmotBridge.
-const START_DELAY_MS = 3_000;
 
 /**
  * Feeds the notification-watcher registrar (src/services/watcherPush.ts) the
@@ -37,10 +35,15 @@ export function WatcherPushBridge(): null {
   const inboxKey = dmInboxRelays.join(' ');
 
   useEffect(() => {
+    // Nothing on first paint needs it: its own slot of the startup queue.
     let stop: (() => void) | null = null;
-    const timer = setTimeout(() => (stop = startWatcherPush()), START_DELAY_MS);
+    const cancel = scheduleStartupTask({
+      name: 'watcherPush',
+      slotMs: STARTUP_SLOTS.watcherPush,
+      run: () => (stop = startWatcherPush()),
+    });
     return () => {
-      clearTimeout(timer);
+      cancel();
       stop?.();
     };
   }, []);

@@ -32,6 +32,7 @@ perfLog('App.tsx imported');
 // OR the tester Settings pref is on, #1057).
 import { setNativeCryptoEnabled, warmUpNativeCrypto } from './src/services/nostrCrypto';
 import { loadNativeCryptoEnabled } from './src/services/nativeCryptoPreference';
+import { prewarmLocalDb } from './src/services/localDb';
 
 // Suppress the dev-tools / debugger warning banners. The "Open debugger
 // to view warnings" overlay keeps intercepting taps + stealing focus on
@@ -63,6 +64,11 @@ console.warn = (...args: unknown[]) => {
   }
   __originalConsoleWarn(...args);
 };
+
+// Start opening the encrypted local DB now (native, off the JS thread) so it
+// overlaps the identity reads instead of starting at the first inbox read.
+// No-op on an install without a DB key yet (see prewarmLocalDb).
+prewarmLocalDb();
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,

@@ -34,6 +34,7 @@ import {
   fetchNearestPlaces,
   formatAddress,
   isBoosted,
+  kickPlacesHydration,
   lightningAddressOf,
   peekCachedPlacesSync,
   prefetchDataset,
@@ -128,9 +129,9 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   // ----- BTC Map merchants ------------------------------------------------
 
   // Seed from the in-memory mirror. The disk hydration that fills it is
-  // kicked off the cold-start critical path (audit HIGH 1) — see
-  // `kickPlacesHydration` in btcMapService, invoked from App.tsx after
-  // first paint rather than at module import. The live fetch below
+  // kept off the cold-start critical path (audit HIGH 1): App.tsx gives it
+  // a late startup-queue slot, and this screen kicks it on first mount if
+  // it gets here first (see the effect below). The live fetch below
   // replaces this once `pos` lands.
   const [merchants, setMerchants] = useState<BtcMapPlace[]>(() => peekCachedPlacesSync());
   // If we already have cached merchants on first render there's no
@@ -139,6 +140,22 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
   const [merchantsLoading, setMerchantsLoading] = useState(
     () => peekCachedPlacesSync().length === 0,
   );
+  // Set once the live fetch has answered, so a late disk hydration never
+  // paints the cached (older) merchants over it.
+  const liveMerchantsRef = useRef(false);
+  useEffect(() => {
+    if (peekCachedPlacesSync().length > 0) return;
+    let cancelled = false;
+    void kickPlacesHydration().then(() => {
+      const cached = peekCachedPlacesSync();
+      if (cancelled || liveMerchantsRef.current || cached.length === 0) return;
+      setMerchants(cached);
+      setMerchantsLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Bumped by pull-to-refresh to invalidate the merchant + relay-sub
   // effects without disturbing `pos`. Lets us re-pull BTC Map + tear
   // down/re-open NIP-GC + NIP-52 subscriptions in one gesture.
@@ -248,6 +265,7 @@ const ExploreHomeScreen: React.FC<Props> = ({ navigation }) => {
             `[PerfBlock] ExploreHome fetchNearestPlaces: ${__ms}ms places=${places.length}`,
           );
         }
+        liveMerchantsRef.current = true;
         if (!cancelled) setMerchants(places);
       } catch {
         // BTC Map outage shouldn't break the whole hub — empty rail.

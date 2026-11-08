@@ -1,6 +1,6 @@
 import * as Application from 'expo-application';
 import enJson from '../i18n/locales/en.json';
-import { SUPPORTED_LOCALES, translations } from '../i18n';
+import { SUPPORTED_LOCALES, loadAllCatalogues } from '../i18n';
 import { requiredPluralCategories } from '../i18n/plurals';
 import { validateCatalogue, type Catalogue } from './i18nSync';
 import {
@@ -12,6 +12,8 @@ import {
 } from './pseudoLocale';
 
 jest.mock('expo-application', () => ({ applicationId: 'com.lightningpiggy.app.dev' }));
+
+const translations = loadAllCatalogues();
 
 type Tree = { [key: string]: string | Tree };
 

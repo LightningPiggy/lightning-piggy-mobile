@@ -68,6 +68,17 @@ export function getOrCreateLocalDbKey(): Promise<string> {
 }
 
 /**
+ * Whether a usable DB key is already stored. Never creates one: lets the
+ * launch-time DB pre-open skip installs that have never opened the DB (fresh,
+ * or wiped on logout), so it can't mint a key + file before sign-in.
+ */
+export async function hasLocalDbKey(): Promise<boolean> {
+  if (keyPromise) return true;
+  const existing = await SecureStore.getItemAsync(LOCAL_DB_KEY_STORE_KEY);
+  return !!existing && HEX_64.test(existing);
+}
+
+/**
  * Delete the DB key on logout / account wipe. The encrypted DB file is
  * unreadable without it and must be deleted alongside this (#690) — a
  * lone key or a lone ciphertext file is useless, but don't leave either

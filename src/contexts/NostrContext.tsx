@@ -61,6 +61,7 @@ import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
 import * as invitationKeys from '../services/marmotInvitationKeySignOut';
 import { wipeLocalDmStore } from '../services/localDb';
+import { scheduleStartupTask, STARTUP_SLOTS } from '../services/startupTasks';
 import { useDmInbox } from './useDmInbox';
 import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging, type UseGroupMessagingResult } from './useGroupMessaging';
@@ -710,26 +711,25 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           hydrateDmInboxFromCache(pk),
         ]);
 
-        // Defer relay fetches until after animations/rendering complete,
-        // PLUS a 1500 ms grace window so the user can tap Send / Receive
-        // / Transfer in the first ~1.5 s of cold-start without the JS
-        // thread being yanked away by parallel kind-3 + kind-0 +
-        // kind-10002 fetches. `runAfterInteractions` alone fires on the
-        // next tick when nothing is registered, so it doesn't actually
-        // give us breathing room here. The setTimeout pulls the bulk
-        // refresh out of the cold-start critical path entirely — the
-        // "Send sheet feels frozen for the first few seconds" symptom
-        // tracked in perf logcats lined up exactly with this batch
-        // running back-to-back with the inbox drain on the JS thread.
+        // Defer relay fetches past a 1500 ms grace window (then JS-thread
+        // idle) so the user can tap Send / Receive / Transfer in the first
+        // ~1.5 s of cold-start without the JS thread being yanked away by
+        // parallel kind-3 + kind-0 + kind-10002 fetches — the "Send sheet
+        // feels frozen for the first few seconds" symptom lined up exactly
+        // with this batch running back-to-back with the inbox drain. It is
+        // the first slot of the serial startup queue (startupTasks.ts), so
+        // the later deferred jobs don't pile onto the same frames.
         //
         // Seed the working relay set from the cached NIP-65 relay list so
         // `loadProfile` / `loadContacts` hit the relays the user actually
         // publishes to — not `DEFAULT_RELAYS`, which might miss their
         // kind-0/kind-3 entirely. Only falls back to DEFAULT_RELAYS on
         // the very first login (before any relay cache exists).
-        const COLD_START_GRACE_MS = 1500;
-        setTimeout(() => {
-          InteractionManager.runAfterInteractions(async () => {
+        scheduleStartupTask({
+          name: 'nostrRefresh',
+          slotMs: STARTUP_SLOTS.nostrRefresh,
+          minDelayMs: STARTUP_SLOTS.nostrRefresh,
+          run: async () => {
             let workingRelays: string[] = enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
             // Ignore the timestamp here — even a stale cached relay list is
             // better than DEFAULT_RELAYS for reaching user-only relays.
@@ -753,7 +753,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             const __tP = Date.now();
             const __tC = Date.now();
             const relayRefresh = loadRelays(pk!);
-            Promise.all([
+            return Promise.all([
               relayRefresh
                 .catch((e) => console.warn('[Nostr] relay refresh failed:', e))
                 .finally(() => console.log(`[PerfBlock] loadRelays: ${Date.now() - __tR}ms`)),
@@ -767,8 +767,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ]).then(() => {
               if (__DEV__) console.log(`[Nostr] parallel refresh complete in ${Date.now() - t0}ms`);
             });
-          });
-        }, COLD_START_GRACE_MS);
+          },
+        });
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
       }

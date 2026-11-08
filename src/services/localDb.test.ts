@@ -6,10 +6,12 @@ const mockDelete = jest.fn();
 const mockDb = { execute: mockExecute, delete: mockDelete };
 const mockOpen = jest.fn(() => mockDb);
 const mockClearKey = jest.fn(() => Promise.resolve());
+const mockHasKey = jest.fn(() => Promise.resolve(true));
 jest.mock('@op-engineering/op-sqlite', () => ({ open: mockOpen }));
 jest.mock('./localDbKey', () => ({
   getOrCreateLocalDbKey: jest.fn(() => Promise.resolve('a'.repeat(64))),
   clearLocalDbKey: mockClearKey,
+  hasLocalDbKey: mockHasKey,
 }));
 
 import { getLocalDb, verifyEncryptedDb } from './localDb';
@@ -154,6 +156,43 @@ describe('localDb', () => {
     const schemaIdx = sqls.findIndex((s) => s.includes('CREATE TABLE'));
     expect(cipherIdx).toBeGreaterThanOrEqual(0);
     expect(cipherIdx).toBeLessThan(schemaIdx); // guard runs before schema
+  });
+
+  it('prewarmLocalDb opens the DB early when a key exists, shared with later callers', async () => {
+    const { prewarmLocalDb, getLocalDb: g } = require('./localDb');
+    prewarmLocalDb();
+    await new Promise((r) => setImmediate(r));
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+    await g();
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('prewarmLocalDb never creates a key or file on an install without one', async () => {
+    mockHasKey.mockResolvedValueOnce(false);
+    const { prewarmLocalDb } = require('./localDb');
+    prewarmLocalDb();
+    await new Promise((r) => setImmediate(r));
+    expect(mockOpen).not.toHaveBeenCalled();
+    const { getOrCreateLocalDbKey } = require('./localDbKey');
+    expect(getOrCreateLocalDbKey).not.toHaveBeenCalled();
+  });
+
+  it('skips DDL when user_version already matches the schema fingerprint', async () => {
+    const { SCHEMA_FINGERPRINT, getLocalDb: g } = require('./localDb');
+    mockExecute.mockImplementation((sql: string) => {
+      if (sql.includes('cipher_version')) {
+        return Promise.resolve({ rows: [{ cipher_version: '4.6.0' }] });
+      }
+      if (sql.includes('user_version')) {
+        return Promise.resolve({ rows: [{ user_version: SCHEMA_FINGERPRINT }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+    await g();
+    expect(mockExecute.mock.calls.map((c) => c[0])).toEqual([
+      'PRAGMA cipher_version;',
+      'PRAGMA user_version;',
+    ]);
   });
 
   // clearLocalDb is module-private (the only safe public wipe is

@@ -1,5 +1,6 @@
 import { open, type DB } from '@op-engineering/op-sqlite';
-import { getOrCreateLocalDbKey, clearLocalDbKey } from './localDbKey';
+import { getOrCreateLocalDbKey, clearLocalDbKey, hasLocalDbKey } from './localDbKey';
+import { perfLog } from '../utils/perfLog';
 
 // The single encrypted local database (#695). SQLCipher is enabled as the
 // op-sqlite compile target (package.json "op-sqlite": { "sqlcipher": true }),
@@ -105,6 +106,31 @@ const ADDED_COLUMNS: readonly { name: string; ddl: string }[] = [
   { name: 'edit_id', ddl: 'ALTER TABLE dm_messages ADD COLUMN edit_id TEXT;' },
 ];
 
+// DDL that needs the ADDED_COLUMNS in place, so it runs after them.
+const POST_COLUMN_SCHEMA: string[] = [
+  // Covering index for the inbox list (getInboxLatest): its per-thread
+  // MAX(created_at) GROUP BY reads only these columns, so it scans this index
+  // instead of every row's (large, encrypted) content pages.
+  `CREATE INDEX IF NOT EXISTS idx_dm_owner_inbox
+     ON dm_messages (owner, conversation, protocol, wire_kind, created_at);`,
+];
+
+/**
+ * `PRAGMA user_version` of a fully migrated DB: a 32-bit FNV-1a hash of every
+ * migration statement, so ANY schema edit changes it and the next open
+ * re-runs the (idempotent) migration once — nobody has to remember to bump a
+ * number. Never 0, which is what a DB that predates this check reads.
+ */
+export const SCHEMA_FINGERPRINT = ((): number => {
+  const source = [...SCHEMA, ...ADDED_COLUMNS.map((c) => c.ddl), ...POST_COLUMN_SCHEMA].join('\n');
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < source.length; i++) {
+    hash ^= source.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash | 0 || 1;
+})();
+
 let dbPromise: Promise<DB> | null = null;
 
 // W1 (#849 review): a backup-restored install carries the ciphertext DB file
@@ -144,6 +170,7 @@ async function openLocalDb(): Promise<DB> {
 }
 
 async function openLocalDbAttempt(): Promise<DB> {
+  const t0 = Date.now();
   const encryptionKey = await getOrCreateLocalDbKey();
   const db = open({ name: DB_NAME, encryptionKey });
   // Fail loud if SQLCipher isn't actually compiled in: op-sqlite silently
@@ -157,10 +184,36 @@ async function openLocalDbAttempt(): Promise<DB> {
       `${SQLCIPHER_MISSING} — refusing to open a plaintext DB (cipher_version empty)`,
     );
   }
+  // Fast path: already migrated to this exact schema, so skip the DDL and
+  // column checks (two table_info reads + ~10 statements on every launch).
+  // Reading user_version is also the first real page read, so a wrong key
+  // still fails here with the signature openLocalDb heals.
+  const version = await db.execute('PRAGMA user_version;');
+  if (Number(version.rows?.[0]?.user_version ?? 0) === SCHEMA_FINGERPRINT) {
+    perfLog(`localDb open ${Date.now() - t0}ms (fast path)`);
+    return db;
+  }
   await rebuildDmMessagesIfPreOwner(db);
   for (const stmt of SCHEMA) await db.execute(stmt);
   await addMissingDmMessagesColumns(db);
+  for (const stmt of POST_COLUMN_SCHEMA) await db.execute(stmt);
+  // Only after every step succeeded: a failed migration re-runs next open.
+  await db.execute(`PRAGMA user_version = ${SCHEMA_FINGERPRINT};`);
+  perfLog(`localDb open ${Date.now() - t0}ms (migrated)`);
   return db;
+}
+
+/**
+ * Start opening the DB at app launch so the key read, SQLCipher key
+ * derivation and schema check overlap the identity reads instead of waiting
+ * for the first inbox hydration. Only on an install that already has a DB
+ * key: a fresh or logged-out install gets no key or file before sign-in,
+ * exactly as before. Failures are left to the next getLocalDb() to retry.
+ */
+export function prewarmLocalDb(): void {
+  void hasLocalDbKey()
+    .then((has) => (has ? getLocalDb() : undefined))
+    .catch(() => undefined);
 }
 
 // v2 → v3 (#850): add the delivery_status / rumor_id columns to a table
