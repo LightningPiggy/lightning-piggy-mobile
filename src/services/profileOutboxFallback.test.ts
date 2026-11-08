@@ -5,8 +5,11 @@ import {
   __resetProfileFallbackForTests,
   fetchMissingProfileEvents,
   FALLBACK_RETRY_THROTTLE_MS,
+  FALLBACK_START_DELAY_MS,
   MAX_FALLBACK_PEOPLE,
+  scheduleMissingProfileFallback,
 } from './profileOutboxFallback';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
 import { querySyncAbortable } from './relayQuery';
 
 jest.mock('./nostrPool', () => ({
@@ -162,4 +165,58 @@ it('a test account in lockdown makes no lookups at all', async () => {
   expect(found.size).toBe(0);
   expect(lists).not.toHaveBeenCalled();
   expect(query).not.toHaveBeenCalled();
+});
+
+describe('scheduleMissingProfileFallback (background, never awaited)', () => {
+  beforeEach(() => {
+    setCurrentUserPubkey(viewer);
+    writeLists({ [alice]: ok([relay('alice1')]) });
+  });
+
+  it('starts only after the stagger delay and reports what it found', async () => {
+    query.mockResolvedValue([kind0(alice)]);
+    const onFound = jest.fn();
+    scheduleMissingProfileFallback([alice], opts, onFound);
+    await jest.advanceTimersByTimeAsync(FALLBACK_START_DELAY_MS - 1);
+    expect(lists).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    await jest.runAllTimersAsync();
+    expect(onFound).toHaveBeenCalledTimes(1);
+    expect([...onFound.mock.calls[0][0].keys()]).toEqual([alice]);
+  });
+
+  it('stays quiet when nothing was found', async () => {
+    const onFound = jest.fn();
+    scheduleMissingProfileFallback([alice], opts, onFound);
+    await jest.runAllTimersAsync();
+    expect(query).toHaveBeenCalled();
+    expect(onFound).not.toHaveBeenCalled();
+  });
+
+  it('is cancelled by its closer before it starts', async () => {
+    const cancel = scheduleMissingProfileFallback([alice], opts, jest.fn());
+    cancel();
+    await jest.runAllTimersAsync();
+    expect(lists).not.toHaveBeenCalled();
+  });
+
+  it('an account switch cancels it, before it starts or while it runs', async () => {
+    scheduleMissingProfileFallback([alice], opts, jest.fn());
+    setCurrentUserPubkey(bob);
+    await jest.runAllTimersAsync();
+    expect(lists).not.toHaveBeenCalled();
+
+    setCurrentUserPubkey(viewer);
+    let answer!: (events: never[]) => void;
+    query.mockReturnValue(new Promise((r) => (answer = r)));
+    const onFound = jest.fn();
+    scheduleMissingProfileFallback([alice], opts, onFound);
+    await jest.advanceTimersByTimeAsync(FALLBACK_START_DELAY_MS);
+    expect(query).toHaveBeenCalled();
+    setCurrentUserPubkey(bob);
+    answer([kind0(alice)] as never[]);
+    await jest.runAllTimersAsync();
+    // The previous account's result is dropped.
+    expect(onFound).not.toHaveBeenCalled();
+  });
 });

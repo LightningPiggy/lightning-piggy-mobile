@@ -608,17 +608,15 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const profileMap = await nostrService.fetchProfiles(
           pubkeysToFetch,
           relayUrls,
-          (partial) => {
-            // Update UI incrementally as each batch of profiles arrives
+          // Update UI incrementally as each batch of profiles arrives
+          (partial) =>
             startTransition(() =>
               setContacts((prev) =>
-                prev.map((c) => ({
-                  ...c,
-                  profile: partial.get(c.pubkey) ?? c.profile,
-                })),
+                prev.map((c) => ({ ...c, profile: partial.get(c.pubkey) ?? c.profile })),
               ),
-            );
-          },
+            ),
+          // Found later, in the background, on people's own relays (#1390).
+          { onLateProfiles: (late) => void persistMergedProfileCache(pk, cachedProfileMap, late) },
         );
         if (__DEV__)
           console.log(

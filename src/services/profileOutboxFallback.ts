@@ -6,7 +6,7 @@ import {
   MAX_AUTHOR_OUTBOX_RELAYS,
   personOutboxRelays,
 } from './authorOutboxRelays';
-import { getCurrentUserPubkey } from './nostrActiveAccount';
+import { getCurrentUserPubkey, onCurrentUserPubkeyChange } from './nostrActiveAccount';
 import { pool } from './nostrPool';
 import { getManyPeerRelayLists } from './peerRelayLists';
 import { querySyncAbortable } from './relayQuery';
@@ -34,6 +34,9 @@ const FALLBACK_CONCURRENCY = 5;
 export const FALLBACK_QUERY_MAX_WAIT_MS = 5_000;
 /** A person whose fallback found nothing isn't retried for this long. */
 export const FALLBACK_RETRY_THROTTLE_MS = 5 * 60_000;
+/** A background fallback starts this long after it's scheduled (CLAUDE.md:
+ * non-urgent work is staggered, cancellable). */
+export const FALLBACK_START_DELAY_MS = 3_000;
 /** Most throttle entries remembered (oldest dropped first). */
 const MAX_THROTTLE_ENTRIES = 512;
 
@@ -165,6 +168,43 @@ export async function fetchMissingProfileEvents(
       `${Date.now() - started}ms`,
   );
   return found;
+}
+
+/**
+ * `fetchMissingProfileEvents` in the background, for a batch caller that
+ * mustn't wait on it (cold-start contact profiles): starts after
+ * FALLBACK_START_DELAY_MS, and `onFound` runs only when something was found.
+ * Cancelled by the returned function or by an account switch (a result for
+ * the previous account is dropped).
+ */
+export function scheduleMissingProfileFallback(
+  pubkeys: readonly string[],
+  options: ProfileFallbackOptions,
+  onFound: (found: Map<string, Event>) => void,
+): () => void {
+  const viewer = options.viewerPubkey === undefined ? getCurrentUserPubkey() : options.viewerPubkey;
+  let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const cancel = () => {
+    cancelled = true;
+    if (timer !== undefined) clearTimeout(timer);
+    stopWatching();
+  };
+  const stopWatching = onCurrentUserPubkeyChange((pubkey) => {
+    if (pubkey !== viewer) cancel();
+  });
+  timer = setTimeout(() => {
+    timer = undefined;
+    void fetchMissingProfileEvents(pubkeys, { ...options, viewerPubkey: viewer })
+      .then((found) => {
+        if (!cancelled && found.size > 0) onFound(found);
+      })
+      .catch(() => {
+        // Best-effort: the profiles just stay missing until the next retry.
+      })
+      .finally(stopWatching);
+  }, FALLBACK_START_DELAY_MS);
+  return cancel;
 }
 
 /** Forget the retry throttle (tests). */

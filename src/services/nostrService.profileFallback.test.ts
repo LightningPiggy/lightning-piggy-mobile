@@ -1,15 +1,19 @@
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { fetchProfile, fetchProfiles, pool } from './nostrService';
 import { fetchProfilesBatch } from './nostrProfileBatch';
-import { fetchMissingProfileEvents } from './profileOutboxFallback';
+import { fetchMissingProfileEvents, scheduleMissingProfileFallback } from './profileOutboxFallback';
 import { PROFILE_RELAYS } from './nostrRelayDefaults';
 
 // The missing-profile fallback (#1390) only runs for profiles that didn't
 // resolve; a profile that resolves keeps the existing path untouched.
-jest.mock('./profileOutboxFallback', () => ({ fetchMissingProfileEvents: jest.fn() }));
+jest.mock('./profileOutboxFallback', () => ({
+  fetchMissingProfileEvents: jest.fn(),
+  scheduleMissingProfileFallback: jest.fn(() => () => {}),
+}));
 jest.mock('./nostrProfileBatch', () => ({ fetchProfilesBatch: jest.fn() }));
 
 const fallback = jest.mocked(fetchMissingProfileEvents);
+const schedule = jest.mocked(scheduleMissingProfileFallback);
 const batch = jest.mocked(fetchProfilesBatch);
 const sk = generateSecretKey();
 const pubkey = getPublicKey(sk);
@@ -68,31 +72,59 @@ describe('fetchProfile', () => {
 describe('fetchProfiles', () => {
   const found = 'b'.repeat(64);
   const missing = 'c'.repeat(64);
-
-  it('runs the fallback for the unresolved people only, after the retry pass', async () => {
+  const resolveFoundOnly = () =>
     batch.mockImplementation(async (pubkeys, _relays, _timeout, onEvent) => {
       if (pubkeys.includes(found)) onEvent(batchEvent(found, '{"name":"B"}'));
     });
-    fallback.mockResolvedValue(
-      new Map([[missing, batchEvent(missing, '{"name":"C","lud16":"c@example.com"}') as never]]),
-    );
-    const profiles = await fetchProfiles([found, missing], ['wss://mine.example']);
-    // Main pass + retry pass ran first.
+
+  it('resolves without waiting for the fallback, which runs later in the background', async () => {
+    resolveFoundOnly();
+    // A fallback that never finishes can't hold fetchProfiles up.
+    schedule.mockImplementation(() => () => {});
+    const onBatch = jest.fn();
+    const onLateProfiles = jest.fn();
+    const profiles = await fetchProfiles([found, missing], ['wss://mine.example'], onBatch, {
+      onLateProfiles,
+    });
+    expect([...profiles.keys()]).toEqual([found]);
+    // Main pass + retry pass ran; the fallback was only scheduled, never awaited.
     expect(batch).toHaveBeenCalledTimes(2);
-    expect(fallback).toHaveBeenCalledTimes(1);
-    const [people, opts] = fallback.mock.calls[0];
+    expect(fallback).not.toHaveBeenCalled();
+    expect(onLateProfiles).not.toHaveBeenCalled();
+    const [people, opts] = schedule.mock.calls[0];
     expect(people).toEqual([missing]);
     expect(opts).toMatchObject({ purpose: 'display', lookupRelays: ['wss://mine.example'] });
-    expect(profiles.get(missing)?.name).toBe('C');
-    // Display-only path: payment fields stripped like any batch profile.
-    expect(profiles.get(missing)?.lud16 ?? null).toBeNull();
   });
 
-  it('skips the fallback when every profile resolved', async () => {
+  it('merges late finds through onBatch and hands only the new ones to onLateProfiles', async () => {
+    resolveFoundOnly();
+    const onBatch = jest.fn();
+    const onLateProfiles = jest.fn();
+    const profiles = await fetchProfiles([found, missing], [], onBatch, { onLateProfiles });
+    const onFound = schedule.mock.calls[0][2];
+    onBatch.mockClear();
+    onFound(
+      new Map([[missing, batchEvent(missing, '{"name":"C","lud16":"c@example.com"}') as never]]),
+    );
+    const snapshot: Map<string, { name?: string; lud16?: string | null }> =
+      onBatch.mock.calls[0][0];
+    expect([...snapshot.keys()].sort()).toEqual([found, missing]);
+    expect(snapshot.get(missing)?.name).toBe('C');
+    // Display-only path: payment fields stripped like any batch profile.
+    expect(snapshot.get(missing)?.lud16 ?? null).toBeNull();
+    const late: Map<string, unknown> = onLateProfiles.mock.calls[0][0];
+    expect([...late.keys()]).toEqual([missing]);
+    // The map already returned is left as it was.
+    expect(profiles.has(missing)).toBe(false);
+  });
+
+  it('schedules nothing when every profile resolved, or without an onBatch to deliver to', async () => {
     batch.mockImplementation(async (pubkeys, _r, _t, onEvent) => {
       for (const pk of pubkeys) onEvent(batchEvent(pk, '{}'));
     });
+    await fetchProfiles([found, missing], [], jest.fn());
+    resolveFoundOnly();
     await fetchProfiles([found, missing], []);
-    expect(fallback).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
   });
 });

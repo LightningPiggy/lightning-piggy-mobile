@@ -11,7 +11,7 @@ import type { Filter } from 'nostr-tools/filter';
 import { querySyncAbortable } from './relayQuery';
 import { DM_INBOX_LIMIT, KIND4_REPLAY_OVERLAP_SECONDS } from './dmInboxFetchPolicy';
 import { fetchProfilesBatch } from './nostrProfileBatch';
-import { fetchMissingProfileEvents } from './profileOutboxFallback';
+import { fetchMissingProfileEvents, scheduleMissingProfileFallback } from './profileOutboxFallback';
 import { pool, connectedRelays, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS, PROFILE_RELAYS } from './nostrRelayDefaults';
 import * as nip19 from 'nostr-tools/nip19';
@@ -239,10 +239,28 @@ export async function fetchRelayListEvent(
   }
 }
 
+// Batch-fetched kind-0 events skip schnorr verification (see the
+// pool.verifyEvent fast-path) — strip payment-relevant fields so a forged
+// relay reply can't redirect a zap. Display-only path.
+const displayProfile = (event: { pubkey: string; content: string }): NostrProfile =>
+  slimDisplayProfile({
+    pubkey: event.pubkey,
+    npub: npubEncode(event.pubkey),
+    ...parseProfileContent(event.content),
+  });
+
+/**
+ * Kind-0s for `pubkeys`, streamed through `onBatch`. With `onBatch`, people
+ * still missing at the end are looked up on their own relays IN THE
+ * BACKGROUND (#1390): this resolves as fast as without it, and anything found
+ * later arrives as one more `onBatch` snapshot, and the late profiles alone
+ * through `onLateProfiles` (e.g. to persist them). Cancelled by an account switch.
+ */
 export async function fetchProfiles(
   pubkeys: string[],
   relays: string[],
   onBatch?: (profiles: Map<string, NostrProfile>) => void,
+  opts?: { onLateProfiles?: (profiles: Map<string, NostrProfile>) => void },
 ): Promise<Map<string, NostrProfile>> {
   const profiles = new Map<string, NostrProfile>();
   if (pubkeys.length === 0) return profiles;
@@ -278,18 +296,7 @@ export async function fetchProfiles(
   };
 
   const ingest = (event: { pubkey: string; content: string; created_at: number }): void => {
-    const parsed = parseProfileContent(event.content);
-    // Batch-fetched kind-0 events skip schnorr verification (see the
-    // pool.verifyEvent fast-path) — strip payment-relevant fields so a
-    // forged relay reply can't redirect a zap. Display-only path.
-    profiles.set(
-      event.pubkey,
-      slimDisplayProfile({
-        pubkey: event.pubkey,
-        npub: npubEncode(event.pubkey),
-        ...parsed,
-      }),
-    );
+    profiles.set(event.pubkey, displayProfile(event));
     scheduleEmit();
   };
 
@@ -346,13 +353,21 @@ export async function fetchProfiles(
       }
     }
 
-    // Still missing: try each person's own write relays (#1390), bounded.
+    // Still missing: their own write relays (#1390), later — never awaited here.
     const unresolved = pubkeys.filter((pk) => !profiles.has(pk));
-    if (unresolved.length > 0 && Date.now() < overallDeadline) {
-      const opts = { purpose: 'display', alreadyAsked: allRelays, lookupRelays: relays } as const;
-      const found = await fetchMissingProfileEvents(unresolved, opts);
-      found.forEach(ingest);
-      if (found.size > 0) flushNow();
+    if (unresolved.length > 0 && onBatch) {
+      const fallback = {
+        purpose: 'display',
+        alreadyAsked: allRelays,
+        lookupRelays: relays,
+      } as const;
+      scheduleMissingProfileFallback(unresolved, fallback, (found) => {
+        const late = new Map<string, NostrProfile>();
+        found.forEach((event) => late.set(event.pubkey, displayProfile(event)));
+        // A full snapshot, as before; the map already returned stays as it was.
+        onBatch(new Map([...profiles, ...late]));
+        opts?.onLateProfiles?.(late);
+      });
     }
   } catch (error) {
     console.warn('Failed to batch fetch profiles:', error);
