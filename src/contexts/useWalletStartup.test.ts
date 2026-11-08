@@ -132,3 +132,29 @@ it('after a gate timeout, a pre-migration install still reads its legacy list', 
   await waitFor(() => expect(result.current.walletsHydrated).toBe(true));
   expect(result.current.wallets.map((w) => w.id)).toEqual(['legacy']);
 });
+
+it('while waiting on the owner, a pull-to-refresh fails fast without reading the legacy list', async () => {
+  await AsyncStorage.setItem(MIGRATED_KEY, 'true');
+  await AsyncStorage.setItem('wallet_list', JSON.stringify([wallet('someone-elses')]));
+  await walletStorage.awaitActivePubkeyHydrated(1);
+  const { result } = mount();
+  await flush();
+  // Resolves (never hangs the spinner) and renders nothing.
+  await act(() => result.current.retry());
+  expect(result.current.wallets).toEqual([]);
+  expect(result.current.walletsHydrated).toBe(false);
+});
+
+it('the retry armed during the wait stops once startup loads the confirmed owner', async () => {
+  await AsyncStorage.setItem(MIGRATED_KEY, 'true');
+  await AsyncStorage.setItem('wallet_list', JSON.stringify([wallet('signed-out')]));
+  await walletStorage.awaitActivePubkeyHydrated(1);
+  const { result } = mount();
+  await flush();
+  act(() => walletStorage.resolveStartupWalletOwner(null));
+  await waitFor(() => expect(result.current.walletsHydrated).toBe(true));
+  // Startup loaded it: a later pull does not reload the list.
+  const reads = jest.mocked(AsyncStorage.getItem).mock.calls.length;
+  await act(() => result.current.retry());
+  expect(jest.mocked(AsyncStorage.getItem).mock.calls.length).toBe(reads);
+});

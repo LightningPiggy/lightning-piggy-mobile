@@ -202,6 +202,12 @@ function commitOwnerWallets(
   );
 }
 
+/** The owner is confirmed, or this install predates per-account storage. */
+async function isOwnerReadable(): Promise<boolean> {
+  if (walletStorage.isWalletOwnerGateOpen()) return true;
+  return !(await hasMigratedToPerAccountStorage().catch(() => true));
+}
+
 /**
  * Whether startup may read the wallet list. After a gate timeout the owner
  * is unknown and `getWalletList` would read the legacy shared `wallet_list`,
@@ -212,11 +218,14 @@ function commitOwnerWallets(
  * ordinary account change, so the identity hydration loads it), true when
  * auto-login confirms signed-out.
  */
-async function awaitConfirmedOwner(setIsLoading: (value: boolean) => void): Promise<boolean> {
-  if (walletStorage.isWalletOwnerGateOpen()) return true;
-  if (!(await hasMigratedToPerAccountStorage().catch(() => true))) return true;
+async function awaitConfirmedOwner(
+  setIsLoading: (value: boolean) => void,
+  onWait: () => void,
+): Promise<boolean> {
+  if (await isOwnerReadable()) return true;
   perfLog('wallet gate timed out on a per-account install: waiting for the owner');
   setIsLoading(false);
+  onWait();
   await walletStorage.awaitWalletOwnerGateOpen();
   return walletStorage.getActivePubkey() === null;
 }
@@ -234,6 +243,9 @@ export function useWalletStartup(deps: WalletStartupDeps): () => Promise<void> {
   // Deps are stable refs / useCallbacks / state setters (see the effect below).
   const [retry] = useState(() =>
     createWalletLoadRetry(async () => {
+      // While startup waits on an unconfirmed owner, a load would read the
+      // legacy shared list. Fail fast instead (never hang a pull-to-refresh).
+      if (!(await isOwnerReadable())) throw new Error('wallet owner not confirmed yet');
       const isCurrent = deps.captureWalletIdentity();
       const loaded = await loadOwnerWallets(deps, isCurrent, null, false);
       if (loaded && isCurrent()) commitOwnerWallets(deps, loaded, isCurrent, 'startup-retry');
@@ -270,7 +282,11 @@ export function useWalletStartup(deps: WalletStartupDeps): () => Promise<void> {
         // full (#816). The 2 s timeout keeps a wedged NostrContext from
         // holding the boot spinner; awaitConfirmedOwner decides what follows.
         await walletStorage.awaitActivePubkeyHydrated();
-        if (!(await awaitConfirmedOwner(setIsLoading))) return;
+        // Waiting on the owner arms the retry too, so pull-to-refresh can
+        // load once the owner is confirmed even if startup's wait never ends.
+        if (!(await awaitConfirmedOwner(setIsLoading, () => retry.arm(captureWalletIdentity())))) {
+          return;
+        }
         isStartupCurrent = captureWalletIdentity();
 
         // Nothing else retries this load straight away: the identity
@@ -292,6 +308,8 @@ export function useWalletStartup(deps: WalletStartupDeps): () => Promise<void> {
           isStartupCurrent,
           loaded.fromPrefetch ? 'startup-prefetch' : 'startup',
         );
+        // Loaded: a retry armed while waiting on the owner has nothing left to do.
+        retry.disarm();
       } catch (error) {
         console.warn('Wallet startup failed:', error);
         if (!isStartupCurrent()) return;

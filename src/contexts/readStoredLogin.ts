@@ -67,17 +67,19 @@ export async function readStoredLogin(isCurrent: () => boolean = () => true): Pr
  * Cold-start auto-login's read. When it ends without an account (logged out,
  * or the slots are unreadable) the wallet gate opens signed-out immediately
  * rather than after its 2 s timeout. A found account is handed to the gate
- * by the caller, once that account's storage migration has run.
+ * by the caller, once that account's storage migration has run. A read
+ * superseded by a newer login, logout or switch reports nothing to the gate:
+ * "no session" then means "not this restore's call", not "signed out".
  */
 export async function readStartupLogin(
   isCurrent: () => boolean = () => true,
 ): Promise<StoredLogin> {
   try {
     const login = await readStoredLogin(isCurrent);
-    if (!login.session) resolveStartupWalletOwner(null);
+    if (!login.session && isCurrent()) resolveStartupWalletOwner(null);
     return login;
   } catch (error) {
-    resolveStartupWalletOwner(null);
+    if (isCurrent()) resolveStartupWalletOwner(null);
     throw error;
   }
 }

@@ -22,6 +22,8 @@ export type WalletRetryTrigger = 'resume' | 'refresh';
 export interface WalletLoadRetry {
   /** The startup load failed for the identity `isCurrent` was captured for. */
   arm(isCurrent: () => boolean): void;
+  /** The load succeeded by other means (startup itself). */
+  disarm(): void;
   isArmed(): boolean;
   /** Retry now if armed. Never rejects. */
   attempt(trigger: WalletRetryTrigger): Promise<void>;
@@ -53,6 +55,7 @@ export function createWalletLoadRetry(
       failures = 0;
       notBefore = 0;
     },
+    disarm,
     isArmed,
     attempt(trigger) {
       if (!isArmed()) return Promise.resolve();

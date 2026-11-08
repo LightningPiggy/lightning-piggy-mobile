@@ -143,6 +143,24 @@ describe('readStartupLogin and the wallet gate', () => {
     expect(await gateReleasedWithoutTimeout()).toBe(false);
     expect(walletStorage.isWalletOwnerGateOpen()).toBe(false);
   });
+
+  it('reports nothing to the gate when a newer login superseded the read (#1746)', async () => {
+    // Superseded NIP-46 restore: no session, because it skipped its bunker.
+    store.set('nostr_signer_type', 'nip46');
+    store.set('nostr_nip46_connection', '{"conn":1}');
+    jest.mocked(restoreNip46Session).mockResolvedValueOnce(null);
+    await readStartupLogin(() => false);
+    expect(walletStorage.isWalletOwnerGateOpen()).toBe(false);
+    // The newer session decides the owner. Its signed-in publish opens the gate.
+    walletStorage.setActivePubkeyForWalletStorage('pk-manual');
+    expect(walletStorage.isWalletOwnerGateOpen()).toBe(true);
+  });
+
+  it('reports nothing to the gate when a superseded read fails', async () => {
+    jest.mocked(loadIdentities).mockRejectedValueOnce(new Error('keystore unavailable'));
+    await expect(readStartupLogin(() => false)).rejects.toThrow('keystore unavailable');
+    expect(await gateReleasedWithoutTimeout()).toBe(false);
+  });
 });
 
 describe('registerRestoredSession', () => {
