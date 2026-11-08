@@ -103,5 +103,58 @@ test('native-engine inbox omits wraps and retains EOSE and close signals', async
   mockPool.destroy();
 });
 
+test('known ids are skipped before parse and verify, and the backlog still reaches EOSE', async () => {
+  mockPool = new TestPool();
+  const verifyEvent = jest.fn(() => true);
+  const relay = new AbstractRelay(url, { verifyEvent: verifyEvent as never });
+  jest.spyOn(relay, 'send').mockResolvedValue();
+  jest.spyOn(mockPool, 'ensureRelay').mockResolvedValue(relay);
+  const onEvent = jest.fn();
+  const onEose = jest.fn();
+  const known = new Set(['1'.repeat(64), '2'.repeat(64)]);
+  const cleanup = subscribeInboxDmsForViewer({
+    viewerPubkey: 'me',
+    relays: [url],
+    onEvent,
+    onEose,
+    isKnownEvent: (id) => known.has(id),
+  });
+  await tick();
+  const sub = [...relay.openSubs.values()][0];
+  const frame = (id: string, kind: number) =>
+    relay._onmessage({
+      data: JSON.stringify([
+        'EVENT',
+        sub.id,
+        {
+          id: id.repeat(64),
+          pubkey: 'a'.repeat(64),
+          sig: 'b'.repeat(128),
+          kind,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [['p', 'me']],
+          content: '',
+        },
+      ]),
+    } as MessageEvent);
+  const parse = jest.spyOn(JSON, 'parse');
+  frame('1', 1059);
+  frame('2', 4);
+  frame('3', 1059);
+  // Only the unknown wrap was parsed, verified and delivered.
+  expect(parse).toHaveBeenCalledTimes(1);
+  parse.mockRestore();
+  expect(verifyEvent).toHaveBeenCalledTimes(1);
+  expect(onEvent.mock.calls.map(([event]) => event.id)).toEqual(['3'.repeat(64)]);
+  relay._onmessage({ data: JSON.stringify(['EOSE', sub.id]) } as MessageEvent);
+  expect(onEose).toHaveBeenCalledTimes(1);
+  // A claim given back (no longer known) is delivered on redelivery.
+  known.delete('1'.repeat(64));
+  frame('1', 1059);
+  expect(onEvent).toHaveBeenCalledTimes(2);
+  cleanup();
+  mockPool.destroy();
+});
+
 beforeEach(() => jest.useFakeTimers({ doNotFake: ['queueMicrotask'] }));
 afterEach(() => jest.useRealTimers());

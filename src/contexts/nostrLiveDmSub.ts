@@ -707,6 +707,15 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // sub — see subscribeInboxDmsForViewer). Read per-arm so the fallback
     // re-arm restores the wrap filter if the engine fails to start.
     skipWraps: () => engineActive,
+    // Pre-parse twin of handleInboxEvent's known-id early return (#1759): the
+    // sub carries only kinds 4 + 1059, so the kind check there always holds.
+    // Kind-4 ids also get the "already stored" mark; the watch only consults
+    // it for wraps, so that is harmless.
+    isKnownEvent: (id) => {
+      if (!knownWrapIds.has(id)) return false;
+      if (!isWrapInFlight(id)) markWrapAlreadyStored(id);
+      return true;
+    },
     onEvent: (ev) => {
       // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
       handleInboxEvent(ev).catch((e) => {

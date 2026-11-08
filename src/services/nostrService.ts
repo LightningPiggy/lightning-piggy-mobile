@@ -8,8 +8,7 @@ import {
   type VerifiedEvent,
 } from 'nostr-tools/pure';
 import type { Filter } from 'nostr-tools/filter';
-import { querySyncAbortable } from './relayQuery';
-import { DM_INBOX_LIMIT, KIND4_REPLAY_OVERLAP_SECONDS } from './dmInboxFetchPolicy';
+import type { RawGiftWrapEvent } from './nostrDmFetch';
 import { fetchProfilesBatch } from './nostrProfileBatch';
 import {
   fetchMissingProfileEvents,
@@ -596,173 +595,15 @@ export function createDirectMessageRumor(input: {
   };
 }
 
-export interface RawDmEvent {
-  id: string;
-  pubkey: string;
-  created_at: number;
-  tags: string[][];
-  content: string;
-}
-
-/**
- * Fetch NIP-4 encrypted DMs (kind 4) exchanged between `myPubkey` and
- * `otherPubkey`, in either direction. Returns raw events — decryption
- * happens in the context layer where the signer (nsec / Amber) lives.
- *
- * Uses two parallel filters: messages authored by me tagged to the other,
- * and messages authored by the other tagged to me. Most relays index
- * `#p`, so this pair covers both conversation halves.
- */
-export async function fetchDirectMessageEvents(
-  myPubkey: string,
-  otherPubkey: string,
-  relays: string[],
-  options: { limit?: number; since?: number } = {},
-): Promise<RawDmEvent[]> {
-  const allRelays = [...new Set([...relays, ...enabledAppRelays('default', DEFAULT_RELAYS)])];
-  trackRelays(allRelays);
-  const limit = options.limit ?? 200;
-  // Damus's trick (SubscriptionManager.swift:293-300): pad `since` back
-  // by 2 minutes so relays with slightly-off clocks still return the
-  // last few events we might have missed on the previous fetch. On
-  // first fetch (no cached last-seen) the caller passes undefined, so
-  // the filter has no `since` and the relay returns full history.
-  const since =
-    options.since !== undefined
-      ? Math.max(0, options.since - KIND4_REPLAY_OVERLAP_SECONDS)
-      : undefined;
-  const fromMeFilter: Filter = {
-    kinds: [4],
-    authors: [myPubkey],
-    '#p': [otherPubkey],
-    limit,
-  };
-  const toMeFilter: Filter = {
-    kinds: [4],
-    authors: [otherPubkey],
-    '#p': [myPubkey],
-    limit,
-  };
-  if (since !== undefined) {
-    fromMeFilter.since = since;
-    toMeFilter.since = since;
-  }
-  try {
-    // maxWait closes the sub at 15 s if EOSE never arrives (proper teardown vs withTimeout race).
-    const [fromMe, toMe] = await Promise.all([
-      pool.querySync(allRelays, fromMeFilter, { maxWait: 15000 }),
-      pool.querySync(allRelays, toMeFilter, { maxWait: 15000 }),
-    ]);
-    const byId = new Map<string, RawDmEvent>();
-    for (const ev of fromMe) byId.set(ev.id, ev as RawDmEvent);
-    for (const ev of toMe) byId.set(ev.id, ev as RawDmEvent);
-    return Array.from(byId.values());
-  } catch (error) {
-    if (__DEV__) console.warn('[Nostr] fetchDirectMessageEvents failed:', error);
-    return [];
-  }
-}
-
-export interface RawGiftWrapEvent {
-  id: string;
-  pubkey: string;
-  kind: number;
-  created_at: number;
-  tags: string[][];
-  content: string;
-  sig: string;
-}
-
-export interface FetchedInboxEvents {
-  kind4: RawDmEvent[];
-  kind1059: RawGiftWrapEvent[];
-}
-
-/**
- * Fetch every DM event that could end up in the current user's inbox:
- * legacy NIP-04 kind-4 events in either direction, plus NIP-17 gift wraps
- * (kind 1059) addressed to them. Returned events are raw — the caller
- * decrypts/unwraps in the context layer where the signer lives.
- *
- * Three parallel filters: `authors=me` covers outgoing kind-4 (which tag
- * the recipient, not me); `#p=me` covers incoming kind-4 and NIP-17 wraps
- * (which always tag the recipient — including self-wraps of the sender's
- * own copy). This matches Damus's twin kind-4 strategy and layers NIP-17
- * on top.
- */
-export async function fetchInboxDmEvents(
-  myPubkey: string,
-  relays: string[],
-  options: { limit?: number; since?: number; signal?: AbortSignal } = {},
-): Promise<FetchedInboxEvents> {
-  const allRelays = [...new Set([...relays, ...enabledAppRelays('default', DEFAULT_RELAYS)])];
-  trackRelays(allRelays);
-  // Share the live-sub limit and retry-store capacity policy (#383).
-  const limit = options.limit ?? DM_INBOX_LIMIT;
-  // `since` shifted back 2 min (Damus clock-drift pad). Applied only to kind-4 filters below; wraps deliberately skip it (see next comment).
-  const since =
-    options.since !== undefined
-      ? Math.max(0, options.since - KIND4_REPLAY_OVERLAP_SECONDS)
-      : undefined;
-  const sentK4Filter: Filter = { kinds: [4], authors: [myPubkey], limit };
-  const recvK4Filter: Filter = { kinds: [4], '#p': [myPubkey], limit };
-  // NIP-59 (gift-wrap) wraps have RANDOMIZED timestamps within ~2 days
-  // of the real publish time in either direction (per spec, for
-  // plausible deniability). So `wrap.created_at` does NOT track when
-  // the underlying message was sent. Applying `since` to the wraps
-  // filter caused recently-published wraps to be silently dropped at
-  // the relay whenever their random ts < lastSeen — and lastSeen could
-  // itself be a future-dated wrap's random ts (see callers using
-  // Math.max over kind1059.created_at), so the inbox query would
-  // progressively skip more and more wraps as the future-dated cap
-  // ratcheted forward. Symptom: a contact's recent DM is visible inside
-  // the per-conversation thread (which fetches peer-scoped without
-  // `since`) but never appears on the Messages tab inbox list.
-  // Resolution: don't filter wraps by `since` at all. The relay query
-  // is bounded by limit + the `#p:[myPubkey]` filter, and the consumer
-  // dedupes against the persisted wrap-id cache so already-decrypted
-  // wraps short-circuit cheaply.
-  const wrapsFilter: Filter = { kinds: [1059], '#p': [myPubkey], limit };
-  if (since !== undefined) {
-    sentK4Filter.since = since;
-    recvK4Filter.since = since;
-  }
-  const __t0 = performance.now();
-  try {
-    // maxWait: per-relay EOSE timeout closes the sub, so the cold-start
-    // inbox fetch genuinely terminates — unlike withTimeout which only raced the
-    // Promise and left the underlying subscribeEose sub running for up to ~60 s.
-    // 8 s (was 15 s): a slow/unresponsive relay shouldn't hold the inbox
-    // spinner for a quarter-minute that reads as a freeze. The live sub keeps
-    // delivering after this resolves, and pull-to-refresh re-runs the query.
-    const [sentK4, receivedK4, wraps] = await Promise.all([
-      querySyncAbortable(pool, allRelays, sentK4Filter, { maxWait: 8000, signal: options.signal }),
-      querySyncAbortable(pool, allRelays, recvK4Filter, { maxWait: 8000, signal: options.signal }),
-      querySyncAbortable(pool, allRelays, wrapsFilter, { maxWait: 8000, signal: options.signal }),
-    ]);
-    // [Perf] Cold-start freeze attribution (#751). querySync ingests every
-    // returned event synchronously (JSON.parse + validateEvent + matchFilters)
-    // before resolving — logs the wrap count + wall-clock so we can tell
-    // whether the dominant cost is fetch volume (reduce limit/fan-out) or
-    // per-event ingest (yield). Prints here, inside the fetch, so it survives
-    // the caller's post-fetch abort short-circuit (useDmInbox.ts:395) which
-    // otherwise suppresses the [Perf] refreshDmInbox count line.
-    console.log(
-      `[Perf] fetchInboxDmEvents: ${(performance.now() - __t0).toFixed(0)}ms ` +
-        `wraps=${wraps.length} sentK4=${sentK4.length} recvK4=${receivedK4.length} ` +
-        `relays=${allRelays.length} limit=${limit}`,
-    );
-    const k4 = new Map<string, RawDmEvent>();
-    for (const ev of sentK4) k4.set(ev.id, ev as RawDmEvent);
-    for (const ev of receivedK4) k4.set(ev.id, ev as RawDmEvent);
-    const k1059 = new Map<string, RawGiftWrapEvent>();
-    for (const ev of wraps) k1059.set(ev.id, ev as RawGiftWrapEvent);
-    return { kind4: Array.from(k4.values()), kind1059: Array.from(k1059.values()) };
-  } catch (error) {
-    if (__DEV__) console.warn('[Nostr] fetchInboxDmEvents failed:', error);
-    return { kind4: [], kind1059: [] };
-  }
-}
+// Bulk DM reads (fetchDirectMessageEvents / fetchInboxDmEvents) and their
+// raw event types live in ./nostrDmFetch (#703 size cap, #1759 quorum read).
+export {
+  fetchDirectMessageEvents,
+  fetchInboxDmEvents,
+  type RawDmEvent,
+  type RawGiftWrapEvent,
+  type FetchedInboxEvents,
+} from './nostrDmFetch';
 
 export interface UnwrappedRumor {
   pubkey: string;
@@ -972,7 +813,7 @@ export type RawInboxDmEvent = RawGiftWrapEvent;
 //    plausible deniability, so a server-side `since` cutoff on wraps
 //    silently drops legit fresh messages whose fake timestamp is older
 //    than the cutoff. kind-4 uses real timestamps and tolerates `since`.
-//    See fetchInboxDmEvents at lines ~769-785 for the same reasoning in
+//    See fetchInboxDmEvents (./nostrDmFetch) for the same reasoning in
 //    the bulk-fetch path. (#383)
 //  - Both kinds get a 1000-event `limit`. Most relays cap at this
 //    anyway; making it explicit aligns the contract and stops a fresh

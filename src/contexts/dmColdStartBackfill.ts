@@ -12,7 +12,7 @@ import type { RefreshDmInboxOptions } from './nostrContextTypes';
  *
  *  - deferred via `runAfterInteractions` so it never blocks the tab transition;
  *  - carrying the original `signal`, so a tab-blur cancels it (the in-flight
- *    relay subscription closes via querySyncAbortable);
+ *    relay subscription closes via the quorum read in fetchInboxDmEvents);
  *  - with `backfill: true`, which bypasses only the freshness TTL (the capped
  *    first pass just stamped the cursor) and fetches the full wrap limit, but
  *    does not itself bypass the #743 skip-set (when the dev follow gate is
@@ -38,7 +38,7 @@ export function scheduleColdStartBackfill(args: {
     // Re-check: the signal may have aborted between scheduling and now (e.g. a
     // tab blur during the interaction window). Skip so we don't toggle loading
     // state or advance the refresh TTL for a backfill the user no longer wants
-    // (#752 Copilot). querySyncAbortable would also short-circuit, but bailing
+    // (#752 Copilot). fetchInboxDmEvents would also short-circuit, but bailing
     // here avoids the wasted refreshDmInbox setup entirely.
     if (args.signal?.aborted) return;
     void args.refreshRef.current?.({

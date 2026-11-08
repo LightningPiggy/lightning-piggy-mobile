@@ -1,4 +1,5 @@
 import { pool, trackRelays, DM_INBOX_LIMIT, type RawInboxDmEvent } from './nostrService';
+import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 
 // Live sub never looks further back than this — caps cold-start restream
 // cost when inboxLastSeen is very stale (e.g. user hasn't opened the app in
@@ -47,6 +48,12 @@ export function subscribeInboxDmsForViewer(input: {
   // self-re-arm (#934/#958) must keep working for it (the engine reconnects
   // its own sockets independently).
   skipWraps?: boolean;
+  // Ids the caller already has (stored / in flight). nostr-tools asks this
+  // with the raw frame's id BEFORE JSON.parse and signature verification, so
+  // a re-streamed backlog of known wraps costs a Set lookup each instead of a
+  // parse + Schnorr verify on the JS thread (#1759). EOSE frames don't go
+  // through it, so a skipped backlog still reaches EOSE normally.
+  isKnownEvent?: (id: string) => boolean;
 }): () => void {
   trackRelays(input.relays);
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
@@ -71,13 +78,26 @@ export function subscribeInboxDmsForViewer(input: {
       : []),
   ];
   let eosed = false;
+  let skippedKnown = 0;
+  const isKnownEvent = input.isKnownEvent;
   const sub = pool.subscribeMap(
     input.relays.flatMap((url) => filters.map((filter) => ({ url, filter }))),
     {
       onevent,
+      ...(isKnownEvent && {
+        alreadyHaveEvent: (id: string) => {
+          if (!isKnownEvent(id)) return false;
+          skippedKnown++;
+          return true;
+        },
+      }),
       oneose: () => {
         if (eosed) return;
         eosed = true;
+        if (PERF_LOGS_ENABLED && isKnownEvent)
+          console.log(
+            `[Perf] live DM sub EOSE: skippedKnown=${skippedKnown} relays=${input.relays.length}`,
+          );
         input.onEose?.();
       },
       onclose: input.onWrapsClose,
