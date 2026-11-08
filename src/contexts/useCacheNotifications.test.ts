@@ -391,13 +391,97 @@ describe('relay-set keying (cold-start re-arm churn)', () => {
       jest.advanceTimersByTime(3_000);
     });
     expect(mockedFetch).toHaveBeenCalledTimes(1);
-    // ...but one after the gap does.
+    // ...and once the gap has elapsed, ONE discovery runs on the new relays.
     await act(async () => {
       jest.advanceTimersByTime(10_000);
+    });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    expect(mockedFetch.mock.calls[1][1]).toEqual(['wss://one', 'wss://two']);
+    await act(async () => {
       onChange('active');
       jest.advanceTimersByTime(3_000);
     });
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('rediscovers on the new relays after the gap when the old ones found no caches', async () => {
+    mockedFetch.mockResolvedValueOnce([]).mockResolvedValue([{ coord: COORD_A }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    expect(mockedFoundLogs).not.toHaveBeenCalled();
+
+    // Hydration adds the relay that actually holds the viewer's caches.
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://one', 'wss://caches'] });
+    await act(async () => {});
+    expect(mockedFetch).toHaveBeenCalledTimes(1); // still inside the gap
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(1));
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
+    expect(mockedFetch.mock.calls[1][1]).toEqual(['wss://one', 'wss://caches']);
+    expect(mockedFoundLogs.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ relays: ['wss://one', 'wss://caches'], cacheCoords: [COORD_A] }),
+    );
+  });
+
+  it('rediscovers after the gap when a joined in-flight fetch found nothing', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch
+      .mockReturnValueOnce(
+        new Promise<{ coord: string }[]>((res) => {
+          resolveFirst = res;
+        }),
+      )
+      .mockResolvedValue([{ coord: COORD_B }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://two'] });
+    await act(async () => {
+      resolveFirst([]);
+    });
+    expect(mockedFoundLogs).not.toHaveBeenCalled();
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(1));
+    expect(mockedFetch.mock.calls[1][1]).toEqual(['wss://two']);
+  });
+
+  it('keeps a cache publish queued across a relay change and runs it on the new relays', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch
+      .mockReturnValueOnce(
+        new Promise<{ coord: string }[]>((res) => {
+          resolveFirst = res;
+        }),
+      )
+      .mockResolvedValue([{ coord: COORD_B }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    // A publish lands mid-fetch (queued), then the relay set changes.
+    await act(async () => {
+      notifyOwnCachesChanged();
+    });
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://two'] });
+    await act(async () => {
+      resolveFirst([{ coord: COORD_A }]);
+    });
+    // The queued follow-up still runs, straight away, on the latest relays.
     await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    expect(mockedFetch.mock.calls[1][1]).toEqual(['wss://two']);
+    await waitFor(() =>
+      expect(mockedFoundLogs.mock.calls.at(-1)![0]).toEqual(
+        expect.objectContaining({ relays: ['wss://two'], cacheCoords: [COORD_B] }),
+      ),
+    );
+    // It already covered the new relays, so the post-gap rediscovery is skipped.
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
   });
 
   it('joins a fetch still in flight when the relay set changes instead of overlapping it', async () => {

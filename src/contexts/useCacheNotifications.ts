@@ -47,6 +47,7 @@ import { subscribeOwnCachesChanged } from '../services/ownCachesBus';
 import { parseCacheCoord } from '../services/nostrPlacesService';
 import { notifyFoundLog } from './nostrEventBus';
 import { useStableRelayList } from '../hooks/useStableRelayList';
+import { relayListKey } from '../utils/relayListKey';
 
 // Tolerate sender/receiver clock drift — matches the DM live sub.
 const NOTIFY_SKEW_SEC = 120;
@@ -105,12 +106,19 @@ interface CoordFetchState {
   coords: string[] | null;
   /** The fetch in flight, if any. */
   pending: Promise<string[]> | null;
+  /** Relay-set key the last fetch ran against (see `relayListKey`). */
+  relaysKey: string | null;
+  /** A forced pass arrived while `pending` ran: the current effect run
+   * consumes it with its own (latest) relays once the fetch settles. */
+  queuedForce: boolean;
 }
 const newCoordFetchState = (pubkey: string | null): CoordFetchState => ({
   pubkey,
   startedAt: 0,
   coords: null,
   pending: null,
+  relaysKey: null,
+  queuedForce: false,
 });
 
 export interface UseCacheNotificationsParams {
@@ -146,6 +154,7 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
       fetchStateRef.current = newCoordFetchState(pubkey);
     }
     const fetchState = fetchStateRef.current;
+    const relaysKey = relayListKey(readRelays);
 
     let cancelled = false;
     let unsubscribeComments: (() => void) | null = null;
@@ -266,11 +275,12 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // pass (own-cache publish, #1016) that lands while a fetch is in flight
     // queues ONE follow-up instead of overlapping it — bypassing the min-gap
     // throttle must not reintroduce the overlapping-fetch problem the
-    // throttle exists to prevent (Copilot #1018).
-    let queuedForce = false;
+    // throttle exists to prevent (Copilot #1018). The queue flag is hoisted
+    // too, so a relay change mid-fetch can't drop the follow-up: the run that
+    // is current when the fetch settles consumes it.
     const runQueuedForce = (): void => {
-      if (queuedForce && !cancelled) {
-        queuedForce = false;
+      if (fetchState.queuedForce && !cancelled) {
+        fetchState.queuedForce = false;
         void refetchAndRearm({ force: true });
       }
     };
@@ -282,7 +292,7 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     const refetchAndRearm = async (opts?: { force?: boolean }): Promise<void> => {
       if (cancelled) return;
       if (fetchState.pending) {
-        if (opts?.force) queuedForce = true;
+        if (opts?.force) fetchState.queuedForce = true;
         return;
       }
       // Throttle bursts (esp. multiple back-to-back AppState 'active' events on
@@ -292,6 +302,7 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
       const startNow = Date.now();
       if (!opts?.force && startNow - fetchState.startedAt < REFETCH_MIN_GAP_MS) return;
       fetchState.startedAt = startNow;
+      fetchState.relaysKey = relaysKey;
       const pending = fetchCachesByAuthor(pubkey, readRelays).then((caches) =>
         caches.map((c) => c.coord),
       );
@@ -315,13 +326,31 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // not stack timers or fire after re-backgrounding — see #554).
     let resumeTimer: ReturnType<typeof setTimeout> | null = null;
 
+    // Discovery on THIS relay set once the min gap since the last fetch has
+    // elapsed. A reused result came from the previous relays, which may have
+    // missed caches the new ones hold (e.g. it found none), and the safety
+    // net is 15 min away. Skipped when a fetch already ran on these relays.
+    let catchUpTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleCatchUp = (): void => {
+      const wait = Math.max(0, fetchState.startedAt + REFETCH_MIN_GAP_MS - Date.now());
+      catchUpTimer = setTimeout(() => {
+        catchUpTimer = null;
+        if (cancelled || fetchState.relaysKey === relaysKey) return;
+        void refetchAndRearm({ force: true });
+      }, wait);
+    };
+
     // First arm for this relay set. A re-run (the relay set changed) reuses
-    // a fetch in flight or a coord set fetched inside the min gap, and only
-    // re-subscribes on the new relays; otherwise it fetches as on mount.
-    if (fetchState.pending) joinPending(fetchState.pending);
-    else if (fetchState.coords && Date.now() - fetchState.startedAt < REFETCH_MIN_GAP_MS)
+    // a fetch in flight or a coord set fetched inside the min gap, so it
+    // re-subscribes on the new relays at once, then rediscovers on them after
+    // the gap; otherwise it fetches as on mount.
+    if (fetchState.pending) {
+      joinPending(fetchState.pending);
+      scheduleCatchUp();
+    } else if (fetchState.coords && Date.now() - fetchState.startedAt < REFETCH_MIN_GAP_MS) {
       armFor(fetchState.coords);
-    else void refetchAndRearm();
+      if (fetchState.relaysKey !== relaysKey) scheduleCatchUp();
+    } else void refetchAndRearm();
     const interval = setInterval(() => {
       void refetchAndRearm();
     }, REFETCH_COORDS_INTERVAL_MS);
@@ -352,6 +381,7 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
 
     return () => {
       cancelled = true;
+      if (catchUpTimer !== null) clearTimeout(catchUpTimer);
       if (resumeTimer !== null) {
         clearTimeout(resumeTimer);
         resumeTimer = null;
