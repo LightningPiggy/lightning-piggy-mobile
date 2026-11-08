@@ -237,10 +237,12 @@ describe('scheduleMissingProfileFallback (background, never awaited)', () => {
 });
 
 describe('cancellation stops running work (#5)', () => {
-  it('passes the signal to every query', async () => {
+  it('passes the signal to the relay-list lookup and to every query', async () => {
     writeLists({ [alice]: ok([relay('alice1')]) });
     const controller = new AbortController();
     await fetchMissingProfileEvents([alice], { ...opts, signal: controller.signal });
+    // Uncached relay-list discovery is cancelled too (#5).
+    expect(lists.mock.calls[0][1]).toMatchObject({ signal: controller.signal });
     expect(query.mock.calls[0][3]).toMatchObject({ signal: controller.signal });
   });
 

@@ -134,7 +134,7 @@ it('a test account in lockdown adds no author relays', async () => {
   expect(mockSubscribeMany).not.toHaveBeenCalled();
 });
 
-it('cuts off a relay that floods the feed: closed, released, reported and quarantined (M2)', async () => {
+it('cuts off a relay that floods the feed: closed once, released, reported and quarantined (M2)', async () => {
   write(['wss://noisy.example/', 'wss://quiet.example/']);
   const closers = new Map<string, jest.Mock>();
   mockSubscribeMany.mockImplementation(([relay]: string[]) => {
@@ -142,24 +142,31 @@ it('cuts off a relay that floods the feed: closed, released, reported and quaran
     closers.set(relay, closeOne);
     return { close: closeOne };
   });
-  const onEvent = jest.fn();
   const onRelays = jest.fn();
-  arm({ onEvent, onRelays, limit: 10 });
+  const stop = arm({ onRelays, limit: 10 });
   await jest.runAllTimersAsync();
   expect(onRelays).toHaveBeenLastCalledWith(['wss://noisy.example/', 'wss://quiet.example/']);
   const noisy = mockSubscribeMany.mock.calls.find(([[r]]) => r === 'wss://noisy.example/')![2];
   const budget = OUTBOX_FEED_EVENT_BUDGET_FACTOR * 10;
-  // Events by anyone count: the cost is paid before the author check.
-  for (let i = 0; i < budget + 50; i++) {
-    noisy.onevent({ id: `e${i}`, pubkey: viewer, kind: 1, created_at: i, content: '', tags: [] });
-  }
-  expect(closers.get('wss://noisy.example/')).toHaveBeenCalled();
+  // Counted in `alreadyHaveEvent`, which nostr-tools calls for every EVENT
+  // BEFORE parsing / verifying it (any author, on-filter or not). Past the
+  // budget each one is skipped (true), so it's never verified.
+  const skipped: boolean[] = [];
+  for (let i = 0; i < budget + 50; i++) skipped.push(noisy.alreadyHaveEvent(`e${i}`));
+  expect(skipped.slice(0, budget).every((s) => s === false)).toBe(true);
+  expect(skipped.slice(budget).every((s) => s === true)).toBe(true);
+  await jest.runAllTimersAsync();
   expect(closers.get('wss://quiet.example/')).not.toHaveBeenCalled();
   expect(recordRelayFailure).toHaveBeenCalledWith('wss://noisy.example/');
   expect(releaseNewIdleRelays).toHaveBeenCalledWith(['wss://noisy.example/'], new Set());
   // Older pages stop asking it, and it isn't leased again for a while.
   expect(onRelays).toHaveBeenLastCalledWith(['wss://quiet.example/']);
   expect(leaseOutboxRelays(['wss://noisy.example/']).relays).toEqual([]);
+  // Closed exactly once, even after the feed closes too (L-A: nostr-tools'
+  // closers aren't idempotent; a second close corrupts its bookkeeping).
+  stop();
+  expect(closers.get('wss://noisy.example/')).toHaveBeenCalledTimes(1);
+  expect(closers.get('wss://quiet.example/')).toHaveBeenCalledTimes(1);
 });
 
 it('a relay within its budget is left alone', async () => {
@@ -168,8 +175,18 @@ it('a relay within its budget is left alone', async () => {
   await jest.runAllTimersAsync();
   const handlers = mockSubscribeMany.mock.calls[0][2];
   for (let i = 0; i < OUTBOX_FEED_EVENT_BUDGET_FACTOR * 10; i++) {
-    handlers.onevent({ id: `e${i}`, pubkey: alice, kind: 1, created_at: i, content: '', tags: [] });
+    expect(handlers.alreadyHaveEvent(`e${i}`)).toBe(false);
   }
+  await jest.runAllTimersAsync();
   expect(close).not.toHaveBeenCalled();
   expect(recordRelayFailure).not.toHaveBeenCalled();
+});
+
+it('never closes a subscription the relay already closed (L-A)', async () => {
+  write(['wss://alice1.example/']);
+  const stop = arm({ limit: 10 });
+  await jest.runAllTimersAsync();
+  mockSubscribeMany.mock.calls[0][2].onclose(['closed by relay']);
+  stop();
+  expect(close).not.toHaveBeenCalled();
 });

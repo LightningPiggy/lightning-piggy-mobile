@@ -10,6 +10,11 @@ import {
   releaseNewIdleRelays,
   trackRelays,
 } from './nostrPool';
+import {
+  __resetOutboxLeasesForTests,
+  leasedOutboxRelayCount,
+  leaseOutboxRelays,
+} from './authorOutboxRelays';
 
 jest.mock('./relayHealth', () => ({
   hydrateRelayHealth: jest.fn(),
@@ -204,4 +209,25 @@ it('sockets never marked for release stay open when their reads end', async () =
   relay.subscribe([{ kinds: [1], limit: 1 }], {}).close();
   await new Promise((r) => setTimeout(r, 0));
   expect(relays.has(relay.url)).toBe(true);
+});
+
+it('an outbox read cancelled mid-connect still closes the socket and frees the cap once it connects', async () => {
+  __resetOutboxLeasesForTests();
+  const lease = leaseOutboxRelays(['wss://slow-outbox/']);
+  const relay = addRelay('wss://slow-outbox/');
+  // Still connecting when the read is cancelled and the lease released.
+  let connected!: () => void;
+  const state = relay as unknown as { connectionPromise?: Promise<void>; _connected: boolean };
+  state.connectionPromise = new Promise<void>((resolve) => (connected = resolve));
+  lease.release();
+  expect(relays.has(relay.url)).toBe(true);
+  expect(leasedOutboxRelayCount()).toBe(1);
+  // The connection succeeds (nostr-tools leaves `idleSince` alone here).
+  state.connectionPromise = undefined;
+  state._connected = true;
+  connected();
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  expect(relays.has(relay.url)).toBe(false);
+  expect(leasedOutboxRelayCount()).toBe(0);
 });

@@ -83,8 +83,10 @@ export function subscribeAuthorFeed(input: {
    *  event arrived: "couldn't ask", which is not the same as "no posts". */
   onUnavailable?: () => void;
   /** Hardening for relays the viewer didn't choose: a relay that sends more
-   *  events than this (any author) has its subscription closed and is
-   *  reported through `onFlood`. */
+   *  events than this has its subscription closed and is reported through
+   *  `onFlood`. Counted in `alreadyHaveEvent`, which nostr-tools calls BEFORE
+   *  parsing and verifying, so off-filter events (other authors, which the
+   *  SDK drops before `onevent`) count too, and the excess is skipped unverified. */
   maxEventsPerRelay?: number;
   onFlood?: (relay: string) => void;
 }): () => void {
@@ -109,23 +111,38 @@ export function subscribeAuthorFeed(input: {
   // One subscription per relay (still one REQ per relay on the wire), so a
   // relay that really answered can be told apart while another stays silent:
   // the pool only reports EOSE once EVERY relay has sent one.
+  // Closed (by us or by the relay): nostr-tools' closers aren't idempotent —
+  // a second close drives the relay's operation count negative.
+  const done: boolean[] = relays.map(() => false);
+  const closeSub = (i: number) => {
+    if (done[i]) return;
+    done[i] = true;
+    try {
+      subs[i].close();
+    } catch {
+      // best-effort
+    }
+  };
+  const budget = input.maxEventsPerRelay;
   const subs = relays.map((relay, i) => {
     let eose = false;
     let closed = false;
     let received = 0;
+    let flooded = false;
+    const countEvent = () => {
+      if (flooded) return true;
+      if (++received <= budget!) return false;
+      flooded = true;
+      // Out of the SDK's message handler before closing.
+      void Promise.resolve().then(() => {
+        closeSub(i);
+        input.onFlood?.(relay);
+      });
+      return true; // skip it: never parsed or verified
+    };
     return pool.subscribeMany([relay], filter, {
+      ...(budget !== undefined ? { alreadyHaveEvent: countEvent } : {}),
       onevent: (ev: Event) => {
-        if (input.maxEventsPerRelay !== undefined && ++received > input.maxEventsPerRelay) {
-          if (received === input.maxEventsPerRelay + 1) {
-            try {
-              subs[i].close();
-            } catch {
-              // best-effort — the sub may already be closed
-            }
-            input.onFlood?.(relay);
-          }
-          return;
-        }
         if (ev.pubkey !== input.authorPubkey || !AUTHOR_FEED_KINDS.includes(ev.kind)) return;
         gotEvent = true;
         input.onEvent(toFeedEvent(ev));
@@ -150,6 +167,7 @@ export function subscribeAuthorFeed(input: {
       // answered stays open. Every relay closing early with nothing received
       // means none was reachable. A close we asked for isn't reported.
       onclose: () => {
+        done[i] = true;
         if (closed) return;
         closed = true;
         if (++closedCount < relays.length) return;
@@ -162,13 +180,7 @@ export function subscribeAuthorFeed(input: {
   });
   return () => {
     closedByUs = true;
-    for (const sub of subs) {
-      try {
-        sub.close();
-      } catch {
-        // best-effort — the sub may already be closed
-      }
-    }
+    subs.forEach((_, i) => closeSub(i));
   };
 }
 
@@ -247,9 +259,12 @@ export function subscribeAuthorOutboxFeed(input: {
   let closed = false;
   const open = new Map<string, () => void>();
   const limit = input.limit ?? AUTHOR_FEED_PAGE_SIZE;
+  // Closing early also cancels an uncached relay-list lookup.
+  const lookup = new AbortController();
   void authorWriteRelays(input.authorPubkey, {
     viewerPubkey: input.viewerPubkey,
     lookupRelays: input.currentRelays,
+    signal: lookup.signal,
   }).then((write) => {
     if (closed) return;
     for (const url of withoutRelays(write, input.currentRelays)) {
@@ -282,6 +297,7 @@ export function subscribeAuthorOutboxFeed(input: {
   });
   return () => {
     closed = true;
+    lookup.abort();
     for (const close of open.values()) close();
     open.clear();
   };

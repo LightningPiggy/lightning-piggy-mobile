@@ -158,10 +158,21 @@ pool.onPublishesDrained = deferRelease;
 const idleWatched = new WeakSet<AbstractRelay>();
 /** Report when a socket marked for release goes idle (nostr-tools sets
  * `idleSince` when its last subscription or operation ends), so a busy socket
- * is closed once its read finishes rather than never. */
+ * is closed once its read finishes rather than never. A socket still
+ * CONNECTING is checked again once that settles: nostr-tools doesn't touch
+ * `idleSince` on a successful connect, so a read cancelled mid-connect would
+ * otherwise leave it open for good. */
 function releaseOnIdle(url: string): void {
   const relay = pool.relayAt(url);
-  if (!relay || idleWatched.has(relay)) return;
+  if (!relay) return;
+  const connecting = (relay as unknown as { connectionPromise?: Promise<void> }).connectionPromise;
+  if (connecting && !relay.connected) {
+    connecting.then(
+      () => deferRelease(url),
+      () => deferRelease(url),
+    );
+  }
+  if (idleWatched.has(relay)) return;
   idleWatched.add(relay);
   let idleSince = relay.idleSince;
   Object.defineProperty(relay, 'idleSince', {

@@ -185,3 +185,27 @@ it('closes both subscriptions on blur / unmount', () => {
   expect(closeMain).toHaveBeenCalled();
   expect(closeOutbox).toHaveBeenCalled();
 });
+
+it('keeps a full page stuck on the cursor second when stepping past it (#3)', async () => {
+  const page = jest.mocked(fetchAuthorFeedPage);
+  // A full page, all from the cursor's second, none seen yet.
+  const sameSecond = Array.from({ length: 30 }, (_, i) => note(`s${i}`, 100));
+  page.mockResolvedValueOnce({ events: sameSecond, complete: true });
+  page.mockResolvedValueOnce({ events: [note('older', 50)], complete: false });
+  const { result } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    main.onEvent(note('seen', 100));
+    main.onEose?.();
+  });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(pageCalls()).toEqual([
+    { relays: ['wss://mine.example/'], until: 100 },
+    { relays: ['wss://mine.example/'], until: 99 },
+  ]);
+  const ids = new Set(result.current.events.map((e) => e.id));
+  for (let i = 0; i < 30; i++) expect(ids.has(`s${i}`)).toBe(true);
+  expect(ids.has('older')).toBe(true);
+  expect(result.current.reachedEnd).toBe(false);
+});

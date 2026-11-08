@@ -72,8 +72,31 @@ export async function readCachedWithTtl<T>(
  * the latest on-disk cache at write time and merge on top of THAT, falling
  * back to `existing` only if the read/parse fails. This prevents a slow
  * background fetch from clobbering fresher data written by a later fetch.
+ *
+ * Persists for one account run ONE AT A TIME (a promise chain per account):
+ * otherwise two could read the same snapshot and the later write would drop
+ * the other's profiles, or put an older kind-0 back (#1390).
  */
-export async function persistMergedProfileCache(
+export function persistMergedProfileCache(
+  pk: string,
+  existing: Record<string, NostrProfile>,
+  fetched: Map<string, NostrProfile>,
+): Promise<void> {
+  const run = (persistChains.get(pk) ?? Promise.resolve()).then(() =>
+    persistMergedProfileCacheNow(pk, existing, fetched),
+  );
+  const tail = run.catch(() => {});
+  persistChains.set(pk, tail);
+  void tail.then(() => {
+    if (persistChains.get(pk) === tail) persistChains.delete(pk);
+  });
+  return run;
+}
+
+/** The tail of each account's queue of persists. */
+const persistChains = new Map<string, Promise<void>>();
+
+async function persistMergedProfileCacheNow(
   pk: string,
   existing: Record<string, NostrProfile>,
   fetched: Map<string, NostrProfile>,

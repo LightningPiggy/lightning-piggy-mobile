@@ -141,6 +141,7 @@ export async function fetchMissingProfileEvents(
   const lists = await getManyPeerRelayLists(people, {
     viewerPubkey: viewer,
     lookupRelays: options.lookupRelays,
+    signal,
   });
   if (signal?.aborted) return found;
   const plans: { pubkey: string; relays: string[] }[] = [];

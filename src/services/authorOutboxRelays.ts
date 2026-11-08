@@ -93,15 +93,20 @@ export function cachedAuthorReadRelays(
  */
 export async function authorWriteRelays(
   pubkey: string,
-  options: { viewerPubkey?: string | null; lookupRelays?: readonly string[] } = {},
+  options: {
+    viewerPubkey?: string | null;
+    lookupRelays?: readonly string[];
+    signal?: AbortSignal;
+  } = {},
 ): Promise<string[]> {
   const viewer = options.viewerPubkey === undefined ? getCurrentUserPubkey() : options.viewerPubkey;
   if (isTestRelayLockdown(viewer)) return [];
   const result = await getPeerRelayLists(pubkey, {
     viewerPubkey: viewer,
     lookupRelays: options.lookupRelays,
+    signal: options.signal,
   });
-  if (result.status !== 'ok') return [];
+  if (result.status !== 'ok' || options.signal?.aborted) return [];
   return result.lists.write ?? [];
 }
 

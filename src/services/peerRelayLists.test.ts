@@ -438,3 +438,67 @@ it('a redirected (uncacheable) retry still returns fresh cached finds, writing n
     lists: { inbox: ['wss://inbox.example.com/'], read: undefined, write: undefined },
   });
 });
+
+describe('cancellation (signal)', () => {
+  it('passes the signal to the REQs, and an aborted lookup is never cached', async () => {
+    const controller = new AbortController();
+    query.mockImplementationOnce(async (_relays, _filters, _maxWait, options) => {
+      controller.abort(); // the caller cancels while the REQs are open
+      options?.onClose?.(['closed automatically on eose']);
+      return [];
+    });
+    const result = await getPeerRelayLists(alice, {
+      viewerPubkey: viewer,
+      signal: controller.signal,
+    });
+    expect((query.mock.calls[0][3] as { abort?: AbortSignal }).abort).toBe(controller.signal);
+    expect(result.status).toBe('failed');
+    // Not cached as absent (or unknown): the next caller looks up afresh.
+    expect(peekPeerRelayLists(alice, viewer)).toBeUndefined();
+    query.mockImplementationOnce(
+      answered([listEvent(alice, 10050, [['relay', 'wss://in.example']])]),
+    );
+    const next = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(next.status === 'ok' && next.lists.inbox).toEqual(['wss://in.example/']);
+  });
+
+  it('an already-aborted caller asks no relay', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const result = await getPeerRelayLists(alice, {
+      viewerPubkey: viewer,
+      signal: controller.signal,
+    });
+    expect(query).not.toHaveBeenCalled();
+    expect(result.status).toBe('failed');
+  });
+
+  it("a cancellable lookup isn't shared, so another caller can't inherit its abort", async () => {
+    const controller = new AbortController();
+    let finish!: () => void;
+    query.mockImplementationOnce(
+      (_relays, _filters, _maxWait, options) =>
+        new Promise((resolve) => {
+          finish = () => {
+            options?.onClose?.(['closed automatically on eose']);
+            resolve([]);
+          };
+        }),
+    );
+    query.mockImplementationOnce(
+      answered([listEvent(alice, 10050, [['relay', 'wss://in.example']])]),
+    );
+    const cancellable = getPeerRelayLists(alice, {
+      viewerPubkey: viewer,
+      signal: controller.signal,
+    });
+    const other = getPeerRelayLists(alice, { viewerPubkey: viewer });
+    expect(query).toHaveBeenCalledTimes(2);
+    controller.abort();
+    finish();
+    await cancellable;
+    const otherResult = await other;
+    expect(otherResult.status === 'ok' && otherResult.lists.inbox).toEqual(['wss://in.example/']);
+  });
+});

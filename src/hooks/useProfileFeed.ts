@@ -245,14 +245,17 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     const { signal } = controller;
     // Each set from its own cursor. `until` is inclusive: events sharing the
     // oldest second come back too and the id-keyed map drops the repeats. If
-    // a whole page is stuck on that one second, step past it rather than stall.
+    // a whole page is stuck on that one second, step past it rather than
+    // stall — keeping that first page too, since it can hold unseen posts.
     const pageSource = async (source: FeedSource) => {
       const from = cursors[source].oldest!;
       const relays = relaysFor(source);
-      let page = await fetchAuthorFeedPage({ authorPubkey, relays, until: from, signal });
-      if (!signal.aborted && isStuckPage(page.events, from, AUTHOR_FEED_PAGE_SIZE)) {
-        page = await fetchAuthorFeedPage({ authorPubkey, relays, until: from - 1, signal });
+      const first = await fetchAuthorFeedPage({ authorPubkey, relays, until: from, signal });
+      if (signal.aborted || !isStuckPage(first.events, from, AUTHOR_FEED_PAGE_SIZE)) {
+        return { source, from, page: first };
       }
+      const next = await fetchAuthorFeedPage({ authorPubkey, relays, until: from - 1, signal });
+      const page = { events: [...first.events, ...next.events], complete: next.complete };
       return { source, from, page };
     };
     try {

@@ -86,6 +86,33 @@ describe('persistMergedProfileCache (#852)', () => {
     expect(result.b.name).toBe('b-newer');
   });
 
+  it('serialises overlapping persists: no lost additions, no older kind-0 written last (#1390)', async () => {
+    const dated = (name: string, createdAt: number) => ({ ...profile(name), createdAt });
+    // Both start before either writes: unsynchronised, both would read the
+    // same (empty) cache and the second write would win outright.
+    const first = persistMergedProfileCache(
+      PK,
+      {},
+      new Map<string, NostrProfile>([
+        ['a', dated('a-new', 200)],
+        ['c', dated('c', 1)],
+      ]),
+    );
+    const second = persistMergedProfileCache(
+      PK,
+      {},
+      new Map<string, NostrProfile>([
+        ['a', dated('a-stale', 100)],
+        ['b', dated('b', 1)],
+      ]),
+    );
+    await Promise.all([first, second]);
+
+    const result = await readCache();
+    expect(result.a.name).toBe('a-new');
+    expect(Object.keys(result).sort()).toEqual(['a', 'b', 'c']);
+  });
+
   it('falls back to the caller snapshot when the on-disk cache is corrupt', async () => {
     await AsyncStorage.setItem(key, '{not valid json');
 
