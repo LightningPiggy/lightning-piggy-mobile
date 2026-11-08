@@ -58,6 +58,7 @@ import PaymentProgressOverlay from './src/components/PaymentProgressOverlay';
 import { isStaleReceipt } from './src/utils/incomingReceipts';
 import BootSplash from './src/components/BootSplash';
 import { LinkActionSheetHost } from './src/components/LinkActionSheet';
+import ShareIntentHost from './src/components/ShareIntentHost';
 import { BrandedAlertHost } from './src/components/BrandedAlert';
 import { BrandedToast, Toast } from './src/components/BrandedToast';
 import OfflineBanner from './src/components/OfflineBanner';
@@ -648,6 +649,11 @@ export default function App() {
                             `LinkActionSheetProvider.test.tsx` pins both the
                             provider requirement and this nesting. */}
                               <LinkActionSheetHost />
+                              {/* "Share to Lightning Piggy" (#1692, Android): text and
+                            photos from other apps → "Send to…" picker → that chat's
+                            composer (prefill only, never auto-send). Its picker is
+                            a BottomSheetModal, so it lives in here too. */}
+                              <ShareIntentHost />
                             </BottomSheetModalProvider>
                           </UserLocationProvider>
                         </LiveLocationProvider>

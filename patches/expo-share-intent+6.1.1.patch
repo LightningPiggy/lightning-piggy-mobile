@@ -1,0 +1,726 @@
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentApplicationLifecycleListener.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentApplicationLifecycleListener.kt
+new file mode 100644
+index 0000000..782266a
+--- /dev/null
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentApplicationLifecycleListener.kt
+@@ -0,0 +1,36 @@
++package expo.modules.shareintent
++
++import android.app.Activity
++import android.app.Application
++import android.os.Build
++import android.os.Bundle
++import expo.modules.core.interfaces.ApplicationLifecycleListener
++
++/**
++ * Lightning Piggy patch: tells the activity listener whether the activity was
++ * recreated from saved state. The Expo template MainActivity calls
++ * `super.onCreate(null)`, so every ReactActivityLifecycleListener sees a null
++ * `savedInstanceState` even when Android restored the activity (process killed
++ * then reopened from Recents or the launcher icon, a config change, "Don't
++ * keep activities"). `onActivityPreCreated` runs in `Activity.performCreate`
++ * with the bundle the system actually passed, before MainActivity drops it.
++ * API 29+; on older releases nothing is recorded and only the listener's own
++ * checks apply.
++ */
++class ExpoShareIntentApplicationLifecycleListener : ApplicationLifecycleListener {
++  override fun onCreate(application: Application) {
++    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
++    application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
++      override fun onActivityPreCreated(activity: Activity, savedInstanceState: Bundle?) {
++        ExpoShareIntentSingleton.notePreCreated(activity, savedInstanceState != null)
++      }
++      override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
++      override fun onActivityStarted(activity: Activity) {}
++      override fun onActivityResumed(activity: Activity) {}
++      override fun onActivityPaused(activity: Activity) {}
++      override fun onActivityStopped(activity: Activity) {}
++      override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
++      override fun onActivityDestroyed(activity: Activity) {}
++    })
++  }
++}
+\ No newline at end of file
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+index 0153c89..ff2e70c 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
+@@ -13,6 +13,8 @@ import android.content.ContentResolver
+ import android.content.ContentUris
+ import android.content.Context
+ import android.content.Intent
++import android.content.pm.PackageManager
++import android.content.pm.ProviderInfo
+ import android.database.Cursor
+ import android.graphics.BitmapFactory
+ import android.media.MediaMetadataRetriever;
+@@ -31,7 +33,14 @@ import expo.modules.kotlin.modules.Module
+ import expo.modules.kotlin.modules.ModuleDefinition
+ import java.io.File
+ import java.io.FileOutputStream
++import java.io.IOException
++import java.util.UUID
+ import java.util.Date
++import java.util.concurrent.RejectedExecutionException
++import java.util.concurrent.SynchronousQueue
++import java.util.concurrent.ThreadPoolExecutor
++import java.util.concurrent.TimeUnit
++import java.util.concurrent.atomic.AtomicLong
+ 
+ 
+ class ExpoShareIntentModule : Module() {
+@@ -41,38 +50,112 @@ class ExpoShareIntentModule : Module() {
+     private val currentActivity: Activity?
+         get() = appContext.currentActivity
+ 
++    /** Lightning Piggy patch: set once JS has called getShareIntent on this
++     *  module instance (one per React context), i.e. its listeners are
++     *  attached. Set on the async queue, read on the main thread. */
++    @Volatile private var jsListening = false
++
+     companion object {
+-        private var instance: ExpoShareIntentModule? = null
++        // Read from the share executor thread too.
++        @Volatile private var instance: ExpoShareIntentModule? = null
++
++        // Lightning Piggy patch: shared files are untrusted input from another
++        // app. Copies go to a dedicated cache subfolder under generated names,
++        // only images are accepted, and both count and size are capped.
++        const val LP_SHARE_DIR = "lp-share"
++        private const val LP_MAX_SHARED_FILES = 10
++        private const val LP_MAX_SHARED_BYTES = 25L * 1024 * 1024
++
++        private const val LP_GENERIC_ERROR = "could not read the shared content"
++
++        /** Share work (provider queries, copies) runs here, off the UI thread.
++         *  A few workers, so a provider that never answers holds only its own
++         *  share; no queue, so stalled work can't pile up — once every worker
++         *  is stuck a new share fails with the generic error. */
++        private const val LP_SHARE_WORKERS = 3
++        private val shareExecutor = ThreadPoolExecutor(
++            0, LP_SHARE_WORKERS, 30L, TimeUnit.SECONDS, SynchronousQueue<Runnable>()
++        )
++
++        /** Latest share wins (as in the app's picker): work for an older share
++         *  that finishes later is dropped, copies and all, never emitted.
++         *  Each share draws a ticket, and only becomes the current share once
++         *  a worker has accepted it, so a share turned away because every
++         *  worker is busy doesn't abandon the ones already in flight. */
++        private val shareTickets = AtomicLong(0)
++        private val shareGeneration = AtomicLong(0)
++        /** Held while publishing a new current share and across every
++         *  "still current?" check and the emit that follows it, so a stale
++         *  worker can't pass the check and then emit after a newer share. */
++        private val emitLock = Any()
++        private fun isCurrent(generation: Long) = generation == shareGeneration.get()
++        /** A newer share has been accepted (lock-free early exit while reading). */
++        private fun isSuperseded(generation: Long) = shareGeneration.get() > generation
++
++        private fun discardCopies(infos: List<Map<String, String?>>) {
++            for (info in infos) info["filePath"]?.let { File(it).delete() }
++        }
++
++        /** Only a `content://` URI served by another app's provider — never
++         *  `file://` (could point into our private storage) nor one of our own
++         *  providers. The provider is resolved through the package manager
++         *  rather than judged by the authority's text; authorities carrying a
++         *  user prefix are refused outright, and an unresolvable one is refused. */
++        private fun isForeignContentUri(uri: Uri): Boolean {
++            if (!"content".equals(uri.scheme, ignoreCase = true)) return false
++            val ctx = try { instance?.context } catch (e: Exception) { null } ?: return false
++            val authority = uri.authority ?: return false
++            if (authority.isEmpty() || authority.contains('@')) return false
++            val info = try { resolveProvider(ctx.packageManager, authority) } catch (e: Exception) { null }
++                ?: return false
++            return info.packageName != ctx.packageName
++        }
++
++        private fun resolveProvider(pm: PackageManager, authority: String): ProviderInfo? =
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++                pm.resolveContentProvider(authority, PackageManager.ComponentInfoFlags.of(0L))
++            } else {
++                @Suppress("DEPRECATION") pm.resolveContentProvider(authority, 0)
++            }
++
++        private fun safeFileInfo(uri: Uri): Map<String, String?>? {
++            if (!isForeignContentUri(uri)) return null
++            return try {
++                getFileInfo(uri)
++            } catch (e: Exception) {
++                Log.w("ExpoShareIntent", "skipped a shared file that could not be read")
++                null
++            }
++        }
+ 
+         private fun notifyShareIntent(value: Any) {
+             notifyState("pending")
+-            instance!!.sendEvent("onChange", mapOf("value" to value))
++            instance?.sendEvent("onChange", mapOf("value" to value))
+         }
+         private fun notifyState(state: String) {
+-            instance!!.sendEvent("onStateChange", mapOf("value" to state))
++            instance?.sendEvent("onStateChange", mapOf("value" to state))
+         }
+         private fun notifyError(message: String) {
+-            instance!!.sendEvent("onError", mapOf("value" to message))
++            instance?.sendEvent("onError", mapOf("value" to message))
+         }
+ 
+         @SuppressLint("Range")
+-        private fun getFileInfo(uri: Uri): Map<String, String?> {
+-            val resolver: ContentResolver? = instance?.currentActivity?.contentResolver
+-                    ?: instance?.context?.contentResolver
+-            if (resolver == null) {
+-                notifyError("Cannot get resolver (getFileInfo)")
+-                return mapOf(
+-                    "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
+-                )
++        private fun getFileInfo(uri: Uri): Map<String, String?>? {
++            val resolver: ContentResolver = instance?.currentActivity?.contentResolver
++                    ?: instance?.context?.contentResolver ?: return null
++            val mimeType = resolver.getType(uri)?.lowercase() ?: return null
++            if (!mimeType.startsWith("image/")) return null
++            var fileName: String? = null
++            var fileSize: String? = null
++            resolver.query(uri, null, null, null, null)?.use { queryResult ->
++                if (queryResult.moveToFirst()) {
++                    val nameIndex = queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME)
++                    val sizeIndex = queryResult.getColumnIndex(OpenableColumns.SIZE)
++                    if (nameIndex >= 0) fileName = queryResult.getString(nameIndex)
++                    if (sizeIndex >= 0) fileSize = queryResult.getString(sizeIndex)
++                }
+             }
+-            val queryResult: Cursor = resolver.query(uri, null, null, null, null)!!
+-            queryResult.moveToFirst()
+-            val fileName = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.DISPLAY_NAME))
+-            val fileSize = queryResult.getString(queryResult.getColumnIndex(OpenableColumns.SIZE))
+-            queryResult.close()
+-
+-            val mimeType = resolver.getType(uri)!!
++            val filePath = instance?.copySharedFile(resolver, uri, mimeType) ?: return null
+ 
+             var mediaWidth: String? = null;
+             var mediaHeight: String? = null;
+@@ -81,7 +164,12 @@ class ExpoShareIntentModule : Module() {
+                 val options = BitmapFactory.Options().apply {
+                     inJustDecodeBounds = true
+                 }
+-                BitmapFactory.decodeStream(resolver.openInputStream(uri), null, options)
++                try {
++                    File(filePath).inputStream().use { BitmapFactory.decodeStream(it, null, options) }
++                } catch (e: Exception) {
++                    File(filePath).delete()  // don't leave a copy nobody will use
++                    throw e
++                }
+                 mediaHeight = options.outHeight.toString()
+                 mediaWidth = options.outWidth.toString()
+             }
+@@ -101,7 +189,7 @@ class ExpoShareIntentModule : Module() {
+ 
+             return mapOf(
+                     "contentUri" to uri.toString(),
+-                    "filePath" to instance?.getAbsolutePath(uri),
++                    "filePath" to filePath,
+                     "fileName" to fileName,
+                     "fileSize" to fileSize,
+                     "mimeType" to mimeType,
+@@ -111,47 +199,145 @@ class ExpoShareIntentModule : Module() {
+             )
+         }
+ 
++        /** Lightning Piggy patch: hand the parked share, if any, to
++         *  handleShareIntent. Taking it empties the slot, so the getShareIntent
++         *  and OnNewIntent paths can't both deliver the same share. */
++        fun deliverPendingShare() {
++            ExpoShareIntentSingleton.take()?.let { handleShareIntent(it) }
++        }
++
++        /**
++         * Lightning Piggy patch: entry point for both the JS-request
++         * (`getShareIntent`) and warm-start (`OnNewIntent`) paths, always via
++         * `deliverPendingShare`. Only the cheap share check and task-root
++         * relaunch happen on the caller's thread; reading the shared content
++         * (provider IPC, copies) is handed to `shareExecutor` so a slow
++         * provider can't stall the UI thread.
++         * Never throws: a malformed intent becomes a generic `onError`.
++         */
+         fun handleShareIntent(intent: Intent) {
+-            val activity = instance?.currentActivity
+-            if (activity != null && !activity.isTaskRoot) {
+-                val newIntent = Intent(intent).apply {
+-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++            val work: Intent = try {
++                // Ignore non-share intents (our `lightning:` / `nostr:` VIEW
++                // links, NFC) before the task-root relaunch below.
++                if (intent.type == null) return
++                if (intent.action != Intent.ACTION_SEND && intent.action != Intent.ACTION_SEND_MULTIPLE) return
++                val activity = instance?.currentActivity
++                if (activity != null && !activity.isTaskRoot) {
++                    val newIntent = Intent(intent).apply {
++                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++                    }
++                    // getShareIntent reaches here on the module's async queue:
++                    // activity transitions belong on the UI thread.
++                    activity.runOnUiThread {
++                        try {
++                            activity.startActivity(newIntent)
++                            activity.finish()
++                        } catch (e: Exception) {
++                            Log.w("ExpoShareIntent", "could not relaunch the share at the task root")
++                            notifyError(LP_GENERIC_ERROR)
++                        }
++                    }
++                    return
+                 }
+-                activity.startActivity(newIntent)
+-                activity.finish()
++                Intent(intent)
++            } catch (e: Exception) {
++                Log.w("ExpoShareIntent", "could not handle a share intent")
++                notifyError(LP_GENERIC_ERROR)
+                 return
+             }
+-            if (intent.type == null) return
+-            if (intent.type!!.startsWith("text/plain")) {
++            val generation = shareTickets.incrementAndGet()
++            try {
++                synchronized(emitLock) {
++                    shareExecutor.execute { processShareIntentSafely(work, generation) }
++                    // Accepted: older work is now stale. The worker's final
++                    // check waits on this lock, so it sees its own share.
++                    if (generation > shareGeneration.get()) shareGeneration.set(generation)
++                }
++            } catch (e: RejectedExecutionException) {
++                Log.w("ExpoShareIntent", "share workers busy")
++                notifyError(LP_GENERIC_ERROR)
++            } catch (e: Exception) {
++                notifyError(LP_GENERIC_ERROR)
++            }
++        }
++
++        private fun processShareIntentSafely(intent: Intent, generation: Long) {
++            try {
++                processShareIntent(intent, generation)
++            } catch (e: Exception) {
++                // e.g. a malformed parcelable in the extras. The message stays
++                // generic: no URI or file name leaves this module.
++                Log.w("ExpoShareIntent", "could not read a share intent")
++                synchronized(emitLock) {
++                    if (isCurrent(generation)) notifyError(LP_GENERIC_ERROR)
++                }
++            }
++        }
++
++        private fun processShareIntent(intent: Intent, generation: Long) {
++            val type = intent.type ?: return
++            if (type.startsWith("text/plain")) {
+                 // text / urls
+-                if (intent.action == Intent.ACTION_SEND) {
+-                    notifyShareIntent(mapOf(
+-                        "text" to intent.getStringExtra(Intent.EXTRA_TEXT),
+-                        "type" to "text",
+-                        "meta" to mapOf(
+-                            "title" to intent.getCharSequenceExtra(Intent.EXTRA_TITLE),
+-                        )
+-                    ))
+-                } else if (intent.action == Intent.ACTION_VIEW) {
+-                    notifyShareIntent(mapOf( "text" to intent.dataString, "type" to "text"))
+-                } else {
+-                    notifyError("Invalid action for text sharing: " + intent.action)
++                synchronized(emitLock) {
++                    if (!isCurrent(generation)) return
++                    if (intent.action == Intent.ACTION_SEND) {
++                        notifyShareIntent(mapOf(
++                            "text" to intent.getStringExtra(Intent.EXTRA_TEXT),
++                            "type" to "text",
++                            "meta" to mapOf(
++                                "title" to intent.getCharSequenceExtra(Intent.EXTRA_TITLE),
++                            )
++                        ))
++                    } else if (intent.action == Intent.ACTION_VIEW) {
++                        notifyShareIntent(mapOf( "text" to intent.dataString, "type" to "text"))
++                    } else {
++                        notifyError("Invalid action for text sharing: " + intent.action)
++                    }
+                 }
+             } else {
+                 // files / medias
++                // A caption or link sent along with the images.
++                val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+                 if (intent.action == Intent.ACTION_SEND) {
+                     val uri = intent.parcelable<Uri>(Intent.EXTRA_STREAM);
+-                    if (uri != null) {
+-                        notifyShareIntent(mapOf( "files" to arrayOf(getFileInfo(uri), "type" to "file")))
+-                    } else {
+-                        notifyError("empty uri for file sharing: " + intent.action)
++                    val info = uri?.let { safeFileInfo(it) }
++                    synchronized(emitLock) {
++                        if (!isCurrent(generation)) {
++                            info?.let { discardCopies(listOf(it)) }
++                            return
++                        }
++                        if (info != null) {
++                            notifyShareIntent(mapOf( "files" to listOf(info), "type" to "file", "text" to text))
++                        } else {
++                            notifyError("empty uri for file sharing: " + intent.action)
++                        }
+                     }
+                 } else if (intent.action == Intent.ACTION_SEND_MULTIPLE) {
+-                    val uris = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM)
+-                    if (uris != null) {
+-                        notifyShareIntent(mapOf( "files" to uris.map { getFileInfo(it) }, "type" to "file"))
+-                    } else {
+-                        notifyError("empty uris array for file sharing: " + intent.action)
++                    val uris: List<Uri> = intent.parcelableArrayList<Uri>(Intent.EXTRA_STREAM).orEmpty()
++                    val infos = mutableListOf<Map<String, String?>>()
++                    for (uri in uris.take(LP_MAX_SHARED_FILES)) {
++                        if (isSuperseded(generation)) break  // stop reading
++                        safeFileInfo(uri)?.let { infos.add(it) }
++                    }
++                    synchronized(emitLock) {
++                        if (!isCurrent(generation)) {
++                            discardCopies(infos)
++                            return
++                        }
++                        if (infos.isNotEmpty()) {
++                            // `lpOfferedFileCount`: how many streams the sender
++                            // offered, before the cap and the checks above dropped
++                            // any — so the app can say some were skipped. A count
++                            // only: no URI or name leaves this module.
++                            notifyShareIntent(mapOf(
++                                "files" to infos,
++                                "type" to "file",
++                                "text" to text,
++                                "lpOfferedFileCount" to uris.size,
++                            ))
++                        } else {
++                            notifyError("empty uris array for file sharing: " + intent.action)
++                        }
+                     }
+                 } else {
+                     notifyError("Invalid action for file sharing: " + intent.action)
+@@ -179,17 +365,23 @@ class ExpoShareIntentModule : Module() {
+ 
+         Events("onChange", "onStateChange", "onError")
+ 
++        // Lightning Piggy patch: every share goes through the single pending
++        // slot in ExpoShareIntentSingleton (filled from the activity's onCreate
++        // and onNewIntent, and from OnNewIntent below) and is handed to JS by
++        // whichever of these takes it first — so exactly once.
+         AsyncFunction("getShareIntent") { _: String ->
+-            // get the Intent from onCreate activity (app not running in background)
+-            ExpoShareIntentSingleton.isPending = false
+-            if (ExpoShareIntentSingleton.intent?.type != null) {
+-                handleShareIntent(ExpoShareIntentSingleton.intent!!);
+-                ExpoShareIntentSingleton.intent = null
+-            }
++            // JS calls this on mount, after attaching its listeners, and on
++            // every return to the foreground: from here on a new share can be
++            // delivered as soon as it arrives.
++            jsListening = true
++            deliverPendingShare()
+         }
+ 
+         Function("clearShareIntent") { _: String ->
+-            ExpoShareIntentSingleton.intent = null
++            // Lightning Piggy patch: a no-op. A share leaves the slot when it
++            // is handed over, so there is nothing delivered left to clear, and
++            // clearing here could drop a share parked between the activity
++            // callback and its hand-over.
+         }
+ 
+         Function("hasShareIntent") { _: String ->
+@@ -197,7 +389,12 @@ class ExpoShareIntentModule : Module() {
+         }
+ 
+         OnNewIntent {
+-            handleShareIntent(it)
++            // Usually already parked by the activity listener (offer is
++            // idempotent); parked here too in case it wasn't.
++            ExpoShareIntentSingleton.offer(it)
++            // Before JS is listening an event would be lost: leave it parked
++            // for getShareIntent.
++            if (jsListening) deliverPendingShare()
+         }
+ 
+         OnCreate {
+@@ -206,6 +403,53 @@ class ExpoShareIntentModule : Module() {
+ 
+         OnDestroy {
+             instance = null
++            // Lightning Piggy patch: a share arriving while the React host is
++            // torn down / reloaded stays parked for the next getShareIntent.
++            jsListening = false
++        }
++    }
++
++    /**
++     * Lightning Piggy patch: copy one shared stream into `cache/lp-share/` under
++     * a generated name (the sender's display name is never used for a path),
++     * stopping at LP_MAX_SHARED_BYTES. The extension comes from the provider's
++     * MIME type; the app re-checks the real type from the file's bytes.
++     */
++    // `filePath` goes back to JS as `file://<path>`; the app only accepts copies
++    // under `Paths.cache` + `lp-share/`. Both sides derive from the same
++    // `context.cacheDir` (expo-file-system's cache directory is
++    // `Uri.fromFile(appContext.cacheDirectory)`, i.e. `context.cacheDir`), so
++    // keep using `context.cacheDir` here or every copy will be rejected.
++    fun copySharedFile(resolver: ContentResolver, uri: Uri, mimeType: String): String? {
++        val dir = File(context.cacheDir, LP_SHARE_DIR)
++        if (!dir.exists() && !dir.mkdirs()) return null
++        val ext = when (mimeType) {
++            "image/png" -> "png"
++            "image/gif" -> "gif"
++            "image/webp" -> "webp"
++            "image/heic", "image/heif" -> "heic"
++            else -> "jpg"
++        }
++        val target = File(dir, "share-${UUID.randomUUID()}.$ext")
++        return try {
++            val input = resolver.openInputStream(uri) ?: return null
++            input.use { inp ->
++                FileOutputStream(target).use { out ->
++                    val buffer = ByteArray(64 * 1024)
++                    var total = 0L
++                    while (true) {
++                        val read = inp.read(buffer)
++                        if (read < 0) break
++                        total += read
++                        if (total > LP_MAX_SHARED_BYTES) throw IOException("shared file too large")
++                        out.write(buffer, 0, read)
++                    }
++                }
++            }
++            target.path
++        } catch (e: Exception) {
++            target.delete()
++            null
+         }
+     }
+ 
+@@ -300,8 +544,19 @@ class ExpoShareIntentModule : Module() {
+                 if (cursor != null && cursor.moveToFirst()) {
+                     val columnIndex = cursor.getColumnIndexOrThrow(column)
+                     val fileName = cursor.getString(columnIndex)
+-                    Log.i("FileDirectory", "File name: $fileName")
+-                    targetFile = File(context.cacheDir, fileName)
++                    // Lightning Piggy patch (backport of expo-share-intent 9.0.0):
++                    // `_display_name` is chosen by the sending app, so a name like
++                    // "../files/x" would write outside the cache ("Dirty Stream").
++                    // Keep only the last path segment and require the result to
++                    // stay inside cacheDir; otherwise fall back to a generated name.
++                    val safeName = fileName?.let { File(it).name }.orEmpty()
++                    if (safeName.isNotEmpty()) {
++                        val candidate = File(context.cacheDir, safeName)
++                        val cacheRoot = context.cacheDir.canonicalPath + File.separator
++                        if (candidate.canonicalPath.startsWith(cacheRoot)) {
++                            targetFile = candidate
++                        }
++                    }
+                 }
+             } finally {
+                 cursor?.close()
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt
+index ff9f033..46be34c 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt
+@@ -1,10 +1,16 @@
+ package expo.modules.shareintent
+ 
+ import android.content.Context
++import expo.modules.core.interfaces.ApplicationLifecycleListener
+ import expo.modules.core.interfaces.Package
+ import expo.modules.core.interfaces.ReactActivityLifecycleListener
+ 
+ class ExpoShareIntentPackage : Package {
++  // Lightning Piggy patch: see ExpoShareIntentApplicationLifecycleListener.
++  override fun createApplicationLifecycleListeners(context: Context): List<ApplicationLifecycleListener> {
++    return listOf(ExpoShareIntentApplicationLifecycleListener())
++  }
++
+   override fun createReactActivityLifecycleListeners(activityContext: Context): List<ReactActivityLifecycleListener> {
+     return listOf(ExpoShareIntentReactActivityLifecycleListener(activityContext))
+   }
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
+index db573ec..ca8751c 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentReactActivityLifecycleListener.kt
+@@ -13,10 +13,38 @@ import expo.modules.core.interfaces.ReactActivityLifecycleListener
+ class ExpoShareIntentReactActivityLifecycleListener(activityContext: Context) : ReactActivityLifecycleListener {
+ 
+     override fun onCreate(activity: Activity?, savedInstanceState: Bundle?) {
+-        // only store when the new intent is not empty
+-        if (activity?.intent?.type != null) {
+-            ExpoShareIntentSingleton.intent = activity?.intent
+-            ExpoShareIntentSingleton.isPending = true
+-        }
++        // Lightning Piggy patch: `activity.intent` is always the intent that
++        // FIRST started the activity. When the activity is recreated rather
++        // than freshly launched — process killed then reopened from Recents or
++        // the launcher icon (the new MAIN arrives via onNewIntent), a config
++        // change, "Don't keep activities" — that is a share the previous
++        // instance already handled. Don't replay it. MainActivity passes
++        // `super.onCreate(null)`, so `savedInstanceState` is null here even
++        // then; `wasRestored` carries the bundle the system really passed.
++        if (savedInstanceState != null) return  // recreated, not freshly launched
++        if (activity == null || ExpoShareIntentSingleton.wasRestored(activity)) return
++        val intent = activity.intent ?: return
++        // Task relaunched fresh from Recents with its original (share) intent.
++        if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return
++        // Share intents only (see ExpoShareIntentSingleton.isShareIntent).
++        ExpoShareIntentSingleton.offer(intent)
++    }
++
++    /**
++     * Lightning Piggy patch: runs at activity level whether or not React is
++     * ready, so a share that arrives while the app is restarting (process
++     * killed in the background) is parked instead of lost. Never claims the
++     * intent: the module's OnNewIntent still runs and hands it over at once
++     * when JS is already listening.
++     *
++     * Relies on ReactActivityDelegateWrapper's loadAppReady completing
++     * synchronously, so this fan-out reaches listeners as soon as the activity
++     * exists. A delayed app load (e.g. adding expo-updates, whose
++     * getDelayLoadAppHandler defers it) would reopen the gap — re-check this
++     * path if that dependency is ever added.
++     */
++    override fun onNewIntent(intent: Intent?): Boolean {
++        if (intent != null) ExpoShareIntentSingleton.offer(intent)
++        return false
+     }
+ }
+\ No newline at end of file
+diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
+index 7f93abe..3c1ff7d 100644
+--- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
++++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentSingleton.kt
+@@ -1,6 +1,8 @@
+ package expo.modules.shareintent
+ 
++import android.app.Activity
+ import android.content.Intent
++import java.lang.ref.WeakReference
+ import expo.modules.core.interfaces.SingletonModule
+ 
+ object ExpoShareIntentSingleton : SingletonModule {
+@@ -9,7 +11,66 @@ object ExpoShareIntentSingleton : SingletonModule {
+     return "ExpoShareIntent"
+   }
+ 
+-  // members to store the initial launch intent
+-  var intent: Intent? = null
+-  var isPending: Boolean = false
++  // Lightning Piggy patch: ONE pending-share slot, filled by every path a share
++  // can arrive on and emptied exactly once when it is handed to JS.
++  //
++  // Why: when Android has killed the process in the background and the user
++  // then shares into the app, the activity is recreated with its OLD launch
++  // intent and the SEND arrives through onNewIntent before React (and so this
++  // module's OnNewIntent) is ready; React drops it with a soft exception. The
++  // activity lifecycle listener sees that onNewIntent regardless, parks the
++  // share here, and `getShareIntent` (called by JS once its listeners are
++  // attached) takes it.
++  //
++  // Latest wins: if two shares arrive before JS asks, only the newest is kept
++  // (the same rule as a second share replacing an open picker). Offering the
++  // same Intent object twice is a no-op — the activity listener and the module
++  // both see every warm onNewIntent — and an intent already taken is never
++  // queued again, so a share is delivered at most once.
++  // Written on the main thread, taken on the module's async queue: guarded.
++  private val lock = Any()
++  private var pending: Intent? = null
++  // Weak: only an identity check, so the last share's text / URIs aren't kept
++  // alive for the rest of the process.
++  private var lastTaken: WeakReference<Intent>? = null
++
++  /** True for an ACTION_SEND / ACTION_SEND_MULTIPLE with a MIME type; never
++   *  for the app's own `lightning:` / `nostr:` VIEW links or NFC intents. */
++  fun isShareIntent(intent: Intent?): Boolean {
++    if (intent == null || intent.type == null) return false
++    return intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE
++  }
++
++  /** Park a share until it is handed to JS. Latest wins (see above). */
++  fun offer(intent: Intent) {
++    if (!isShareIntent(intent)) return
++    synchronized(lock) {
++      if (lastTaken?.get() === intent) return
++      pending = intent
++    }
++  }
++
++  /** Take the parked share, if any; it can't be taken (or offered) again. */
++  fun take(): Intent? = synchronized(lock) {
++    val intent = pending
++    pending = null
++    if (intent != null) lastTaken = WeakReference(intent)
++    intent
++  }
++
++  // The activity most recently created FROM SAVED STATE (see
++  // ExpoShareIntentApplicationLifecycleListener). Main thread only; weak so a
++  // destroyed activity isn't kept.
++  private var restoredActivity: WeakReference<Activity>? = null
++
++  fun notePreCreated(activity: Activity, restored: Boolean) {
++    restoredActivity = if (restored) WeakReference(activity) else null
++  }
++
++  /** True if Android recreated [activity] from saved state, even though the
++   *  app's MainActivity hands `super.onCreate` a null bundle. */
++  fun wasRestored(activity: Activity): Boolean = restoredActivity?.get() === activity
++
++  val isPending: Boolean
++    get() = synchronized(lock) { pending != null }
+ }
+\ No newline at end of file
+diff --git a/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts b/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts
+index f2ebd1a..752846f 100644
+--- a/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts
++++ b/node_modules/expo-share-intent/build/ExpoShareIntentModule.types.d.ts
+@@ -53,12 +53,16 @@ export type ShareIntent = BaseShareIntent & {
+     files: ShareIntentFile[] | null;
+     type: "media" | "file" | "text" | "weburl" | null;
+     webUrl: string | null;
++    /** Lightning Piggy patch (Android): files offered before the native cap
++     *  and checks dropped any. Absent when not reported. */
++    lpOfferedFileCount?: number;
+ };
+ /**
+  * Shared intent type for Android.
+  */
+ export interface AndroidShareIntent extends BaseShareIntent {
+     files?: AndroidShareIntentFile[];
++    lpOfferedFileCount?: number;
+     type: "file" | "text";
+ }
+ /**
+diff --git a/node_modules/expo-share-intent/build/utils.js b/node_modules/expo-share-intent/build/utils.js
+index 3d343c6..7894b75 100644
+--- a/node_modules/expo-share-intent/build/utils.js
++++ b/node_modules/expo-share-intent/build/utils.js
+@@ -57,7 +57,9 @@ export const parseShareIntent = (value, options) => {
+     else {
+         shareIntent = value; // Android
+     }
+-    if (shareIntent?.text) {
++    // Lightning Piggy patch: images shared with a caption / link (Android
++    // EXTRA_TEXT) take the files branch below, which keeps the text too.
++    if (shareIntent?.text && !shareIntent?.files?.length) {
+         // Try to find the webURL in the SharedIntent text
+         const webUrl = shareIntent.text
+             .match(/[(http(s)?)://(www.)?-a-zA-Z0-9@:%._+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_+.~#?&//=]*)/gi)
+@@ -112,6 +114,12 @@ export const parseShareIntent = (value, options) => {
+                 }, [])
+                 : null,
+             type: isMedia ? "media" : "file",
++            ...(shareIntent?.text ? { text: shareIntent.text } : {}),
++            // Lightning Piggy patch: Android reports how many files were
++            // offered before its cap / checks dropped any (a count only).
++            ...(typeof shareIntent?.lpOfferedFileCount === "number"
++                ? { lpOfferedFileCount: shareIntent.lpOfferedFileCount }
++                : {}),
+         };
+     }
+     options.debug &&

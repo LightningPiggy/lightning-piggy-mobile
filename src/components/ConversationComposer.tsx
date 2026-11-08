@@ -13,6 +13,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createConversationComposerStyles } from '../styles/ConversationComposer.styles';
+import SharedImageTray from './SharedImageTray';
+import type { StagedShare } from '../hooks/useStagedShare';
 
 /**
  * Shared composer for 1:1 (ConversationScreen) and group
@@ -95,6 +97,8 @@ export interface ConversationComposerProps {
    * the group chat's @mention picker (#1295).
    */
   accessory?: React.ReactNode;
+  /** Images shared in from another app, waiting for the user's Send (#1692). */
+  stagedShare?: StagedShare | null;
   /** Cursor tracking for the @mention picker. */
   onSelectionChange?: TextInputProps['onSelectionChange'];
   /** Set briefly to place the cursor (after inserting a mention). */
@@ -134,6 +138,7 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   editing,
   replying,
   accessory,
+  stagedShare,
   onSelectionChange,
   selection,
   testIDs,
@@ -175,6 +180,17 @@ const ConversationComposer: React.FC<ConversationComposerProps> = ({
   return (
     <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
       {attachmentsEnabled && attachOpen && !editing ? attachPanel : null}
+      {stagedShare ? (
+        <SharedImageTray
+          {...stagedShare}
+          // Photos go out only where the composer could send one itself: not
+          // in a text-only (NIP-04) chat, not mid-edit, not signed out.
+          sendBlocked={!attachmentsEnabled || !!editing || !!disabled}
+          sendBlockedHint={
+            attachmentsEnabled ? undefined : t('conversationComposer.attachmentsNip17Only')
+          }
+        />
+      ) : null}
       {editing ? (
         <View style={styles.editBanner} testID="composer-edit-banner">
           <Pencil size={14} color={colors.brandPink} />

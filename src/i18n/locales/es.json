@@ -604,6 +604,30 @@
     "noSearchMatch": "Ningún amigo coincide con tu búsqueda.",
     "noResolvedProfiles": "No hay contactos con un perfil disponible a los que enviar mensajes."
   },
+  "shareIntent": {
+    "title": "Enviar a…",
+    "subtitlePhotos": {
+      "one": "Elige un chat para tu foto. Puedes añadir un mensaje antes de enviarla.",
+      "other": "Elige un chat para tus {{count}} fotos. Puedes añadir un mensaje antes de enviarlas."
+    },
+    "subtitleText": "Elige un chat. Tu texto aparecerá en el campo de mensaje, listo para enviarlo.",
+    "recentChats": "Chats recientes",
+    "friends": "Amigos",
+    "trayTitle": {
+      "one": "1 foto compartida, lista para enviar",
+      "other": "{{count}} fotos compartidas, listas para enviar"
+    },
+    "imageLabel": "Foto compartida {{index}} de {{total}}",
+    "removeImage": "Quitar foto compartida {{index}} de {{total}}",
+    "sendImages": {
+      "one": "Enviar foto",
+      "other": "Enviar {{count}} fotos"
+    },
+    "nothingToShare": "Lightning Piggy puede recibir texto y fotos (JPEG, PNG, GIF, WebP o HEIC, de hasta 25 MB cada una).",
+    "someSkipped": "No se pudieron añadir algunos elementos. Lightning Piggy permite compartir hasta 10 fotos, de 25 MB cada una.",
+    "signedOutTitle": "Inicia sesión para compartir",
+    "signedOutMessage": "Inicia sesión en Lightning Piggy y vuelve a compartir. No se guardó nada de lo que compartiste."
+  },
   "friendsScreen": {
     "title": "Amigos",
     "searchPlaceholder": "Buscar...",
