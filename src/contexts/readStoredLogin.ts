@@ -6,6 +6,7 @@ import {
   type IdentitiesBlob,
   type StoredIdentity,
 } from '../services/identitiesStore';
+import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
 import { resolveStartupWalletOwner } from '../services/walletStorageService';
 import type { SignerType } from '../types/nostr';
 import { perfLog } from '../utils/perfLog';
@@ -34,8 +35,10 @@ function isSignerType(value: string | null): value is SignerType {
  * slot chain: two SecureStore hops on the critical path instead of three
  * serial ones. Only the active signer's slot is read, so another signer's
  * secret (a stale nsec, a NIP-46 client key) never enters JS memory.
+ * `isCurrent` false (the restore was superseded) skips installing a NIP-46
+ * bunker connection.
  */
-export async function readStoredLogin(): Promise<StoredLogin> {
+export async function readStoredLogin(isCurrent: () => boolean = () => true): Promise<StoredLogin> {
   const t0 = Date.now();
   const readSigner = async () => {
     const signerType = await SecureStore.getItemAsync(SIGNER_TYPE_KEY);
@@ -56,7 +59,7 @@ export async function readStoredLogin(): Promise<StoredLogin> {
   }
   // Amber: the slot is the pubkey. NIP-46: restore the persisted bunker
   // connection from it (see useNip46Login).
-  const pubkey = signerType === 'amber' ? slot : await restoreNip46Session(slot);
+  const pubkey = signerType === 'amber' ? slot : await restoreNip46Session(slot, isCurrent);
   return { identities, session: pubkey ? { pubkey, signerType, nsec: null } : null };
 }
 
@@ -66,15 +69,54 @@ export async function readStoredLogin(): Promise<StoredLogin> {
  * rather than after its 2 s timeout. A found account is handed to the gate
  * by the caller, once that account's storage migration has run.
  */
-export async function readStartupLogin(): Promise<StoredLogin> {
+export async function readStartupLogin(
+  isCurrent: () => boolean = () => true,
+): Promise<StoredLogin> {
   try {
-    const login = await readStoredLogin();
+    const login = await readStoredLogin(isCurrent);
     if (!login.session) resolveStartupWalletOwner(null);
     return login;
   } catch (error) {
     resolveStartupWalletOwner(null);
     throw error;
   }
+}
+
+/**
+ * Hand a restored session's account to the wallet gate and publish it, unless
+ * a login, logout or switch superseded this auto-login while it read
+ * SecureStore and migrated (#1746): then it is dropped and false returned.
+ *
+ * The one-time per-account storage migration (#288) MUST run first:
+ * WalletContext's startup reads `wallet_list_${pk}` as soon as the gate opens
+ * for `pk`, so migrating later would let it read before the legacy
+ * `wallet_list` was copied there (#442). The gate opens on the publish (in
+ * useActiveNostrAccount's layout effect). The migration runs once, sets a
+ * flag and short-circuits afterwards (<50 ms of cold start).
+ */
+export async function publishRestoredSession(
+  pk: string,
+  isCurrent: () => boolean,
+  publish: (pk: string) => void,
+): Promise<boolean> {
+  try {
+    const result = await migrateToPerAccountStorage(pk);
+    if (__DEV__ && !result.alreadyDone) {
+      console.log(
+        `[Nostr] per-account storage migration: copied ${result.ranSteps} keys`,
+        result.copiedKeys,
+      );
+    }
+  } catch (e) {
+    console.warn('[Nostr] per-account storage migration failed:', e);
+  }
+  if (!isCurrent()) {
+    perfLog('auto-login superseded by a newer login, logout or switch: session dropped');
+    return false;
+  }
+  resolveStartupWalletOwner(pk);
+  publish(pk);
+  return true;
 }
 
 /**

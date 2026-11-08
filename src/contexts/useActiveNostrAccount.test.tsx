@@ -10,6 +10,7 @@ import {
   retireBuyerOrderTitles,
 } from '../services/buyerOrderTitles';
 import { useActiveNostrAccount } from './useActiveNostrAccount';
+import { captureSessionGeneration } from '../services/sessionGeneration';
 import { useNip65Relays } from './useNip65Relays';
 import { fetchRelayListEvent } from '../services/nostrService';
 import { fetchLatestReplaceable } from '../services/nostrRelayLists';
@@ -166,4 +167,14 @@ it('does not rediscover relays when hydration completes after the account leaves
     read.mockRestore();
     await forgetAppRelayPrefs(owner);
   }
+});
+
+it('supersedes an in-flight session restore on every identity change (#1746)', () => {
+  const { result } = renderHook(() => useActiveNostrAccount());
+  const restoreToken = captureSessionGeneration();
+  act(() => result.current[1]('manual-login'));
+  expect(restoreToken()).toBe(false);
+  const afterLogin = captureSessionGeneration();
+  act(() => result.current[1](null)); // logout
+  expect(afterLogin()).toBe(false);
 });

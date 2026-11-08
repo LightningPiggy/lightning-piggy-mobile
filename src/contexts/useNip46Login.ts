@@ -38,7 +38,10 @@ import type { SignerType, Nip46Connection } from '../types/nostr';
  * `storedConn` lets cold start pass a connection it already read alongside
  * the other identity slots; when omitted, it's read here.
  */
-export async function restoreNip46Session(storedConn?: string | null): Promise<string | null> {
+export async function restoreNip46Session(
+  storedConn?: string | null,
+  isCurrent: () => boolean = () => true,
+): Promise<string | null> {
   const storedConnRaw =
     storedConn === undefined ? await SecureStore.getItemAsync(NIP46_CONNECTION_KEY) : storedConn;
   if (!storedConnRaw) {
@@ -57,6 +60,9 @@ export async function restoreNip46Session(storedConn?: string | null): Promise<s
       throw new Error('stored NIP-46 connection has an invalid shape');
     }
     const conn = parsed;
+    // A login, logout or switch superseded this cold-start restore (#1746):
+    // never install its bunker over the newer session's.
+    if (!isCurrent()) return null;
     await nostrConnectService.setActiveConnection(conn);
     // `conn.userPubkey` is the source of truth (Copilot review): if the legacy
     // PUBKEY_KEY slot ever diverged (partial write, migration, manual edit),

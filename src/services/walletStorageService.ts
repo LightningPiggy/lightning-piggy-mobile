@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { WalletMetadata } from '../types/wallet';
 import { perAccountKey } from './perAccountStorage';
+import { hasMigratedToPerAccountStorage } from './migrateToPerAccountStorage';
 import { writeWalletOwnerHint } from './walletOwnerHint';
 import { perfLog, perfOwnerTag } from '../utils/perfLog';
 
@@ -100,6 +101,11 @@ export function resolveStartupWalletOwner(owner: string | null): void {
 
 export function isWalletOwnerGateOpen(): boolean {
   return _gateState === 'open';
+}
+
+/** Resolves when the gate opens for the real owner — no timeout. */
+export function awaitWalletOwnerGateOpen(): Promise<void> {
+  return _gateState === 'open' ? Promise.resolve() : _gatePromise;
 }
 
 /**
@@ -244,6 +250,41 @@ export function updateWalletList(
     const latest = await getWalletList(owner);
     const updated = update(latest);
     if (updated !== null) await writeWalletList(updated, owner);
+  });
+}
+
+/**
+ * Delete the legacy shared `wallet_list` once it is a pure duplicate (#1746):
+ * the per-account migration (#288) copied it to the first account and never
+ * removed it, so afterwards it only holds that account's metadata, which a
+ * signed-out session or a cold-start gate timeout could render for someone
+ * else. Deleted only when (a) the per-account migration has completed and
+ * (b) every wallet in it is already in `owner`'s own list — so no account
+ * depends on it. A list holding any wallet no account owns (one added while
+ * signed out) is kept, as is a corrupt one. Credentials and per-wallet caches
+ * are keyed by wallet id and shared with the per-account copy, so they are
+ * never touched. Serialised with signed-out writes to the same key, and
+ * idempotent: once the key is gone this is a single read.
+ */
+export function pruneMigratedLegacyWalletList(owner: string): Promise<void> {
+  return serializeWalletListUpdate(null, async () => {
+    const legacyJson = await AsyncStorage.getItem(WALLET_LIST_KEY_BASE);
+    if (legacyJson === null || !(await hasMigratedToPerAccountStorage())) return;
+    let legacy: unknown;
+    try {
+      legacy = JSON.parse(legacyJson);
+    } catch {
+      return;
+    }
+    if (!Array.isArray(legacy)) return;
+    const owned = new Set((await getWalletList(owner)).map((w) => w.id));
+    const duplicate = legacy.every(
+      (w: Partial<WalletMetadata> | null) => typeof w?.id === 'string' && owned.has(w.id),
+    );
+    if (!duplicate) return;
+    invalidateBackgroundPaymentScope();
+    await AsyncStorage.removeItem(WALLET_LIST_KEY_BASE);
+    perfLog(`legacy wallet_list pruned (${legacy.length} wallets owned by the active account)`);
   });
 }
 

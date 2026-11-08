@@ -54,8 +54,12 @@ import {
 } from './useMessageSend';
 import { useContactActions } from './useContactActions';
 import { useNip46Login } from './useNip46Login';
-import { readStartupLogin, registerRestoredSession } from './readStoredLogin';
-import { resolveStartupWalletOwner } from '../services/walletStorageService';
+import {
+  publishRestoredSession,
+  readStartupLogin,
+  registerRestoredSession,
+} from './readStoredLogin';
+import { captureSessionGeneration } from '../services/sessionGeneration';
 import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
@@ -648,49 +652,28 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Auto-login on startup: load cache immediately, refresh from relays in background
   useEffect(() => {
     perfLog('NostrProvider auto-login effect fires');
+    // A login, logout or switch from here on supersedes the restore (#1746).
+    const isAutoLoginCurrent = captureSessionGeneration();
     (async () => {
       try {
         // Registry + the active signer's slot, read concurrently. Empty
         // registry on a fresh install — the backfill below populates it when
         // the legacy single-account keys are restored. Finding no account
         // (or failing to read) opens the wallet gate signed-out right away.
-        const login = await readStartupLogin();
+        const login = await readStartupLogin(isAutoLoginCurrent);
+        if (!isAutoLoginCurrent()) return;
         setIdentities(login.identities);
         const { session } = login;
         if (!session) return;
         const pk = session.pubkey;
-
-        // One-time per-account storage migration (#288). MUST run before
-        // the wallet gate opens for `pk`: WalletContext's startup reads
-        // `wallet_list_${pk}` as soon as it does, so migrating later would
-        // let it read before legacy `wallet_list` → `wallet_list_${pk}` was
-        // copied (#442 Copilot review). The gate opens only once
-        // `resolveStartupWalletOwner(pk)` + `setPubkey(pk)` below have run
-        // (the publish happens in useActiveNostrAccount's layout effect).
-        // Self-contained in `migrateToPerAccountStorage`: runs once, copies
-        // legacy global values to `${base}_${pk}`, sets a flag,
-        // short-circuits afterwards. Adds <50 ms to cold start.
-        try {
-          const result = await migrateToPerAccountStorage(pk);
-          if (__DEV__ && !result.alreadyDone) {
-            console.log(
-              `[Nostr] per-account storage migration: copied ${result.ranSteps} keys`,
-              result.copiedKeys,
-            );
-          }
-        } catch (e) {
-          console.warn('[Nostr] per-account storage migration failed:', e);
-        }
-
-        // Now safe to hand `pk` to the wallet gate and publish it — the
-        // per-account `wallet_list_${pk}` is already populated (by the
-        // migration just above or an earlier run that short-circuited).
-        resolveStartupWalletOwner(pk);
-        setPubkey(pk);
+        // Migrates `pk`'s storage, then opens the wallet gate and publishes.
+        if (!(await publishRestoredSession(pk, isAutoLoginCurrent, setPubkey))) return;
+        const ownsSession = captureSessionGeneration();
         setSignerType(session.signerType);
         setIsLoggedIn(true);
         // nsec / Amber sessions missing from the registry; NIP-46 isn't in it.
         const registered = await registerRestoredSession(login);
+        if (!ownsSession()) return;
         if (registered) setIdentities(registered.identities);
 
         // Eagerly hydrate cached state from disk in parallel — these

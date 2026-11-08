@@ -14,7 +14,10 @@
 //     Skips if the namespaced key is already populated (idempotent).
 //   - Does NOT delete the legacy key. The downgrade story for at least
 //     one release is "old build reads the legacy global, sees the same
-//     values it expected" — so keep the global copies around.
+//     values it expected" — so keep the global copies around. The one
+//     exception is the legacy `wallet_list`: once it is a pure duplicate of
+//     a signed-in account's list, walletStorageService's
+//     `pruneMigratedLegacyWalletList` deletes it (#1746).
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PER_ACCOUNT_STORAGE_BASES, perAccountKey } from './perAccountStorage';
@@ -61,6 +64,15 @@ export async function migrateToPerAccountStorage(activePubkey: string): Promise<
 
   await AsyncStorage.setItem(MIGRATION_DONE_KEY, 'true');
   return { ranSteps: copiedKeys.length, copiedKeys, alreadyDone: false };
+}
+
+/**
+ * True once the migration has completed on this device: per-account storage
+ * is then the source of truth and a legacy global value (e.g. `wallet_list`)
+ * may be a stale copy of some account's data. Rejects on a storage error.
+ */
+export async function hasMigratedToPerAccountStorage(): Promise<boolean> {
+  return (await AsyncStorage.getItem(MIGRATION_DONE_KEY)) === 'true';
 }
 
 // Test/debug helper: drop the migration flag so the next call re-runs

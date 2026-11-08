@@ -32,7 +32,7 @@ import { WalletLiveContext } from './WalletLiveContext';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
 import { useWalletIdentityHydration } from './useWalletIdentityHydration';
 import { useDeferredSwapRefresh } from './useDeferredSwapRefresh';
-import { hydrateWalletReceipts, persistSeenReceipts } from './hydrateWalletReceipts';
+import { persistSeenReceipts, useSeenReceipts } from './hydrateWalletReceipts';
 import { useIncomingReceiveAnnouncer } from './useIncomingReceiveAnnouncer';
 import { useWalletTransactionsFetch } from './useWalletTransactionsFetch';
 import type { IncomingPayment } from './incomingPayment';
@@ -118,6 +118,8 @@ interface WalletContextType {
   reorderWallet: (walletId: string, direction: 'up' | 'down') => Promise<void>;
   setActiveWallet: (walletId: string | null) => void;
   refreshActiveBalance: () => Promise<void>;
+  /** Retry a failed cold-start wallet load (Home pull-to-refresh); a no-op otherwise. */
+  retryWalletLoad: () => Promise<void>;
   completeOnboarding: () => Promise<void>;
 
   // Payment actions (operate on active wallet)
@@ -219,38 +221,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // trigger: a balance *increase* means something settled, so we refresh the
   // transaction list and let the receive detector announce it (#653).
   const paymentBaselinesRef = useRef<Map<string, number>>(new Map());
-  // Per-wallet set of settled-incoming payment_hashes we've already announced.
-  // Receives are detected by transaction identity (hash), not balance-diffing,
-  // so a flapping/stale balance can't re-announce the same payment (#653).
-  // Seeded silently from existing history on first sight (no launch re-announce).
-  const seenReceiptsRef = useRef<Map<string, Set<string>>>(new Map());
+  // Announced-receipt baseline per wallet (#653); see useSeenReceipts.
+  const { seenReceiptsRef, seedSeenReceipts, hydrateSeenReceipts } = useSeenReceipts();
   // Wallet ids whose initial transaction fetch has already been kicked off, so
   // the initial-fetch effect runs once per wallet rather than on every render
   // that touches `wallets` (#725).
   const initiallyFetchedRef = useRef<Set<string>>(new Set());
-
-  // Record a wallet's announced-receipt baseline in memory and (optionally) on
-  // disk — the "set the ref + persistSeenReceipts" pattern shared by the launch-
-  // hydration, identity-switch, and first-fetch baseline sites. `persist` is
-  // false only when the set was just read back from disk (no need to re-write).
-  const seedSeenReceipts = useCallback(
-    (walletId: string, seeded: Set<string>, persist = true): void => {
-      seenReceiptsRef.current.set(walletId, seeded);
-      if (persist) persistSeenReceipts(walletId, seeded);
-    },
-    [],
-  );
-
-  // Seed a wallet's announced-receipts set BEFORE the detector runs, on launch
-  // hydration / identity switch: prefer the persisted set, else baseline from
-  // cached history (a corrupt persisted value falls back to a fresh baseline).
-  // The in-memory set alone reset on every JS re-eval and re-announced a payment
-  // whose hash wasn't in the (possibly stale) tx cache (#653 follow-up).
-  const hydrateSeenReceipts = useCallback(
-    (walletId: string, cachedTxs: readonly WalletTransaction[], isCurrent?: () => boolean) =>
-      hydrateWalletReceipts(walletId, cachedTxs, seedSeenReceipts, isCurrent),
-    [seedSeenReceipts],
-  );
 
   useLegacyOnchainMigration(wallets, walletsHydrated, setWallets);
 
@@ -344,7 +320,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setLastIncomingPayment,
   });
   // Cold start: hydrate the real owner's wallets once, then reconnect them.
-  useWalletStartup({
+  const retryWalletLoad = useWalletStartup({
     captureWalletIdentity,
     lastTxsJsonRef,
     hydrateSeenReceipts,
@@ -1273,7 +1249,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           `[Wallet] expecting payment on ${paymentHash.slice(0, 12)}… (${Math.round(durationMs / 1000)} s window, amount=${expectedAmountSats ?? '?'})`,
         );
     },
-    [stopExpectedPayment, updateWalletInState, captureWalletIdentity],
+    [stopExpectedPayment, updateWalletInState, captureWalletIdentity, seenReceiptsRef],
   );
 
   // Tear down any outstanding expectation when the context unmounts —
@@ -1503,6 +1479,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       reorderWallet,
       setActiveWallet,
       refreshActiveBalance,
+      retryWalletLoad,
       completeOnboarding,
       makeInvoice,
       payInvoice,
@@ -1540,6 +1517,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       reorderWallet,
       setActiveWallet,
       refreshActiveBalance,
+      retryWalletLoad,
       completeOnboarding,
       makeInvoice,
       payInvoice,
