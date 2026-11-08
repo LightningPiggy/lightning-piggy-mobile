@@ -350,7 +350,7 @@ describe('event-driven own-caches rearm (#1016)', () => {
 });
 
 describe('relay-set keying (cold-start re-arm churn)', () => {
-  type Props = { pubkey: string; getReadRelays: () => string[] };
+  type Props = { pubkey: string | null; getReadRelays: () => string[] };
   const renderWith = (initialProps: Props) =>
     renderHook((props: Props) => useCacheNotifications(props), { initialProps });
 
@@ -504,6 +504,49 @@ describe('relay-set keying (cold-start re-arm churn)', () => {
     expect(mockedFoundLogs.mock.calls[0][0]).toEqual(
       expect.objectContaining({ relays: ['wss://two'], cacheCoords: [COORD_B] }),
     );
+  });
+
+  it('runs a publish queued before sign-out when the same account signs back in', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch
+      .mockReturnValueOnce(
+        new Promise<{ coord: string }[]>((res) => {
+          resolveFirst = res;
+        }),
+      )
+      .mockResolvedValue([{ coord: COORD_A }, { coord: COORD_B }]);
+    const relays = () => ['wss://one'];
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: relays });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    // Publish mid-fetch (queued), sign out, the fetch settles, sign back in
+    // with the same relays inside the gap.
+    await act(async () => {
+      notifyOwnCachesChanged();
+    });
+    rerender({ pubkey: null, getReadRelays: relays });
+    await act(async () => {
+      resolveFirst([{ coord: COORD_A }]);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    rerender({ pubkey: VIEWER, getReadRelays: relays });
+
+    // The cached coords arm at once, and the queued discovery runs now.
+    expect(mockedFoundLogs.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ cacheCoords: [COORD_A] }),
+    );
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    expect(mockedFetch.mock.calls[1]).toEqual([VIEWER, ['wss://one']]);
+    await waitFor(() =>
+      expect(mockedFoundLogs.mock.calls.at(-1)![0]).toEqual(
+        expect.objectContaining({ cacheCoords: [COORD_A, COORD_B] }),
+      ),
+    );
+    // Consumed once: nothing more fetches before the safety net.
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
   });
 
   it('fetches straight away for a new account, whatever the previous throttle', async () => {

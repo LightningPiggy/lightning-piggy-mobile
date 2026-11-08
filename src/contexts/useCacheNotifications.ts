@@ -344,13 +344,22 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // a fetch in flight or a coord set fetched inside the min gap, so it
     // re-subscribes on the new relays at once, then rediscovers on them after
     // the gap; otherwise it fetches as on mount.
+    // A publish queued while an earlier run's fetch was in flight (that run
+    // was torn down, e.g. sign-out then back in) is consumed here: the cached
+    // coords arm at once and a forced discovery runs on these relays.
     if (fetchState.pending) {
       joinPending(fetchState.pending);
       scheduleCatchUp();
-    } else if (fetchState.coords && Date.now() - fetchState.startedAt < REFETCH_MIN_GAP_MS) {
-      armFor(fetchState.coords);
-      if (fetchState.relaysKey !== relaysKey) scheduleCatchUp();
-    } else void refetchAndRearm();
+    } else {
+      const queuedForce = fetchState.queuedForce;
+      fetchState.queuedForce = false;
+      const recent =
+        fetchState.coords !== null && Date.now() - fetchState.startedAt < REFETCH_MIN_GAP_MS;
+      if (recent) armFor(fetchState.coords!);
+      if (queuedForce) void refetchAndRearm({ force: true });
+      else if (!recent) void refetchAndRearm();
+      else if (fetchState.relaysKey !== relaysKey) scheduleCatchUp();
+    }
     const interval = setInterval(() => {
       void refetchAndRearm();
     }, REFETCH_COORDS_INTERVAL_MS);
