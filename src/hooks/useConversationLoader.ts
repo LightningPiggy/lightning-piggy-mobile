@@ -4,11 +4,22 @@ import { useFocusEffect } from '@react-navigation/native';
 import { filterMessagesByProtocol, type DmProtocol } from '../utils/dmProtocol';
 import { subscribeDmMessages } from '../contexts/nostrEventBus';
 import { subscribeDmStorage } from '../services/dmDb';
-import { keepPendingLocalRows, reconcileDeliveryStatus } from '../contexts/nostrDmCache';
+import {
+  DM_CONV_CAP,
+  keepPendingLocalRows,
+  mergeConversationMessages,
+  reconcileDeliveryStatus,
+} from '../contexts/nostrDmCache';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { ConversationMessageInput } from '../utils/conversationItems';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { createAbortReplacer } from '../utils/abortReplace';
+import { createConversationLiveRefresh } from '../utils/conversationLiveRefresh';
+import { perfLog } from '../utils/perfLog';
+import { useChatOpenTiming } from './useChatOpenTiming';
+
+/** Why `load` is asking the relays: perf lines attribute every fetch. */
+type RelayFetchReason = 'open' | 'refresh' | 'gap';
 
 // Owns the conversation thread's data lifecycle (#868): read-through paint from
 // the ingested store, the background relay top-up, abort-on-unmount, and
@@ -73,7 +84,7 @@ export function useConversationLoader({
   const isMountedRef = useRef(true);
   // Single-flight + abort (#868): the controller for the in-flight conversation
   // fetch. `load` aborts-and-replaces it on every call, so a re-entry (the mount
-  // effect firing again, a live-sub re-fetch, or a second pull) can't stack a
+  // effect firing again, a gap re-fetch, or a second pull) can't stack a
   // second decrypt loop on the JS thread; the unmount cleanup aborts it so a
   // back-press mid-fetch cancels the relay query + decrypt instead of letting it
   // drain. At most one in-flight conversation fetch per screen instance.
@@ -94,8 +105,17 @@ export function useConversationLoader({
     };
   }, []);
 
+  // Relay fetches this screen instance has made, for the perf lines.
+  const relayFetchesRef = useRef(0);
+  // Bumped by every live message / store commit, so a relay fetch that
+  // overlapped one re-reads the store after replacing the list: the fetch's
+  // store slice predates the commit and would otherwise drop the new row.
+  const liveEpochRef = useRef(0);
+  // The focused session's coalesced store read (null while blurred).
+  const scheduleStoreReadRef = useRef<(() => void) | null>(null);
+
   const load = useCallback(
-    async (showSpinner: boolean) => {
+    async (showSpinner: boolean, reason: RelayFetchReason) => {
       if (!isLoggedIn) {
         setLoading(false);
         return;
@@ -132,6 +152,9 @@ export function useConversationLoader({
         setLoading(false);
         return;
       }
+      const epochAtFetch = liveEpochRef.current;
+      relayFetchesRef.current++;
+      perfLog(`ConversationFetch ${protocol} relay (${reason}) total=${relayFetchesRef.current}`);
       try {
         const conv = filterMessagesByProtocol(
           await fetchConversation(pubkey, { signal, protocol }),
@@ -153,9 +176,16 @@ export function useConversationLoader({
           // AsyncStorage write is a plain side-effect — keeps the updater pure
           // and StrictMode-safe (Copilot #858).
           const previous = filterMessagesByProtocol(messagesRef.current, protocol);
+          // A live row painted from the store mid-fetch isn't in `conv` (its
+          // store slice was read when the fetch began): merge rather than
+          // replace, so the row never blinks out before the re-read below.
+          const overlapped = liveEpochRef.current !== epochAtFetch;
+          const fetched = overlapped
+            ? mergeConversationMessages(previous, conv, DM_CONV_CAP)
+            : conv;
           const reconciled = keepPendingLocalRows(
             previous,
-            reconcileDeliveryStatus(previous, conv),
+            reconcileDeliveryStatus(previous, fetched),
           );
           // Durably write the reconciled ticks back to the conv cache, keyed by
           // the (now real-id) row id, so the tick survives a cold restart —
@@ -169,6 +199,8 @@ export function useConversationLoader({
           }
           void persistDeliveryStatuses(pubkey, statusById);
           setMessages(reconciled);
+          // The store is the superset: re-read it so the merge settles to it.
+          if (overlapped) scheduleStoreReadRef.current?.();
         }
       } finally {
         // Leave the spinner state to whichever load is current — an aborted /
@@ -188,64 +220,71 @@ export function useConversationLoader({
     ],
   );
 
-  // Live updates: NostrContext fires `subscribeDmMessages` after a kind-1059
-  // wrap arrives via the long-lived relay sub and decrypts to a 1:1 rumor for
-  // this thread's peer (#349). Re-fetching the conversation is cheap because the
-  // new wrap is now in the persistent NIP-17 cache, so fetchConversation
-  // short-circuits the relay round-trip and the thread re-renders within a tick.
+  // Live updates (#349, #1325): a live message is announced by
+  // `subscribeDmMessages` and its row committed to the DM store (in either
+  // order — see conversationLiveRefresh). Both only re-read the store; the
+  // relay is reserved for focus (open / refocus catch-up), pull-to-refresh and
+  // a live message whose store write never lands.
   useFocusEffect(
     useCallback(() => {
       if (!pubkey) return;
       // Catch up with messages received while this screen was blurred.
-      void load(true);
-      const target = pubkey.toLowerCase();
-      let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-      const unsubscribe = subscribeDmMessages((partnerPubkey) => {
-        if (partnerPubkey !== target) return;
-        // Coalesce relay bursts into one read instead of one load per event.
-        if (refreshTimer) return;
-        refreshTimer = setTimeout(() => {
-          refreshTimer = undefined;
-          void load(false);
-        }, 150);
-      });
-      // The live sub announces a message before its store write commits
-      // (#934), so the read above can miss it on a busy cold start, and
-      // nothing announces it again (#1325). Re-read the store, without a
-      // relay fetch, once a write has committed.
-      // Only the newest read may apply, and only while this focus lasts: an
-      // older read resolving late would drop the newer message again.
-      let storeTimer: ReturnType<typeof setTimeout> | undefined;
-      let storeRead = 0;
-      let focused = true;
+      void load(true, 'open');
       const viewer = notification?.owner?.toLowerCase();
       const peer = pubkey.toLowerCase();
+      // Only the newest read may apply, and only while this focus lasts: an
+      // older read resolving late would drop the newer message again.
+      let storeRead = 0;
+      let focused = true;
+      const readStore = () => {
+        const read = ++storeRead;
+        void loadInitialConversation(pubkey, protocol)
+          .then((rows) => {
+            if (!isMountedRef.current || !focused || read !== storeRead) return;
+            const stored = filterMessagesByProtocol(rows, protocol);
+            // Keep the delivery ticks `load` reconciled: the store rows may
+            // not carry them yet.
+            setMessages((prev) => {
+              const previous = filterMessagesByProtocol(prev, protocol);
+              return keepPendingLocalRows(previous, reconcileDeliveryStatus(previous, stored));
+            });
+            const c = live.counts();
+            perfLog(
+              `ConversationLive ${protocol} store read: live=${c.liveMessages} ` +
+                `commits=${c.storeCommits} storeReads=${c.storeReads} ` +
+                `relayFetches=${relayFetchesRef.current} gapFetches=${c.gapFetches}`,
+            );
+          })
+          .catch(() => undefined);
+      };
+      const live = createConversationLiveRefresh({
+        readStore,
+        fetchRelay: () => void load(false, 'gap'),
+        // Marmot threads never read the relays here (see `load`).
+        trackGaps: protocol !== 'marmot',
+      });
+      scheduleStoreReadRef.current = live.scheduleStoreRead;
+      const unsubscribe = subscribeDmMessages((partnerPubkey) => {
+        if (partnerPubkey !== peer) return;
+        liveEpochRef.current++;
+        live.onLiveMessage();
+      });
       const unsubscribeStore = subscribeDmStorage((owner, rows) => {
-        // Only this account's writes to this thread (rows are empty when a
-        // write isn't row-specific: re-read then too).
-        if (storeTimer || (viewer && owner.toLowerCase() !== viewer)) return;
-        if (rows.length && !rows.some((r) => r.conversation.toLowerCase() === peer)) return;
-        storeTimer = setTimeout(() => {
-          storeTimer = undefined;
-          const read = ++storeRead;
-          void loadInitialConversation(pubkey, protocol)
-            .then((rows) => {
-              if (!isMountedRef.current || !focused || read !== storeRead) return;
-              const stored = filterMessagesByProtocol(rows, protocol);
-              // Keep the delivery ticks `load` reconciled: the store rows may
-              // not carry them yet.
-              setMessages((prev) => {
-                const previous = filterMessagesByProtocol(prev, protocol);
-                return keepPendingLocalRows(previous, reconcileDeliveryStatus(previous, stored));
-              });
-            })
-            .catch(() => undefined);
-        }, 150);
+        // Only this account's writes to this thread. Rows are empty, or carry
+        // no conversation (deletes), when a write isn't thread-specific:
+        // re-read then too.
+        if (viewer && owner.toLowerCase() !== viewer) return;
+        const touchesThread = rows.some(
+          (r) => !r.conversation || r.conversation.toLowerCase() === peer,
+        );
+        if (rows.length && !touchesThread) return;
+        liveEpochRef.current++;
+        live.onStoreCommit();
       });
       return () => {
         focused = false;
-        clearTimeout(refreshTimer);
-        clearTimeout(storeTimer);
+        live.dispose();
+        scheduleStoreReadRef.current = null;
         unsubscribe();
         unsubscribeStore();
         // A blurred thread (e.g. kept underneath another protocol's thread)
@@ -264,7 +303,7 @@ export function useConversationLoader({
     const gen = ++refreshGenRef.current;
     setRefreshing(true);
     try {
-      await load(false);
+      await load(false, 'refresh');
     } finally {
       if (refreshGenRef.current === gen) {
         setRefreshing(false);
@@ -284,5 +323,6 @@ export function useConversationLoader({
     notification?.messageId,
     threadMessages,
   );
+  useChatOpenTiming(`dm:${protocol}`, loading, routedMessages.length);
   return { messages: routedMessages, setMessages, loading, refreshing, handleRefresh };
 }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, BackHandler, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, BackHandler, Linking } from 'react-native';
 import { Mic, Square, Send, X, Play, Pause } from 'lucide-react-native';
 import Animated, {
   useAnimatedStyle,
@@ -16,7 +16,6 @@ import {
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import {
   useAudioRecorder,
-  useAudioRecorderState,
   useAudioPlayer,
   useAudioPlayerStatus,
   RecordingPresets,
@@ -29,6 +28,11 @@ import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
+import {
+  createVoiceRecordingSheetStyles,
+  voiceWaveformStyles,
+} from '../styles/VoiceRecordingSheet.styles';
+import { useRecorderStatusWhileActive } from '../hooks/useRecorderStatusWhileActive';
 
 interface Props {
   visible: boolean;
@@ -113,14 +117,14 @@ const Waveform: React.FC<{
   const played = Math.round(progress * bars.length);
   return (
     <View
-      style={waveStyles.row}
+      style={voiceWaveformStyles.row}
       accessibilityLabel={t('voiceRecordingSheet.waveformAccessibility')}
     >
       {bars.map((v, i) => (
         <View
           key={i}
           style={[
-            waveStyles.bar,
+            voiceWaveformStyles.bar,
             {
               height: 3 + v * 28,
               backgroundColor: i < played ? colors.brandPink : colors.divider,
@@ -131,11 +135,6 @@ const Waveform: React.FC<{
     </View>
   );
 };
-
-const waveStyles = StyleSheet.create({
-  row: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 2, height: 34 },
-  bar: { width: 3, borderRadius: 2, minHeight: 3 },
-});
 
 const fmtTime = (totalSeconds: number) => {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -170,7 +169,7 @@ const fmtTime = (totalSeconds: number) => {
 const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sending = false }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createVoiceRecordingSheetStyles(colors), [colors]);
   const sheetRef = useRef<BottomSheetModal>(null);
   // No explicit snapPoints — gorhom v5 defaults `enableDynamicSizing` to
   // true and sizes the sheet to its content intrinsically (BottomSheetView
@@ -179,16 +178,10 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   // entirely (matches ContactProfileSheet / AccountSwitcherSheet).
 
   // The recorder hook re-uses the same native recorder across renders.
-  // We poll its state at 200 ms — fast enough to drive a smooth
-  // elapsed-seconds counter without thrashing the JS bridge. A separate
-  // useAudioRecorder + useAudioRecorderState pair (vs. the
-  // statusListener overload) keeps the hot path declarative — the
-  // animated pulse below reads `state.metering` on every render tick.
   const recorder = useAudioRecorder({
     ...RecordingPresets.HIGH_QUALITY,
     isMeteringEnabled: true,
   });
-  const recorderState = useAudioRecorderState(recorder, 200);
 
   // Track the recorded file URI captured at stop-time so the Send
   // handler doesn't race a still-finalising recorder. Cleared on every
@@ -222,6 +215,13 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
   // True while we're awaiting a permission decision so the mic button
   // shows a disabled state instead of double-firing the prompt.
   const [requesting, setRequesting] = useState(false);
+  // Recorder state at 200 ms — smooth enough for the elapsed counter and the
+  // metering pulse — but only while a recording is in progress: from the
+  // start tap until the clip is captured (recordedUri) or the sheet closes.
+  const recorderState = useRecorderStatusWhileActive(
+    recorder,
+    visible && didStart && recordedUri === null,
+  );
 
   // 60 s hard-cap timer. We don't rely on the recorder's internal
   // `stopOnReachingTimeLimit` (varies by platform) — JS-side timer is
@@ -371,9 +371,9 @@ const VoiceRecordingSheet: React.FC<Props> = ({ visible, onClose, onSend, sendin
       setRecordedUri(null);
       setMeteringHistory([]);
       cutoffTimerRef.current = setTimeout(() => {
-        // Hard 60 s cap — fire-and-forget; the recorder.stop()
-        // promise resolves async and the state listener will pick
-        // up isRecording=false on the next poll.
+        // Hard 60 s cap — fire-and-forget; once stop() resolves the
+        // captured clip ends polling, whose last sample picks up
+        // isRecording=false.
         recorder
           .stop()
           .then(() => setRecordedUri(recorder.uri ?? null))
@@ -709,135 +709,5 @@ async function getFileSizeBytes(fileUri: string): Promise<number> {
   if (!info.exists) throw new Error(`File not found: ${fileUri}`);
   return info.size;
 }
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-    },
-    handleIndicator: {
-      backgroundColor: colors.divider,
-    },
-    content: {
-      paddingHorizontal: 24,
-      paddingTop: 8,
-      paddingBottom: 28,
-      alignItems: 'center',
-      gap: 14,
-    },
-    title: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: colors.textHeader,
-    },
-    encryptionNote: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      paddingHorizontal: 4,
-      lineHeight: 16,
-    },
-    elapsed: {
-      fontSize: 32,
-      fontWeight: '700',
-      color: colors.textBody,
-      // Tabular nums so the seconds digit doesn't shift the layout
-      // every time it ticks up.
-      fontVariant: ['tabular-nums'],
-    },
-    micArea: {
-      width: 120,
-      height: 120,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginVertical: 4,
-    },
-    pulse: {
-      position: 'absolute',
-      width: 120,
-      height: 120,
-      borderRadius: 60,
-    },
-    micButton: {
-      width: 84,
-      height: 84,
-      borderRadius: 42,
-      alignItems: 'center',
-      justifyContent: 'center',
-      // Crisp shadow so the mic feels tappable even when the pulse is
-      // dim (start-of-utterance, breath pauses).
-      shadowColor: '#000',
-      shadowOpacity: 0.18,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 6,
-    },
-    liveWave: {
-      alignSelf: 'stretch',
-      height: 34,
-      justifyContent: 'center',
-      paddingHorizontal: 8,
-    },
-    playerCard: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      alignSelf: 'stretch',
-      gap: 12,
-      backgroundColor: colors.background,
-      borderRadius: 16,
-      paddingVertical: 10,
-      paddingHorizontal: 14,
-    },
-    playButton: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    playerTime: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      fontVariant: ['tabular-nums'],
-      minWidth: 40,
-      textAlign: 'right',
-    },
-    hint: {
-      fontSize: 13,
-      color: colors.textSupplementary,
-      textAlign: 'center',
-      paddingHorizontal: 8,
-    },
-    buttonRow: {
-      flexDirection: 'row',
-      alignSelf: 'stretch',
-      gap: 12,
-      marginTop: 8,
-    },
-    actionButton: {
-      flex: 1,
-      flexDirection: 'row',
-      gap: 8,
-      paddingVertical: 12,
-      paddingHorizontal: 14,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    cancelButton: {
-      backgroundColor: colors.background,
-    },
-    sendButton: {
-      backgroundColor: colors.brandPink,
-    },
-    sendButtonDisabled: {
-      opacity: 0.4,
-    },
-    actionLabel: {
-      fontSize: 15,
-      fontWeight: '700',
-    },
-  });
 
 export default VoiceRecordingSheet;
