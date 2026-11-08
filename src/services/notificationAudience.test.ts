@@ -22,10 +22,10 @@ const FRIEND = 'b'.repeat(64);
 const FOF = 'c'.repeat(64);
 const STRANGER = 'd'.repeat(64);
 
-const setTier = (owner: string, tier: WotTier) =>
+const setTier = (owner: string, tier: WotTier, explicit = true) =>
   AsyncStorage.setItem(
     perAccountKey(WOT_STORAGE_KEY_BASE, owner),
-    JSON.stringify({ wotTier: tier }),
+    JSON.stringify(explicit ? { wotTier: tier, explicit } : { wotTier: tier }),
   );
 const cacheFof = (owner: string, set: string[], computedAt = Date.now()) =>
   persistFofCache(
@@ -101,7 +101,21 @@ describe('loadNotificationAudience (no React tree)', () => {
     expect(audienceAdmits(audience, FOF)).toBe(false);
   });
 
-  it('a never-chosen tier reads as the stored default, All', async () => {
+  it('an unchosen tier notifies like Friends; only an explicit pick widens it', async () => {
+    expect((await loadNotificationAudience(ME, new Set([FRIEND])))?.tier).toBe('friends');
+    await setTier(ME, 'all', false);
+    expect((await loadNotificationAudience(ME, new Set([FRIEND])))?.tier).toBe('friends');
+    await setTier(ME, 'fof', false);
+    await cacheFof(ME, [FOF]);
+    expect(await loadNotificationAudience(ME, new Set([FRIEND]))).toEqual({
+      tier: 'friends',
+      fof: null,
+    });
+    await setTier(ME, 'all');
     expect((await loadNotificationAudience(ME, new Set([FRIEND])))?.tier).toBe('all');
+    await setTier(ME, 'fof');
+    expect([...((await loadNotificationAudience(ME, new Set([FRIEND])))?.fof ?? [])]).toEqual([
+      FOF,
+    ]);
   });
 });

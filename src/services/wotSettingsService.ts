@@ -33,7 +33,19 @@ export type WotTier = 'friends' | 'fof' | 'all';
 
 export interface WotSettings {
   wotTier: WotTier;
+  /** The user picked this tier (Web of Trust sheet / Settings). Absent for the
+   * #627 default and for tiers the legacy migration derived. */
+  explicit?: boolean;
 }
+
+/**
+ * The tier message NOTIFICATIONS follow. An unchosen tier notifies like
+ * Friends: the wide 'all' default only exists so a new user's rails aren't
+ * empty (#627), and must not let strangers notify. Only an explicit pick
+ * widens notifications. The Messages list keeps using `wotTier` as stored.
+ */
+export const notificationTierFor = (settings: WotSettings): WotTier =>
+  settings.explicit ? settings.wotTier : 'friends';
 
 const DEFAULTS: WotSettings = { wotTier: 'all' };
 
@@ -51,7 +63,9 @@ const parseWotSettings = (raw: string | null): WotSettings => {
     const parsed = JSON.parse(raw);
     // New shape — wotTier present and valid.
     if (parsed && typeof parsed === 'object' && isWotTier(parsed.wotTier)) {
-      return { wotTier: parsed.wotTier };
+      return parsed.explicit === true
+        ? { wotTier: parsed.wotTier, explicit: true }
+        : { wotTier: parsed.wotTier };
     }
     // Legacy migration: pre-#535 stored `{ filterEnabled: boolean }`. Map
     // false → 'all' (filter explicitly off), true (or missing) → 'friends'.
@@ -92,18 +106,19 @@ export const loadWotSettings = async (pubkey: string | null): Promise<WotSetting
 };
 
 /**
- * The account's tier for a reader with no React tree (the background DM
- * watch). Unlike `loadWotSettings`, a storage failure returns `null` rather
- * than the wide 'all' default, so the caller can fail closed. A tier that was
- * never chosen is still 'all' — what the Messages list applies too.
+ * The account's NOTIFICATION tier (`notificationTierFor`) for a reader with no
+ * React tree (the background DM watch). Unlike `loadWotSettings`, a storage
+ * failure returns `null` rather than a default, so the caller can fail closed.
  */
-export const readStoredWotTier = async (pubkey: string): Promise<WotTier | null> => {
+export const readStoredNotificationTier = async (pubkey: string): Promise<WotTier | null> => {
   try {
     await ensureSafetySettingsMigrated(pubkey);
     const known = peekAccountSetting(WOT_STORAGE_KEY_BASE, pubkey);
-    if (known !== undefined) return parseWotSettings(known).wotTier;
-    const raw = await AsyncStorage.getItem(perAccountKey(WOT_STORAGE_KEY_BASE, pubkey));
-    return parseWotSettings(raw).wotTier;
+    const raw =
+      known !== undefined
+        ? known
+        : await AsyncStorage.getItem(perAccountKey(WOT_STORAGE_KEY_BASE, pubkey));
+    return notificationTierFor(parseWotSettings(raw));
   } catch {
     return null;
   }

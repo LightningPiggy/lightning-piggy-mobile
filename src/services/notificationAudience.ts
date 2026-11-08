@@ -1,4 +1,6 @@
-// Who may raise a message notification: the account's Web of Trust tier.
+// Who may raise a message notification: the account's Web of Trust tier —
+// as explicitly CHOSEN. An unchosen tier (the #627 'all' default, or one the
+// legacy migration derived) notifies like Friends; see `notificationTierFor`.
 //
 // The follow gate (the live DM sub, the background watch) decides what is
 // STORED in Messages, and passes follows and people we've replied to. This
@@ -20,7 +22,7 @@
 // change (or per watch arm), never per event.
 
 import { FOF_SHARED_MAX, loadFofCache } from './friendsOfFriendsService';
-import { readStoredWotTier, type WotTier } from './wotSettingsService';
+import { readStoredNotificationTier, type WotTier } from './wotSettingsService';
 
 export interface NotificationAudience {
   tier: WotTier;
@@ -70,7 +72,7 @@ export async function loadNotificationAudience(
   owner: string,
   follows: ReadonlySet<string> | null,
 ): Promise<NotificationAudience | null> {
-  const tier = await readStoredWotTier(owner);
+  const tier = await readStoredNotificationTier(owner);
   if (!tier) return null;
   if (tier !== 'fof' || !follows || follows.size === 0) return { tier, fof: null };
   // The last good set, even past its 24 h refresh — the Messages list shows

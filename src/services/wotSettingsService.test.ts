@@ -6,7 +6,13 @@
 //   2. The legacy boolean payload migrates correctly so users on pre-#535
 //      installs don't have their explicit choice ignored.
 
-import { loadWotSettings, peekWotSettings, saveWotSettings } from './wotSettingsService';
+import {
+  loadWotSettings,
+  notificationTierFor,
+  peekWotSettings,
+  readStoredNotificationTier,
+  saveWotSettings,
+} from './wotSettingsService';
 import { __resetAccountSettingsCacheForTests } from './accountSettingsCache';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
@@ -141,5 +147,31 @@ describe('wotSettingsService', () => {
       const settings = await loadWotSettings(PK);
       expect(settings.wotTier).toBe('all');
     });
+  });
+});
+
+describe('notification tier (#1764): an unchosen tier notifies like Friends', () => {
+  it('maps only an explicit pick through', () => {
+    expect(notificationTierFor({ wotTier: 'all' })).toBe('friends');
+    expect(notificationTierFor({ wotTier: 'fof' })).toBe('friends');
+    expect(notificationTierFor({ wotTier: 'all', explicit: true })).toBe('all');
+    expect(notificationTierFor({ wotTier: 'fof', explicit: true })).toBe('fof');
+  });
+
+  it('round-trips the explicit marker, while the list tier stays as stored', async () => {
+    await saveWotSettings({ wotTier: 'all', explicit: true }, PK);
+    expect(await loadWotSettings(PK)).toEqual({ wotTier: 'all', explicit: true });
+    await saveWotSettings({ wotTier: 'all' }, OTHER);
+    expect(await loadWotSettings(OTHER)).toEqual({ wotTier: 'all' });
+  });
+
+  it('reads the stored notification tier: none stored, unchosen, explicit, legacy', async () => {
+    expect(await readStoredNotificationTier(PK)).toBe('friends');
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ wotTier: 'all' }));
+    expect(await readStoredNotificationTier(PK)).toBe('friends');
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ filterEnabled: false }));
+    expect(await readStoredNotificationTier(PK)).toBe('friends');
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ wotTier: 'all', explicit: true }));
+    expect(await readStoredNotificationTier(PK)).toBe('all');
   });
 });

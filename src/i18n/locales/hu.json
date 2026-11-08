@@ -3291,7 +3291,7 @@
   "messageSettingsScreen": {
     "title": "Üzenetek",
     "trustTitle": "Kiket látsz",
-    "trustHint": "Ez a Bizalmi háló szűrő azt is meghatározza, mely üzenetekről kapsz értesítést, és mit látsz a Térképen, az Eseményekben és a Csoportokban.",
+    "trustHint": "Ez a Bizalmi háló szűrő azt is meghatározza, mit látsz a Térképen, az Eseményekben és a Csoportokban. Ha kiválasztasz egy szűrőt, az azt is eldönti, mely üzenetekről kapsz értesítést; addig csak azoktól, akiket követsz.",
     "trustRowA11y": "Kiket látsz: {{tier}}"
   },
   "hermesProfiler": {

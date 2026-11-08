@@ -3,6 +3,7 @@ import { act, renderHook } from '@testing-library/react-native';
 import { TrustGraphProvider, useTrustGraph } from './TrustGraphContext';
 import type { WotSettings } from '../services/wotSettingsService';
 import { liveNotificationAudience } from '../services/notificationAudience';
+import { saveWotSettings } from '../services/wotSettingsService';
 
 const STRANGER = 'f'.repeat(64);
 let mockPubkey = 'big';
@@ -14,6 +15,7 @@ jest.mock('./NostrContext', () => ({
   useNostrContacts: () => ({ contacts: [] }),
 }));
 jest.mock('../services/wotSettingsService', () => ({
+  notificationTierFor: jest.requireActual('../services/wotSettingsService').notificationTierFor,
   peekWotSettings: (pk: string | null) => (pk ? (mockKnown.get(pk) ?? null) : null),
   // Each load stays pending until the test resolves it (slow AsyncStorage).
   loadWotSettings: (pk: string) =>
@@ -76,19 +78,28 @@ it('a load that resolves after the user picks a tier does not roll it back', asy
 });
 
 it('publishes the tier for notifications per account, live, and nothing while it loads', async () => {
-  mockKnown.set('middle', { wotTier: 'friends' });
+  mockKnown.set('middle', { wotTier: 'fof', explicit: true });
   const { result, rerender, unmount } = renderHook(() => useTrustGraph(), { wrapper });
   // 'big' still loading: no audience, so notifications stay follows-only.
   expect(liveNotificationAudience('big')).toBeNull();
-  await act(async () => mockPending.get('big')!({ wotTier: 'friends' }));
+  // Unchosen 'all' (the #627 default): the list widens, notifications don't.
+  await act(async () => mockPending.get('big')!({ wotTier: 'all' }));
+  expect(result.current.wotTier).toBe('all');
   expect(liveNotificationAudience('big')).toEqual({ tier: 'friends', fof: null });
+  // A derived tier (legacy migration) stays unchosen.
+  act(() => result.current.setWotTier('all', { explicit: false }));
+  expect(liveNotificationAudience('big')).toEqual({ tier: 'friends', fof: null });
+  expect(saveWotSettings).toHaveBeenLastCalledWith({ wotTier: 'all' }, 'big');
+  // Picked in the sheet: everyone, saved with the marker.
   act(() => result.current.setWotTier('all'));
   expect(liveNotificationAudience('big')).toEqual({ tier: 'all', fof: null });
+  expect(saveWotSettings).toHaveBeenLastCalledWith({ wotTier: 'all', explicit: true }, 'big');
   // Switching away retracts the previous account's audience.
   mockPubkey = 'middle';
   rerender({});
   expect(liveNotificationAudience('big')).toBeNull();
-  expect(liveNotificationAudience('middle')?.tier).toBe('friends');
+  // Explicit FoF with no friends-of-friends set built yet: follows only.
+  expect(liveNotificationAudience('middle')).toEqual({ tier: 'fof', fof: null });
   unmount();
   expect(liveNotificationAudience('middle')).toBeNull();
 });

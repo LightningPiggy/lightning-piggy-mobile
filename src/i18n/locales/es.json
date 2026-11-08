@@ -3291,7 +3291,7 @@
   "messageSettingsScreen": {
     "title": "Mensajes",
     "trustTitle": "A quién ves",
-    "trustHint": "Este filtro de Red de Confianza también decide qué mensajes te avisan y lo que ves en el Mapa, en Eventos y en Grupos.",
+    "trustHint": "Este filtro de Red de Confianza también decide lo que ves en el Mapa, en Eventos y en Grupos. Cuando eliges un filtro, también decide qué mensajes te avisan; hasta entonces, solo te avisan las personas que sigues.",
     "trustRowA11y": "A quién ves: {{tier}}"
   },
   "hermesProfiler": {

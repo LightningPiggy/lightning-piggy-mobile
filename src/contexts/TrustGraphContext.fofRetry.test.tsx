@@ -19,6 +19,7 @@ jest.mock('./NostrContext', () => ({
   useNostrContacts: () => ({ contacts: [] }),
 }));
 jest.mock('../services/wotSettingsService', () => ({
+  notificationTierFor: jest.requireActual('../services/wotSettingsService').notificationTierFor,
   peekWotSettings: () => ({ wotTier: mockTier }),
   loadWotSettings: () => new Promise(() => {}),
   saveWotSettings: jest.fn(async () => {}),

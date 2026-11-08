@@ -3343,7 +3343,7 @@
   "messageSettingsScreen": {
     "title": "Wiadomości",
     "trustTitle": "Kogo widzisz",
-    "trustHint": "Ten filtr sieci zaufania decyduje też o tym, o których wiadomościach dostajesz powiadomienia i co widzisz na mapie, w wydarzeniach i w grupach.",
+    "trustHint": "Ten filtr sieci zaufania decyduje też o tym, co widzisz na mapie, w wydarzeniach i w grupach. Gdy wybierzesz filtr, decyduje on też o tym, o których wiadomościach dostajesz powiadomienia; do tego czasu tylko o wiadomościach od osób, które obserwujesz.",
     "trustRowA11y": "Kogo widzisz: {{tier}}"
   },
   "hermesProfiler": {

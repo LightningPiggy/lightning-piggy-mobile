@@ -3291,7 +3291,7 @@
   "messageSettingsScreen": {
     "title": "Messages",
     "trustTitle": "Who you see",
-    "trustHint": "This Web of Trust filter also decides which messages notify you, and what you see on the Map, in Events and in Groups.",
+    "trustHint": "This Web of Trust filter also decides what you see on the Map, in Events and in Groups. Once you choose a filter, it also decides which messages notify you; until then, only people you follow do.",
     "trustRowA11y": "Who you see: {{tier}}"
   },
   "hermesProfiler": {

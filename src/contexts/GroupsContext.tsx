@@ -295,7 +295,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // and then notify the in-memory state so the UI picks it up on
         // the next render without waiting for loadWotSettings to re-run.
         await saveWotSettings({ wotTier: next }, pubkey);
-        setWotTier(next);
+        // Derived, not chosen: it must not widen notifications (#1764).
+        setWotTier(next, { explicit: false });
         await AsyncStorage.setItem(WOT_MIGRATION_DONE_KEY, 'true');
       } catch {
         // Best-effort; failures leave the marker unset so a later mount

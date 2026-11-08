@@ -83,7 +83,13 @@ const FOF = 'c'.repeat(64);
 const STRANGER = 'd'.repeat(64);
 let mockActive = ME;
 
-async function seedAccount(owner: string, tier: WotTier | null, fof: string[] | null) {
+/** `tier` is an explicit pick unless `explicit: false` (the #627 default / a migrated tier). */
+async function seedAccount(
+  owner: string,
+  tier: WotTier | null,
+  fof: string[] | null,
+  explicit = true,
+) {
   await AsyncStorage.setItem(
     perAccountKey(CONTACTS_CACHE_KEY_BASE, owner),
     JSON.stringify([{ pubkey: FRIEND }]),
@@ -91,7 +97,7 @@ async function seedAccount(owner: string, tier: WotTier | null, fof: string[] | 
   if (tier)
     await AsyncStorage.setItem(
       perAccountKey(WOT_STORAGE_KEY_BASE, owner),
-      JSON.stringify({ wotTier: tier }),
+      JSON.stringify(explicit ? { wotTier: tier, explicit } : { wotTier: tier }),
     );
   if (fof)
     await persistFofCache(
@@ -155,8 +161,18 @@ describe.each<[WotTier, boolean, boolean]>([
   });
 });
 
-it('a never-chosen tier is the stored default (All), like the Messages list', async () => {
-  await seedAccount(ME, null, null);
+it('an unchosen tier notifies like Friends: nothing stored, or an unchosen All', async () => {
+  await seedAccount(ME, null, [FOF]);
+  await arm(ME);
+  expect(await notifies(FRIEND)).toBe(true);
+  expect(await notifies(FOF)).toBe(false);
+  expect(await notifies(STRANGER)).toBe(false);
+  // The #627 default / a migrated 'all', saved without the explicit marker.
+  await seedAccount(ME, 'all', [FOF], false);
+  await arm(ME);
+  expect(await notifies(STRANGER)).toBe(false);
+  // Chosen in the sheet: everyone.
+  await seedAccount(ME, 'all', [FOF]);
   await arm(ME);
   expect(await notifies(STRANGER)).toBe(true);
 });

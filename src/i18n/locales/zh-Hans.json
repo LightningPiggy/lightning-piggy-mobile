@@ -3291,7 +3291,7 @@
   "messageSettingsScreen": {
     "title": "消息",
     "trustTitle": "你看到的人",
-    "trustHint": "此信任网络过滤也决定了哪些消息会通知你，以及你在地图、活动和群组中看到的内容。",
+    "trustHint": "此信任网络过滤也决定了你在地图、活动和群组中看到的内容。选择过滤后，它还会决定哪些消息会通知你；在此之前，只有你关注的人的消息会通知你。",
     "trustRowA11y": "你看到的人：{{tier}}"
   },
   "hermesProfiler": {
