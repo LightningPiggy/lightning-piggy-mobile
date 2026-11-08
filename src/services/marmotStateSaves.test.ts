@@ -146,6 +146,54 @@ describe('MarmotStateSaves (#1754)', () => {
     expect(getMarmotUnsavedStateSnapshot().owner).toBeNull();
   });
 
+  it('goes again when a newer failure arrives while its successful save is in flight', async () => {
+    const { saves } = makeSaves();
+    const group = fakeGroup(0, 2n);
+    saves.watch(group);
+    // The retry's save writes epoch 2; meanwhile a commit to epoch 3 lands
+    // and its own save fails — this loop's success must not swallow that.
+    group.save.mockImplementationOnce(async () => {
+      group.state.groupContext.epoch = 3n;
+      saves.check(group, [FAILED]);
+    });
+    saves.check(group, [FAILED]);
+    await saves.settled(ID);
+    expect(group.save).toHaveBeenCalledTimes(2);
+    expect(saves.isUnsaved(ID)).toBe(false);
+  });
+
+  it('marks the newest epoch when a failure arrives during a failing retry', async () => {
+    const { saves, backend } = makeSaves();
+    const group = fakeGroup(Infinity, 2n);
+    group.save.mockImplementationOnce(async () => {
+      group.state.groupContext.epoch = 3n;
+      saves.check(group, [FAILED]);
+      throw new Error('disk full');
+    });
+    saves.check(group, [FAILED]);
+    await saves.settled(ID);
+    expect(group.save).toHaveBeenCalledTimes(RETRY_MS.length);
+    expect(await backend.get('unsavedState', ID)).toBe('3');
+  });
+
+  it('stop() ends a pending backoff at once, without saving', async () => {
+    const backend = createMemoryMarmotBackend();
+    const saves = new MarmotStateSaves({
+      owner: OWNER,
+      backend,
+      stopped: () => false,
+      retryMs: [60_000],
+    });
+    const group = fakeGroup(0);
+    saves.check(group, [FAILED]);
+    saves.stop();
+    await saves.settled(ID); // would hang for a minute if the sleep weren't cancelled
+    expect(group.save).not.toHaveBeenCalled();
+    saves.check(group, [FAILED]); // and a stopped guard starts nothing new
+    await saves.settled(ID);
+    expect(group.save).not.toHaveBeenCalled();
+  });
+
   it('forgets a group that left the device', async () => {
     const { saves, backend } = makeSaves();
     const group = fakeGroup(Infinity);

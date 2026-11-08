@@ -225,13 +225,17 @@ export class MarmotSession {
     this.pubkey = opts.pubkey;
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
-    this.superseded = new DmSuperseded(this.backend);
     this.stateSaves = new MarmotStateSaves({
       owner: opts.pubkey,
       backend: this.backend,
       stopped: () => this.gate.stopped,
       retryMs: opts.stateSaveRetryMs,
     });
+    // A repaired 1:1's old group is no longer used: its unsaved mark goes too.
+    this.superseded = new DmSuperseded(
+      this.backend,
+      (id) => void this.stateSaves.forget(toMlsGroupId(id)),
+    );
 
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);
     this.outbox = new MarmotWelcomeOutbox(this.backend, () => this.gate.stopped);

@@ -49,18 +49,32 @@ export class MarmotStateSaves {
   /** MLS group id → the epoch this device holds in memory but not on disk. */
   private readonly unsaved = new Map<string, bigint>();
   private readonly retries = new Map<string, Promise<void>>();
+  /** Groups with a failure newer than their running retry's latest save. */
+  private readonly rerun = new Set<string>();
+  /** Pending backoff sleeps, woken early by stop(). */
+  private readonly sleeps = new Set<() => void>();
+  private halted = false;
 
   constructor(private readonly deps: MarmotStateSavesDeps) {}
+
+  private stopped(): boolean {
+    return this.halted || this.deps.stopped();
+  }
 
   /** Inspect one publish's results; a failed save is retried in the background. */
   check(group: SavableGroup, results: readonly Pick<GroupPublishResult, 'persistence'>[]): void {
     const failed = results.find((r) => r.persistence.kind === 'failed')?.persistence;
-    if (failed?.kind !== 'failed' || this.deps.stopped()) return;
+    if (failed?.kind !== 'failed' || this.stopped()) return;
     if (__DEV__)
       console.warn(`[PerfBlock] marmot state save failed ${short(group.idStr)}: ${failed.error}`);
     // One retry loop per group: every try writes the group's CURRENT state.
-    if (this.retries.has(group.idStr)) return;
-    const run = this.retry(group).finally(() => this.retries.delete(group.idStr));
+    // A failure landing while that loop's save is already in flight may be
+    // for a newer state than the one being written — the loop goes again.
+    if (this.retries.has(group.idStr)) return void this.rerun.add(group.idStr);
+    const run = this.retry(group).finally(() => {
+      this.retries.delete(group.idStr);
+      this.rerun.delete(group.idStr);
+    });
     this.retries.set(group.idStr, run);
   }
 
@@ -104,16 +118,42 @@ export class MarmotStateSaves {
     await this.clear(mlsId);
   }
 
+  /** Session stopped: no more retries (pending backoffs end now) or UI marks. */
   stop(): void {
+    this.halted = true;
+    for (const wake of [...this.sleeps]) wake();
     clearMarmotUnsavedState(this.deps.owner);
   }
 
   private async retry(group: SavableGroup): Promise<void> {
+    for (;;) {
+      const saved = await this.retryOnce(group);
+      // Go again only if a failure arrived during the successful save (rare).
+      if (!saved || !this.rerun.has(group.idStr) || this.stopped()) return;
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        this.sleeps.delete(wake);
+        resolve();
+      };
+      const timer = setTimeout(wake, ms);
+      this.sleeps.add(wake);
+    });
+  }
+
+  /** Bounded retries; true once a save landed, false if they all failed. */
+  private async retryOnce(group: SavableGroup): Promise<boolean> {
     const delays = this.deps.retryMs ?? STATE_SAVE_RETRY_MS;
     for (const [i, ms] of delays.entries()) {
-      await new Promise((resolve) => setTimeout(resolve, ms));
-      if (this.deps.stopped()) return;
+      await this.sleep(ms);
+      if (this.stopped()) return false;
       const started = Date.now();
+      // Failures reported from here on may postdate the state this writes.
+      this.rerun.delete(group.idStr);
       try {
         await group.save(true);
         if (__DEV__)
@@ -122,7 +162,7 @@ export class MarmotStateSaves {
               `${short(group.idStr)} ms=${Date.now() - started}`,
           );
         await this.clear(group.idStr);
-        return;
+        return true;
       } catch (e) {
         if (__DEV__)
           console.warn(
@@ -131,7 +171,9 @@ export class MarmotStateSaves {
           );
       }
     }
-    if (!this.deps.stopped()) await this.mark(group);
+    // The mark records the CURRENT epoch, so it covers any later failure too.
+    if (!this.stopped()) await this.mark(group);
+    return false;
   }
 
   private async mark(group: SavableGroup): Promise<void> {
@@ -152,7 +194,7 @@ export class MarmotStateSaves {
   }
 
   private publish(): void {
-    if (this.deps.stopped()) return;
+    if (this.stopped()) return;
     publishMarmotUnsavedState(this.deps.owner, this.unsaved.keys());
   }
 }

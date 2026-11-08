@@ -22,3 +22,10 @@ it('does not supersede the working group when Repair fails', async () => {
   ).rejects.toThrow('offline');
   expect(markers.has('old')).toBe(false);
 });
+
+it('reports each group a Repair supersedes, so its leftover state is forgotten (#1754)', async () => {
+  const superseded: string[] = [];
+  const markers = new DmSuperseded(createMemoryMarmotBackend(), (id) => superseded.push(id));
+  await markers.restart([{ id: 'old' }, { id: 'older' }], async () => ({ id: 'fresh' }));
+  expect(superseded).toEqual(['old', 'older']);
+});
