@@ -1,6 +1,11 @@
 import { audienceAdmits, liveNotificationAudience } from '../services/notificationAudience';
-import { fireMessageNotification } from '../services/notificationService';
-import { claimWrapNotification, markWrapHandled } from '../services/dmWrapNotificationDedupe';
+import { fireMessageNotification, isThreadActivelyViewed } from '../services/notificationService';
+import {
+  claimWrapNotification,
+  markWrapHandled,
+  retractContentlessWrapAlert,
+  takeContentlessWrapAlert,
+} from '../services/dmWrapNotificationDedupe';
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import { isChatReactionKind } from '../utils/nip17Reactions';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -46,13 +51,23 @@ export function audienceAlert(viewer: string, entry: AlertEntry, body: string) {
  * Fire the alert once per event id: the claim keeps a redelivery (the row is
  * never stored, so nothing else dedupes it) and the background watch from
  * posting it twice; "handled" keeps the background sync from pinging it again.
+ * A remote-signer watch's contentless placeholder for this wrap (the watch
+ * holds the claim) is REPLACED, as on the live drop path: the real alert is
+ * written first, then the placeholder goes.
  */
 export function fireAudienceNotification(viewer: string, entry: AlertEntry, body: string): void {
   markWrapHandled(entry.id);
-  if (!claimWrapNotification(entry.id)) return;
-  void Promise.resolve(fireMessageNotification(audienceAlert(viewer, entry, body))).catch(
-    () => undefined,
-  );
+  const placeholder = takeContentlessWrapAlert(entry.id);
+  if (!claimWrapNotification(entry.id) && !placeholder) return;
+  const alert = audienceAlert(viewer, entry, body);
+  void Promise.resolve(fireMessageNotification(alert))
+    .then((id) =>
+      // Only once the real alert was written (or the thread is on screen).
+      placeholder && (id || isThreadActivelyViewed(alert.threadId))
+        ? retractContentlessWrapAlert(viewer, entry.id)
+        : undefined,
+    )
+    .catch(() => undefined);
 }
 
 /**
