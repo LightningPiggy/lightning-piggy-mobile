@@ -13,7 +13,6 @@ import React, {
   useMemo,
   useRef,
 } from 'react';
-import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
@@ -22,13 +21,13 @@ import * as zapCounterpartyStorage from '../services/zapCounterpartyStorage';
 import * as zapSenderProfileStorage from '../services/zapSenderProfileStorage';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import { computePendingHash, shouldSkipResolve } from '../utils/zapResolverGuard';
-import { singleFlight } from '../utils/singleFlight';
 import * as onchainService from '../services/onchainService';
 import * as walletStorage from '../services/walletStorageService';
 import { useAccountCurrency } from './useAccountCurrency';
 import { rearmBackgroundWatchAfterNwcWalletAdded } from '../services/backgroundDmService';
 import { FiatCurrency } from '../services/fiatService';
 import { WalletLiveContext } from './WalletLiveContext';
+import { useActiveWalletBalanceRefresh } from './useActiveWalletBalanceRefresh';
 import { useOnchainIncomingPoll } from './useOnchainIncomingPoll';
 import { useWalletIdentityHydration } from './useWalletIdentityHydration';
 import { useDeferredSwapRefresh } from './useDeferredSwapRefresh';
@@ -1415,55 +1414,16 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     };
   }, []);
 
-  useEffect(() => {
-    if (!activeWalletId || !activeWalletConnected) return;
-    // No focused surface needs the balance right now — skip the
-    // interval setup entirely. Re-runs when demand transitions 0 → 1
-    // (focus event in a balance-displaying screen).
-    if (balancePollDemand <= 0) return;
-
-    // singleFlight drops a tick whose predecessor is still awaiting; replyTimeoutMs caps each to a single 8 s attempt (#650).
-    let disposed = false;
-    const pollBalance = singleFlight(async () => {
-      const isIdentityCurrent = captureWalletIdentity();
-      const isCurrent = () => !disposed && isIdentityCurrent();
-      if (!isCurrent()) return;
-      const b = await nwcService.getBalance(activeWalletId, { replyTimeoutMs: 8000 });
-      if (b !== null && isCurrent()) updateWalletInState(activeWalletId, { balance: b });
-    });
-    const refreshOnce = () => {
-      // Bail if the wallet has since disconnected — we read through
-      // `walletsRef` rather than the closure so this is current.
-      const current = walletsRef.current.find((w) => w.id === activeWalletId);
-      if (!current || !current.isConnected || current.walletType === 'onchain') return;
-      // Skip a parked (dead/timing-out) relay so a refresh can't re-arm the
-      // churn the cooldown is trying to suppress (#656).
-      if (nwcService.isRelayInCooldown(activeWalletId)) return;
-      pollBalance().catch(() => {});
-    };
-
-    // Event-driven (#657): refresh on focus (this effect re-runs when a balance
-    // surface gains focus, via balancePollDemand) and on app-foreground — NOT on
-    // a constant interval. Receive *detection* is transaction-hash-based now
-    // (#653), so the old "poll to catch LUD-16 receives" rationale is gone, and
-    // the constant 10 s poll was the dominant relay load that rate-limited
-    // self-hosted relays. Unsolicited address receives surface on next focus /
-    // foreground (sends + the Receive-sheet expectPayment poll cover the rest).
-    if (AppState.currentState === 'active') refreshOnce();
-    const sub = AppState.addEventListener('change', (next) => {
-      if (next === 'active') refreshOnce();
-    });
-    return () => {
-      disposed = true;
-      sub.remove();
-    };
-  }, [
+  // Focus/foreground balance refresh (#657) — see useActiveWalletBalanceRefresh
+  // (the foreground one is staggered ~3 s per the AppState rule, #554).
+  useActiveWalletBalanceRefresh({
     activeWalletId,
     activeWalletConnected,
-    updateWalletInState,
     balancePollDemand,
-    captureWalletIdentity,
-  ]);
+    walletsRef,
+    captureIdentity: captureWalletIdentity,
+    updateWalletInState,
+  });
 
   // On-chain incoming-payment coverage (#134). Extracted into its own
   // hook so this over-cap context doesn't grow — see
