@@ -1,6 +1,7 @@
 import { preferredConversationParams } from '../services/preferredDmProtocol';
 import BrandedSpinner from '../components/BrandedSpinner';
 import { useGroupConversationLoader } from '../hooks/useGroupConversationLoader';
+import { useChatOpenTiming } from '../hooks/useChatOpenTiming';
 import { useGroupChatTools } from '../hooks/useGroupChatTools';
 import { useChatLocalHistory } from '../hooks/useChatLocalHistory';
 import { ChatToolsProvider } from '../components/ChatToolsProvider';
@@ -38,29 +39,32 @@ import { useGroupComposerActions } from '../hooks/useGroupComposerActions';
 import { useGroupMemberProfiles } from '../hooks/useGroupMemberProfiles';
 import { buildGroupMemberRows } from '../utils/groupMemberRows';
 import { shortNpub } from '../utils/shortNpub';
-import RenameGroupSheet from '../components/RenameGroupSheet';
-import GroupMembersSheet from '../components/GroupMembersSheet';
+import {
+  ContactProfileSheet,
+  FriendPickerSheet,
+  GifPickerSheet,
+  GroupMembersSheet,
+  LiveLocationDurationPicker,
+  MessageActionsSheet,
+  PollComposerSheet,
+  ReceiveSheet,
+  RenameGroupSheet,
+  SecretModeCelebration,
+  SendSheet,
+  VoiceRecordingSheet,
+} from '../components/chatSheets';
 import ChatHeaderBar from '../components/ChatHeaderBar';
 import GroupConversationHeader from '../components/GroupConversationHeader';
 import { canManageGroup } from '../utils/groupAdmins';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
 import FullscreenGifModal from '../components/FullscreenGifModal';
-import GifPickerSheet from '../components/GifPickerSheet';
-import PollComposerSheet from '../components/PollComposerSheet';
-import ReceiveSheet from '../components/ReceiveSheet';
-import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
-import SendSheet from '../components/SendSheet';
-import FriendPickerSheet from '../components/FriendPickerSheet';
-import ContactProfileSheet from '../components/ContactProfileSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import GroupMessageRow from '../components/GroupMessageRow';
 import { groupSenderRunStarts } from '../utils/groupSenderRuns';
-import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
 import { useGroupLiveLocation } from '../hooks/useGroupLiveLocation';
 import { useFollowedPubkeys } from '../hooks/useFollowedPubkeys';
 import { canAutoLoadMedia } from '../utils/mediaTrust';
-import MessageActionsSheet from '../components/MessageActionsSheet';
 import { useGroupMessageActions } from '../hooks/useGroupMessageActions';
 import { useMessageActionsMenu } from '../hooks/useMessageActionsMenu';
 import { useStagedShare } from '../hooks/useStagedShare';
@@ -76,7 +80,6 @@ import {
   type GroupTimelineRow,
 } from '../hooks/useGroupTimeline';
 import { useMessageInfoSheet } from '../hooks/useMessageInfoSheet';
-import SecretModeCelebration from '../components/SecretModeCelebration';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import { buildOsmViewUrl, type SharedLocation } from '../services/locationService';
 import { type GroupMessage } from '../services/groupMessagesStorageService';
@@ -134,7 +137,6 @@ const GroupConversationScreen: React.FC = () => {
     `group:${route.params.groupId}`,
     rawMessages,
   );
-  const [loadingMessages, setLoadingMessages] = useState(true);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [gifPickerOpen, setGifPickerOpen] = useState(false);
   const [invoiceSheetOpen, setInvoiceSheetOpen] = useState(false);
@@ -170,7 +172,8 @@ const GroupConversationScreen: React.FC = () => {
 
   const loadedGroupId = group?.id;
 
-  useGroupConversationLoader(myPubkey, loadedGroupId, setMessages, setLoadingMessages);
+  const loadingMessages = useGroupConversationLoader(myPubkey, loadedGroupId, setMessages);
+  useChatOpenTiming('group', loadingMessages, messages.length);
 
   const liveEntries = useMemo(
     () => messages.map((message) => ({ id: message.id, createdAt: message.createdAt })),
@@ -183,14 +186,6 @@ const GroupConversationScreen: React.FC = () => {
     edge: 'end',
     scrollToLatest: (animated) => listRef.current?.scrollToEnd({ animated }),
   });
-
-  // NOTE: We used to call refreshDmInbox({ force: true }) on mount here
-  // to drain any pending kind-14 group rumors before the live subscription
-  // kicked in. That cost 3-25 s of JS-thread blocking depending on inbox
-  // size — perceived as freeze on back-tap (#286). The live subscription
-  // (`subscribeGroupMessages` above) handles delivery for any wraps that
-  // land while the screen is open; missed wraps from before mount get
-  // drained on the next MessagesScreen focus or app-foreground refresh.
 
   // Stored `memberPubkeys` excludes the viewer by LP convention (see
   // GroupsContext). For display we re-include self pinned at the top so

@@ -83,7 +83,7 @@ it('filters initial reads and late fetches while keeping pending local rows', as
   expect(result.current.messages).toHaveLength(2);
 });
 
-it('filters live refreshes and defaults missing kinds to NIP-17', async () => {
+it('filters live store reads and defaults missing kinds to NIP-17', async () => {
   const { result, fetchConversation, loadInitialConversation } = setup('nip17');
   await waitFor(() => expect(result.current.loading).toBe(false));
   expect(result.current.messages).toEqual([modern, unknown]);
@@ -96,7 +96,8 @@ it('filters live refreshes and defaults missing kinds to NIP-17', async () => {
     notifyDmMessage('peer');
   });
   await waitFor(() => expect(result.current.messages).toEqual([modern, unknown, later]));
-  expect(fetchConversation).toHaveBeenCalledTimes(2);
+  // A live message is answered from the store; the relays were only asked on open.
+  expect(fetchConversation).toHaveBeenCalledTimes(1);
 });
 
 it('aborts the in-flight conversation fetch when the screen blurs', async () => {

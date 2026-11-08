@@ -20,7 +20,6 @@ import {
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConversationProtocol } from '../hooks/useConversationProtocol';
 import ConversationHeader from '../components/ConversationHeader';
-import DmMembersSheet from '../components/DmMembersSheet';
 import { useDmDevices } from '../hooks/useDmDevices';
 import { View, Text, Pressable, FlatList, BackHandler, Linking, StyleSheet } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
@@ -34,30 +33,32 @@ import { useDmCatchUpOnOpen } from '../hooks/useDmCatchUpOnOpen';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
-import SendSheet from '../components/SendSheet';
+import {
+  ContactProfileSheet,
+  DmMembersSheet,
+  FriendPickerSheet,
+  GifPickerSheet,
+  LiveLocationDurationPicker,
+  MessageActionsSheet,
+  NwcWalletShareSheet,
+  PollComposerSheet,
+  ReceiveSheet,
+  SecretModeCelebration,
+  SendSheet,
+  TransactionDetailSheet,
+  VoiceRecordingSheet,
+} from '../components/chatSheets';
 import AttachPanel from '../components/AttachPanel';
 import ConversationComposer from '../components/ConversationComposer';
-import GifPickerSheet from '../components/GifPickerSheet';
-import PollComposerSheet from '../components/PollComposerSheet';
-import ReceiveSheet from '../components/ReceiveSheet';
-import VoiceRecordingSheet from '../components/VoiceRecordingSheet';
 import ConversationMessageRow from '../components/ConversationMessageRow';
 import { useFollowedPubkeys } from '../hooks/useFollowedPubkeys';
 import { canAutoLoadMedia } from '../utils/mediaTrust';
-import NwcWalletShareSheet from '../components/NwcWalletShareSheet';
-import MessageActionsSheet from '../components/MessageActionsSheet';
-import SecretModeCelebration from '../components/SecretModeCelebration';
 import { useGroups } from '../contexts/GroupsContext';
-import TransactionDetailSheet, {
-  TransactionDetailData,
-} from '../components/TransactionDetailSheet';
-import FriendPickerSheet from '../components/FriendPickerSheet';
-import ContactProfileSheet from '../components/ContactProfileSheet';
+import type { TransactionDetailData } from '../components/TransactionDetailSheet';
 import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import { buildOsmViewUrl, SharedLocation } from '../services/locationService';
 import { useLiveLocation } from '../contexts/LiveLocationContext';
 import { useUserLocation } from '../contexts/UserLocationContext';
-import LiveLocationDurationPicker from '../components/LiveLocationDurationPicker';
 import { isConfigured as isGifConfigured } from '../services/giphyService';
 import type { NostrProfile } from '../types/nostr';
 import type { RootStackParamList } from '../navigation/types';
@@ -79,6 +80,7 @@ import { useConversationReactions } from '../hooks/useConversationReactions';
 import { useItemHandlers } from '../hooks/useItemHandlers';
 import { useThreadReactionBackend } from '../hooks/useReactionBackend';
 import { useConversationLoader } from '../hooks/useConversationLoader';
+import { DM_CHAT_LIST_WINDOW } from '../utils/chatListWindow';
 import DeliveryDetailSheet from '../components/DeliveryDetailSheet';
 import { createConversationScreenStyles } from '../styles/ConversationScreen.styles';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
@@ -670,20 +672,7 @@ const ConversationScreen: React.FC = () => {
                 inverted
                 // Keep the visible history row anchored when live messages prepend.
                 maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-                // Window the list: mount the 20 newest up front, the rest as
-                // the user scrolls. windowSize stays at RN's default 21
-                // (10 screens kept either side): a smaller window unmounted
-                // rows a few screens back, so scrolling back showed blank
-                // space until they re-rendered.
-                //
-                // NOTE: `removeClippedSubviews` is deliberately OFF. It's
-                // broken with `inverted` on Android — breaks the contentOffset
-                // reporting so onScroll's `y < 200` check flips when the user
-                // is visually at the bottom, making the scroll-to-bottom FAB
-                // show spuriously. See facebook/react-native#30521 / #26061.
-                initialNumToRender={20}
-                maxToRenderPerBatch={10}
-                windowSize={21}
+                {...DM_CHAT_LIST_WINDOW}
                 ListEmptyComponent={
                   <View style={styles.empty}>
                     <Text style={styles.emptyTitle}>{t('conversationScreen.noMessages')}</Text>

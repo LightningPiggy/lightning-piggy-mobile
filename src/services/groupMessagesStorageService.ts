@@ -3,6 +3,7 @@ import { isAttachmentPlaceholderText } from '../utils/attachmentPlaceholder';
 import { isNewerEdit } from '../utils/marmotEditOrder';
 import { isPollVoteMessage, parsePoll } from '../utils/pollMessage';
 import { mutateGroupStorage } from './groupStorageQueue';
+import { PERF_LOGS_ENABLED, perfLog } from '../utils/perfLog';
 import type { MarmotEdit } from './marmotEdits';
 import {
   groupMessagesKey,
@@ -78,9 +79,21 @@ function requireOwnerKey(owner: string | null | undefined, groupId: string): str
 
 async function readLog(key: string, strict = false): Promise<GroupMessage[]> {
   try {
+    const startedAt = PERF_LOGS_ENABLED ? performance.now() : 0;
     const raw = await AsyncStorage.getItem(key);
     if (!raw) return [];
+    const readAt = PERF_LOGS_ENABLED ? performance.now() : 0;
     const parsed = JSON.parse(raw) as GroupMessage[];
+    // Each group's history is one JSON blob (up to CAP messages), read and
+    // parsed whole on every open, live message and write.
+    if (PERF_LOGS_ENABLED) {
+      const parsedAt = performance.now();
+      perfLog(
+        `GroupHistory read ${Array.isArray(parsed) ? parsed.length : 0} msgs ` +
+          `${Math.round(raw.length / 1024)}KB get=${Math.round(readAt - startedAt)}ms ` +
+          `parse=${(parsedAt - readAt).toFixed(1)}ms`,
+      );
+    }
     if (!Array.isArray(parsed) && strict) throw new Error('Invalid group history');
     return Array.isArray(parsed) ? parsed : [];
   } catch (error) {
