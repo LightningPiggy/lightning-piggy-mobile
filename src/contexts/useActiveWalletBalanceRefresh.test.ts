@@ -152,6 +152,77 @@ describe('useActiveWalletBalanceRefresh', () => {
     expect(mockedGetBalance).toHaveBeenCalledWith('b', expect.anything());
   });
 
+  describe('resume while the wallet is not armed (regression: dropped NWC / unfocused)', () => {
+    type Props = { connected: boolean; demand: number };
+    const mountWith = (initial: Props) =>
+      renderHook(
+        ({ connected, demand }: Props) =>
+          useActiveWalletBalanceRefresh({
+            activeWalletId: 'nwc',
+            activeWalletConnected: connected,
+            balancePollDemand: demand,
+            walletsRef: { current: wallets },
+            captureIdentity,
+            updateWalletInState: jest.fn(),
+          }),
+        { initialProps: initial },
+      );
+
+    it('refreshes ~3 s after resume when the wallet reconnected while backgrounded', async () => {
+      const view = mountWith({ connected: true, demand: 1 });
+      await advance(BALANCE_RESUME_MIN_GAP_MS);
+      expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+      // NWC drops in the background: the armed effect tears down.
+      await setAppState('background');
+      view.rerender({ connected: false, demand: 1 });
+      await advance(20_000);
+      await setAppState('active');
+      // Reconnect lands inside the stagger window: still waits for the timer.
+      await advance(1_000);
+      view.rerender({ connected: true, demand: 1 });
+      await advance(0);
+      expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+      await advance(BALANCE_RESUME_DELAY_MS - 1_000);
+      expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+    });
+
+    it('refreshes as soon as the wallet reconnects when the stagger fired first', async () => {
+      const view = mountWith({ connected: true, demand: 1 });
+      await advance(BALANCE_RESUME_MIN_GAP_MS);
+      await setAppState('background');
+      view.rerender({ connected: false, demand: 1 });
+      await advance(20_000);
+      await setAppState('active');
+      await advance(BALANCE_RESUME_DELAY_MS + 1_000);
+      expect(mockedGetBalance).toHaveBeenCalledTimes(1); // nothing armed, nothing to refresh
+      view.rerender({ connected: true, demand: 1 });
+      await advance(0);
+      expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not refresh early when the effect re-arms inside the stagger window', async () => {
+      const view = mountWith({ connected: true, demand: 1 });
+      await advance(BALANCE_RESUME_MIN_GAP_MS);
+      await setAppState('background');
+      await setAppState('active');
+      view.rerender({ connected: true, demand: 2 }); // dep change re-runs the effect
+      await advance(BALANCE_RESUME_DELAY_MS - 1);
+      expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+      await advance(1);
+      expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+    });
+
+    it('still cancels the stagger on re-background while unarmed', async () => {
+      const view = mountWith({ connected: false, demand: 1 });
+      await setAppState('background');
+      await setAppState('active');
+      await setAppState('background');
+      view.rerender({ connected: true, demand: 1 });
+      await advance(60_000);
+      expect(mockedGetBalance).not.toHaveBeenCalled();
+    });
+  });
+
   it('clears the pending resume timer and subscription on unmount', async () => {
     const { unmount } = mount();
     await advance(BALANCE_RESUME_MIN_GAP_MS);
