@@ -58,10 +58,17 @@ export function useNip65Relays() {
   // The user's own DM inbox relays: others deliver NIP-17 DMs there, so the
   // app must READ them too (merged into getReadRelays by NostrContext).
   const [dmInboxRelays, setDmInboxRelays] = useState<string[]>([]);
-  // True once this identity's lists are known from its own cache or relays —
-  // the NIP-65 list settled and the cached DM inbox read — not the defaults
-  // used before then. Outbox reads (#1390) never lease a relay until then.
+  // True once this identity's lists are known-good from ANY path — its load
+  // settled, or a list was adopted (editor / just published) — not the
+  // defaults used before then. Outbox reads (#1390) never lease a relay
+  // until then. Per identity: cleared by resetRelayLists.
   const [relayListsHydrated, setRelayListsHydrated] = useState(false);
+  // Bumped ONLY by resetRelayLists (logout / identity switch) — unlike the
+  // load generations below, which an in-app adoption also bumps.
+  const identityRef = useRef(0);
+  const markHydrated = useCallback((identity: number) => {
+    if (identity === identityRef.current) setRelayListsHydrated(true);
+  }, []);
 
   // Bumped by resetRelayLists (logout / identity switch): a background load
   // started for the previous identity must not restore its relays afterwards.
@@ -81,23 +88,29 @@ export function useNip65Relays() {
 
   /** Adopt a DM inbox list (in memory first; caching is best-effort so a
    * full device can't break the caller) and re-arm the background watch. */
-  const adoptDmInbox = useCallback(async (pk: string, list: string[], createdAt?: number) => {
-    setDmInboxRelays(keepIfSameUrls(list));
-    const key = perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk);
-    const before = await AsyncStorage.getItem(key).catch(() => null);
-    await AsyncStorage.setItem(key, JSON.stringify(list)).catch(() => {});
-    if (createdAt) {
-      const createdAtKey = perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, pk);
-      remember(createdAtKey, createdAt);
-      await AsyncStorage.setItem(createdAtKey, String(createdAt)).catch(() => {});
-    }
-    // The background DM watch reads this cache; re-arm it when it changed.
-    if (before !== JSON.stringify(list)) void rearmBackgroundDmWatchForActiveIdentity();
-  }, []);
+  const adoptDmInbox = useCallback(
+    async (pk: string, list: string[], createdAt?: number) => {
+      setDmInboxRelays(keepIfSameUrls(list));
+      // Callers only adopt for the current identity (generation-checked).
+      markHydrated(identityRef.current);
+      const key = perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk);
+      const before = await AsyncStorage.getItem(key).catch(() => null);
+      await AsyncStorage.setItem(key, JSON.stringify(list)).catch(() => {});
+      if (createdAt) {
+        const createdAtKey = perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, pk);
+        remember(createdAtKey, createdAt);
+        await AsyncStorage.setItem(createdAtKey, String(createdAt)).catch(() => {});
+      }
+      // The background DM watch reads this cache; re-arm it when it changed.
+      if (before !== JSON.stringify(list)) void rearmBackgroundDmWatchForActiveIdentity();
+    },
+    [markHydrated],
+  );
 
   const loadDmInboxRelays = useCallback(
     async (pk: string, nip65WriteRelays: string[] = [], generation = generationRef.current) => {
       const current = () => generation === generationRef.current;
+      const identity = identityRef.current;
       let cached: string[] = [];
       try {
         const raw = await AsyncStorage.getItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk));
@@ -109,7 +122,8 @@ export function useNip65Relays() {
         /* corrupt cache — the network read below replaces it */
       }
       // Called once the NIP-65 list is settled; the cached inbox is now in.
-      if (current()) setRelayListsHydrated(true);
+      // Same identity is enough: an adoption meanwhile only made it newer.
+      markHydrated(identity);
       const cachedAt = await baselineOf(perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, pk));
       // The NEWEST published list across relays, not the first reply — also on
       // the user's NIP-65 write relays and the inbox relays themselves, where
@@ -126,7 +140,7 @@ export function useNip65Relays() {
       if (!event || !current() || event.created_at < cachedAt) return;
       await adoptDmInbox(pk, dmInboxRelaysFromTags(event.tags), event.created_at);
     },
-    [adoptDmInbox, baselineOf],
+    [adoptDmInbox, baselineOf, markHydrated],
   );
 
   /** Adopt DM inbox relays the user just published (or the editor found).
@@ -154,6 +168,7 @@ export function useNip65Relays() {
     nip65GenerationRef.current += 1;
     setNip65Relays(keepIfSameConfigs([]));
     setDmInboxRelays(keepIfSameUrls([]));
+    identityRef.current += 1;
     setRelayListsHydrated(false);
   }, []);
 
@@ -178,7 +193,7 @@ export function useNip65Relays() {
     }
   }, []);
 
-  const loadRelays = useCallback(
+  const loadRelaysOnce = useCallback(
     async (pk: string): Promise<string[]> => {
       const t0 = Date.now();
       const generation = nip65GenerationRef.current;
@@ -257,6 +272,18 @@ export function useNip65Relays() {
     [loadDmInboxRelays, baselineOf],
   );
 
+  // Hydrated once this identity's load settles, whichever path it took —
+  // even when an in-app adoption meanwhile superseded its result.
+  const loadRelays = useCallback(
+    async (pk: string): Promise<string[]> => {
+      const identity = identityRef.current;
+      const read = await loadRelaysOnce(pk);
+      markHydrated(identity);
+      return read;
+    },
+    [loadRelaysOnce, markHydrated],
+  );
+
   /** Adopt a relay list the user just published (and cache it), so the app
    * uses it straight away instead of waiting for the cache TTL. */
   const applyPublishedRelayList = useCallback(
@@ -269,6 +296,7 @@ export function useNip65Relays() {
         return { adopted: false, baseline: adoptedAt };
       nip65GenerationRef.current += 1;
       setNip65Relays(keepIfSameConfigs(list));
+      markHydrated(identityRef.current);
       const key = perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk);
       const before = await AsyncStorage.getItem(key).catch(() => null);
       // Best-effort: the list is already adopted in memory.
@@ -286,7 +314,7 @@ export function useNip65Relays() {
       if (before !== JSON.stringify(list)) void rearmBackgroundDmWatchForActiveIdentity();
       return { adopted: true, baseline: Math.max(adoptedAt, createdAt ?? 0) };
     },
-    [baselineOf],
+    [baselineOf, markHydrated],
   );
 
   return {

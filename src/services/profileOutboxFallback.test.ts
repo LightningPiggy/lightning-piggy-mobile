@@ -4,6 +4,7 @@ import { getManyPeerRelayLists, type PeerRelayListResult } from './peerRelayList
 import {
   __resetProfileFallbackForTests,
   fetchMissingProfileEvents,
+  FALLBACK_HYDRATION_WAIT_MS,
   FALLBACK_RETRY_THROTTLE_MS,
   FALLBACK_START_DELAY_MS,
   MAX_FALLBACK_PEOPLE,
@@ -62,16 +63,40 @@ const become = (pubkey: string) => {
   setCurrentUserOwnRelays([], true);
 };
 
-it("is a no-op until the viewer's own relays are known (cold start) (c)", async () => {
+it("asks nothing until the viewer's own relays are known, giving up after a bounded wait (c)", async () => {
   setCurrentUserOwnRelays(['wss://default.example/'], false);
   writeLists({ [alice]: ok([relay('alice1')]) });
-  expect((await fetchMissingProfileEvents([alice], opts)).size).toBe(0);
+  const run = fetchMissingProfileEvents([alice], opts);
+  await jest.advanceTimersByTimeAsync(FALLBACK_HYDRATION_WAIT_MS);
+  expect((await run).size).toBe(0);
   expect(lists).not.toHaveBeenCalled();
   expect(query).not.toHaveBeenCalled();
   // Once hydrated it runs, and the earlier call recorded no miss.
   setCurrentUserOwnRelays([], true);
   await fetchMissingProfileEvents([alice], opts);
   expect(query).toHaveBeenCalledTimes(1);
+});
+
+it('a fallback that arrives before hydration runs as soon as the own relays are known', async () => {
+  setCurrentUserOwnRelays(['wss://default.example/'], false);
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  query.mockResolvedValue([kind0(alice)]);
+  const run = fetchMissingProfileEvents([alice], opts);
+  await jest.advanceTimersByTimeAsync(1_000);
+  expect(lists).not.toHaveBeenCalled();
+  setCurrentUserOwnRelays(['wss://mine.example/'], true); // the lists load
+  expect((await run).has(alice)).toBe(true);
+});
+
+it('an abort while waiting for hydration stops it', async () => {
+  setCurrentUserOwnRelays([], false);
+  const controller = new AbortController();
+  const run = fetchMissingProfileEvents([alice], { ...opts, signal: controller.signal });
+  controller.abort();
+  expect((await run).size).toBe(0);
+  setCurrentUserOwnRelays([], true);
+  await jest.advanceTimersByTimeAsync(10);
+  expect(lists).not.toHaveBeenCalled();
 });
 
 beforeEach(() => {

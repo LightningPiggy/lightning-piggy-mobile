@@ -222,3 +222,28 @@ it("never leases the viewer's DM inbox relays, even when they're the author's wr
   expect(mockFrameBudgets.has('wss://dm-inbox.example/')).toBe(false);
   expect(leasedOutboxRelayCount()).toBe(1);
 });
+
+it('a feed opened before hydration subscribes its author relays once the own relays are known', async () => {
+  setCurrentUserOwnRelays(['wss://default.example/'], false); // cold start
+  write(['wss://alice1.example/', 'wss://mine-later.example/']);
+  const onRelays = jest.fn();
+  arm({ onRelays });
+  await jest.runAllTimersAsync();
+  expect(mockSubscribeMany).not.toHaveBeenCalled();
+  expect(leasedOutboxRelayCount()).toBe(0);
+  // The lists load: one of the author's relays turns out to be the viewer's.
+  setCurrentUserOwnRelays(['wss://mine-later.example/'], true);
+  expect(mockSubscribeMany.mock.calls.map(([[r]]) => r)).toEqual(['wss://alice1.example/']);
+  expect(onRelays).toHaveBeenLastCalledWith(['wss://alice1.example/']);
+});
+
+it('a feed closed before hydration never subscribes afterwards', async () => {
+  setCurrentUserOwnRelays([], false);
+  write(['wss://alice1.example/']);
+  const stop = arm();
+  await jest.runAllTimersAsync();
+  stop();
+  setCurrentUserOwnRelays([], true);
+  expect(mockSubscribeMany).not.toHaveBeenCalled();
+  expect(leasedOutboxRelayCount()).toBe(0);
+});

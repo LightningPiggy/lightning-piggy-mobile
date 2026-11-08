@@ -1,7 +1,7 @@
 import type { Event } from 'nostr-tools';
 import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { perfLog } from '../utils/perfLog';
-import { leaseOutboxRelays, personOutboxRelays } from './authorOutboxRelays';
+import { leaseOutboxRelays, personOutboxRelays, whenOwnRelaysHydrated } from './authorOutboxRelays';
 import {
   areCurrentUserOwnRelaysHydrated,
   getCurrentUserOwnRelays,
@@ -38,8 +38,33 @@ export const FALLBACK_RETRY_THROTTLE_MS = 5 * 60_000;
 /** A background fallback starts this long after it's scheduled (CLAUDE.md:
  * non-urgent work is staggered, cancellable). */
 export const FALLBACK_START_DELAY_MS = 3_000;
+/** Longest a fallback waits for the viewer's own relays to be known (cold
+ * start) before giving up for now — no miss is recorded then. */
+export const FALLBACK_HYDRATION_WAIT_MS = 10_000;
 /** Most throttle entries remembered (oldest dropped first). */
 const MAX_THROTTLE_ENTRIES = 512;
+
+/** True once the viewer's own relays are known — waiting up to
+ * FALLBACK_HYDRATION_WAIT_MS for them; false on timeout or abort. */
+function ownRelaysKnown(signal: AbortSignal | undefined): Promise<boolean> {
+  if (areCurrentUserOwnRelaysHydrated()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let cancel: () => void = () => {};
+    let settled = false;
+    const finish = (known: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cancel();
+      signal?.removeEventListener('abort', onAbort);
+      resolve(known);
+    };
+    const onAbort = () => finish(false);
+    const timer = setTimeout(() => finish(false), FALLBACK_HYDRATION_WAIT_MS);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    cancel = whenOwnRelaysHydrated(() => finish(true));
+  });
+}
 
 const HEX_PUBKEY = /^[0-9a-f]{64}$/;
 
@@ -132,8 +157,9 @@ export async function fetchMissingProfileEvents(
   const { signal } = options;
   const viewer = options.viewerPubkey === undefined ? getCurrentUserPubkey() : options.viewerPubkey;
   if (isTestRelayLockdown(viewer) || signal?.aborted) return found;
-  // Not before the viewer's own relays are known: one of them could be leased.
-  if (!areCurrentUserOwnRelaysHydrated()) return found;
+  // Not before the viewer's own relays are known (one of them could be
+  // leased): a cold-start call waits for them, bounded and abortable.
+  if (!(await ownRelaysKnown(signal)) || signal?.aborted) return found;
   const now = Date.now();
   const people: string[] = [];
   for (const raw of pubkeys) {

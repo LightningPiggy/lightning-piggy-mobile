@@ -176,6 +176,26 @@ export function isOutboxRelayQuarantined(url: string, now = Date.now()): boolean
   return isQuarantined(normalizeRelayUrl(url), now);
 }
 
+/**
+ * Run `fn` once the viewer's own relays are known (at once if they are):
+ * nothing is leased before that, so callers that arrive early (a profile
+ * opened at cold start) retry then instead of giving up. Returns a cancel.
+ */
+export function whenOwnRelaysHydrated(fn: () => void): () => void {
+  if (areCurrentUserOwnRelaysHydrated()) {
+    fn();
+    return () => {};
+  }
+  const stop = onCurrentUserOwnRelaysChange(() => {
+    if (!areCurrentUserOwnRelaysHydrated()) return;
+    stop();
+    fn();
+  });
+  return () => {
+    stop();
+  };
+}
+
 /** An owned socket blew its frame budget: quarantine it, report it, and have
  * every holder drop its lease (the receive hook has closed the socket). */
 function revokeOutboxRelay(url: string): void {

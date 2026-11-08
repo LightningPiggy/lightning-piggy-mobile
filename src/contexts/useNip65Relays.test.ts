@@ -368,3 +368,57 @@ describe('cold-start re-sets with unchanged content (relay subs must not re-arm)
     expect(result.current.dmInboxRelays).toHaveLength(2);
   });
 });
+
+describe('relayListsHydrated (#1390: outbox leasing waits for it)', () => {
+  it('is set when the load settles, even if the editor adopted lists during discovery', async () => {
+    fetchLatest.mockResolvedValue(null);
+    let finish!: (list: unknown) => void;
+    fetchList.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const { result } = renderHook(() => useNip65Relays());
+    expect(result.current.relayListsHydrated).toBe(false);
+    let loading!: Promise<string[]>;
+    act(() => {
+      loading = result.current.loadRelays(PK);
+    });
+    // The relay editor adopts both lists mid-load: that invalidates the load's
+    // generations, so it no longer adopts its own result...
+    await act(async () => {
+      await result.current.applyPublishedRelayList(PK, [
+        { url: 'wss://nostr.mom', read: true, write: true },
+      ]);
+    });
+    // ...but an adopted list is known-good on its own.
+    expect(result.current.relayListsHydrated).toBe(true);
+    await act(async () => {
+      result.current.resetRelayLists();
+    });
+    expect(result.current.relayListsHydrated).toBe(false);
+    // A load for the new identity, superseded by an adoption, still hydrates.
+    act(() => {
+      loading = result.current.loadRelays(PK);
+    });
+    await act(async () => {
+      await result.current.applyPublishedDmInbox(PK, ['wss://inbox.example']);
+      finish([{ url: 'wss://relay.primal.net', read: true, write: true }]);
+      await loading;
+    });
+    expect(result.current.relayListsHydrated).toBe(true);
+  });
+
+  it('a load for a previous identity, finishing after a reset, does not hydrate the next', async () => {
+    fetchLatest.mockResolvedValue(null);
+    let finish!: (list: unknown) => void;
+    fetchList.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const { result } = renderHook(() => useNip65Relays());
+    let loading!: Promise<string[]>;
+    act(() => {
+      loading = result.current.loadRelays(PK);
+    });
+    await act(async () => {
+      result.current.resetRelayLists(); // logout / account switch mid-load
+      finish([{ url: 'wss://relay.primal.net', read: true, write: true }]);
+      await loading;
+    });
+    expect(result.current.relayListsHydrated).toBe(false);
+  });
+});

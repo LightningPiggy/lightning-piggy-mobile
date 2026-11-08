@@ -9,6 +9,7 @@ import {
   authorWriteRelays,
   leaseOutboxRelays,
   quarantineOutboxRelay,
+  whenOwnRelaysHydrated,
   withoutRelays,
 } from './authorOutboxRelays';
 import { pool, trackRelays } from './nostrPool';
@@ -268,6 +269,15 @@ export function subscribeAuthorOutboxFeed(input: {
     signal: lookup.signal,
   }).then((write) => {
     if (closed) return;
+    // Nothing is leased before the viewer's own relays are known: a profile
+    // opened at cold start subscribes its author relays once they are (the
+    // viewer-relay sub is untouched meanwhile).
+    stopWaiting = whenOwnRelaysHydrated(() => {
+      if (!closed) armAuthorRelays(write);
+    });
+  });
+  let stopWaiting: (() => void) | undefined;
+  const armAuthorRelays = (write: readonly string[]) => {
     for (const url of withoutRelays(write, [
       ...input.currentRelays,
       ...(input.excludeRelays ?? []),
@@ -304,10 +314,11 @@ export function subscribeAuthorOutboxFeed(input: {
       });
     }
     if (open.size > 0) input.onRelays?.([...open.keys()]);
-  });
+  };
   return () => {
     closed = true;
     lookup.abort();
+    stopWaiting?.();
     for (const close of open.values()) close();
     open.clear();
   };
