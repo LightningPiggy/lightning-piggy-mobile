@@ -202,18 +202,13 @@ function commitOwnerWallets(
   );
 }
 
-/** The owner is confirmed, or this install predates per-account storage. */
-async function isOwnerReadable(): Promise<boolean> {
-  if (walletStorage.isWalletOwnerGateOpen()) return true;
-  return !(await hasMigratedToPerAccountStorage().catch(() => true));
-}
-
 /**
  * Whether startup may read the wallet list. After a gate timeout the owner
  * is unknown and `getWalletList` would read the legacy shared `wallet_list`,
  * which on a per-account install may hold another account's wallets (#1746).
  * Only a pre-migration install reads it then (it is that one account's only
- * copy). Otherwise the boot spinner ends with Home neutral and startup waits
+ * copy), and only for this initial load: retries always need an open gate.
+ * Otherwise the boot spinner ends with Home neutral and startup waits
  * for the real owner: false when a signed-in one lands (that publish is an
  * ordinary account change, so the identity hydration loads it), true when
  * auto-login confirms signed-out.
@@ -222,7 +217,8 @@ async function awaitConfirmedOwner(
   setIsLoading: (value: boolean) => void,
   onWait: () => void,
 ): Promise<boolean> {
-  if (await isOwnerReadable()) return true;
+  if (walletStorage.isWalletOwnerGateOpen()) return true;
+  if (!(await hasMigratedToPerAccountStorage().catch(() => true))) return true;
   perfLog('wallet gate timed out on a per-account install: waiting for the owner');
   setIsLoading(false);
   onWait();
@@ -243,9 +239,12 @@ export function useWalletStartup(deps: WalletStartupDeps): () => Promise<void> {
   // Deps are stable refs / useCallbacks / state setters (see the effect below).
   const [retry] = useState(() =>
     createWalletLoadRetry(async () => {
-      // While startup waits on an unconfirmed owner, a load would read the
-      // legacy shared list. Fail fast instead (never hang a pull-to-refresh).
-      if (!(await isOwnerReadable())) throw new Error('wallet owner not confirmed yet');
+      // Retries need a confirmed owner: with the gate still shut a load would
+      // read the legacy shared list. Unlike the initial startup load, even a
+      // pre-migration install waits here. Fail fast (never hang a pull).
+      if (!walletStorage.isWalletOwnerGateOpen()) {
+        throw new Error('wallet owner not confirmed yet');
+      }
       const isCurrent = deps.captureWalletIdentity();
       const loaded = await loadOwnerWallets(deps, isCurrent, null, false);
       if (loaded && isCurrent()) commitOwnerWallets(deps, loaded, isCurrent, 'startup-retry');
