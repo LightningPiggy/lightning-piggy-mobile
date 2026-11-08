@@ -223,6 +223,59 @@ describe('useActiveWalletBalanceRefresh', () => {
     });
   });
 
+  it('treats a successful refresh right at resume as the resume refresh (no second call)', async () => {
+    // The effect re-arms at the instant of resume (e.g. the connection flag
+    // flips): that immediate refresh commits, so the stagger is redundant.
+    const view = renderHook(
+      ({ demand }: { demand: number }) =>
+        useActiveWalletBalanceRefresh({
+          activeWalletId: 'nwc',
+          activeWalletConnected: true,
+          balancePollDemand: demand,
+          walletsRef: { current: wallets },
+          captureIdentity,
+          updateWalletInState: jest.fn(),
+        }),
+      { initialProps: { demand: 1 } },
+    );
+    await advance(BALANCE_RESUME_MIN_GAP_MS);
+    await setAppState('background');
+    await advance(20_000);
+    (AppState as unknown as { currentState: string }).currentState = 'active';
+    view.rerender({ demand: 2 }); // re-arm BEFORE the AppState event is delivered
+    await advance(0);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+    await setAppState('active');
+    await advance(BALANCE_RESUME_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+  });
+
+  it('follows a failed refresh at resume with the staggered one', async () => {
+    const view = renderHook(
+      ({ demand }: { demand: number }) =>
+        useActiveWalletBalanceRefresh({
+          activeWalletId: 'nwc',
+          activeWalletConnected: true,
+          balancePollDemand: demand,
+          walletsRef: { current: wallets },
+          captureIdentity,
+          updateWalletInState: jest.fn(),
+        }),
+      { initialProps: { demand: 1 } },
+    );
+    await advance(BALANCE_RESUME_MIN_GAP_MS);
+    await setAppState('background');
+    await advance(20_000);
+    (AppState as unknown as { currentState: string }).currentState = 'active';
+    mockedGetBalance.mockResolvedValueOnce(null);
+    view.rerender({ demand: 2 });
+    await advance(0);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+    await setAppState('active');
+    await advance(BALANCE_RESUME_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(3);
+  });
+
   it('clears the pending resume timer and subscription on unmount', async () => {
     const { unmount } = mount();
     await advance(BALANCE_RESUME_MIN_GAP_MS);

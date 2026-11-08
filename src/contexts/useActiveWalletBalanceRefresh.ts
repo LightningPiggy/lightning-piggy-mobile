@@ -64,7 +64,9 @@ export function useActiveWalletBalanceRefresh({
       if (next !== 'active') return; // background / inactive cancel a pending resume
       resumeTimer.current = setTimeout(() => {
         resumeTimer.current = undefined;
-        armed.current?.resume();
+        if (armed.current) armed.current.resume();
+        else
+          perfLog('wallet balance resume refresh: not armed (disconnected or no balance surface)');
       }, BALANCE_RESUME_DELAY_MS);
     });
     return () => {
@@ -108,8 +110,10 @@ export function useActiveWalletBalanceRefresh({
       resume: () => {
         // Freshness is judged when the stagger fires, not at the transition.
         const last = lastRefresh.current;
-        if (last?.walletId === activeWalletId && Date.now() - last.at < BALANCE_RESUME_MIN_GAP_MS)
+        if (last?.walletId === activeWalletId && Date.now() - last.at < BALANCE_RESUME_MIN_GAP_MS) {
+          perfLog('wallet balance resume refresh skipped: balance is fresh');
           return;
+        }
         perfLog('wallet balance resume refresh (staggered)');
         refreshOnce();
       },
@@ -118,7 +122,10 @@ export function useActiveWalletBalanceRefresh({
     // Arming (focus, or the wallet reconnecting) refreshes at once: the user is
     // looking at it. Not while a resume stagger is pending, though: that timer
     // will do it, ~3 s after the foreground transition.
-    if (AppState.currentState === 'active' && resumeTimer.current === undefined) refreshOnce();
+    if (AppState.currentState === 'active' && resumeTimer.current === undefined) {
+      perfLog('wallet balance refresh (armed)');
+      refreshOnce();
+    }
 
     return () => {
       disposed = true;
