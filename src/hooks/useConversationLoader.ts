@@ -4,7 +4,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import { filterMessagesByProtocol, type DmProtocol } from '../utils/dmProtocol';
 import { subscribeDmMessages } from '../contexts/nostrEventBus';
 import { subscribeDmStorage } from '../services/dmDb';
-import { keepPendingLocalRows, reconcileDeliveryStatus } from '../contexts/nostrDmCache';
+import {
+  DM_CONV_CAP,
+  keepPendingLocalRows,
+  mergeConversationMessages,
+  reconcileDeliveryStatus,
+} from '../contexts/nostrDmCache';
 import type { ConversationMessage } from '../contexts/nostrContextTypes';
 import type { ConversationMessageInput } from '../utils/conversationItems';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
@@ -171,9 +176,16 @@ export function useConversationLoader({
           // AsyncStorage write is a plain side-effect — keeps the updater pure
           // and StrictMode-safe (Copilot #858).
           const previous = filterMessagesByProtocol(messagesRef.current, protocol);
+          // A live row painted from the store mid-fetch isn't in `conv` (its
+          // store slice was read when the fetch began): merge rather than
+          // replace, so the row never blinks out before the re-read below.
+          const overlapped = liveEpochRef.current !== epochAtFetch;
+          const fetched = overlapped
+            ? mergeConversationMessages(previous, conv, DM_CONV_CAP)
+            : conv;
           const reconciled = keepPendingLocalRows(
             previous,
-            reconcileDeliveryStatus(previous, conv),
+            reconcileDeliveryStatus(previous, fetched),
           );
           // Durably write the reconciled ticks back to the conv cache, keyed by
           // the (now real-id) row id, so the tick survives a cold restart —
@@ -187,7 +199,8 @@ export function useConversationLoader({
           }
           void persistDeliveryStatuses(pubkey, statusById);
           setMessages(reconciled);
-          if (liveEpochRef.current !== epochAtFetch) scheduleStoreReadRef.current?.();
+          // The store is the superset: re-read it so the merge settles to it.
+          if (overlapped) scheduleStoreReadRef.current?.();
         }
       } finally {
         // Leave the spinner state to whichever load is current — an aborted /

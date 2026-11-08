@@ -11,6 +11,14 @@
  * upsert). So a live message that sees no store commit for this thread within
  * `gapMs` counts as a gap, and gets a single relay fetch.
  *
+ * Limitation: gap detection is per thread, not per message. Live
+ * announcements carry only the peer, not the event id, so any commit to the
+ * thread (another message, an own send, a reaction) inside the window counts
+ * as covering it: a failed upsert of B can be masked by A's commit. Such a
+ * row shows on the next open, refocus or pull-to-refresh. Conversely, a
+ * commit slower than `gapMs` (a cold-start backlog) costs one spurious fetch,
+ * which is the pre-change behaviour.
+ *
  * Live messages and store commits share one coalesced read, so a relay burst
  * costs one store read.
  */

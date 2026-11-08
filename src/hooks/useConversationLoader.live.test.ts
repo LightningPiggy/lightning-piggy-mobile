@@ -142,7 +142,7 @@ describe('useConversationLoader', () => {
     expect(hook.result.current.refreshing).toBe(false);
   });
 
-  it('re-reads the store when a message lands while the open fetch is in flight', async () => {
+  it('keeps a row that landed while the open fetch was in flight, then re-reads the store', async () => {
     let resolveFetch: (rows: ConversationMessage[]) => void = () => undefined;
     const fetchConversation = jest.fn(
       () =>
@@ -159,10 +159,13 @@ describe('useConversationLoader', () => {
     });
     await flush(LIVE_REFRESH_COALESCE_MS);
     const readsBeforeFetchLands = loadInitialConversation.mock.calls.length;
-    // ...then the fetch resolves with its older slice and replaces the list.
+    expect(hook.result.current.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
+    // ...then the fetch resolves with its older slice: the live row must never
+    // leave the list, not even until the follow-up store read lands.
     await act(async () => {
       resolveFetch([message('m1', 1)]);
     });
+    expect(hook.result.current.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
     await flush(LIVE_REFRESH_COALESCE_MS);
     expect(loadInitialConversation).toHaveBeenCalledTimes(readsBeforeFetchLands + 1);
     expect(hook.result.current.messages.map((m) => m.id)).toEqual(['m1', 'm2']);
