@@ -63,7 +63,7 @@ import { KeyPackageRefreshRequests } from './marmotKeyRefresh';
 import { KeyPackageReplenisher } from './marmotKeyPackageReplenisher';
 import { alignCommitForMdk, spreadProposals } from './marmotProposals';
 import { MarmotWelcomeOutbox } from './marmotWelcomeOutbox';
-import { MarmotWelcomePayloads } from './marmotWelcomePayloads';
+import { MarmotWelcomePayloads, type InviteOutcome } from './marmotWelcomePayloads';
 import { boundGroupQueries } from './marmotGroupBackfill';
 import { createMarmotGroupConnections } from './marmotGroupConnections';
 import { submitWhenSettled, type GroupSendIntent } from './marmotSendGate';
@@ -162,12 +162,7 @@ export interface MarmotSessionOptions {
   dmDeviceSyncWaitMs?: number;
 }
 
-/** The people an invite didn't reach yet; `waitingForRelays` of them publish
- * no inbox relays yet, the rest are retried for other reasons (#1402). */
-export interface InviteOutcome {
-  undelivered: string[];
-  waitingForRelays: string[];
-}
+export type { InviteOutcome } from './marmotWelcomePayloads';
 
 export class MarmotSession {
   readonly pubkey: string;
@@ -580,27 +575,38 @@ export class MarmotSession {
       ),
       adminPubkeys: opts.adminPubkeys ?? [this.pubkey],
     });
-    const createdEpoch = group.state.groupContext.epoch;
     try {
       // Undelivered Welcomes stay queued (with their reason) and are retried:
       // the chat is kept, its members sheet shows who hasn't joined (#1402).
-      const { undelivered, waitingForRelays } = await this.inviteAll(group.idStr, devices);
+      const outcome = await this.inviteKept(group.idStr, devices);
       this.activity.note(group.idStr, Date.now()); // we just made it: it's the live one here
-      return { ...this.summarise(group), undelivered, waitingForRelays };
+      return { ...this.summarise(group), ...outcome };
     } catch (e) {
-      // Undo only an Add that never committed (so a retry leaves no empty
-      // group). After it, the invitees hold leaves and their queued Welcomes
-      // are the only way in.
-      const epoch = await this.client.groups.get(group.idStr).then(
-        (g) => g.state.groupContext.epoch,
-        () => createdEpoch,
-      );
-      if (epoch === createdEpoch) {
-        await this.client.groups.destroy(group.id).catch(() => undefined);
-        await this.welcomePayloads.drop(group.idStr, { outbox: true }).catch(() => undefined);
-      }
+      // Only an Add that never committed gets here: undo it, leaving no empty group.
+      await this.client.groups.destroy(group.id).catch(() => undefined);
+      await this.welcomePayloads.drop(group.idStr, { outbox: true }).catch(() => undefined);
       this.emitGroupsChanged();
       throw e;
+    }
+  }
+
+  /** inviteAll that rejects only for an Add that never committed: after it, a
+   * declined / silent signer or refusing relays leave the Welcomes queued with
+   * their reason, and the invitees come back as undelivered (#1402). */
+  private async inviteKept(mlsId: string, devices: Map<string, NostrEvent[]>) {
+    const epochOf = () =>
+      this.client.groups.get(mlsId).then(
+        (g) => g.state.groupContext.epoch,
+        () => null,
+      );
+    const before = await epochOf();
+    try {
+      const { undelivered } = await this.inviteAll(mlsId, devices);
+      return await this.welcomePayloads.outcome(mlsId, undelivered);
+    } catch (e) {
+      const after = await epochOf();
+      if (after === null || after === before) throw e;
+      return this.welcomePayloads.outcome(mlsId, [...devices.keys()]);
     }
   }
 
@@ -608,12 +614,11 @@ export class MarmotSession {
    * (their invitations are retried automatically — no re-invite needed). */
   async addMembers(appGroupId: string, members: string[]): Promise<InviteOutcome> {
     const devices = await this.invitees(members);
-    const { undelivered, waitingForRelays } = await this.inviteAll(
-      toMlsGroupId(appGroupId),
-      devices,
-    );
-    this.emitGroupsChanged();
-    return { undelivered, waitingForRelays };
+    try {
+      return await this.inviteKept(toMlsGroupId(appGroupId), devices);
+    } finally {
+      this.emitGroupsChanged();
+    }
   }
 
   /** Members whose invitation hasn't reached them yet, and why (#1402). */
@@ -648,8 +653,7 @@ export class MarmotSession {
       opts,
     );
     await this.dmDevices.noteInvited(mlsId, result.invited).catch(() => undefined);
-    const waiting = await this.welcomePayloads.waitingForRelays(mlsId).catch(() => new Set());
-    return { ...result, waitingForRelays: result.undelivered.filter((p) => waiting.has(p)) };
+    return result;
   }
 
   /** A user's open / send retries a chat's invitations (#1402); remote signers: sends only. */

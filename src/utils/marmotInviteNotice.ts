@@ -7,6 +7,8 @@ export interface UndeliveredInvites {
   undelivered: readonly string[];
   /** Of those, the ones who publish no inbox relays yet (#1402). */
   waitingForRelays: readonly string[];
+  /** …and the ones whose invitation our signer declined or didn't answer. */
+  needsSigner?: readonly string[];
 }
 
 /**
@@ -22,6 +24,8 @@ const forSigner = (key: string, remoteSigner: boolean) => (remoteSigner ? `${key
 
 /** The members-sheet line for a member whose invitation hasn't arrived. */
 export function inviteStatusTextKey(status: InviteStatus, remoteSigner: boolean): string {
+  // Only a remote signer can decline or go quiet: one wording.
+  if (status === 'needsSigner') return 'groupMembersSheet.inviteNeedsSigner';
   return forSigner(
     status === 'waitingForRelays'
       ? 'groupMembersSheet.inviteWaitingForRelays'
@@ -44,10 +48,13 @@ export function undeliveredInviteNotice(
 ): { title: string; body: string } | null {
   if (outcome.undelivered.length === 0) return null;
   const waiting = new Set(outcome.waitingForRelays);
+  const signer = new Set(outcome.needsSigner ?? []);
   const names = (people: readonly string[]) => people.map(nameOf).join(', ');
-  const relays = outcome.undelivered.filter((p) => waiting.has(p));
-  const others = outcome.undelivered.filter((p) => !waiting.has(p));
+  const signed = outcome.undelivered.filter((p) => signer.has(p));
+  const relays = outcome.undelivered.filter((p) => waiting.has(p) && !signer.has(p));
+  const others = outcome.undelivered.filter((p) => !waiting.has(p) && !signer.has(p));
   const body = [
+    signed.length > 0 ? t('marmotInvite.needsSignerBody', { names: names(signed) }) : null,
     others.length > 0
       ? t(forSigner('marmotInvite.notReachedBody', remoteSigner), { names: names(others) })
       : null,

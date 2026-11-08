@@ -273,8 +273,8 @@ describe('MarmotWelcomePayloads routing and retries', () => {
       // Nothing frozen in the signed outbox: the next retry decides again.
       expect(await t.outbox.pending()).toEqual([]);
       expect((await t.stored())?.reason).toBe(reason);
-      expect(await t.payloads.waitingForRelays(GROUP)).toEqual(
-        new Set(reason === 'noRelays' ? [INVITEE] : []),
+      expect((await t.payloads.outcome(GROUP, [INVITEE])).waitingForRelays).toEqual(
+        reason === 'noRelays' ? [INVITEE] : [],
       );
       expect(await t.payloads.inviteStatus(GROUP)).toEqual(
         new Map([[INVITEE, reason === 'noRelays' ? 'waitingForRelays' : 'pending']]),

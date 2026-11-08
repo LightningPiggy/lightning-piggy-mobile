@@ -87,3 +87,20 @@ describe('wording per signer (#1402): remote signers retry only on a send', () =
     );
   });
 });
+
+describe('a signer that declined or went quiet (#1402)', () => {
+  it('names them apart, says they will be asked again on a send', () => {
+    const notice = undeliveredInviteNotice(
+      { undelivered: ['a', 'b'], waitingForRelays: [], needsSigner: ['a'] },
+      nameOf,
+      true,
+    );
+    expect(notice?.body).toBe(
+      "Your signer didn't approve the invitation for Big Piggy. You'll be asked again the next time you send a message here. " +
+        "We couldn't deliver the invitation to Little Piggy yet. It'll be retried the next time you send a message here.",
+    );
+    expect(t(inviteStatusTextKey('needsSigner', true))).toBe(
+      "Invitation not sent: your signer didn't approve it. You'll be asked again the next time you send a message here.",
+    );
+  });
+});

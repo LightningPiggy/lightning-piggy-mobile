@@ -15,6 +15,8 @@ import {
   WELCOME_RETRY_BACKOFF_MS,
   type MarmotWelcomeOutbox,
 } from './marmotWelcomeOutbox';
+import { amberFailureKind } from './amberErrors';
+import { NostrConnectError, SignerTimeoutError } from './signerErrors';
 import {
   MarmotNoWelcomeRelaysError,
   welcomeRelays,
@@ -28,16 +30,54 @@ export const MAX_PENDING_WELCOME_PAYLOADS = 50;
  * to the max, so every open / send doesn't redo the lookup (#1402). */
 export const NO_RELAYS_RETRY_MS = WELCOME_RETRY_BACKOFF_MS;
 export const NO_RELAYS_RETRY_MAX_MS = WELCOME_RETRY_BACKOFF_MAX_MS;
+const signerReason = (r: WelcomeWaitReason | undefined) =>
+  r === 'signerDenied' || r === 'signerTimeout';
 /** Session start's (and each resume's) retry waits this long, like other
  * non-urgent resume work (#554). */
 export const WELCOME_RETRY_DELAY_MS = 3_000;
 
 /**
  * Where an invitee's Welcome stands, for the chat's member list:
- * `waitingForRelays` — they publish no inbox relays yet (confirmed);
- * `pending` — queued for another reason (signer, network) and retried.
+ * `needsSigner` — our signer declined or didn't answer; asked again on a send;
+ * `pending` — queued for another reason (network, a lookup) and retried;
+ * `waitingForRelays` — they publish no inbox relays yet (confirmed).
  */
-export type InviteStatus = 'waitingForRelays' | 'pending';
+export type InviteStatus = 'needsSigner' | 'pending' | 'waitingForRelays';
+/** Most urgent first: what a person's several devices report as one status. */
+const STATUS_RANK: Record<InviteStatus, number> = {
+  needsSigner: 0,
+  pending: 1,
+  waitingForRelays: 2,
+};
+
+/**
+ * Why a queued Welcome hasn't gone out: no destination yet (`noRelays` /
+ * `unknown`, see marmotWelcomeRelays), or the signer declined it /
+ * didn't answer in time (`signerDenied` / `signerTimeout`) after the Add
+ * had committed — the invitee is a member, so it waits here for a retry.
+ */
+export type WelcomeWaitReason = NoWelcomeRelaysReason | 'signerDenied' | 'signerTimeout';
+
+/** A signer refusal / timeout while sealing a Welcome, or null. */
+export function signerFailureReason(e: unknown): 'signerDenied' | 'signerTimeout' | null {
+  if (e instanceof SignerTimeoutError || amberFailureKind(e) === 'no-response')
+    return 'signerTimeout';
+  if (
+    (e instanceof NostrConnectError && e.kind === 'permission') ||
+    amberFailureKind(e) === 'declined'
+  )
+    return 'signerDenied';
+  return null;
+}
+
+/** The people an invite didn't reach yet, and why (#1402). */
+export interface InviteOutcome {
+  undelivered: string[];
+  /** …who publish no inbox relays yet. */
+  waitingForRelays: string[];
+  /** …whose Welcome our signer declined or didn't answer. */
+  needsSigner: string[];
+}
 
 type PendingPayload = {
   groupId: string;
@@ -48,7 +88,7 @@ type PendingPayload = {
   relays: string[];
   queuedAt: number;
   /** Why the last attempt found nowhere to send it (#1402). */
-  reason?: NoWelcomeRelaysReason;
+  reason?: WelcomeWaitReason;
 };
 
 export class MarmotWelcomePayloads {
@@ -147,7 +187,9 @@ export class MarmotWelcomePayloads {
         async (e: unknown) => {
           // Recorded before the invite reports back, so the session and the
           // member list can say why (not guess from an error message).
-          if (e instanceof MarmotNoWelcomeRelaysError) await this.noteNoRelays(id, item, e);
+          if (e instanceof MarmotNoWelcomeRelaysError) await this.noteWaiting(id, item, e.reason);
+          const signer = signerFailureReason(e);
+          if (signer) await this.noteWaiting(id, item, signer);
           throw e;
         },
       )
@@ -157,13 +199,13 @@ export class MarmotWelcomePayloads {
   }
 
   /** Back off a Welcome with nowhere to go and record why. */
-  private async noteNoRelays(id: string, item: PendingPayload, e: MarmotNoWelcomeRelaysError) {
+  private async noteWaiting(id: string, item: PendingPayload, reason: WelcomeWaitReason) {
     this.backoff.set(id, nextRetryBackoff(this.backoff.get(id)));
-    await this.recordReason(id, item, e.reason);
+    await this.recordReason(id, item, reason);
   }
 
   /** Persist `reason` on a still-queued payload (none: it has a destination now). */
-  private async recordReason(id: string, item: PendingPayload, reason?: NoWelcomeRelaysReason) {
+  private async recordReason(id: string, item: PendingPayload, reason?: WelcomeWaitReason) {
     if (item.reason === reason || !(await this.backend.get(NS, id))) return;
     // `undefined` drops the field from the stored JSON.
     await this.backend.set(NS, id, JSON.stringify({ ...item, reason }));
@@ -270,39 +312,51 @@ export class MarmotWelcomePayloads {
         continue; // unreadable: prune() drops it
       }
       const delivery = item && this.deliveries.get(item.groupId);
-      if (!delivery || this.devices.isDeclined(item.groupId, item.keyPackage.id)) continue;
+      // Waiting on our signer: only a user's send asks it again.
+      if (!delivery || signerReason(item.reason)) continue;
       try {
         await welcomeRelays(delivery.network, item.keyPackage, this.readRelays);
         this.backoff.delete(id);
         await this.recordReason(id, item, undefined);
       } catch (e) {
-        if (e instanceof MarmotNoWelcomeRelaysError) await this.noteNoRelays(id, item, e);
+        if (e instanceof MarmotNoWelcomeRelaysError) await this.noteWaiting(id, item, e.reason);
       }
     }
-  }
-
-  /** People whose Welcome into `groupId` waits on their inbox relays (confirmed). */
-  async waitingForRelays(groupId: string): Promise<Set<string>> {
-    const out = new Set<string>();
-    for (const item of await this.queued(groupId)) {
-      if (item.reason === 'noRelays') out.add(item.keyPackage.pubkey.toLowerCase());
-    }
-    return out;
   }
 
   /** Per person, the status of their undelivered Welcomes into `groupId`. */
   async inviteStatus(groupId: string): Promise<Map<string, InviteStatus>> {
     const out = new Map<string, InviteStatus>();
+    const note = (person: string, status: InviteStatus) => {
+      const had = out.get(person);
+      if (!had || STATUS_RANK[status] < STATUS_RANK[had]) out.set(person, status);
+    };
     for (const w of await this.outbox.pending()) {
-      if (w.groupIdHex === groupId) out.set(w.recipient.toLowerCase(), 'pending');
+      if (w.groupIdHex === groupId) note(w.recipient.toLowerCase(), 'pending');
     }
     for (const item of await this.queued(groupId)) {
       const person = item.keyPackage.pubkey.toLowerCase();
-      // One device still to reach is enough to say "pending".
-      if (item.reason !== 'noRelays') out.set(person, 'pending');
-      else if (!out.has(person)) out.set(person, 'waitingForRelays');
+      note(
+        person,
+        signerReason(item.reason)
+          ? 'needsSigner'
+          : item.reason === 'noRelays'
+            ? 'waitingForRelays'
+            : 'pending',
+      );
     }
     return out;
+  }
+
+  /** `undelivered` with each person's reason, read from the queues. */
+  async outcome(groupId: string, undelivered: string[]): Promise<InviteOutcome> {
+    const status = await this.inviteStatus(groupId).catch(() => new Map<string, InviteStatus>());
+    const by = (s: InviteStatus) => undelivered.filter((p) => status.get(p) === s);
+    return {
+      undelivered,
+      waitingForRelays: by('waitingForRelays'),
+      needsSigner: by('needsSigner'),
+    };
   }
 
   private async queued(groupId: string): Promise<PendingPayload[]> {
@@ -344,7 +398,7 @@ export class MarmotWelcomePayloads {
             return;
           }
           if (groupId && item.groupId !== groupId) return;
-          if (this.devices.isDeclined(item.groupId, item.keyPackage.id)) return;
+          if (this.devices.suppressesRetry(item.groupId, item.keyPackage.id)) return;
           if (Date.now() < (this.backoff.get(id)?.at ?? 0)) return;
           const delivery = this.deliveries.get(item.groupId);
           if (delivery) return this.send(item, delivery);

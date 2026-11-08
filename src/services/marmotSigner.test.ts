@@ -3,7 +3,9 @@ import {
   AMBER_REQUEST_TIMEOUT_MS,
   amberRequestOpenSince,
   createMarmotSigner,
+  NIP46_REQUEST_TIMEOUT_MS,
 } from './marmotSigner';
+import { SignerTimeoutError } from './signerErrors';
 
 const mockAmberSign = jest.fn();
 const mockBunkerSign = jest.fn();
@@ -126,6 +128,27 @@ describe('createMarmotSigner', () => {
       expect(await stuckOutcome).toMatchObject({ kind: 'no-response' });
       await jest.advanceTimersByTimeAsync(1_000); // abandonable's poll interval
       await expect(next).resolves.toBeDefined();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('a NIP-46 request the bunker never answers times out and frees the queue (#1402)', async () => {
+    jest.useFakeTimers();
+    try {
+      const signed = { event: JSON.stringify({ ...draft, id: 'i', sig: 's', pubkey: PK }) };
+      mockBunkerSign.mockImplementationOnce(() => new Promise(() => undefined)); // silent bunker
+      mockBunkerSign.mockImplementationOnce(async () => signed);
+      const stuck = createMarmotSigner(PK, 'nip46', { cancelled: () => false }).signEvent(draft);
+      const stuckOutcome = Promise.resolve(stuck).catch((e: unknown) => e);
+      const next = createMarmotSigner(PK, 'nip46').signEvent(draft);
+      await jest.advanceTimersByTimeAsync(NIP46_REQUEST_TIMEOUT_MS - 1);
+      expect(mockBunkerSign).toHaveBeenCalledTimes(1); // still waiting, nothing else asked
+      await jest.advanceTimersByTimeAsync(1);
+      expect(await stuckOutcome).toBeInstanceOf(SignerTimeoutError);
+      await jest.advanceTimersByTimeAsync(1_000);
+      await expect(next).resolves.toBeDefined();
+      expect(mockBunkerSign).toHaveBeenCalledTimes(2);
     } finally {
       jest.useRealTimers();
     }

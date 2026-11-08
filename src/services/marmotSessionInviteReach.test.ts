@@ -78,7 +78,11 @@ test("an unreachable member of an existing chat is shown as waiting, and invited
   await dave.session.start();
   await dave.session.ensureKeyPackage();
   const added = await alice.session.addMembers(group.id, [carol.pubkey, dave.pubkey]);
-  expect(added).toEqual({ undelivered: [carol.pubkey], waitingForRelays: [carol.pubkey] });
+  expect(added).toEqual({
+    undelivered: [carol.pubkey],
+    waitingForRelays: [carol.pubkey],
+    needsSigner: [],
+  });
   expect(await alice.session.pendingInvites(group.id)).toEqual(
     new Map([[carol.pubkey, 'waitingForRelays']]),
   );
