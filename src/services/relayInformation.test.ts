@@ -4,6 +4,8 @@ import {
   parseRelayInformation,
   RELAY_INFORMATION_TTL_MS,
 } from './relayInformation';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
 
 jest.mock('./relayHealth', () => ({
   relayKey: (url: string) => url.toLowerCase().replace(/\/+$/, ''),
@@ -169,4 +171,23 @@ it('tolerates missing and malformed optional fields', () => {
       fees: { admission: [null, {}, { amount: Infinity, unit: 'msats' }, { amount: 2, unit: 4 }] },
     }).fees,
   ).toEqual({ admission: [] });
+});
+
+it('makes no NIP-11 request for test accounts in lockdown, even to the test relay', async () => {
+  setCurrentUserPubkey([...TEST_ACCOUNT_PUBKEYS][0]);
+  try {
+    expect(await fetchRelayInformation('wss://relay.example.com')).toBeNull();
+    expect(await fetchRelayInformation(TEST_RELAY_URL)).toBeNull();
+    expect(mockFetch).not.toHaveBeenCalled();
+  } finally {
+    setCurrentUserPubkey(null);
+  }
+});
+
+it('refuses redirects on NIP-11 fetches', async () => {
+  await fetchRelayInformation('wss://relay.example.com');
+  expect(mockFetch).toHaveBeenCalledWith(
+    'https://relay.example.com/',
+    expect.objectContaining({ redirect: 'error' }),
+  );
 });
