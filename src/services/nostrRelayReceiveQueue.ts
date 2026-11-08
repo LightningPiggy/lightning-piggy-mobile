@@ -5,6 +5,7 @@ import { hydrateVerifiedEventCache } from './nostrVerifyCache';
 import {
   maybeLogReceiveWindow,
   recordInboxEoseLatency,
+  recordReceiveGate,
   recordReceiveWait,
   type ReceiveLane,
 } from './relayReceivePerf';
@@ -88,7 +89,10 @@ export class RelayReceiveQueue {
     this.draining = true;
     const pacing = createYieldScheduler({ safetyEvery: 64, budgetMs: 4, coldStart: true });
     try {
+      // Single-flight: only a cold start's first drain really waits here.
+      const gateStart = Date.now();
       await hydrateVerifiedEventCache();
+      recordReceiveGate(Date.now() - gateStart);
       while (this.size) {
         // Gate BEFORE every unit, including after await/hydration. A 34 ms
         // Schnorr is indivisible, but a second one never follows in the same

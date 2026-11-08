@@ -8,6 +8,7 @@ import {
   isInboxSubscription,
   paceRelayReceive,
 } from './nostrRelayReceiveQueue';
+import { hydrateVerifiedEventCache } from './nostrVerifyCache';
 import { RECEIVE_PERF_WINDOW_MS, takeReceiveWindow } from './relayReceivePerf';
 import { reqPriority } from './relayReqBudget';
 
@@ -230,8 +231,37 @@ it('reports per-lane queue wait and inbox EOSE→handler latency once per window
   const line = takeReceiveWindow(Date.now() + RECEIVE_PERF_WINDOW_MS);
   expect(line).toMatch(/^\[Perf\] relay receive window=\d+ms wait inbox n=2 p50=\d+ms max=\d+ms/);
   expect(line).toContain('normal n=1');
-  expect(line).toMatch(/inbox EOSE→handler n=1 p50=\d+ms max=\d+ms$/);
+  expect(line).toMatch(/inbox EOSE→handler n=1 p50=\d+ms max=\d+ms · hydration gate=0ms$/);
   // …and the window resets once reported.
   expect(takeReceiveWindow(Date.now() + 2 * RECEIVE_PERF_WINDOW_MS)).toBeUndefined();
+  relay.close();
+});
+
+it('attributes a cold-start hydration gate: inbox waits it out, later normal frames do not', async () => {
+  // The device shape behind `inbox p50≈1s · normal p50≈0.2s`: the live inbox
+  // backfill arrived while the first drain awaited verify-cache hydration, so
+  // every lane waited; normal traffic only arrived after it had finished.
+  jest
+    .mocked(hydrateVerifiedEventCache)
+    .mockImplementationOnce(() => new Promise<void>((resolve) => setTimeout(resolve, 1000)));
+  const { relay, order, open } = pacedRelay();
+  open('group', [445]);
+  open('dm', [1059]);
+  for (let i = 0; i < 10; i++) relay._onmessage(message(['EVENT', 'dm', event(1059, `${i}`)]));
+  relay._onmessage(message(['EOSE', 'dm']));
+  await jest.advanceTimersByTimeAsync(900);
+  expect(order).toEqual([]); // nothing runs, in any lane, until hydration
+  await jest.advanceTimersByTimeAsync(200);
+  expect(order.at(-1)).toBe('dm:EOSE');
+  relay._onmessage(message(['EVENT', 'group', event(445, 'late')]));
+  await jest.advanceTimersByTimeAsync(10);
+  expect(order.at(-1)).toBe('group:late');
+  const line = takeReceiveWindow(Date.now() + RECEIVE_PERF_WINDOW_MS)!;
+  const inboxP50 = Number(/wait inbox n=11 p50=(\d+)ms/.exec(line)?.[1]);
+  const normalMax = Number(/normal n=1 p50=\d+ms max=(\d+)ms/.exec(line)?.[1]);
+  const gate = Number(/hydration gate=(\d+)ms$/.exec(line)?.[1]);
+  expect(gate).toBeGreaterThanOrEqual(1000);
+  expect(inboxP50).toBeGreaterThanOrEqual(1000);
+  expect(normalMax).toBeLessThanOrEqual(100);
   relay.close();
 });

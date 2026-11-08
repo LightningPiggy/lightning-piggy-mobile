@@ -11,6 +11,7 @@ type Series = { n: number; max: number; samples: number[] };
 const series = (): Series => ({ n: 0, max: 0, samples: [] });
 let wait: Record<ReceiveLane, Series> = { inbox: series(), normal: series() };
 let inboxEose = series();
+let gateMs = 0;
 let windowStart = 0;
 
 function add(s: Series, ms: number): void {
@@ -42,13 +43,23 @@ export function recordInboxEoseLatency(ms: number): void {
   if (PERF_LOGS_ENABLED) add(inboxEose, ms);
 }
 
+/** Time a drain held ALL queued work waiting for verify-cache hydration (the
+ * cold-start gate). Frames queued during the gate wait at least this long in
+ * either lane, so a large lane wait can be told apart from lane scheduling. */
+export function recordReceiveGate(ms: number): void {
+  if (!PERF_LOGS_ENABLED || ms <= 0) return;
+  gateMs += ms;
+  if (!windowStart) windowStart = Date.now() - ms;
+}
+
 /** The window's `[Perf]` line, resetting it, once it is RECEIVE_PERF_WINDOW_MS
  * old; undefined (a cheap no-op) otherwise. */
 export function takeReceiveWindow(now = Date.now()): string | undefined {
   if (!PERF_LOGS_ENABLED || !windowStart || now - windowStart < RECEIVE_PERF_WINDOW_MS) return;
-  const line = `[Perf] relay receive window=${now - windowStart}ms wait ${summary('inbox', wait.inbox)} · ${summary('normal', wait.normal)} · inbox EOSE→handler ${summary('', inboxEose).trim()}`;
+  const line = `[Perf] relay receive window=${now - windowStart}ms wait ${summary('inbox', wait.inbox)} · ${summary('normal', wait.normal)} · inbox EOSE→handler ${summary('', inboxEose).trim()} · hydration gate=${gateMs}ms`;
   wait = { inbox: series(), normal: series() };
   inboxEose = series();
+  gateMs = 0;
   windowStart = 0;
   return line;
 }

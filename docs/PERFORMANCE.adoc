@@ -469,7 +469,10 @@ Verification trust persists in the background, never on the EOSE or
 deadline path: after 1 s without a new record, at most 5 s after the first
 unwritten one, at 256 pending records, or when the app leaves the
 foreground. `[Perf] relay receive window=…` reports, at most once per 5 s
-window, queue wait p50/max per lane and inbox EOSE→handler latency.
+window, queue wait p50/max per lane, inbox EOSE→handler latency and the
+time the first cold-start drain held every lane awaiting verify-cache
+hydration (`hydration gate=`). Frames queued during that gate wait at least
+that long in either lane, so read lane waits against it.
 
 Count-based Jest fixture (native crypto off): 1,300 cold Schnorr checks
 before persistence, *zero* after restarting RAM and hydrating trust. A
