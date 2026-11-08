@@ -72,7 +72,7 @@ const inboxByOwner: Record<string, DmInboxEntry[]> = {
 beforeEach(() => {
   jest.clearAllMocks();
   loadInboxEntriesMock.mockImplementation(async (owner: string) => inboxByOwner[owner] ?? []);
-  fetchMock.mockResolvedValue({ kind4: [], kind1059: [] } as unknown as Awaited<
+  fetchMock.mockResolvedValue({ kind4: [], kind1059: [], complete: true } as unknown as Awaited<
     ReturnType<typeof fetchInboxDmEvents>
   >);
 });
@@ -116,7 +116,7 @@ describe('useDmInbox account scoping', () => {
       () =>
         new Promise((resolve) => {
           releaseFetch = () =>
-            resolve({ kind4: [], kind1059: [] } as unknown as Awaited<
+            resolve({ kind4: [], kind1059: [], complete: true } as unknown as Awaited<
               ReturnType<typeof fetchInboxDmEvents>
             >);
         }),
@@ -201,7 +201,7 @@ it('serializes a rapid A → B → A refresh without joining cancelled work', as
   fetchMock.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
-        releaseA = () => resolve({ kind4: [], kind1059: [] } as never);
+        releaseA = () => resolve({ kind4: [], kind1059: [], complete: true } as never);
       }),
   );
   const { result, rerender } = renderInbox(A);
@@ -266,7 +266,7 @@ it('joins an in-flight user refresh even when the prior completion is still fres
   fetchMock.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
-        release = () => resolve({ kind4: [], kind1059: [] } as never);
+        release = () => resolve({ kind4: [], kind1059: [], complete: true } as never);
       }),
   );
   let forced!: Promise<void>;
@@ -319,7 +319,7 @@ it('waits for a tab-aborted warm refresh and starts the requested replacement', 
   fetchMock.mockImplementationOnce(
     () =>
       new Promise((resolve) => {
-        release = () => resolve({ kind4: [], kind1059: [] } as never);
+        release = () => resolve({ kind4: [], kind1059: [], complete: true } as never);
       }),
   );
   const controller = new AbortController();

@@ -17,16 +17,22 @@ import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 // the slow tail straight back. Two independent EOSEs guard against a single
 // relay that is empty or behind; the grace still lets a relay that is only a
 // little slower contribute. Anything later is reconciled elsewhere: the live
-// DM sub (armed from the session's starting kind-4 cursor, wraps without
-// `since`) streams what stragglers hold once they answer, cold-start
-// backfill and explicit refreshes re-read without the kind-4 floor, and the
-// pre-#1759 8 s / 15 s deadlines already advanced the cursors past a relay
-// that never answered.
+// DM sub (wraps without `since`) streams what stragglers hold once they
+// answer, and cold-start backfill and explicit refreshes re-read without the
+// kind-4 floor.
+//
+// Cursors: a read that cut a relay off (still pending at the grace or the
+// deadline) reports `complete: false`, and callers must not advance their
+// kind-4 cursors past it — the live sub only covers `#p: viewer`, so a slow
+// relay's SENT kind-4 (from another device) would otherwise be skipped every
+// time. Failed relays don't make a read partial (pre-#1759 parity).
 export const DM_FETCH_QUORUM: RelayQuorum = { quorum: 2, graceMs: 1200 };
 
-const logQuorum =
-  (what: string) =>
+/** Logs the quorum outcome and records whether the read was complete. */
+const settledInto =
+  (what: string, read: { complete: boolean }) =>
   (s: QuorumStats): void => {
+    read.complete = s.cut === 0;
     if (!PERF_LOGS_ENABLED) return;
     console.log(
       `[Perf] ${what} fetch quorum: relays=${s.relays}, eosed=${s.eosed}, failed=${s.failed}, ` +
@@ -56,7 +62,7 @@ export async function fetchDirectMessageEvents(
   otherPubkey: string,
   relays: string[],
   options: { limit?: number; since?: number } = {},
-): Promise<RawDmEvent[]> {
+): Promise<{ events: RawDmEvent[]; complete: boolean }> {
   const allRelays = [...new Set([...relays, ...enabledAppRelays('default', DEFAULT_RELAYS)])];
   trackRelays(allRelays);
   const limit = options.limit ?? 200;
@@ -85,18 +91,19 @@ export async function fetchDirectMessageEvents(
     fromMeFilter.since = since;
     toMeFilter.since = since;
   }
+  const read = { complete: false };
   try {
     // 15 s backstop: the deadline closes every REQ still open (proper teardown).
     const events = await pool.querySyncFilters(allRelays, [fromMeFilter, toMeFilter], 15000, {
       quorum: DM_FETCH_QUORUM,
-      onQuorumSettled: logQuorum('conversation'),
+      onQuorumSettled: settledInto('conversation', read),
     });
     const byId = new Map<string, RawDmEvent>();
     for (const ev of events) if (ev.kind === 4) byId.set(ev.id, ev as RawDmEvent);
-    return Array.from(byId.values());
+    return { events: Array.from(byId.values()), complete: read.complete };
   } catch (error) {
     if (__DEV__) console.warn('[Nostr] fetchDirectMessageEvents failed:', error);
-    return [];
+    return { events: [], complete: false };
   }
 }
 
@@ -113,6 +120,9 @@ export interface RawGiftWrapEvent {
 export interface FetchedInboxEvents {
   kind4: RawDmEvent[];
   kind1059: RawGiftWrapEvent[];
+  /** False when a relay was cut off (or the read failed): don't advance a
+   * kind-4 cursor from this read. */
+  complete: boolean;
 }
 
 /**
@@ -130,7 +140,14 @@ export interface FetchedInboxEvents {
 export async function fetchInboxDmEvents(
   myPubkey: string,
   relays: string[],
-  options: { limit?: number; since?: number; signal?: AbortSignal } = {},
+  options: {
+    limit?: number;
+    since?: number;
+    signal?: AbortSignal;
+    /** Ids already stored: skipped before parse/verify. They are absent from
+     * the result, so a cursor computed from it advances no further for them. */
+    isKnownEvent?: (id: string) => boolean;
+  } = {},
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...enabledAppRelays('default', DEFAULT_RELAYS)])];
   trackRelays(allRelays);
@@ -166,6 +183,7 @@ export async function fetchInboxDmEvents(
     recvK4Filter.since = since;
   }
   const __t0 = performance.now();
+  const read = { complete: false };
   try {
     // 8 s backstop (was 15 s): it now only bounds a read where fewer than
     // DM_FETCH_QUORUM relays answer. The deadline closes every REQ still
@@ -175,7 +193,12 @@ export async function fetchInboxDmEvents(
       allRelays,
       [sentK4Filter, recvK4Filter, wrapsFilter],
       8000,
-      { abort: options.signal, quorum: DM_FETCH_QUORUM, onQuorumSettled: logQuorum('inbox') },
+      {
+        abort: options.signal,
+        quorum: DM_FETCH_QUORUM,
+        alreadyHaveEvent: options.isKnownEvent,
+        onQuorumSettled: settledInto('inbox', read),
+      },
     );
     const k4 = new Map<string, RawDmEvent>();
     const k1059 = new Map<string, RawGiftWrapEvent>();
@@ -198,9 +221,13 @@ export async function fetchInboxDmEvents(
         `wraps=${k1059.size} sentK4=${sentK4} recvK4=${k4.size - sentK4} ` +
         `relays=${allRelays.length} limit=${limit}`,
     );
-    return { kind4: Array.from(k4.values()), kind1059: Array.from(k1059.values()) };
+    return {
+      kind4: Array.from(k4.values()),
+      kind1059: Array.from(k1059.values()),
+      complete: read.complete,
+    };
   } catch (error) {
     if (__DEV__) console.warn('[Nostr] fetchInboxDmEvents failed:', error);
-    return { kind4: [], kind1059: [] };
+    return { kind4: [], kind1059: [], complete: false };
   }
 }

@@ -1,6 +1,5 @@
 import type { Event as NostrEvent } from 'nostr-tools/pure';
 import { finishAfterRelayReceive } from './nostrRelayReceiveQueue';
-import { flushVerifiedEventCache } from './nostrVerifyCache';
 
 /** The close reason the health-aware pool gives a one-shot REQ that reached EOSE. */
 export const RELAY_EOSE_REASON = 'closed automatically on eose';
@@ -87,15 +86,20 @@ export function queryRelaysQuorum(input: {
           // already closing — ignore.
         }
       }
-      input.onSettled?.({
-        relays: relays.length,
-        eosed: eosed.size,
-        failed: failed.size,
-        cut,
-        skippedKnown,
-        outcome,
-        ms: Date.now() - startedAt,
-      });
+      try {
+        input.onSettled?.({
+          relays: relays.length,
+          eosed: eosed.size,
+          failed: failed.size,
+          cut,
+          skippedKnown,
+          outcome,
+          ms: Date.now() - startedAt,
+        });
+      } catch (error) {
+        // A stats consumer must never wedge the read or throw into the SDK.
+        if (__DEV__) console.warn('[Nostr] quorum onSettled failed:', error);
+      }
       resolve(events);
     };
     const onAbort = () => finish('aborted');
@@ -105,14 +109,12 @@ export function queryRelaysQuorum(input: {
       (answered ? eosed : failed).add(url);
       if (eosed.size + failed.size === relays.length) finish('all');
       else if (answered && eosed.size === need)
-        grace = setTimeout(() => {
-          // Quorum relays' events are all in: each relay's EOSE was paced
-          // behind its own events and flushed verification trust. Close the
-          // stragglers now rather than queue behind their backlog.
-          void flushVerifiedEventCache()
-            .catch(() => undefined)
-            .then(() => finish('quorum'));
-        }, quorum.graceMs);
+        // Quorum relays' events are all in (each EOSE is paced behind its own
+        // events), so close the stragglers now rather than queue behind their
+        // backlog. NB the grace is wall-clock: a straggler whose frames are
+        // still in the receive queue is cut too — `cut` vs `eosed` in the
+        // callers' [Perf] lines measures how often (#1759).
+        grace = setTimeout(() => finish('quorum'), quorum.graceMs);
     };
     if (signal?.aborted || relays.length === 0) {
       finish(signal?.aborted ? 'aborted' : 'all');

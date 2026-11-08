@@ -97,6 +97,8 @@ test('inbox: one REQ per relay with three filters, no since on 1059, quorum beat
   const result = await read;
   expect(result.kind1059.map((e) => e.id[0])).toEqual(['1']);
   expect(result.kind4.map((e) => e.id[0]).sort()).toEqual(['2', '3']);
+  // A relay was cut off: callers must not advance a kind-4 cursor from this.
+  expect(result.complete).toBe(false);
   // The stuck relay's REQ is closed at the end of the grace, not at 8 s.
   expect(relays.get(URLS[2])!.openSubs.size).toBe(0);
 });
@@ -106,7 +108,7 @@ test('inbox: abort resolves at once and closes every REQ', async () => {
   const read = fetchInboxDmEvents(ME, URLS, { signal: controller.signal });
   await jest.advanceTimersByTimeAsync(0);
   controller.abort();
-  await expect(read).resolves.toEqual({ kind4: [], kind1059: [] });
+  await expect(read).resolves.toEqual({ kind4: [], kind1059: [], complete: false });
   for (const relay of relays.values()) expect(relay.openSubs.size).toBe(0);
 });
 
@@ -123,5 +125,29 @@ test('conversation: both kind-4 directions share one REQ per relay', async () =>
   frame(URLS[1], ['EOSE', subOf(URLS[1]).id]);
   // Under the 15 s backstop, the grace after the second EOSE ends the read.
   await jest.advanceTimersByTimeAsync(1200);
-  expect((await read).map((e) => e.id[0])).toEqual(['4']);
+  const { events, complete } = await read;
+  expect(events.map((e) => e.id[0])).toEqual(['4']);
+  expect(complete).toBe(false);
+});
+
+test('inbox: complete when every relay answered or failed; known ids skipped before parse', async () => {
+  const parse = jest.spyOn(JSON, 'parse');
+  const known = event('5', 4, PEER, ME, 2);
+  const read = fetchInboxDmEvents(ME, URLS, { isKnownEvent: (id) => id === known.id });
+  await jest.advanceTimersByTimeAsync(0);
+  parse.mockClear();
+  frame(URLS[0], ['EVENT', subOf(URLS[0]).id, known]);
+  frame(URLS[0], ['EVENT', subOf(URLS[0]).id, event('6', 4, PEER, ME, 3)]);
+  // Only the unknown event (and the EOSE / CLOSED control frames) got parsed.
+  const parsedEvents = () =>
+    parse.mock.results.filter((r) => Array.isArray(r.value) && r.value[0] === 'EVENT').length;
+  expect(parsedEvents()).toBe(1);
+  parse.mockRestore();
+  frame(URLS[0], ['EOSE', subOf(URLS[0]).id]);
+  frame(URLS[1], ['EOSE', subOf(URLS[1]).id]);
+  // A relay that refuses the read is a failure, not a cut (pre-#1759 parity).
+  frame(URLS[2], ['CLOSED', subOf(URLS[2]).id, 'restricted: no']);
+  const result = await read;
+  expect(result.kind4.map((e) => e.id[0])).toEqual(['6']);
+  expect(result.complete).toBe(true);
 });

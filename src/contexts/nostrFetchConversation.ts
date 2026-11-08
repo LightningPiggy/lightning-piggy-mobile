@@ -123,9 +123,10 @@ export async function fetchConversationFor(
   const convLastSeen = await loadLastSeen(convLastSeenKey(pubkey, normalized));
 
   // NIP-04 — peer-scoped fetch, two directions, filtered by since.
-  const kind4Events = await nostrService.fetchDirectMessageEvents(pubkey, normalized, readRelays, {
-    since: convLastSeen,
-  });
+  const { events: kind4Events, complete: kind4ReadComplete } =
+    await nostrService.fetchDirectMessageEvents(pubkey, normalized, readRelays, {
+      since: convLastSeen,
+    });
   // Three-pass decrypt:
   //  1. Pull plaintext synchronously for events already in the RAM LRU —
   //     no decrypt round-trip, no Amber IPC, no CPU.
@@ -401,9 +402,10 @@ export async function fetchConversationFor(
   // the encrypted store now (#850; the plaintext conv-blob write is gone).
   // kind-1059 deliberately excluded — wrap timestamps are randomized per
   // NIP-59 and would poison the kind-4 since cursor (same reasoning as the
-  // inbox path; see fetchInboxDmEvents + refreshDmInbox).
+  // inbox path; see fetchInboxDmEvents + refreshDmInbox). A quorum read that
+  // cut a slow relay off (#1759) must not move the cursor past what it holds.
   const newConvLastSeen = Math.max(convLastSeen ?? 0, ...kind4Events.map((e) => e.created_at));
-  if (newConvLastSeen > (convLastSeen ?? 0)) {
+  if (kind4ReadComplete && newConvLastSeen > (convLastSeen ?? 0)) {
     AsyncStorage.setItem(convLastSeenKey(pubkey, normalized), String(newConvLastSeen)).catch(
       () => {},
     );

@@ -11,7 +11,6 @@ const mockFinishAfterRelayReceive = jest.fn((finish: () => void) => finish());
 jest.mock('./nostrRelayReceiveQueue', () => ({
   finishAfterRelayReceive: (finish: () => void) => mockFinishAfterRelayReceive(finish),
 }));
-jest.mock('./nostrVerifyCache', () => ({ flushVerifiedEventCache: jest.fn(async () => {}) }));
 
 const ev = (id: string) => ({ id, kind: 4 }) as NostrEvent;
 
@@ -195,4 +194,21 @@ test('known ids and cross-relay duplicates are skipped before parse', async () =
   r.eose('wss://b/');
   expect((await read).map((e) => e.id)).toEqual(['new']);
   expect(onSettled).toHaveBeenCalledWith(expect.objectContaining({ skippedKnown: 1 }));
+});
+
+test('a throwing onSettled still resolves the read', async () => {
+  const r = fakeRelays(['wss://a/']);
+  const read = queryRelaysQuorum({
+    relays: r.urls,
+    open: r.open,
+    maxWait: 8000,
+    quorum: { quorum: 2, graceMs: 1200 },
+    onSettled: () => {
+      throw new Error('logger blew up');
+    },
+  });
+  const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  expect(() => r.eose('wss://a/')).not.toThrow();
+  warn.mockRestore();
+  await expect(read).resolves.toEqual([]);
 });

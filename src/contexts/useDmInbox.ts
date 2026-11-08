@@ -65,6 +65,7 @@ import {
   type ScopedDmInbox,
 } from './dmInboxScope';
 import { useDmRefreshCoordinator, canJoinDmRefresh } from './dmRefreshCoordinator';
+import { knownInboxEvent } from './knownInboxEvent';
 
 type DmInboxSetter = React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
 
@@ -584,9 +585,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             setInboxForRefresh(filteredCache);
           }
 
-          // Widening and explicit warm user refreshes backfill kind-4.
-          // Wraps remain bounded without since (randomised NIP-59 timestamps).
-          const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
+          // Widening / explicit warm refreshes backfill kind-4; wraps never take `since` (NIP-59).
+          const { kind4, kind1059, complete } = await nostrService.fetchInboxDmEvents(
             refreshForPubkey,
             readRelays,
             {
@@ -595,6 +595,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 ? {}
                 : { since: kind4Failures?.committedCursor(lastSeen ?? 0) ?? lastSeen }),
               signal: effectiveSignal,
+              isKnownEvent: knownInboxEvent(knownWrapIdsRef, refreshForPubkey),
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
           );
@@ -784,14 +785,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           );
           setInboxForRefresh(filteredFinal);
 
-          // Advance only after all targets were processed and rows persisted.
-          // Pending failures protect the floor independently of refresh completion.
-          // Randomised wrap timestamps never contribute.
+          // Advance only after all targets were processed and rows persisted, and never
+          // past a relay the quorum read cut off (#1759: commit failures, keep the floor).
+          // Pending failures protect the floor too. Randomised wrap timestamps never contribute.
           const newest = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
           const kind4Complete = k4Result.processed === k4ToDecrypt.length;
-          if (!effectiveSignal.aborted && kind4Complete) {
-            if (kind4Failures && kind4Pass) await kind4Failures.commitPass(kind4Pass, newest);
-          }
+          if (!effectiveSignal.aborted && kind4Complete && kind4Failures && kind4Pass)
+            await kind4Failures.commitPass(kind4Pass, complete ? newest : 0);
           // Completion drives TTL and full wrap backfill independently of the
           // history floor. A productive abort still needs another pass.
           refreshCompleted = !effectiveSignal.aborted && kind4Complete;

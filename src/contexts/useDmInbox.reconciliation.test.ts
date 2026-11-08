@@ -130,6 +130,7 @@ beforeEach(async () => {
   fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
     kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
     kind1059: [wrap],
+    complete: true,
   }));
   ingestMock.mockResolvedValue(null);
 });
@@ -147,6 +148,7 @@ it('reconciles a suppressed reconnect at expiry with cursor and negative cache i
   fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
     kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
     kind1059: [wrap, missedWrap],
+    complete: true,
   }));
   ingestMock.mockImplementation(async ({ wraps, bypassSkipSet }) => ({
     entries: wraps
@@ -236,7 +238,7 @@ it('waits for an automatic pass then performs the stronger pull-to-refresh', asy
     forced = result.current.refreshDmInbox({ force: true });
   });
   await act(async () => {
-    release.resolve({ kind4: [event(1)], kind1059: [wrap] });
+    release.resolve({ kind4: [event(1)], kind1059: [wrap], complete: true });
     await Promise.all([automatic, forced]);
   });
   expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -338,6 +340,7 @@ it('retains one TTL-governed reconnect after fetch resolves while wrap ingestion
         (e) => opts?.since === undefined || e.created_at >= opts.since - 120,
       ),
       kind1059: [...liveSlice, missedWrap],
+      complete: true,
     }));
     ingestMock.mockImplementation(async ({ wraps, bypassSkipSet }) => ({
       entries: wraps
@@ -400,6 +403,7 @@ it('completes cold and warm refreshes despite a persistent null kind-4 decrypt a
   fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
     kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
     kind1059: wraps.slice(0, opts?.limit ?? wraps.length),
+    complete: true,
   }));
   ingestMock.mockImplementation(async ({ wraps: fetched }) => {
     const fresh = fetched.filter((w) => !rows.some((r) => r.eventId === w.id));
@@ -633,3 +637,19 @@ it.each([false, true])(
     expect(result.current.dmInbox).toEqual(includeNonFollows ? [invoice] : []);
   },
 );
+
+it('keeps the kind-4 cursor when the quorum read cut a relay off, and advances once complete', async () => {
+  const { result, unmount } = renderInbox();
+  relayEvents = [event(1), event(2, BASE + 300)];
+  fetchMock.mockImplementation(async () => ({ kind4: relayEvents, kind1059: [], complete: false }));
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  // The pre-parse skip is wired in: a function over the live sub's known ids.
+  expect(typeof fetchMock.mock.calls[0][2]?.isKnownEvent).toBe('function');
+  // Decrypts persisted, but the floor didn't move past the cut relay.
+  expect(rows.map((r) => r.eventId)).toEqual([event(1).id, event(2).id]);
+  expect(await savedCursor()).toBe('0');
+  fetchMock.mockImplementation(async () => ({ kind4: relayEvents, kind1059: [], complete: true }));
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  expect(await savedCursor()).toBe(String(BASE + 300));
+  unmount();
+});

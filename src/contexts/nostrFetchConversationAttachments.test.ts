@@ -6,7 +6,7 @@ import { textForRumor, unwrapWrapNsec, type DecodedRumor } from '../utils/nip17U
 import { classifyStoredMessage } from '../utils/messageContent';
 
 jest.mock('../services/nostrService', () => ({
-  fetchDirectMessageEvents: jest.fn(async () => []),
+  fetchDirectMessageEvents: jest.fn(async () => ({ events: [], complete: true })),
   fetchInboxDmEvents: jest.fn(async () => ({ kind1059: [{ id: 'document-wrap' }] })),
 }));
 jest.mock('../services/dmDb', () => ({
