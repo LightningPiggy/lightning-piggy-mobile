@@ -18,6 +18,31 @@ test('test accounts in lockdown never make a NIP-11 request', async () => {
   expect(fetch).not.toHaveBeenCalled();
 });
 
+test('lockdown beginning before the deferred fetch runs sends no request', async () => {
+  const fetch = jest.spyOn(expoFetch, 'fetch');
+  const pending = discoverRelayReqLimit('wss://late.example.com/');
+  setCurrentUserPubkey([...TEST_ACCOUNT_PUBKEYS][0]);
+  expect(await pending).toBeUndefined();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+test('lockdown beginning during an in-flight request aborts it', async () => {
+  let signal: AbortSignal | undefined;
+  jest.spyOn(expoFetch, 'fetch').mockImplementation(((_url: string, init: RequestInit) => {
+    signal = init.signal as AbortSignal;
+    return new Promise((_resolve, reject) =>
+      signal?.addEventListener('abort', () => reject(new Error('aborted'))),
+    );
+  }) as unknown as typeof expoFetch.fetch);
+  const pending = discoverRelayReqLimit('wss://slow.example.com/');
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(signal?.aborted).toBe(false);
+  setCurrentUserPubkey([...TEST_ACCOUNT_PUBKEYS][0]);
+  expect(signal?.aborted).toBe(true);
+  expect(await pending).toBeUndefined();
+});
+
 test('NIP-11 discovery uses HTTPS, advertises NIP-11, caches and respects a smaller max', async () => {
   const fetch = (
     jest.spyOn(expoFetch, 'fetch') as unknown as jest.MockedFunction<typeof global.fetch>

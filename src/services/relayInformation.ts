@@ -1,6 +1,6 @@
 import { activeAccountRelays } from './testRelayRouting';
 import { relayKey } from './relayHealth';
-import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
+import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { getCurrentUserPubkey } from './nostrActiveAccount';
 
 export interface RelayFee {
@@ -146,9 +146,8 @@ const cache = new Map<string, { until: number; request: Promise<RelayInformation
 /** One bounded HTTP GET, shared across screens; never opens a Nostr subscription. */
 export function fetchRelayInformation(url: string): Promise<RelayInformation | null> {
   const key = relayKey(activeAccountRelays([url])[0]);
-  // Defence in depth: under lockdown only the LAN test relay may be contacted.
-  if (isTestRelayLockdown(getCurrentUserPubkey()) && key !== relayKey(TEST_RELAY_URL))
-    return Promise.resolve(null);
+  // Test accounts make no NIP-11 request at all, not even to the LAN test relay.
+  if (isTestRelayLockdown(getCurrentUserPubkey())) return Promise.resolve(null);
   const previous = cache.get(key);
   if (previous && previous.until > Date.now()) return previous.request;
   let http: URL;
@@ -165,6 +164,8 @@ export function fetchRelayInformation(url: string): Promise<RelayInformation | n
   entry.request = (async () => {
     try {
       const response = await fetch(http.toString(), {
+        // A relay must not bounce the request to another host.
+        redirect: 'error',
         headers: { Accept: 'application/nostr+json' },
         signal: controller.signal,
       });
