@@ -105,6 +105,25 @@ describe('liveness probe (#1768)', () => {
     unmount();
   });
 
+  it('does not overwrite a balance stored while the probe was out (#1768 review)', async () => {
+    const list = [
+      { id: 'w1', walletType: 'nwc', balance: 1000, isConnected: true },
+    ] as WalletState[];
+    let resolveProbe!: (v: number) => void;
+    jest
+      .mocked(nwcService.getBalance)
+      .mockImplementationOnce(() => new Promise<number | null>((r) => (resolveProbe = r)));
+    const update = jest.fn();
+    const { unmount } = mount(list, update);
+    await tick(WATCHDOG_INTERVAL_MS);
+    // A post-payment read lands first and stores the newer balance…
+    list[0] = { ...list[0], balance: 400 };
+    // …then the probe's older reply arrives.
+    await act(async () => resolveProbe(1000));
+    expect(update).not.toHaveBeenCalledWith('w1', { balance: 1000 });
+    unmount();
+  });
+
   it('skips the probe when the wallet answered recently (throttle says no)', async () => {
     jest.mocked(nwcService.shouldProbeWallet).mockReturnValue(false);
     const { unmount } = mount(live);
@@ -184,6 +203,24 @@ describe('resume stagger (#1768, CLAUDE.md #554/#1031)', () => {
     // The staggered resume pass still runs once at +3 s.
     await tick(WATCHDOG_RESUME_DELAY_MS - 1_000);
     expect(nwcService.getBalance).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('syncs every wallet health before any probe goes out (#1768 review)', async () => {
+    const list = [
+      { id: 'w1', walletType: 'nwc', isConnected: true, connectionHealth: 'responsive' },
+      { id: 'w2', walletType: 'nwc', isConnected: true, connectionHealth: 'responsive' },
+    ] as WalletState[];
+    jest.mocked(nwcService.getWalletHealth).mockReturnValue('checking');
+    jest.mocked(nwcService.getBalance).mockImplementation(() => new Promise(() => {}));
+    const update = jest.fn();
+    const { unmount } = mount(list, update);
+    act(() => appStateListener?.('active'));
+    await tick(WATCHDOG_RESUME_DELAY_MS);
+    // w1's probe is still hanging, yet BOTH stale greens have already decayed.
+    expect(nwcService.getBalance).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith('w1', { isConnected: true, connectionHealth: 'checking' });
+    expect(update).toHaveBeenCalledWith('w2', { isConnected: true, connectionHealth: 'checking' });
     unmount();
   });
 

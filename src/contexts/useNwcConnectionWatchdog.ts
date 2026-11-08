@@ -81,10 +81,14 @@ export function useNwcConnectionWatchdog(
       if (nwcService.isConnectionInProgress(w.id) || nwcService.isBalanceInFlight(w.id)) return;
       if (!nwcService.shouldProbeWallet(w.id)) return;
       nwcService.markWalletProbed(w.id);
+      const before = walletsRef.current.find((ww) => ww.id === w.id)?.balance;
       const balance = await nwcService.getBalance(w.id, { replyTimeoutMs: PROBE_REPLY_TIMEOUT_MS });
       if (balance !== null && isCurrent()) {
         const current = walletsRef.current.find((ww) => ww.id === w.id);
-        if (current && current.balance !== balance) updateWalletInState(w.id, { balance });
+        // Only commit if nothing else stored a balance while the probe was out
+        // — e.g. a post-payment read; the probe's reply may be older (#1768).
+        if (current && current.balance === before && current.balance !== balance)
+          updateWalletInState(w.id, { balance });
       }
     };
 
@@ -96,7 +100,12 @@ export function useNwcConnectionWatchdog(
       const currentIdentity = captureIdentity();
       const isCurrent = () => !disposed && currentIdentity();
       try {
-        for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
+        const nwcWallets = walletsRef.current.filter((ww) => ww.walletType === 'nwc');
+        // Re-read every wallet's health first (no network), so after a long
+        // background a stale green decays to "Checking…" at once instead of
+        // waiting behind earlier wallets' probes / reconnects (#1768).
+        for (const w of nwcWallets) syncHealth(w);
+        for (const w of nwcWallets) {
           if (!isCurrent()) return;
           // A handshake already in flight (startup connect, payInvoice's
           // publish-failure reconnect) must not be superseded by the tick.

@@ -22,6 +22,18 @@ describe('isUnansweredError (#1768)', () => {
     }
   });
 
+  it('a wallet error whose own text mentions a timeout / connection is still an answer', () => {
+    // e.g. the wallet's Lightning backend timed out and the wallet SAID so.
+    for (const error of [
+      withCode('upstream node reply timeout', 'INTERNAL'),
+      withCode('payment failed: connection lost to peer', 'PAYMENT_FAILED'),
+      withCode('backend websocket closed', 'OTHER'),
+    ]) {
+      expect(isWalletAnswer(error)).toBe(true);
+      expect(isUnansweredError(error)).toBe(false);
+    }
+  });
+
   it('SDK-local coded errors are not answers (raised before anything is published)', () => {
     // Nip47UnsupportedEncryptionError is thrown locally while picking an
     // encryption; an offline wallet must not turn green on it.
