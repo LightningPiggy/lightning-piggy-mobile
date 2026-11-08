@@ -75,9 +75,10 @@ export const PEER_LOOKUP_MAX_WAIT_MS = 4_000;
 
 const HEX_PUBKEY = /^[0-9a-f]{64}$/;
 
-/** One kind's cached state. */
+/** One kind's cached state. A found list keeps its event's identity so only a
+ * strictly newer event (NIP-01: later created_at, ties to the lower id) replaces it. */
 type KindState<T> =
-  | { state: 'found'; value: T; at: number }
+  | { state: 'found'; value: T; at: number; createdAt: number; eventId: string }
   | { state: 'absent' | 'unknown'; at: number };
 
 interface Nip65Lists {
@@ -143,38 +144,70 @@ function toResult(entry: CacheEntry): PeerRelayListResult {
   };
 }
 
-/** The cached result when BOTH kinds are fresh; a half-fresh entry is kept for merging. */
-function freshEntry(key: string): PeerRelayListResult | undefined {
+interface CachedView {
+  result: PeerRelayListResult;
+  /** Every kind is fresh: no lookup needed. */
+  complete: boolean;
+}
+
+/**
+ * The cache's fresh knowledge for `key`. Kinds expire on their own: an expired
+ * kind reads as unknown (and is re-looked up) while the other kind's fresh list
+ * is still served. Undefined when nothing is fresh.
+ */
+function cachedView(key: string): CachedView | undefined {
   const entry = cache.get(key);
   if (!entry) return undefined;
   const now = Date.now();
   const inboxFresh = isFresh(entry.inbox, entry.nip65, now);
   const nip65Fresh = isFresh(entry.nip65, entry.inbox, now);
-  if (!inboxFresh && !nip65Fresh) {
-    cache.delete(key);
-    return undefined;
-  }
-  if (!inboxFresh || !nip65Fresh) return undefined;
+  if (!inboxFresh && !nip65Fresh) return undefined;
   // Refresh recency: Map iteration order is the LRU order.
   cache.delete(key);
   cache.set(key, entry);
-  return toResult(entry);
+  const view: CacheEntry = {
+    inbox: inboxFresh ? entry.inbox : { state: 'unknown', at: entry.inbox.at },
+    nip65: nip65Fresh ? entry.nip65 : { state: 'unknown', at: entry.nip65.at },
+    error: entry.error,
+  };
+  return { result: toResult(view), complete: inboxFresh && nip65Fresh };
 }
 
-/** Store a lookup's states; a kind it couldn't tell keeps a still-fresh known state. */
+const isNewerList = (
+  a: { createdAt: number; eventId: string },
+  b: { createdAt: number; eventId: string },
+): boolean => a.createdAt > b.createdAt || (a.createdAt === b.createdAt && a.eventId < b.eventId);
+
+/**
+ * Fold one lookup's state for a kind into what's cached:
+ *   - two finds: the newer event wins; an older or identical one only
+ *     re-confirms the cached list;
+ *   - a fresh find is never downgraded by a later lookup — not to absent (that
+ *     lookup may simply have asked relays without the event), not to unknown;
+ *     a fresh absence isn't downgraded to unknown either;
+ *   - otherwise the new state replaces it.
+ */
+function mergeKind<T>(
+  old: KindState<T> | undefined,
+  oldSibling: KindState<unknown> | undefined,
+  next: KindState<T>,
+): KindState<T> {
+  if (!old) return next;
+  if (old.state === 'found' && next.state === 'found') {
+    return isNewerList(next, old) ? next : { ...old, at: next.at };
+  }
+  const oldFresh = isFresh(old, oldSibling);
+  if (old.state === 'found' && oldFresh) return old;
+  if (next.state === 'unknown' && old.state === 'absent' && oldFresh) return old;
+  return next;
+}
+
+/** Store a lookup's states, merged with what's cached (see `mergeKind`). */
 function store(key: string, next: CacheEntry): CacheEntry {
   const prev = cache.get(key);
-  const keep = <T>(
-    old: KindState<T> | undefined,
-    oldSibling: KindState<unknown> | undefined,
-    fresh: KindState<T>,
-  ): KindState<T> =>
-    fresh.state === 'unknown' && old && old.state !== 'unknown' && isFresh(old, oldSibling)
-      ? old
-      : fresh;
   const merged: CacheEntry = {
-    inbox: keep(prev?.inbox, prev?.nip65, next.inbox),
-    nip65: keep(prev?.nip65, prev?.inbox, next.nip65),
+    inbox: mergeKind(prev?.inbox, prev?.nip65, next.inbox),
+    nip65: mergeKind(prev?.nip65, prev?.inbox, next.nip65),
     error: next.error,
   };
   cache.delete(key);
@@ -232,7 +265,13 @@ function peerEntryFromEvents(
   const nip65 = pickLatestReplaceable(events, pubkey, 10002);
   return {
     inbox: inbox
-      ? { state: 'found', value: sanitizePeerRelayUrls(tagValues(inbox, 'relay')), at }
+      ? {
+          state: 'found',
+          value: sanitizePeerRelayUrls(tagValues(inbox, 'relay')),
+          at,
+          createdAt: inbox.created_at,
+          eventId: inbox.id,
+        }
       : missing,
     nip65: nip65
       ? {
@@ -242,6 +281,8 @@ function peerEntryFromEvents(
             write: sanitizePeerRelayUrls(tagValues(nip65, 'r', 'write')),
           },
           at,
+          createdAt: nip65.created_at,
+          eventId: nip65.id,
         }
       : missing,
     ...(complete ? {} : { error: 'no relay completed the lookup' }),
@@ -317,12 +358,13 @@ async function lookupBatch(
   return { entries: out, cacheable: !redirected };
 }
 
-/** A fresh cached result, without any network. */
+/** The fresh cached knowledge, without any network — a kind that expired (and
+ * may be being re-looked up) reads as unknown while the other is still served. */
 export function peekPeerRelayLists(
   pubkey: string,
   viewerPubkey: string | null | undefined = getCurrentUserPubkey(),
 ): PeerRelayListResult | undefined {
-  return freshEntry(cacheKey(pubkey.toLowerCase(), viewerPubkey));
+  return cachedView(cacheKey(pubkey.toLowerCase(), viewerPubkey))?.result;
 }
 
 /**
@@ -346,10 +388,10 @@ export async function getManyPeerRelayLists(
       continue;
     }
     const key = cacheKey(pubkey, viewer);
-    const cached = freshEntry(key);
-    if (cached) {
+    const cached = cachedView(key);
+    if (cached?.complete) {
       hits++;
-      pending.set(pubkey, Promise.resolve(cached));
+      pending.set(pubkey, Promise.resolve(cached.result));
       continue;
     }
     const shared = inFlight.get(key);

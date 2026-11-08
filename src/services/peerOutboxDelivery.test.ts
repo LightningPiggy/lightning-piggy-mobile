@@ -191,6 +191,30 @@ describe('deliverToPeerRelays', () => {
     expect(peekPeerRelayLists(alice, sender)?.status).toBe('ok');
   });
 
+  it('still uses a fresh inbox when the retry of an expired kind outlasts the timeout', async () => {
+    // A partial lookup (no EOSE) finds the inbox; the 10002 stays unknown.
+    publishedInboxes({ [alice]: ['wss://alice.example.com'] });
+    await getPeerRelayLists(alice, { viewerPubkey: sender });
+    // 30 s later the unknown kind is re-looked up, and that retry hangs.
+    const now = Date.now();
+    jest.spyOn(Date, 'now').mockReturnValue(now + 30_001);
+    query.mockReturnValue(new Promise(() => {}));
+    try {
+      const wrap = wrapTo(alice);
+      const report = await deliverToPeerRelays({
+        events: [wrap],
+        senderPubkey: sender,
+        baseRelays: base,
+        role: 'inbox',
+        lookupTimeoutMs: 10,
+      });
+      expect(publish).toHaveBeenCalledWith(['wss://alice.example.com/'], wrap);
+      expect(report.relays).toEqual(['wss://alice.example.com/']);
+    } finally {
+      jest.mocked(Date.now).mockRestore();
+    }
+  });
+
   it('never throws when the extra relays reject or the lookup fails', async () => {
     publishedInboxes({ [alice]: ['wss://alice.example.com'] });
     publish.mockImplementationOnce((relays) => relays.map(() => Promise.reject(new Error('no'))));

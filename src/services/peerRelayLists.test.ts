@@ -341,3 +341,74 @@ it("marks a found pubkey's missing kind unknown (not absent) when the lookup was
   const third = await getPeerRelayLists(alice, { viewerPubkey: viewer });
   expect(third.status === 'ok' && third.lists.read).toBeNull();
 });
+
+it('serves a still-fresh kind while the expired other kind is re-looked up', async () => {
+  jest.useFakeTimers({ now: 7_000_000 });
+  query.mockImplementationOnce(
+    incomplete([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]),
+  );
+  await getPeerRelayLists(alice, { viewerPubkey: viewer });
+
+  // The unknown 10002 expires; a retry starts and hangs.
+  jest.setSystemTime(7_000_000 + PEER_LIST_FAILED_TTL_MS);
+  query.mockReturnValueOnce(new Promise(() => {}));
+  void getPeerRelayLists(alice, { viewerPubkey: viewer });
+  expect(query).toHaveBeenCalledTimes(2);
+
+  // The inbox is still within its own TTL, so it's still served.
+  expect(peekPeerRelayLists(alice, viewer)).toEqual({
+    status: 'ok',
+    lists: { inbox: ['wss://inbox.example.com/'], read: undefined, write: undefined },
+  });
+  // Once it expires too, nothing is fresh.
+  jest.setSystemTime(7_000_000 + PEER_LIST_TTL_MS);
+  expect(peekPeerRelayLists(alice, viewer)).toBeUndefined();
+});
+
+it('never downgrades a fresh find to absent, and keeps the newest list', async () => {
+  jest.useFakeTimers({ now: 9_000_000 });
+  const inbox = (url: string, createdAt: number, id: string) =>
+    listEvent(alice, 10050, [['relay', url]], createdAt, id);
+  const inboxOf = async () => {
+    const r = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+    return r.status === 'ok' ? r.lists.inbox : r.status;
+  };
+  // A partial lookup finds the current inbox; the 10002 stays unknown.
+  query.mockImplementationOnce(incomplete([inbox('wss://current.example.com', 200, 'b')]));
+  expect(await inboxOf()).toEqual(['wss://current.example.com/']);
+
+  // Retry: a relay without that event completes (EOSE) while the original is down.
+  jest.setSystemTime(9_000_000 + PEER_LIST_FAILED_TTL_MS);
+  query.mockImplementationOnce(answered([]));
+  expect(await inboxOf()).toEqual(['wss://current.example.com/']);
+
+  // Retries (partial lookups, so the 10002 stays unknown and is re-asked every 30 s):
+  // an OLDER event doesn't replace the newer cached list...
+  const step = 9_000_000 + PEER_LIST_FAILED_TTL_MS + PEER_LIST_ABSENT_TTL_MS;
+  jest.setSystemTime(step);
+  query.mockImplementationOnce(incomplete([inbox('wss://stale.example.com', 100, 'a')]));
+  expect(await inboxOf()).toEqual(['wss://current.example.com/']);
+
+  // ...nor does a same-second event with a higher id (NIP-01 tie-break)...
+  jest.setSystemTime(step + PEER_LIST_FAILED_TTL_MS);
+  query.mockImplementationOnce(incomplete([inbox('wss://tie.example.com', 200, 'c')]));
+  expect(await inboxOf()).toEqual(['wss://current.example.com/']);
+
+  // ...but a strictly newer one does.
+  jest.setSystemTime(step + 2 * PEER_LIST_FAILED_TTL_MS);
+  query.mockImplementationOnce(incomplete([inbox('wss://newer.example.com', 300, 'd')]));
+  expect(await inboxOf()).toEqual(['wss://newer.example.com/']);
+  expect(query).toHaveBeenCalledTimes(5);
+});
+
+it('lets a completed lookup replace an EXPIRED find with absent', async () => {
+  jest.useFakeTimers({ now: 11_000_000 });
+  query.mockImplementationOnce(
+    answered([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]),
+  );
+  await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  jest.setSystemTime(11_000_000 + PEER_LIST_TTL_MS);
+  query.mockImplementationOnce(answered([]));
+  const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  expect(result.status === 'ok' && result.lists.inbox).toBeNull();
+});
