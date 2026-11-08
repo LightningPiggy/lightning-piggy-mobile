@@ -18,6 +18,7 @@ import { NSEC_KEY } from '../contexts/nostrAuthKeys';
 import type { SignerType } from '../types/nostr';
 import * as amberService from './amberService';
 import { AmberSignerError } from './amberErrors';
+import { SignerTimeoutError } from './signerErrors';
 import { markDmSetup } from './marmotDmSetupTrace';
 import { nip44DecryptFrom, nip44EncryptForRecipient } from './nostrCrypto';
 import * as nostrConnectService from './nostrConnectService';
@@ -66,6 +67,26 @@ const ABANDON_POLL_MS = 250;
  * launch then either works or gets BUSY. It never hangs.
  */
 export const AMBER_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
+ * The same bound for a NIP-46 request. A bunker that never answers (offline,
+ * or a prompt nobody looks at) used to hold the shared queue for good, so a
+ * new chat's invite spun for ever. Past this it rejects with
+ * SignerTimeoutError, the queue moves on, and the caller decides (an
+ * invitation stays queued, unsigned, for a later retry).
+ */
+export const NIP46_REQUEST_TIMEOUT_MS = AMBER_REQUEST_TIMEOUT_MS;
+
+function withNip46Deadline<T>(task: () => Promise<T>, op: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new SignerTimeoutError(`NIP-46 signer did not answer ${op} in time`)),
+      NIP46_REQUEST_TIMEOUT_MS,
+    );
+  });
+  return Promise.race([task(), deadline]).finally(() => clearTimeout(timer));
+}
 
 /** When the Amber request at the front of the queue started, or null. */
 let amberOpenSince: number | null = null;
@@ -134,7 +155,12 @@ export function createMarmotSigner(
 ): EventSigner {
   const { cancelled } = opts;
   const run = <T>(rawTask: () => Promise<T>, op = 'request'): Promise<T> => {
-    const task = signerType === 'amber' ? () => withAmberDeadline(rawTask, op) : rawTask;
+    const task =
+      signerType === 'amber'
+        ? () => withAmberDeadline(rawTask, op)
+        : signerType === 'nip46'
+          ? () => withNip46Deadline(rawTask, op)
+          : rawTask;
     if (!cancelled) return enqueue(task);
     return new Promise<T>((resolve, reject) => {
       void enqueue(async () => {

@@ -714,6 +714,11 @@
     "removeMember": "移除{{name}}",
     "addMembers": "添加成员",
     "pickFriendSubtitle": "选择一位好友加入此群组",
+    "inviteWaitingForRelays": "邀请等待中：{{name}}还没有发布收件中继。一旦发布就会发送。",
+    "invitePending": "邀请尚未送达。Lightning Piggy会继续尝试。",
+    "inviteWaitingForRelaysRemote": "邀请等待中：{{name}}还没有发布收件中继。在那之后你下次在这里发消息时就会发送。",
+    "invitePendingRemote": "邀请尚未送达。你下次在这里发消息时会再试一次。",
+    "inviteNeedsSigner": "邀请未发送：你的签名器没有批准。你下次在这里发消息时会再次询问你。",
     "follow": "关注",
     "following": "已关注",
     "followMember": "关注{{name}}",
@@ -3016,6 +3021,7 @@
   "marmotFallback": {
     "titleNoKeyPackage": "{{name}}还没有使用Marmot",
     "titleOutdated": "{{name}}需要打开或更新其Marmot应用",
+    "titleNoInbox": "暂时无法通过Marmot联系{{name}}",
     "body": "改用NIP-17发送吗？它仍然是端到端加密的，但Marmot能更好地隐藏你在和谁聊天。",
     "willNotify": "我们也会告诉对方你尝试过使用Marmot。",
     "cancel": "取消",
@@ -3025,6 +3031,8 @@
   "marmotSend": {
     "noKeyPackage": "我们在对方的中继上没有找到Marmot密钥包。对方可能需要打开自己的Marmot应用来发布一个——或者暂时使用NIP-17。",
     "outdatedKeyPackage": "对方的Marmot密钥包已过期，或使用了Lightning Piggy暂时无法兼容的旧版Marmot。打开或更新对方的Marmot应用应该能解决——暂时请使用NIP-17。",
+    "noInbox": "对方没有发布任何可以接收Marmot邀请的中继，因此没有开始聊天。等对方设置好消息中继后可以再试一次——或者暂时使用NIP-17。",
+    "noInboxGroup": "这些人都没有发布可以接收Marmot邀请的中继，因此没有创建任何内容。等他们设置好消息中继后再试一次——或者暂时使用NIP-17。",
     "sendFailedTitle": "发送失败",
     "couldNotSendVoice": "无法发送语音消息。",
     "couldNotSendPhoto": "无法发送图片。",
@@ -3170,7 +3178,13 @@
     "progressTitle": "正在邀请设备…{{done}}/{{total}}",
     "progressBody": "请在你的签名器中逐个批准请求——对方使用的每部手机或每个应用都需要各自的邀请。",
     "notReachedTitle": "邀请尚未送达",
-    "notReachedBody": "我们暂时无法把邀请送达{{names}}。Lightning Piggy会自动继续尝试。"
+    "notReachedBody": "我们暂时无法把邀请送达{{names}}。Lightning Piggy会自动继续尝试。",
+    "notReachedBodyRemote": "暂时无法把邀请送达{{names}}。你下次在这里发消息时会再试一次。",
+    "needsSignerBody": "你的签名器没有批准发给{{names}}的邀请。你下次在这里发消息时会再次询问你。",
+    "waitingForRelaysBodyOne": "{{names}}还没有发布收件中继。一旦发布，Lightning Piggy就会发送邀请。",
+    "waitingForRelaysBodyOther": "{{names}}还没有发布收件中继。一旦发布，Lightning Piggy就会发送他们的邀请。",
+    "waitingForRelaysBodyOneRemote": "{{names}}还没有发布收件中继。在那之后你下次在这里发消息时就会发送邀请。",
+    "waitingForRelaysBodyOtherRemote": "{{names}}还没有发布收件中继。在那之后你下次在这里发消息时就会发送他们的邀请。"
   },
   "invitationKeys": {
     "title": "用于新聊天的设备",

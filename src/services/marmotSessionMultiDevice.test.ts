@@ -5,7 +5,7 @@
 import type { Event as NostrEvent } from 'nostr-tools';
 import { finalizeEvent } from 'nostr-tools';
 
-import { MarmotWelcomeDeliveryError } from './marmotInvitees';
+import { WELCOME_RETRY_BACKOFF_MS } from './marmotWelcomeOutbox';
 import * as pushWake from './marmotPushWake';
 import { MARMOT_CHAT_KIND, MarmotSession, buildMarmotRumor } from './marmotSession';
 import { loadFailedInvites, parseWelcomeOutcome } from './marmotWelcomeOutcomes';
@@ -214,21 +214,34 @@ describe('MarmotSession multi-device invites (no WebCrypto)', () => {
     [again, bob.session, carol.session].forEach((s) => s.stop());
   }, 90_000);
 
-  it('multi-device: no group is left behind when every Welcome fails', async () => {
+  it('multi-device: every Welcome refused after the commit keeps the chat queued, then delivers (#1402)', async () => {
     const relay = makeRelay();
     const publish = relay.network.publish;
+    let refuse = true;
     relay.network.publish = async (relays, event) =>
-      event.kind === 1059
+      event.kind === 1059 && refuse
         ? Object.fromEntries(relays.map((r) => [r, { from: r, ok: false, message: 'no' }]))
         : publish(relays, event);
     const big = makeSession(relay);
     const little = makeSession(relay);
     await Promise.all([big.session.start(), little.session.start()]);
     await waitFor(() => relay.events.some((e) => e.kind === 30443 && e.pubkey === little.pubkey));
-    await expect(big.session.getOrCreateDm(little.pubkey)).rejects.toBeInstanceOf(
-      MarmotWelcomeDeliveryError,
-    );
-    expect(big.session.listGroups()).toEqual([]);
+    const dm = await big.session.getOrCreateDm(little.pubkey);
+    expect(big.session.listGroups()).toHaveLength(1);
+    expect(await big.session.pendingInvites(dm.id)).toEqual(new Map([[little.pubkey, 'pending']]));
+    expect(unwrapWelcomes(relay, little)).toHaveLength(0);
+
+    // Relays accept again; past the wrap's backoff, a send in the chat delivers it.
+    refuse = false;
+    const now = Date.now();
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now + 3 * WELCOME_RETRY_BACKOFF_MS);
+    big.session.retryInvites(dm.id);
+    for (let i = 0; i < 200 && (await big.session.pendingInvites(dm.id)).size > 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(await big.session.pendingInvites(dm.id)).toEqual(new Map());
+    expect(unwrapWelcomes(relay, little).length).toBeGreaterThan(0);
+    clock.mockRestore();
     big.session.stop();
     little.session.stop();
   }, 60_000);

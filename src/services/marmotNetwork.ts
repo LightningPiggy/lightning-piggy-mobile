@@ -1,4 +1,4 @@
-import { appRelayPrefsRevision, enabledAppRelays } from './appRelayPrefs';
+import { enabledAppRelays } from './appRelayPrefs';
 import {
   isTestRelayLockdown,
   TEST_PUSH_DISABLED,
@@ -15,6 +15,7 @@ import type { VerifiedEvent, VerifyEventMethod } from 'applesauce-core/helpers';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 
 import { createGroupSubscriptionMux } from './marmotGroupSubscriptions';
+import { marmotInboxRelays } from './marmotPeerRelayLists';
 import { noteMarmotRelayReconnect } from './marmotRelayReconnect';
 import { watchMarmotResume } from './marmotResume';
 import { subscribeMarmotRelays } from './marmotSubscription';
@@ -40,10 +41,11 @@ export const verifyMarmotEvent: VerifyEventMethod = (event): event is VerifiedEv
   verifyEventCached(event);
 
 const REQUEST_MAX_WAIT_MS = 6_000;
+const GIFT_WRAP_KIND = 1059;
 const PUBLISH_TIMEOUT_MS = 10_000;
+/** The push transport's cache of a server's 10050 — asked again sooner when
+ * it wasn't found, but not on every message we send. */
 const INBOX_CACHE_TTL_MS = 10 * 60_000;
-/** A server whose 10050 wasn't found is asked again sooner — but not on
- * every message we send. */
 const INBOX_MISS_TTL_MS = 60_000;
 
 /** Most relays one push trigger is published to, and most taken from a push
@@ -110,6 +112,8 @@ export function createMarmotNetwork(
         onReconnect();
       }
     : undefined;
+  // Reads, subscriptions and group events with no relays of their own fall
+  // back to the lookup relays + defaults.
   const relaysOr = (relays: string[]) => {
     const cleaned = cleanRelays(relays);
     return locked
@@ -121,6 +125,9 @@ export function createMarmotNetwork(
             ...enabledAppRelays('default', DEFAULT_RELAYS, ownerPubkey),
           ]);
   };
+  // A gift wrap (Welcome) goes where its recipient listens or nowhere — a
+  // missing inbox is never papered over with defaults (#1402).
+  const exactly = (relays: string[]) => (locked ? [TEST_RELAY_URL] : cleanRelays(relays));
   const groupSubscribe = createGroupSubscriptionMux(
     (url, filters, next, onReqOpen, onClose) =>
       pool.subscribeMap(
@@ -151,11 +158,9 @@ export function createMarmotNetwork(
       if (generation !== resumeGeneration || groupOwners.size === 0) return;
       reconnect?.();
     });
-  const inboxCache = new Map<string, { relays: string[]; at: number; revision: number }>();
-
   return {
     async publish(relays, event) {
-      const requested = relaysOr(relays);
+      const requested = event.kind === GIFT_WRAP_KIND ? exactly(relays) : relaysOr(relays);
       const targets = [443, 30443, 10051].includes(event.kind)
         ? selectHealthyRelays(requested)
         : requested;
@@ -233,24 +238,15 @@ export function createMarmotNetwork(
       };
     },
 
+    // The invitee's 10050 via the shared peer relay-list cache: [] when they
+    // publish none, a rejection when the lookup couldn't tell — so the
+    // Welcome's caller (marmotWelcomeRelays) only falls back to hints on a
+    // confirmed absence. A locked session delivers on the LAN relay only.
     async getUserInboxRelays(pubkey) {
-      const cached = inboxCache.get(pubkey);
-      if (
-        cached?.revision === appRelayPrefsRevision() &&
-        Date.now() - cached.at < INBOX_CACHE_TTL_MS
-      )
-        return cached.relays;
-      const revision = appRelayPrefsRevision();
-      const lookup = relaysOr(getFallbackRelays());
-      const events = await pool.querySync(
-        lookup,
-        { kinds: [10050], authors: [pubkey], limit: 1 },
-        { maxWait: REQUEST_MAX_WAIT_MS },
-      );
-      const latest = events.sort((a, b) => b.created_at - a.created_at)[0];
-      const relays = relaysOr(latest ? dmInboxRelaysFromTags(latest.tags) : []);
-      inboxCache.set(pubkey, { relays, at: Date.now(), revision });
-      return relays;
+      if (locked) return [TEST_RELAY_URL];
+      const inbox = await marmotInboxRelays(pubkey, ownerPubkey, getFallbackRelays());
+      if (!inbox) throw new Error('Inbox relay lookup incomplete');
+      return inbox;
     },
   };
 }

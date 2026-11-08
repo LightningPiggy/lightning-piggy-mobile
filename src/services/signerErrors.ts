@@ -7,6 +7,14 @@ export class SignerUnavailableError extends Error {
   }
 }
 
+/** A remote signer (NIP-46 bunker) didn't answer within its deadline. */
+export class SignerTimeoutError extends Error {
+  constructor(message = 'Signer did not answer in time') {
+    super(message);
+    this.name = 'SignerTimeoutError';
+  }
+}
+
 export class NostrConnectError extends Error {
   constructor(
     readonly kind: 'unavailable' | 'permission' | 'failed' | 'decrypt-failed',

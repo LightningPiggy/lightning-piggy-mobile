@@ -165,6 +165,15 @@ export const createGroupMembersSheetStyles = (colors: Palette) =>
       fontSize: 13,
       color: colors.textSupplementary,
     },
+    // Marmot: "Invitation not delivered yet" under the name (#1402).
+    inviteStatus: {
+      marginLeft: 52,
+      marginTop: -8,
+      marginBottom: 8,
+      fontSize: 13,
+      fontStyle: 'italic',
+      color: colors.textSupplementary,
+    },
     // A person's devices, indented under their row (#1267).
     deviceList: {
       marginLeft: 52,

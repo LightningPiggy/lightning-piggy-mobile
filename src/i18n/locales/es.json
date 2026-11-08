@@ -714,6 +714,11 @@
     "removeMember": "Eliminar a {{name}}",
     "addMembers": "Añadir miembros",
     "pickFriendSubtitle": "Elige un amigo para añadir a este grupo",
+    "inviteWaitingForRelays": "Invitación en espera: {{name}} todavía no ha publicado relays de entrada. Se enviará en cuanto lo haga.",
+    "invitePending": "Invitación aún no entregada. Lightning Piggy seguirá intentándolo.",
+    "inviteWaitingForRelaysRemote": "Invitación en espera: {{name}} todavía no ha publicado relays de entrada. Se enviará la próxima vez que envíes un mensaje aquí después de que lo haga.",
+    "invitePendingRemote": "Invitación aún no entregada. Se volverá a intentar la próxima vez que envíes un mensaje aquí.",
+    "inviteNeedsSigner": "Invitación no enviada: tu app de firma no la aprobó. Se te volverá a pedir la próxima vez que envíes un mensaje aquí.",
     "follow": "Seguir",
     "following": "Siguiendo",
     "followMember": "Seguir a {{name}}",
@@ -3016,6 +3021,7 @@
   "marmotFallback": {
     "titleNoKeyPackage": "{{name}} todavía no está en Marmot",
     "titleOutdated": "{{name}} tiene que abrir o actualizar su app de Marmot",
+    "titleNoInbox": "Todavía no se puede contactar a {{name}} en Marmot",
     "body": "¿Enviarlo con NIP-17? Sigue cifrado de extremo a extremo, pero Marmot oculta más sobre con quién hablas.",
     "willNotify": "También le avisaremos de que intentaste usar Marmot.",
     "cancel": "Cancelar",
@@ -3025,6 +3031,8 @@
   "marmotSend": {
     "noKeyPackage": "No encontramos un paquete de claves de Marmot en los relays de esta persona. Puede que tenga que abrir su app de Marmot para que publique uno; mientras tanto, usa NIP-17.",
     "outdatedKeyPackage": "El paquete de claves de Marmot de esta persona ha caducado o usa una versión antigua de Marmot con la que Lightning Piggy aún no puede comunicarse. Debería arreglarse si abre o actualiza su app de Marmot; por ahora, usa NIP-17.",
+    "noInbox": "Esta persona no ha publicado ningún relay donde pueda llegarle una invitación de Marmot, así que no se inició ningún chat. Cuando tenga configurados sus relays de mensajes, puedes volver a intentarlo; mientras tanto, usa NIP-17.",
+    "noInboxGroup": "Ninguna de estas personas ha publicado relays donde pueda llegarle una invitación de Marmot, así que no se creó nada. Vuelve a intentarlo cuando tengan configurados sus relays de mensajes; mientras tanto, usa NIP-17.",
     "sendFailedTitle": "Error al enviar",
     "couldNotSendVoice": "No se pudo enviar la nota de voz.",
     "couldNotSendPhoto": "No se pudo enviar la imagen.",
@@ -3170,7 +3178,13 @@
     "progressTitle": "Invitando dispositivos… {{done}} de {{total}}",
     "progressBody": "Aprueba cada solicitud en tu app de firma: cada teléfono o app que usa esta persona necesita su propia invitación.",
     "notReachedTitle": "Invitación aún no entregada",
-    "notReachedBody": "Todavía no pudimos entregar la invitación a {{names}}. Lightning Piggy lo seguirá intentando automáticamente."
+    "notReachedBody": "Todavía no pudimos entregar la invitación a {{names}}. Lightning Piggy lo seguirá intentando automáticamente.",
+    "notReachedBodyRemote": "Todavía no pudimos entregar la invitación a {{names}}. Se volverá a intentar la próxima vez que envíes un mensaje aquí.",
+    "needsSignerBody": "Tu app de firma no aprobó la invitación para {{names}}. Se te volverá a pedir la próxima vez que envíes un mensaje aquí.",
+    "waitingForRelaysBodyOne": "{{names}} todavía no ha publicado relays de entrada. Lightning Piggy enviará la invitación en cuanto lo haga.",
+    "waitingForRelaysBodyOther": "{{names}} todavía no han publicado relays de entrada. Lightning Piggy enviará sus invitaciones en cuanto lo hagan.",
+    "waitingForRelaysBodyOneRemote": "{{names}} todavía no ha publicado relays de entrada. La invitación se enviará la próxima vez que envíes un mensaje aquí después de que lo haga.",
+    "waitingForRelaysBodyOtherRemote": "{{names}} todavía no han publicado relays de entrada. Sus invitaciones se enviarán la próxima vez que envíes un mensaje aquí después de que lo hagan."
   },
   "invitationKeys": {
     "title": "Dispositivos para nuevos chats",

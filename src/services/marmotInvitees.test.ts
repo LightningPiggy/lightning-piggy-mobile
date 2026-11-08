@@ -20,6 +20,7 @@ import {
   selectDeviceKeyPackages,
 } from './marmotInvitees';
 import { MarmotDmDeviceSync } from './marmotDmDeviceSync';
+import { NO_KEY_PACKAGE_LISTS } from './marmotPeerRelayLists';
 import { createMemoryMarmotBackend } from './marmotStore';
 import {
   MarmotKeyPackageLookupError,
@@ -333,14 +334,23 @@ describe('selectDeviceKeyPackages', () => {
         );
       }),
     };
-    const invitees = await resolveInvitees(network, [RELAY], big.pubkey, [
-      little.pubkey,
+    const invitees = await resolveInvitees(
+      network,
+      [RELAY],
       big.pubkey,
-    ]);
+      [little.pubkey, big.pubkey],
+      NO_KEY_PACKAGE_LISTS,
+    );
     expect([...invitees.keys()]).toEqual([little.pubkey]);
     expect(invitees.get(little.pubkey)).toHaveLength(2);
     await expect(
-      resolveInvitees(network, [RELAY], big.pubkey, [little.pubkey, middle.pubkey]),
+      resolveInvitees(
+        network,
+        [RELAY],
+        big.pubkey,
+        [little.pubkey, middle.pubkey],
+        NO_KEY_PACKAGE_LISTS,
+      ),
     ).rejects.toBeInstanceOf(MarmotNoKeyPackageError);
   });
 
@@ -351,7 +361,7 @@ describe('selectDeviceKeyPackages', () => {
       throw new Error('No relay answered: connection failure; query deadline');
     });
     await expect(
-      resolveInvitees({ request }, [RELAY], big.pubkey, [little.pubkey]),
+      resolveInvitees({ request }, [RELAY], big.pubkey, [little.pubkey], NO_KEY_PACKAGE_LISTS),
     ).rejects.toBeInstanceOf(MarmotKeyPackageLookupError);
     // The key-package read asks the pool to tell "none published" from "no answer".
     const keyPackageCall = request.mock.calls.find((c) => !Array.isArray(c[1]));

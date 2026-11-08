@@ -15,6 +15,7 @@ import { marmotImetaTag } from './marmotMedia';
 import { getBlossomServers } from './walletStorageService';
 import type { MarmotUnreachableReason } from './marmotFallback';
 import { MarmotWelcomeDeliveryError } from './marmotInvitees';
+import { MarmotInviteesUnreachableError } from './marmotWelcomeRelays';
 import { MarmotGroupNotReadyError } from './marmotSendGate';
 import { t } from '../i18n';
 import { MarmotKeyPackageLookupError } from './marmotKeyPackages';
@@ -58,6 +59,8 @@ function marmotUnreachableReason(e: unknown): MarmotUnreachableReason | null {
   // app still ships it) that this current-protocol library can't decode, and
   // expired ones. Not the peer's fault — the protocols differ.
   if (e instanceof MarmotUnusableKeyPackageError) return 'outdatedKeyPackage';
+  // Nowhere to deliver the invitation (no inbox / relay hints, #1402).
+  if (e instanceof MarmotInviteesUnreachableError && e.people.length === 1) return 'noInbox';
   return null;
 }
 
@@ -150,6 +153,7 @@ export function marmotSendError(e: unknown): string {
   if (e instanceof MarmotKeyPackageLookupError) return t('marmotSend.keyPackageLookupFailed');
   if (e instanceof MarmotDmSetupTimeoutError)
     return t(e.waitingForAmber ? 'marmotSend.waitingForAmber' : 'marmotSend.chatSetupTimedOut');
+  if (e instanceof MarmotInviteesUnreachableError) return t('marmotSend.noInboxGroup');
   if (e instanceof MarmotWelcomeDeliveryError) return t('marmotSend.inviteNotDelivered');
   if (e instanceof MarmotGroupNotReadyError) return t('marmotSend.chatNotReady');
   if (isRelayUnreachableError(e)) return t('marmotSend.relaysUnreachable');
@@ -238,6 +242,8 @@ export async function sendMarmotGroupRumor(
 }> {
   try {
     const session = requireMarmotSession(pubkey);
+    // The user's send: invitations still waiting in this group retry too (#1402).
+    session.retryInvites(appGroupId);
     const rumor = buildMarmotRumor(pubkey, {
       kind: marmotKindForAppKind(draft.kind),
       content: draft.content,
@@ -308,6 +314,7 @@ export async function sendMarmotImage(
     if (!group) throw new Error('This group is not available yet.');
     // Before encrypting: a device added now needs this epoch's key (#1559).
     if ('peer' in target) await session.syncDmDevices(group.id).catch(() => undefined);
+    else session.retryInvites(group.id); // #1402
     const plaintext = new Uint8Array(Buffer.from(image.base64, 'base64'));
     const filename =
       image.filename ?? `photo.${image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'jpg'}`;

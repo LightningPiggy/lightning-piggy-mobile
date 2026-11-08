@@ -714,6 +714,11 @@
     "removeMember": "Eltávolítás: {{name}}",
     "addMembers": "Tagok hozzáadása",
     "pickFriendSubtitle": "Válassz egy barátot, akit hozzáadsz a csoporthoz",
+    "inviteWaitingForRelays": "A meghívó várakozik: {{name}} még nem tett közzé bejövő relay-eket. Elküldjük, amint megteszi.",
+    "invitePending": "A meghívó még nem érkezett meg. A Lightning Piggy tovább próbálkozik.",
+    "inviteWaitingForRelaysRemote": "A meghívó várakozik: {{name}} még nem tett közzé bejövő relay-eket. Akkor küldjük el, amikor ezután legközelebb üzenetet küldesz itt.",
+    "invitePendingRemote": "A meghívó még nem érkezett meg. Újrapróbáljuk, amikor legközelebb üzenetet küldesz itt.",
+    "inviteNeedsSigner": "A meghívó nem lett elküldve: az aláíró nem hagyta jóvá. Legközelebb, amikor itt üzenetet küldesz, újra megkérdezünk.",
     "follow": "Követés",
     "following": "Követed",
     "followMember": "Követés: {{name}}",
@@ -3016,6 +3021,7 @@
   "marmotFallback": {
     "titleNoKeyPackage": "{{name}} még nincs a Marmoton",
     "titleOutdated": "{{name}} Marmot-alkalmazását meg kell nyitni vagy frissíteni",
+    "titleNoInbox": "{{name}} még nem érhető el a Marmoton",
     "body": "Elküldöd inkább NIP-17-tel? Az is végpontok közötti titkosítású, de a Marmot többet elrejt arról, hogy kivel beszélsz.",
     "willNotify": "Azt is tudatjuk vele, hogy Marmotot próbáltál.",
     "cancel": "Mégse",
@@ -3025,6 +3031,8 @@
   "marmotSend": {
     "noKeyPackage": "Ennek a személynek a relay-eiben nem találtunk Marmot-kulcscsomagot. Lehet, hogy meg kell nyitnia a Marmot-alkalmazását, hogy közzétehessen egyet – vagy egyelőre használj NIP-17-et.",
     "outdatedKeyPackage": "Ennek a személynek a Marmot-kulcscsomagja lejárt, vagy a Marmot egy régebbi verzióját használja, amellyel a Lightning Piggy még nem tud beszélni. A Marmot-alkalmazás megnyitása vagy frissítése megoldhatja – egyelőre használj NIP-17-et.",
+    "noInbox": "Ez a személy nem tett közzé olyan relay-t, amelyen egy Marmot-meghívó elérhetné, ezért nem indult csevegés. Ha beállította az üzenetküldő relay-eit, próbáld újra – vagy egyelőre használj NIP-17-et.",
+    "noInboxGroup": "Egyik személy sem tett közzé olyan relay-t, amelyen egy Marmot-meghívó elérhetné, ezért semmi sem jött létre. Próbáld újra, ha beállították az üzenetküldő relay-eiket – vagy egyelőre használj NIP-17-et.",
     "sendFailedTitle": "A küldés nem sikerült",
     "couldNotSendVoice": "A hangüzenetet nem sikerült elküldeni.",
     "couldNotSendPhoto": "A képet nem sikerült elküldeni.",
@@ -3170,7 +3178,13 @@
     "progressTitle": "Eszközök meghívása… {{done}} / {{total}}",
     "progressBody": "Hagyd jóvá az egyes kéréseket az aláíródban – a személy minden telefonjának vagy alkalmazásának saját meghívó kell.",
     "notReachedTitle": "A meghívó még nem érkezett meg",
-    "notReachedBody": "A meghívót még nem tudtuk kézbesíteni ide: {{names}}. A Lightning Piggy automatikusan próbálkozik tovább."
+    "notReachedBody": "A meghívót még nem tudtuk kézbesíteni ide: {{names}}. A Lightning Piggy automatikusan próbálkozik tovább.",
+    "notReachedBodyRemote": "Még nem tudtuk kézbesíteni a meghívót neki: {{names}}. Újrapróbáljuk, amikor legközelebb üzenetet küldesz itt.",
+    "needsSignerBody": "Az aláíró nem hagyta jóvá a meghívót neki: {{names}}. Legközelebb, amikor itt üzenetet küldesz, újra megkérdezünk.",
+    "waitingForRelaysBodyOne": "{{names}} még nem tett közzé bejövő relay-eket. A Lightning Piggy elküldi a meghívót, amint megteszi.",
+    "waitingForRelaysBodyOther": "{{names}} még nem tettek közzé bejövő relay-eket. A Lightning Piggy elküldi a meghívóikat, amint megteszik.",
+    "waitingForRelaysBodyOneRemote": "{{names}} még nem tett közzé bejövő relay-eket. A meghívót akkor küldjük el, amikor ezután legközelebb üzenetet küldesz itt.",
+    "waitingForRelaysBodyOtherRemote": "{{names}} még nem tettek közzé bejövő relay-eket. A meghívóikat akkor küldjük el, amikor ezután legközelebb üzenetet küldesz itt."
   },
   "invitationKeys": {
     "title": "Eszközök új csevegésekhez",

@@ -36,7 +36,7 @@ import type { Event as NostrEvent } from 'nostr-tools';
 
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { amberFailureKind } from './amberErrors';
-import { NostrConnectError } from './signerErrors';
+import { NostrConnectError, SignerTimeoutError } from './signerErrors';
 import { keyPackageSignatureKey, readGroupLeaves, type GroupLeaf } from './marmotDevices';
 import { MAX_DEVICES_PER_PERSON, selectDeviceKeyPackages } from './marmotInvitees';
 import type { MarmotKvBackend } from './marmotStore';
@@ -127,6 +127,8 @@ export class MarmotDmDeviceSync {
   private readonly nextCheck = new Map<string, number>();
   // Refusals suppress only the attempted group + key packages for this session.
   private readonly declined = new Set<string>();
+  /** Group + key package this sync topped up (not the user's own invite). */
+  private readonly toppedUp = new Set<string>();
   private readonly running = new Map<string, Promise<void>>();
   private readonly lookups = new Map<string, { at: number; events: Promise<NostrEvent[]> }>();
 
@@ -157,14 +159,22 @@ export class MarmotDmDeviceSync {
     };
   }
 
-  isDeclined(mlsId: string, packageId: string): boolean {
-    return this.declined.has(`${mlsId}:${packageId}`);
+  /**
+   * A queued Welcome whose signature the user declined for one of THIS
+   * sync's automatic top-ups: not asked again this session, so a busy 1:1
+   * doesn't nag (#1559). A Welcome from the user's own invite (a new chat,
+   * added members) is asked again on their next send instead (#1402).
+   */
+  suppressesRetry(mlsId: string, packageId: string): boolean {
+    const key = `${mlsId}:${packageId}`;
+    return this.declined.has(key) && this.toppedUp.has(key);
   }
 
   private noteDeclined(mlsId: string, packages: readonly NostrEvent[], error: unknown): void {
     if (
       !this.opts.silentSigner &&
       (amberFailureKind(error) === 'declined' ||
+        error instanceof SignerTimeoutError ||
         (error instanceof NostrConnectError && error.kind === 'permission'))
     ) {
       for (const kp of packages) this.declined.add(`${mlsId}:${kp.id}`);
@@ -287,6 +297,7 @@ export class MarmotDmDeviceSync {
     });
     if (plan.size === 0 || this.opts.stopped()) return ok;
     const packages = [...plan.values()].flat();
+    for (const kp of packages) this.toppedUp.add(`${mlsId}:${kp.id}`);
     try {
       await this.opts.invite(mlsId, plan);
     } catch (error) {

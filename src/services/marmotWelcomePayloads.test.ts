@@ -64,7 +64,7 @@ describe('MarmotWelcomePayloads retries', () => {
   it.each(['declined', 'delivered'] as const)(
     'rechecks queued concurrent retries after the first is %s',
     async (outcome) => {
-      const { backend, outbox, devices, signEvent, publish, payloads, seed } = setup();
+      const { backend, outbox, signEvent, publish, payloads, seed } = setup();
       await seed();
       // Hold the shared capture queue until both flushes have queued their retry.
       let release!: () => void;
@@ -84,7 +84,6 @@ describe('MarmotWelcomePayloads retries', () => {
       await Promise.all([held, first, second]);
       expect(signEvent).toHaveBeenCalledTimes(1);
       expect(publish).toHaveBeenCalledTimes(outcome === 'delivered' ? 1 : 0);
-      expect(devices.isDeclined(GROUP, keyPackage.id)).toBe(outcome === 'declined');
       expect(await backend.get('welcomePayloads', `${GROUP}:${keyPackage.id}`)).toEqual(
         outcome === 'delivered' ? null : expect.any(String),
       );

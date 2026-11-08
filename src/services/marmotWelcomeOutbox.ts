@@ -9,8 +9,10 @@
 //
 // Lifecycle: the session's network publish is wrapped so failed gift wraps
 // are captured while an invite runs; the invite retries them once straight
-// away, then persists what's still undelivered here and retries at every
-// session start until a relay accepts it or it expires.
+// away, then persists what's still undelivered here and retries it — after
+// session start / resume and on a send in its chat — until a relay accepts it
+// or it expires. Each wrap backs off between retries (1 min doubling to
+// 30 min) and is never republished twice at once (#1402).
 
 import type { NostrNetworkInterface } from '@internet-privacy/marmot-ts';
 import type { Event as NostrEvent } from 'nostr-tools';
@@ -23,6 +25,47 @@ const OUTBOX_NS = 'welcomeOutbox';
 export const WELCOME_OUTBOX_TTL_SECS = 14 * 24 * 60 * 60;
 /** Bound on stored wraps (oldest dropped first). */
 const OUTBOX_MAX = 100;
+/** A queued invitation is retried no sooner than this after a failed attempt,
+ * doubling up to the max (#1402). Shared with the unsigned queue. */
+export const WELCOME_RETRY_BACKOFF_MS = 60_000;
+export const WELCOME_RETRY_BACKOFF_MAX_MS = 30 * 60_000;
+/** Queue changes in a burst are reported once per chat, at most this often. */
+export const INVITE_CHANGE_COALESCE_MS = 150;
+
+/** The next backoff after a failed attempt (`previous` = the last one, if any). */
+export function nextRetryBackoff(previous: { delayMs: number } | undefined, now = Date.now()) {
+  const delayMs = Math.min(
+    (previous?.delayMs ?? WELCOME_RETRY_BACKOFF_MS / 2) * 2,
+    WELCOME_RETRY_BACKOFF_MAX_MS,
+  );
+  return { at: now + delayMs, delayMs };
+}
+
+/**
+ * "A chat's queued invitations changed" (queued, reason changed, delivered,
+ * dropped), coalesced: a burst of queue writes becomes one call per chat
+ * (MLS group id hex), so a member list reloads its status once (#1402).
+ */
+export class InviteChanges {
+  private readonly listeners = new Set<(groupIdHex: string) => void>();
+  private readonly changed = new Set<string>();
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  notify(groupIdHex: string): void {
+    this.changed.add(groupIdHex);
+    this.timer ??= setTimeout(() => {
+      this.timer = null;
+      const ids = [...this.changed];
+      this.changed.clear();
+      for (const id of ids) for (const listener of this.listeners) listener(id);
+    }, INVITE_CHANGE_COALESCE_MS);
+  }
+
+  subscribe(listener: (groupIdHex: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+}
 
 export interface PendingWelcome {
   /** The signed kind-1059 gift wrap, ready to republish. */
@@ -48,6 +91,14 @@ export class MarmotWelcomeOutbox {
   /** Captures run one at a time: gift wraps are encrypted, so a failed one
    * can't be traced to its group — two invites at once would swap them. */
   private captureChain: Promise<unknown> = Promise.resolve();
+  /** Per wrap (event id): when it may be retried again (in memory). */
+  private readonly backoff = new Map<string, { at: number; delayMs: number }>();
+  /** Per wrap: the republish in flight, shared by concurrent flushes. */
+  private readonly retrying = new Map<string, Promise<boolean>>();
+  /** Both invitation queues report their changes here. */
+  readonly changes = new InviteChanges();
+  /** Per chat, bumped when its invitations are dropped (see `markDropped`). */
+  private readonly generations = new Map<string, number>();
 
   constructor(
     private readonly backend: MarmotKvBackend,
@@ -95,52 +146,141 @@ export class MarmotWelcomeOutbox {
     return run;
   }
 
+  /**
+   * A chat's drop generation (MLS group id hex). Work on its invitations that
+   * started before a drop — an invite's captured failures, a retry — passes
+   * the generation it saw, and stops once it has moved on (#1402).
+   */
+  generation(groupIdHex: string): number {
+    return this.generations.get(groupIdHex) ?? 0;
+  }
+
+  /** The chat was left, removed or destroyed: its in-flight resends and
+   * enqueues stop (called by `drop` and the unsigned queue's drop). */
+  markDropped(groupIdHex: string): void {
+    this.generations.set(groupIdHex, this.generation(groupIdHex) + 1);
+  }
+
+  private isDropped(guard?: { groupIdHex: string; generation: number }): boolean {
+    return !!guard && this.generation(guard.groupIdHex) !== guard.generation;
+  }
+
   /** Republish each wrap once; returns those still not accepted (all of
-   * them once the session has stopped — they stay queued, unpublished). */
-  async resend<W extends CapturedWrap>(wraps: W[]): Promise<W[]> {
+   * them, unpublished, once the session has stopped or — with `guard` —
+   * their chat was dropped since `guard.generation`). */
+  async resend<W extends CapturedWrap>(
+    wraps: W[],
+    guard?: { groupIdHex: string; generation: number },
+  ): Promise<W[]> {
     const publish = this.publishRaw;
-    if (!publish || this.isStopped()) return wraps;
+    if (!publish || this.isStopped() || this.isDropped(guard)) return wraps;
     const results = await Promise.all(
       wraps.map((w) => publish(w.relays, w.event).then(accepted, () => false)),
     );
     return wraps.filter((_, i) => !results[i]);
   }
 
-  /** Keep undelivered wraps for retry at the next session start. */
-  async enqueue(groupIdHex: string, wraps: CapturedWrap[]): Promise<void> {
+  /** Keep undelivered wraps for retry. They were just attempted, so the
+   * first retry waits out the first backoff step. */
+  async enqueue(groupIdHex: string, wraps: CapturedWrap[], generation?: number): Promise<void> {
+    // A chat dropped since the caller's `generation`: nothing to keep.
+    if (generation !== undefined && this.isDropped({ groupIdHex, generation })) return;
     const queuedAt = Math.floor(Date.now() / 1000);
+    const started = this.generation(groupIdHex);
+    const written: PendingWelcome[] = [];
     for (const w of wraps) {
+      // Dropped part-way (left / destroyed): stop, and take back what we wrote.
+      if (this.generation(groupIdHex) !== started) break;
       const item: PendingWelcome = { ...w, groupIdHex, queuedAt };
       await this.backend.set(OUTBOX_NS, w.event.id, JSON.stringify(item));
+      this.backoff.set(w.event.id, nextRetryBackoff(this.backoff.get(w.event.id)));
+      written.push(item);
     }
+    if (this.generation(groupIdHex) !== started) {
+      for (const item of written) await this.forget(item);
+      return;
+    }
+    if (wraps.length > 0) this.changes.notify(groupIdHex);
     if ((await this.backend.keys(OUTBOX_NS)).length <= OUTBOX_MAX) return;
     const oldestFirst = (await this.pending()).sort((a, b) => a.queuedAt - b.queuedAt);
     for (const item of oldestFirst.slice(0, oldestFirst.length - OUTBOX_MAX)) {
-      await this.backend.remove(OUTBOX_NS, item.event.id);
+      await this.forget(item); // its chat's members sheet updates too
+    }
+  }
+
+  /** Forget `recipient`'s queued wraps into a chat (they were removed from it). */
+  async dropRecipient(groupIdHex: string, recipient: string): Promise<void> {
+    for (const item of await this.pending()) {
+      if (item.groupIdHex === groupIdHex && item.recipient.toLowerCase() === recipient) {
+        await this.forget(item);
+      }
     }
   }
 
   /** Forget a group's queued wraps (the group was destroyed / left). */
   async drop(groupIdHex: string): Promise<void> {
+    this.markDropped(groupIdHex);
     for (const item of await this.pending()) {
-      if (item.groupIdHex === groupIdHex) await this.backend.remove(OUTBOX_NS, item.event.id);
+      if (item.groupIdHex === groupIdHex) await this.forget(item);
     }
   }
 
-  /** Retry every queued wrap; delivered and expired ones are removed. */
-  async flush(): Promise<void> {
+  /**
+   * Retry queued wraps — only `groupIdHex`'s when given (a send in that chat),
+   * every chat's otherwise (the scheduled retry). A wrap still backing off is
+   * skipped; one already being republished is shared, not sent twice.
+   * Delivered and expired ones are removed.
+   */
+  async flush(groupIdHex?: string): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
+    // Generations as of the start: a chat dropped while this flush reads the
+    // queue or works through earlier wraps isn't republished.
+    const started = new Map(this.generations);
     for (const item of await this.pending()) {
       if (this.isStopped()) return;
-      const expired = now - item.queuedAt > WELCOME_OUTBOX_TTL_SECS;
-      if (expired || (await this.resend([item])).length === 0) {
-        await this.backend.remove(OUTBOX_NS, item.event.id);
+      if (groupIdHex && item.groupIdHex !== groupIdHex) continue;
+      if (now - item.queuedAt > WELCOME_OUTBOX_TTL_SECS) {
+        await this.forget(item);
+        continue;
       }
+      if (Date.now() < (this.backoff.get(item.event.id)?.at ?? 0)) continue;
+      const guard = { groupIdHex: item.groupIdHex, generation: started.get(item.groupIdHex) ?? 0 };
+      if (await this.retryOnce(item, guard)) await this.forget(item);
     }
+  }
+
+  private retryOnce(
+    item: PendingWelcome,
+    guard: { groupIdHex: string; generation: number },
+  ): Promise<boolean> {
+    const id = item.event.id;
+    const running = this.retrying.get(id);
+    if (running) return running;
+    const run = this.resend([item], guard)
+      .then((still) => {
+        if (still.length > 0) this.backoff.set(id, nextRetryBackoff(this.backoff.get(id)));
+        return still.length === 0;
+      })
+      .finally(() => this.retrying.delete(id));
+    this.retrying.set(id, run);
+    return run;
+  }
+
+  private async forget(item: PendingWelcome): Promise<void> {
+    await this.backend.remove(OUTBOX_NS, item.event.id);
+    this.backoff.delete(item.event.id);
+    this.changes.notify(item.groupIdHex);
   }
 
   async remove(eventId: string): Promise<void> {
+    const raw = await this.backend.get(OUTBOX_NS, eventId);
     await this.backend.remove(OUTBOX_NS, eventId);
+    this.backoff.delete(eventId);
+    try {
+      if (raw) this.changes.notify((JSON.parse(raw) as PendingWelcome).groupIdHex);
+    } catch {
+      // unreadable: nothing to report
+    }
   }
 
   async pending(): Promise<PendingWelcome[]> {

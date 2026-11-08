@@ -720,6 +720,11 @@
     "removeMember": "Usuń: {{name}}",
     "addMembers": "Dodaj członków",
     "pickFriendSubtitle": "Wybierz znajomego do dodania do tej grupy",
+    "inviteWaitingForRelays": "Zaproszenie czeka: {{name}} nie opublikował(a) jeszcze przekaźników skrzynki odbiorczej. Zostanie wysłane, gdy to zrobi.",
+    "invitePending": "Zaproszenie jeszcze nie dotarło. Lightning Piggy będzie próbować dalej.",
+    "inviteWaitingForRelaysRemote": "Zaproszenie czeka: {{name}} nie opublikował(a) jeszcze przekaźników skrzynki odbiorczej. Zostanie wysłane, gdy potem następnym razem wyślesz tu wiadomość.",
+    "invitePendingRemote": "Zaproszenie jeszcze nie dotarło. Spróbujemy ponownie, gdy następnym razem wyślesz tu wiadomość.",
+    "inviteNeedsSigner": "Zaproszenie nie zostało wysłane: twoja aplikacja podpisująca go nie zatwierdziła. Zapytamy ponownie, gdy następnym razem wyślesz tu wiadomość.",
     "follow": "Obserwuj",
     "following": "Obserwujesz",
     "followMember": "Obserwuj: {{name}}",
@@ -3046,6 +3051,7 @@
   "marmotFallback": {
     "titleNoKeyPackage": "{{name}} nie ma jeszcze Marmot",
     "titleOutdated": "Aplikację Marmot użytkownika {{name}} trzeba otworzyć lub zaktualizować",
+    "titleNoInbox": "Nie można jeszcze dotrzeć do {{name}} przez Marmot",
     "body": "Wysłać to przez NIP-17? Nadal jest szyfrowane end-to-end, ale Marmot ukrywa więcej informacji o tym, z kim rozmawiasz.",
     "willNotify": "Damy też znać, że próbowano przez Marmot.",
     "cancel": "Anuluj",
@@ -3055,6 +3061,8 @@
   "marmotSend": {
     "noKeyPackage": "Nie znaleźliśmy pakietu kluczy Marmot na przekaźnikach tej osoby. Może musieć otworzyć swoją aplikację Marmot, aby go opublikować — albo na razie użyj NIP-17.",
     "outdatedKeyPackage": "Pakiet kluczy Marmot tej osoby wygasł lub używa starszej wersji Marmot, z którą Lightning Piggy jeszcze nie potrafi się porozumieć. Otwarcie lub aktualizacja jej aplikacji Marmot powinny pomóc — na razie użyj NIP-17.",
+    "noInbox": "Ta osoba nie opublikowała żadnych przekaźników, przez które mogłoby do niej dotrzeć zaproszenie Marmot, więc czat nie został rozpoczęty. Gdy skonfiguruje swoje przekaźniki wiadomości, spróbuj ponownie — albo na razie użyj NIP-17.",
+    "noInboxGroup": "Żadna z tych osób nie opublikowała przekaźników, przez które mogłoby do niej dotrzeć zaproszenie Marmot, więc nic nie zostało utworzone. Spróbuj ponownie, gdy skonfigurują swoje przekaźniki wiadomości — albo na razie użyj NIP-17.",
     "sendFailedTitle": "Nie udało się wysłać",
     "couldNotSendVoice": "Nie udało się wysłać wiadomości głosowej.",
     "couldNotSendPhoto": "Nie udało się wysłać obrazu.",
@@ -3206,7 +3214,13 @@
     "progressTitle": "Zapraszanie urządzeń… {{done}} z {{total}}",
     "progressBody": "Zatwierdź każdą prośbę w swojej aplikacji podpisującej — każdy telefon lub aplikacja tej osoby potrzebuje własnego zaproszenia.",
     "notReachedTitle": "Zaproszenie jeszcze nie dotarło",
-    "notReachedBody": "Nie udało się jeszcze dostarczyć zaproszenia. Odbiorcy: {{names}}. Lightning Piggy będzie próbować automatycznie."
+    "notReachedBody": "Nie udało się jeszcze dostarczyć zaproszenia. Odbiorcy: {{names}}. Lightning Piggy będzie próbować automatycznie.",
+    "notReachedBodyRemote": "Nie udało się jeszcze dostarczyć zaproszenia do {{names}}. Spróbujemy ponownie, gdy następnym razem wyślesz tu wiadomość.",
+    "needsSignerBody": "Twoja aplikacja podpisująca nie zatwierdziła zaproszenia dla {{names}}. Zapytamy ponownie, gdy następnym razem wyślesz tu wiadomość.",
+    "waitingForRelaysBodyOne": "{{names}} nie opublikował(a) jeszcze przekaźników skrzynki odbiorczej. Lightning Piggy wyśle zaproszenie, gdy to zrobi.",
+    "waitingForRelaysBodyOther": "{{names}} nie opublikowali jeszcze przekaźników skrzynki odbiorczej. Lightning Piggy wyśle ich zaproszenia, gdy to zrobią.",
+    "waitingForRelaysBodyOneRemote": "{{names}} nie opublikował(a) jeszcze przekaźników skrzynki odbiorczej. Zaproszenie zostanie wysłane, gdy potem następnym razem wyślesz tu wiadomość.",
+    "waitingForRelaysBodyOtherRemote": "{{names}} nie opublikowali jeszcze przekaźników skrzynki odbiorczej. Ich zaproszenia zostaną wysłane, gdy potem następnym razem wyślesz tu wiadomość."
   },
   "invitationKeys": {
     "title": "Urządzenia do nowych czatów",
