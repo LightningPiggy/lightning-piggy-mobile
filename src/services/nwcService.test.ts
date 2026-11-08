@@ -24,7 +24,12 @@ import {
   isWalletConnected,
   payInvoice,
   getInfo,
+  getWalletHealth,
+  isBalanceInFlight,
+  listTransactions,
 } from './nwcService';
+import { resetWalletReply } from './nwcRelayHealth';
+import * as paymentCompletion from './nwcPaymentCompletion';
 import { clearPaymentProofsForTests, getPaymentProof } from './paymentProofs';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
@@ -58,6 +63,7 @@ jest.mock('@getalby/sdk', () => ({
     getInfo: () => mockGetInfo(),
     sendPayment: (bolt11: string) => mockSendPaymentImpl(bolt11),
     lookupInvoice: (args: { paymentHash: string }) => mockLookupInvoiceImpl(args),
+    listTransactions: (args: unknown) => mockRawListTransactions(args),
     close: jest.fn(),
     // `client.connected` is read by ensureConnected(); make it look
     // healthy so the reconnect path isn't triggered mid-test.
@@ -529,3 +535,100 @@ it.each(['NOT_IMPLEMENTED', 'RESTRICTED', 'UNAUTHORIZED', 'timeout'])(
     expect(await pending).toEqual({ paid: null });
   },
 );
+
+describe('wallet health is credited only by real wallet answers (#1768)', () => {
+  const BOLT11 =
+    'lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsy' +
+    'p3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4e' +
+    'vs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp';
+  const health = () => getWalletHealth(WALLET_ID, true);
+
+  beforeEach(() => {
+    // The outer beforeEach's connect() probe answered; start each case from "no reply yet".
+    resetWalletReply(WALLET_ID);
+    expect(health()).toBe('checking');
+  });
+
+  it("an SDK reply timeout on connect()'s probe is NOT a reply (the outage case)", async () => {
+    const id = 'outage-wallet';
+    mockGetBalanceImpl = async () => {
+      throw Object.assign(new Error('reply timeout: event abc'), { code: 'INTERNAL' });
+    };
+    const pending = connect(id, VALID_NWC_URL);
+    await jest.runAllTimersAsync();
+    expect((await pending).success).toBe(true);
+    expect(getWalletHealth(id, true)).toBe('degraded');
+    disconnect(id);
+  });
+
+  it('credits a successful pay_invoice', async () => {
+    mockSendPaymentImpl = async () => ({ preimage: 'c'.repeat(64) });
+    await payInvoice(WALLET_ID, BOLT11);
+    expect(health()).toBe('responsive');
+  });
+
+  it('does not credit a payment confirmed only by the LUD-21 HTTP verify', async () => {
+    const spy = jest
+      .spyOn(paymentCompletion, 'confirmNwcPayment')
+      .mockResolvedValueOnce({ preimage: 'c'.repeat(64), confirmed: true, answered: false });
+    await payInvoice(WALLET_ID, BOLT11);
+    expect(health()).toBe('checking');
+    spy.mockRestore();
+  });
+
+  it('credits a NIP-47 wallet error from pay_invoice (the wallet answered)', async () => {
+    mockSendPaymentImpl = async () => {
+      throw Object.assign(new Error('no funds'), { code: 'INSUFFICIENT_BALANCE' });
+    };
+    await expect(payInvoice(WALLET_ID, BOLT11)).rejects.toThrow('no funds');
+    expect(health()).toBe('responsive');
+  });
+
+  it('credits a NOT_IMPLEMENTED list_transactions answer without retry/reconnect churn', async () => {
+    mockRawListTransactions.mockReset();
+    mockRawListTransactions.mockRejectedValueOnce(
+      Object.assign(new Error('list not supported'), { code: 'NOT_IMPLEMENTED' }),
+    );
+    const listing = listTransactions(WALLET_ID);
+    const assertion = expect(listing).rejects.toThrow('list not supported');
+    await jest.runAllTimersAsync();
+    await assertion;
+    expect(mockRawListTransactions).toHaveBeenCalledTimes(1);
+    expect(health()).toBe('responsive');
+  });
+
+  it('credits a real get_info but not the WebLN fallback stub', async () => {
+    mockGetInfo.mockResolvedValueOnce({ methods: ['sendPayment'], node: {}, supports: [] });
+    await getInfo(WALLET_ID);
+    expect(health()).toBe('checking');
+    mockGetInfo.mockResolvedValueOnce({ methods: ['getBalance'], node: { alias: 'x' } });
+    await getInfo(WALLET_ID);
+    expect(health()).toBe('responsive');
+  });
+
+  it('credits list_transactions and lookup_invoice answers', async () => {
+    mockRawListTransactions.mockResolvedValueOnce({ transactions: [] });
+    const listing = listTransactions(WALLET_ID);
+    await jest.runAllTimersAsync();
+    await listing;
+    expect(health()).toBe('responsive');
+
+    resetWalletReply(WALLET_ID);
+    mockRawLookupInvoice.mockRejectedValueOnce(
+      Object.assign(new Error('invoice not found'), { code: 'NOT_FOUND' }),
+    );
+    expect(await lookupInvoice(WALLET_ID, mockPaymentHash)).toBeNull();
+    expect(health()).toBe('responsive'); // a NIP-47 error is still an answer
+  });
+
+  it('reports a get_balance in flight, including the bounded replyTimeoutMs path', async () => {
+    let resolve!: (v: { balance: number }) => void;
+    mockGetBalanceImpl = () => new Promise((r) => (resolve = r));
+    const pending = getBalance(WALLET_ID, { replyTimeoutMs: 5000 });
+    await Promise.resolve();
+    expect(isBalanceInFlight(WALLET_ID)).toBe(true);
+    resolve({ balance: 1 });
+    await pending;
+    expect(isBalanceInFlight(WALLET_ID)).toBe(false);
+  });
+});

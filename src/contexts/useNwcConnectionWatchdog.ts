@@ -1,29 +1,98 @@
 import type React from 'react';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
+import { AppState } from 'react-native';
 import * as nwcService from '../services/nwcService';
 import * as walletStorage from '../services/walletStorageService';
 import type { WalletState } from '../types/wallet';
+
+/** Watchdog tick: reconnect dropped sockets, probe idle wallets, sync health. */
+export const WATCHDOG_INTERVAL_MS = 30_000;
+/** Resume stagger (CLAUDE.md "AppState `active` handlers stagger", #554/#1031). */
+export const WATCHDOG_RESUME_DELAY_MS = 3_000;
+/** Coalescing window for health-change notifications (≤150 ms per CLAUDE.md). */
+export const HEALTH_SYNC_COALESCE_MS = 150;
+/** Single-attempt ceiling for the liveness probe — same as the focus balance poll (#650). */
+export const PROBE_REPLY_TIMEOUT_MS = 8_000;
 
 /**
  * NWC connection watchdog — extracted from `WalletContext` (per-responsibility
  * hook split, see CLAUDE.md "File size and modularity").
  *
- * Checks each NWC wallet's WebSocket state every 30 seconds and reconnects if
- * dropped (prevents idle timeout disconnections). Reads the wallet list
- * through a ref so the interval isn't torn down and re-created on every
- * wallet state update (the wallets array churns constantly with balance
- * polls / tx refreshes — missed/duplicated checks, extra churn).
+ * Every 30 s, for each NWC wallet:
+ *  1. reconnect a dropped / dead socket (respecting the relay cooldown, #656);
+ *  2. send a liveness probe — one `get_balance`, which also refreshes the
+ *     balance — when the wallet hasn't answered anything for ~4 min (#1768).
+ *     Without it, a wallet backend that goes down while the app sits idle
+ *     never fails a request and so stays green "Connected" indefinitely. The
+ *     probe skips parked / rate-limited relays, handshakes in flight, a
+ *     get_balance already in flight and a backgrounded app, and is throttled
+ *     per wallet in `shouldProbeWallet`. Any real answer resets its clock —
+ *     get_balance / make_invoice and, via `recordWalletReply`, pay / list /
+ *     lookup / get_info — so normal use rarely needs it. Note the foreground
+ *     balance refresh is event-driven (once on focus / foreground, #657), NOT
+ *     a constant poll, so a balance screen left open still gets probed;
+ *  3. sync `isConnected` + the four-state `connectionHealth` into wallet state
+ *     (write only on change).
+ *
+ * On resume the same pass runs once after a cancellable ~3 s stagger, so a
+ * wallet left idle past the freshness window decays to grey "Checking…" and is
+ * re-probed promptly instead of waiting for the next tick. Between passes,
+ * relay-health notifications (an answer, a timeout, a fresh socket) trigger a
+ * coalesced no-network health sync so the card turns green as soon as the
+ * startup probe answers.
+ *
+ * Reads the wallet list through a ref so the interval isn't torn down and
+ * re-created on every wallet state update (the wallets array churns constantly
+ * with balance polls / tx refreshes).
  */
 export function useNwcConnectionWatchdog(
   walletsRef: React.MutableRefObject<WalletState[]>,
   updateWalletInState: (walletId: string, updates: Partial<WalletState>) => void,
   captureIdentity: () => () => boolean,
 ): void {
-  const connectionCheckInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     let checkInProgress = false;
     let disposed = false;
-    connectionCheckInterval.current = setInterval(async () => {
+    let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+    let syncTimer: ReturnType<typeof setTimeout> | null = null;
+    // When the app last came to the foreground. An overdue interval tick can
+    // fire the instant the app resumes (iOS delivers suspended timers on
+    // foreground); skipping ticks inside the stagger window keeps all resume
+    // work behind the 3 s timer (CLAUDE.md #554/#1031).
+    let lastResumeAt = Number.NEGATIVE_INFINITY;
+
+    // Sync stored state to relay *responsiveness* (does it answer?), not
+    // connect()'s socket-level success — so a dead relay stays Disconnected
+    // instead of flapping back to Connected (#654). getWalletHealth needs the
+    // SOCKET-only state to tell amber "Not responding" (socket up, relay
+    // parked) from red "Disconnected" (socket down) — isWalletConnected is
+    // already false for the degraded case (#786 review). Write only on change.
+    const syncHealth = (w: WalletState) => {
+      const isConnected = nwcService.isWalletConnected(w.id);
+      const health = nwcService.getWalletHealth(w.id, nwcService.isSocketConnected(w.id));
+      if (isConnected !== w.isConnected || health !== w.connectionHealth) {
+        updateWalletInState(w.id, { isConnected, connectionHealth: health });
+      }
+    };
+
+    const probe = async (w: WalletState, isCurrent: () => boolean) => {
+      if (AppState.currentState !== 'active') return;
+      if (!nwcService.isWalletConnected(w.id) || nwcService.isRelayInCooldown(w.id)) return;
+      if (nwcService.isConnectionInProgress(w.id) || nwcService.isBalanceInFlight(w.id)) return;
+      if (!nwcService.shouldProbeWallet(w.id)) return;
+      nwcService.markWalletProbed(w.id);
+      const before = walletsRef.current.find((ww) => ww.id === w.id)?.balance;
+      const balance = await nwcService.getBalance(w.id, { replyTimeoutMs: PROBE_REPLY_TIMEOUT_MS });
+      if (balance !== null && isCurrent()) {
+        const current = walletsRef.current.find((ww) => ww.id === w.id);
+        // Only commit if nothing else stored a balance while the probe was out
+        // — e.g. a post-payment read; the probe's reply may be older (#1768).
+        if (current && current.balance === before && current.balance !== balance)
+          updateWalletInState(w.id, { balance });
+      }
+    };
+
+    const runCheck = async () => {
       // A reconnect on a dead relay can outlast the 30s tick; this guard stops
       // checks stacking across ticks (#654).
       if (checkInProgress) return;
@@ -31,7 +100,12 @@ export function useNwcConnectionWatchdog(
       const currentIdentity = captureIdentity();
       const isCurrent = () => !disposed && currentIdentity();
       try {
-        for (const w of walletsRef.current.filter((ww) => ww.walletType === 'nwc')) {
+        const nwcWallets = walletsRef.current.filter((ww) => ww.walletType === 'nwc');
+        // Re-read every wallet's health first (no network), so after a long
+        // background a stale green decays to "Checking…" at once instead of
+        // waiting behind earlier wallets' probes / reconnects (#1768).
+        for (const w of nwcWallets) syncHealth(w);
+        for (const w of nwcWallets) {
           if (!isCurrent()) return;
           // A handshake already in flight (startup connect, payInvoice's
           // publish-failure reconnect) must not be superseded by the tick.
@@ -40,8 +114,7 @@ export function useNwcConnectionWatchdog(
             // Relay unresponsive (dead / hung) and not currently parked — try to
             // (re)connect, which re-probes via its initial getBalance. The
             // cooldown gate (#656) backs off a persistently-dead relay so we
-            // don't hammer it every 30s tick; a recovered relay reconnects once
-            // its cooldown lapses (no app-foreground reconnect-all to rely on).
+            // don't hammer it every 30s tick.
             try {
               const nwcUrl = await walletStorage.getNwcUrl(w.id);
               if (nwcUrl && isCurrent())
@@ -49,31 +122,57 @@ export function useNwcConnectionWatchdog(
             } catch {
               // connect threw — the responsiveness read below reflects it
             }
+          } else {
+            try {
+              await probe(w, isCurrent);
+            } catch {
+              // getBalance records the outcome itself; the sync below reflects it
+            }
           }
-          // Sync stored state to relay *responsiveness* (does it answer?), not
-          // connect()'s socket-level success — so a dead relay stays
-          // Disconnected instead of flapping back to Connected (#654). Also
-          // surface the tri-state health so the card can show amber "Not
-          // responding" when the socket is up but the relay is parked /
-          // rate-limited (#786). Write only on change to avoid re-renders.
           if (!isCurrent()) return;
-          const isConnected = nwcService.isWalletConnected(w.id);
-          // getWalletHealth needs the SOCKET-only state to tell amber
-          // "Not responding" (socket up, relay parked) from red "Disconnected"
-          // (socket down) — isWalletConnected is already false for the degraded
-          // case, which would force red instead of amber (#786 review).
-          const health = nwcService.getWalletHealth(w.id, nwcService.isSocketConnected(w.id));
-          if (isConnected !== w.isConnected || health !== w.connectionHealth) {
-            updateWalletInState(w.id, { isConnected, connectionHealth: health });
-          }
+          syncHealth(walletsRef.current.find((ww) => ww.id === w.id) ?? w);
         }
       } finally {
         checkInProgress = false;
       }
-    }, 30 * 1000);
+    };
+
+    const interval = setInterval(() => {
+      if (Date.now() - lastResumeAt < WATCHDOG_RESUME_DELAY_MS) return;
+      void runCheck();
+    }, WATCHDOG_INTERVAL_MS);
+
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (resumeTimer) {
+        clearTimeout(resumeTimer);
+        resumeTimer = null;
+      }
+      if (next !== 'active') return;
+      lastResumeAt = Date.now();
+      resumeTimer = setTimeout(() => {
+        resumeTimer = null;
+        void runCheck();
+      }, WATCHDOG_RESUME_DELAY_MS);
+    });
+
+    const unsubscribeHealth = nwcService.subscribeWalletHealth(() => {
+      if (syncTimer || disposed) return;
+      syncTimer = setTimeout(() => {
+        syncTimer = null;
+        if (disposed) return;
+        for (const w of walletsRef.current) {
+          if (w.walletType === 'nwc') syncHealth(w);
+        }
+      }, HEALTH_SYNC_COALESCE_MS);
+    });
+
     return () => {
       disposed = true;
-      if (connectionCheckInterval.current) clearInterval(connectionCheckInterval.current);
+      clearInterval(interval);
+      if (resumeTimer) clearTimeout(resumeTimer);
+      if (syncTimer) clearTimeout(syncTimer);
+      appStateSub.remove();
+      unsubscribeHealth();
     };
   }, [walletsRef, updateWalletInState, captureIdentity]);
 }

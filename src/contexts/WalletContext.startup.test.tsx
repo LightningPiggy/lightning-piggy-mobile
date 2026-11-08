@@ -31,6 +31,8 @@ jest.mock('../services/nwcService', () => ({
   isWalletConnected: jest.fn(() => true),
   isSocketConnected: jest.fn(() => true),
   isRelayInCooldown: jest.fn(() => false),
+  subscribeWalletHealth: jest.fn(() => () => {}),
+  isBalanceInFlight: jest.fn(() => false),
   isConnectionInProgress: jest.fn(() => false),
   getWalletHealth: jest.fn(() => 'connected'),
 }));

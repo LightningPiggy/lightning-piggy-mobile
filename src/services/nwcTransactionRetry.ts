@@ -1,5 +1,6 @@
 import type { NostrWebLNProvider } from '@getalby/sdk';
 import { CONNECTION_REPLACED_MESSAGE } from './nwcConnectionAttempts';
+import { isWalletAnswer } from './nwcErrors';
 
 /** Identity cancellation must fence retries, not just the eventual UI result. */
 export async function listTransactionsWithRetry(
@@ -27,6 +28,11 @@ export async function listTransactionsWithRetry(
       return result.transactions || [];
     } catch (error) {
       if (!isActive()) throw new Error(CONNECTION_REPLACED_MESSAGE);
+      // The wallet ANSWERED, just with a NIP-47 error (e.g. NOT_IMPLEMENTED):
+      // retrying can't change that, and the reconnect would reset the reply
+      // timestamp and leave a healthy wallet grey. Surface the original error
+      // at once so the caller's `trackWalletReply` credits the answer (#1768).
+      if (isWalletAnswer(error)) throw error;
       const msg = error instanceof Error ? error.message : String(error);
       console.warn(`listTransactions attempt ${attempt}/${maxAttempts} for ${walletId}:`, msg);
       if (attempt < maxAttempts) {

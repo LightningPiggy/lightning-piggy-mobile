@@ -2182,6 +2182,7 @@
   "walletCard": {
     "zaplie": "Zaplie",
     "zaplieBolt": "Zaplie Bolt",
+    "checking": "Ellenőrzés…",
     "connected": "Csatlakozva",
     "notResponding": "Nem válaszol",
     "disconnected": "Nincs kapcsolat",
@@ -3565,7 +3566,8 @@
       "ok": "Rendben",
       "warn": "Figyelmet igényel",
       "error": "Hiba",
-      "unknown": "Ismeretlen"
+      "unknown": "Ismeretlen",
+      "checking": "Ellenőrzés…"
     },
     "opensInBrowser": "Böngészőben nyílik meg"
   },

@@ -56,6 +56,70 @@ export function isConnectionError(error: unknown): boolean {
   );
 }
 
+/**
+ * The request never got an answer from the wallet service: our typed
+ * reply-timeout, a relay connectivity error, OR the @getalby/sdk's own
+ * `Nip47ReplyTimeoutError` / `Nip47PublishTimeoutError` / `Nip47PublishError`.
+ * The SDK classes set no `name` and their messages ("reply timeout: event …",
+ * "publish timeout: …", "failed to publish: …") slip past both matchers above,
+ * so without this an SDK-level timeout read as "the wallet answered" and kept
+ * the card green while the NWC provider was offline (#1768).
+ */
+export function isUnansweredError(error: unknown): boolean {
+  // A genuine NIP-47 wallet response is an answer whatever its text says — a
+  // wallet's own message may mention "timeout" or "connection lost" (#1768).
+  if (isWalletAnswer(error)) return false;
+  if (isReplyTimeoutError(error) || isConnectionError(error)) return true;
+  const msg = (error as { message?: string } | undefined)?.message ?? String(error ?? '');
+  return /reply timeout|publish timeout|failed to publish/i.test(msg);
+}
+
+/**
+ * NIP-47 error codes a wallet service sends back in a response. Deliberately an
+ * allow-list: the SDK also attaches codes to errors it raises LOCALLY, before
+ * anything is published — e.g. `Nip47UnsupportedEncryptionError`
+ * (`UNSUPPORTED_ENCRYPTION`) — and those must not read as "the wallet answered"
+ * (#1768 review). `RATE_LIMITED` is left out on purpose: it's handled as relay
+ * back-off (`isConnectionError` / `isRateLimitError`), not as a healthy reply.
+ */
+const NIP47_RESPONSE_CODES = new Set([
+  'NOT_IMPLEMENTED',
+  'INSUFFICIENT_BALANCE',
+  'QUOTA_EXCEEDED',
+  'RESTRICTED',
+  'UNAUTHORIZED',
+  'INTERNAL',
+  'OTHER',
+  'PAYMENT_FAILED',
+  'NOT_FOUND',
+]);
+
+// Fixed prefixes of the SDK's own transport errors (see isWalletAnswer).
+const SDK_TRANSPORT_MESSAGE =
+  /^(reply timeout: event|publish timeout:|failed to publish:|failed to connect to)/i;
+
+/**
+ * Did the wallet service actually respond, just with a NIP-47 error (e.g.
+ * `NOT_IMPLEMENTED`, `INSUFFICIENT_BALANCE`, `NOT_FOUND`)? The SDK raises those
+ * as `Nip47WalletError` carrying the response's `code`. Only allow-listed
+ * response codes count. Errors raised locally carry no code ("Not connected",
+ * AbortError, …) or a code outside the list (`UNSUPPORTED_ENCRYPTION`), and the
+ * SDK's own timeouts / publish / network errors, which reuse `INTERNAL` /
+ * `OTHER`, are recognised by their fixed SDK message prefixes. None of those
+ * count as a reply (#1768).
+ */
+export function isWalletAnswer(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code;
+  if (typeof code !== 'string' || !NIP47_RESPONSE_CODES.has(code)) return false;
+  // The SDK raises its own transport errors with the generic INTERNAL / OTHER
+  // codes, always with these exact message prefixes (Nip47ReplyTimeoutError,
+  // Nip47PublishTimeoutError, Nip47PublishError, Nip47NetworkError). Anything
+  // else carrying an allow-listed code came back from the wallet.
+  if (code !== 'INTERNAL' && code !== 'OTHER') return true;
+  const msg = (error as { message?: unknown }).message;
+  return !(typeof msg === 'string' && SDK_TRANSPORT_MESSAGE.test(msg));
+}
+
 export function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw createAbortError();
 }

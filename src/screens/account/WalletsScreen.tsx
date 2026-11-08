@@ -12,6 +12,7 @@ import { useWallet } from '../../contexts/WalletContext';
 import { useLocale } from '../../contexts/LocaleContext';
 import { useThemeColors } from '../../contexts/ThemeContext';
 import { createWalletsScreenStyles } from '../../styles/WalletsScreen.styles';
+import { resolveWalletHealth } from '../../utils/walletHealthDisplay';
 
 const WalletsScreen: React.FC = () => {
   const { t } = useLocale();
@@ -20,9 +21,9 @@ const WalletsScreen: React.FC = () => {
   const { wallets, removeWallet, updateWalletSettings, reorderWallet } = useWallet();
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const connectedCount = wallets.filter((w) =>
-    w.walletType === 'onchain' ? w.balance !== null : w.isConnected,
-  ).length;
+  // Count what the status dots show as green, so "Checking…" wallets aren't
+  // claimed as connected before they've answered (#1768).
+  const connectedCount = wallets.filter((w) => resolveWalletHealth(w) === 'responsive').length;
 
   return (
     <AccountScreenLayout title={t('walletsScreen.title')}>
