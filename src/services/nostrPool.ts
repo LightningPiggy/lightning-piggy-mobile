@@ -5,7 +5,7 @@ import {
   type RelayConnectionParams,
 } from './testRelayRouting';
 import { AbstractRelay } from 'nostr-tools/abstract-relay';
-import { paceRelayReceive } from './nostrRelayReceiveQueue';
+import { forgetRelayFrames, paceRelayReceive } from './nostrRelayReceiveQueue';
 import { SimplePool } from 'nostr-tools/pool';
 import { normalizeURL } from 'nostr-tools/utils';
 import { withRelayHealth } from './healthAwarePool';
@@ -35,6 +35,10 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
       paceRelayReceive(relay);
       relay.onclose = () => {
         if (this.relays.get(key) === relay) this.relays.delete(key);
+        // Tidy-up only. What guarantees a fresh outbox frame count is that it's
+        // keyed per WebSocket (a new socket, or a reconnect, starts at zero);
+        // pruning and nostr-tools' auto-reconnect don't come through here.
+        forgetRelayFrames(relay);
       };
       this.relays.set(key, relay);
     }
@@ -80,6 +84,11 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
       urls.forEach(finish);
       throw error;
     }
+  }
+
+  /** The pooled socket for a normalised URL, if any. */
+  relayAt(url: string): AbstractRelay | undefined {
+    return this.relays.get(url);
   }
 
   /** `only`: normalised URLs to consider; all relays when omitted. */
@@ -136,17 +145,50 @@ watchTestRelayLockdown(() => {
   releaseWhenIdle.clear();
 });
 
-// One-off sockets (e.g. a send's outbox relays) to close once nothing uses them.
-// A socket opened by one send may still carry another send's publish when the
-// first finishes; it's released when that last publish settles (#1570).
+// One-off sockets (e.g. a send's outbox relays, an author's relays) to close
+// once nothing uses them. A socket opened by one send may still carry another
+// send's publish, or a read, when the first finishes; it's released when that
+// last publish settles (#1570) or that last read ends (#1390).
 const releaseWhenIdle = new Set<string>();
-pool.onPublishesDrained = (url) => {
+function deferRelease(url: string): void {
   if (!releaseWhenIdle.has(url)) return;
-  // Let nostr-tools finish its own OK bookkeeping first.
+  // Let nostr-tools finish its own OK / CLOSE bookkeeping first.
   setTimeout(() => {
     if (releaseWhenIdle.has(url)) pruneIdleRelays([url]);
   }, 0);
-};
+}
+pool.onPublishesDrained = deferRelease;
+
+const idleWatched = new WeakSet<AbstractRelay>();
+/** Report when a socket marked for release goes idle (nostr-tools sets
+ * `idleSince` when its last subscription or operation ends), so a busy socket
+ * is closed once its read finishes rather than never. A socket still
+ * CONNECTING is checked again once that settles: nostr-tools doesn't touch
+ * `idleSince` on a successful connect, so a read cancelled mid-connect would
+ * otherwise leave it open for good. */
+function releaseOnIdle(url: string): void {
+  const relay = pool.relayAt(url);
+  if (!relay) return;
+  const connecting = (relay as unknown as { connectionPromise?: Promise<void> }).connectionPromise;
+  if (connecting && !relay.connected) {
+    connecting.then(
+      () => deferRelease(url),
+      () => deferRelease(url),
+    );
+  }
+  if (idleWatched.has(relay)) return;
+  idleWatched.add(relay);
+  let idleSince = relay.idleSince;
+  Object.defineProperty(relay, 'idleSince', {
+    configurable: true,
+    enumerable: true,
+    get: () => idleSince,
+    set: (value: number | undefined) => {
+      idleSince = value;
+      if (value !== undefined) deferRelease(url);
+    },
+  });
+}
 
 // Load what we learned about dead relays last session, so they're skipped
 // from the first query rather than after two more timeouts.
@@ -203,8 +245,21 @@ export function releaseNewIdleRelays(urls: readonly string[], before: ReadonlySe
     }
   }
   if (opened.length === 0) return;
-  opened.forEach((url) => releaseWhenIdle.add(url));
+  opened.forEach((url) => {
+    releaseWhenIdle.add(url);
+    releaseOnIdle(url);
+  });
   pruneIdleRelays(opened);
+}
+
+/** Take `url` back from a pending release (it's needed again). True when it
+ * was pending — the caller now owns closing it. */
+export function claimPendingRelease(url: string): boolean {
+  try {
+    return releaseWhenIdle.delete(normalizeURL(url));
+  } catch {
+    return false;
+  }
 }
 
 function forgetPruned(pruned: ReadonlySet<string>): void {

@@ -52,7 +52,10 @@ export function useOwnProfile(
       // the current relays no longer carry its kind-0. Never replace newer
       // in-memory state with this stale seed.
       if (cached) setProfile((prev) => prev ?? cached);
-      const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls);
+      // Cold start: never waits on the outbox fallback (#1390).
+      const fetchedProfile = await nostrService.fetchProfile(pk, relayUrls, {
+        outboxFallback: false,
+      });
       if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
       if (fetchedProfile) {
         setProfile((prev) => (sameProfile(prev, fetchedProfile) ? prev : fetchedProfile));

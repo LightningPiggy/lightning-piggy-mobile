@@ -3,6 +3,7 @@ import { InteractionManager } from 'react-native';
 
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
+import { newerProfile } from '../utils/profileFreshness';
 
 // Cache key bases — each is suffixed with `_${pubkey}` via perAccountKey()
 // at every call site (#288). The legacy un-suffixed keys are migrated on
@@ -71,12 +72,65 @@ export async function readCachedWithTtl<T>(
  * the latest on-disk cache at write time and merge on top of THAT, falling
  * back to `existing` only if the read/parse fails. This prevents a slow
  * background fetch from clobbering fresher data written by a later fetch.
+ *
+ * Persists for one account run ONE AT A TIME (a promise chain per account):
+ * otherwise two could read the same snapshot and the later write would drop
+ * the other's profiles, or put an older kind-0 back (#1390).
  */
-export async function persistMergedProfileCache(
+export function persistMergedProfileCache(
   pk: string,
   existing: Record<string, NostrProfile>,
   fetched: Map<string, NostrProfile>,
+  /** The account's cache epoch when the PRODUCER started (see
+   * profilePersisterFor); defaults to now, at queue time. */
+  epoch: number = persistEpochs.get(pk) ?? 0,
 ): Promise<void> {
+  const run = (persistChains.get(pk) ?? Promise.resolve()).then(() =>
+    persistMergedProfileCacheNow(pk, existing, fetched, epoch),
+  );
+  const tail = run.catch(() => {});
+  persistChains.set(pk, tail);
+  void tail.then(() => {
+    if (persistChains.get(pk) === tail) persistChains.delete(pk);
+  });
+  return run;
+}
+
+/** The tail of each account's queue of persists. */
+const persistChains = new Map<string, Promise<void>>();
+/** Bumped when an account's caches are wiped: persists queued before it never write. */
+const persistEpochs = new Map<string, number>();
+
+/**
+ * Before wiping `pk`'s caches (sign-out / account deletion): every profile
+ * persist already queued or running for it is retired — none writes after
+ * this — and one mid-write finishes first, so the wipe removes what it wrote.
+ */
+/**
+ * A profile-cache persist bound to `pk`'s cache epoch NOW — take it when the
+ * producer starts (e.g. a contacts load), so a fetch that began before a
+ * sign-out but finishes after it writes nothing back (#1390).
+ */
+export function profilePersisterFor(
+  pk: string,
+): (existing: Record<string, NostrProfile>, fetched: Map<string, NostrProfile>) => Promise<void> {
+  const epoch = persistEpochs.get(pk) ?? 0;
+  return (existing, fetched) => persistMergedProfileCache(pk, existing, fetched, epoch);
+}
+
+export async function retireProfilePersists(pk: string): Promise<void> {
+  persistEpochs.set(pk, (persistEpochs.get(pk) ?? 0) + 1);
+  await persistChains.get(pk);
+}
+
+async function persistMergedProfileCacheNow(
+  pk: string,
+  existing: Record<string, NostrProfile>,
+  fetched: Map<string, NostrProfile>,
+  epoch: number,
+): Promise<void> {
+  const retired = () => (persistEpochs.get(pk) ?? 0) !== epoch;
+  if (retired()) return;
   await new Promise<void>((resolve) => InteractionManager.runAfterInteractions(() => resolve()));
   let base: Record<string, NostrProfile> = existing;
   try {
@@ -88,16 +142,19 @@ export async function persistMergedProfileCache(
   } catch {
     // Corrupt / unreadable cache — keep the caller's snapshot as the base.
   }
-  // This fetch's results are the most authoritative for the keys it covers.
+  // This fetch's results are the most authoritative for the keys it covers —
+  // unless the cached copy is from a newer kind-0 (a late fallback, #1390).
   const merged: Record<string, NostrProfile> = { ...base };
   fetched.forEach((v, k) => {
-    merged[k] = v;
+    merged[k] = newerProfile(merged[k], v) ?? v;
   });
   // Await both writes (still swallowing errors) so the function only resolves
   // once persistence has completed. Callers that `await` this (e.g.
   // loadContacts with awaitProfiles) then get the durability the name implies,
   // and the on-disk state can't lag a resolved promise; fire-and-forget callers
   // (#852) are unaffected since they don't await the returned promise.
+  // The account's caches were wiped meanwhile: write nothing back (#1390).
+  if (retired()) return;
   await Promise.all([
     AsyncStorage.setItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk), JSON.stringify(merged)),
     AsyncStorage.setItem(perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk), Date.now().toString()),

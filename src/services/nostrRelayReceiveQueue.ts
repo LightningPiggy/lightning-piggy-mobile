@@ -50,6 +50,61 @@ export class RelayReceiveQueue {
 const sharedQueue = new RelayReceiveQueue();
 const installed = new WeakSet<AbstractRelay>();
 
+/** How many raw frames ONE socket to a URL may receive, while outbox leases
+ * hold that URL. Only URLs the app opened on someone else's behalf (outbox
+ * reads, #1390) ever have one: the viewer's own relays are never counted. */
+const frameGrants = new Map<string, { frames: number; onExceeded: () => void }>();
+/** Frames each socket has received, keyed by the WebSocket itself (a relay
+ * that reconnects gets a new one) — never per URL: a closed socket's count
+ * (or blown budget) never touches the next socket to that URL. */
+const framesUsed = new WeakMap<object, number>();
+const socketOf = (relay: AbstractRelay): object =>
+  (relay as unknown as { ws?: object }).ws ?? relay;
+
+/**
+ * Let each socket to `url` receive `frames` more frames (any type, counted on
+ * arrival, before any parsing); past that, the socket is closed and
+ * `onExceeded` runs, once per socket. A second call tops up the grant.
+ */
+export function addRelayFrameBudget(url: string, frames: number, onExceeded: () => void): void {
+  const grant = frameGrants.get(url);
+  if (grant) grant.frames += frames;
+  else frameGrants.set(url, { frames, onExceeded });
+}
+
+/** Stop counting frames for `url` (its leases are gone). */
+export function clearRelayFrameBudget(url: string): void {
+  frameGrants.delete(url);
+}
+
+/** This socket closed (for any reason): forget its count. */
+export function forgetRelayFrames(relay: AbstractRelay): void {
+  framesUsed.delete(socketOf(relay));
+  framesUsed.delete(relay);
+}
+
+/** False when this frame is over its socket's budget (drop it). */
+function withinFrameBudget(relay: AbstractRelay): boolean {
+  const grant = frameGrants.get(relay.url);
+  if (!grant) return true;
+  const socket = socketOf(relay);
+  const used = (framesUsed.get(socket) ?? 0) + 1;
+  framesUsed.set(socket, used);
+  if (used <= grant.frames) return true;
+  if (used === grant.frames + 1) {
+    // Out of the socket's message handler before closing it. Frames that
+    // arrive meanwhile are dropped; once closed, the socket drops the rest.
+    void Promise.resolve().then(() => {
+      try {
+        relay.close();
+      } finally {
+        grant.onExceeded();
+      }
+    });
+  }
+  return false;
+}
+
 /** Snapshot deadlines share the receive queue's boundary: finish only after
  * events already received have been verified, delivered and persisted. Explicit
  * cancellation must bypass this barrier so tab-blur still closes immediately. */
@@ -88,6 +143,8 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
   };
   relay._onmessage = (message) => {
     if (closed) return;
+    // One Map lookup, only non-empty while outbox sockets are open.
+    if (frameGrants.size > 0 && !withinFrameBudget(relay)) return;
     const data = message.data;
     // Only explicit crypto-free control types bypass pacing. Queue ambiguous
     // JSON too: an escaped "\\u0045VENT" also decodes to EVENT in the SDK.

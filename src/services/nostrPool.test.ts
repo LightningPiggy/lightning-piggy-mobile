@@ -2,6 +2,7 @@ import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { SimplePool } from 'nostr-tools/pool';
 import type { Event, VerifiedEvent } from 'nostr-tools';
 import {
+  claimPendingRelease,
   connectedRelays,
   pool,
   pooledRelayUrls,
@@ -9,6 +10,12 @@ import {
   releaseNewIdleRelays,
   trackRelays,
 } from './nostrPool';
+import {
+  __resetOutboxLeasesForTests,
+  leasedOutboxRelayCount,
+  leaseOutboxRelays,
+} from './authorOutboxRelays';
+import { setCurrentUserOwnRelays } from './nostrActiveAccount';
 
 jest.mock('./relayHealth', () => ({
   hydrateRelayHealth: jest.fn(),
@@ -174,4 +181,55 @@ it('leaves sockets never marked for release open after their publishes drain', a
   } finally {
     publish.mockRestore();
   }
+});
+
+it('closes a socket marked for release once its last read ends, not only after a publish (#1390)', async () => {
+  const relay = addRelay('wss://outbox-read/');
+  const sub = relay.subscribe([{ kinds: [1], limit: 1 }], {});
+  // Still reading: the release is deferred, not dropped.
+  releaseNewIdleRelays(['wss://outbox-read'], new Set());
+  expect(relays.has(relay.url)).toBe(true);
+  sub.close();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(relays.has(relay.url)).toBe(false);
+});
+
+it('a pending release claimed back is not closed when it next goes idle (M1)', async () => {
+  const relay = addRelay('wss://reclaimed/');
+  const sub = relay.subscribe([{ kinds: [1], limit: 1 }], {});
+  releaseNewIdleRelays(['wss://reclaimed'], new Set());
+  expect(claimPendingRelease('wss://reclaimed')).toBe(true);
+  expect(claimPendingRelease('wss://reclaimed')).toBe(false);
+  sub.close();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(relays.has(relay.url)).toBe(true);
+});
+
+it('sockets never marked for release stay open when their reads end', async () => {
+  const relay = addRelay('wss://own-relay/');
+  relay.subscribe([{ kinds: [1], limit: 1 }], {}).close();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(relays.has(relay.url)).toBe(true);
+});
+
+it('an outbox read cancelled mid-connect still closes the socket and frees the cap once it connects', async () => {
+  __resetOutboxLeasesForTests();
+  setCurrentUserOwnRelays([], true); // the viewer's lists have loaded
+  const lease = leaseOutboxRelays(['wss://slow-outbox/']);
+  const relay = addRelay('wss://slow-outbox/');
+  // Still connecting when the read is cancelled and the lease released.
+  let connected!: () => void;
+  const state = relay as unknown as { connectionPromise?: Promise<void>; _connected: boolean };
+  state.connectionPromise = new Promise<void>((resolve) => (connected = resolve));
+  lease.release();
+  expect(relays.has(relay.url)).toBe(true);
+  expect(leasedOutboxRelayCount()).toBe(1);
+  // The connection succeeds (nostr-tools leaves `idleSince` alone here).
+  state.connectionPromise = undefined;
+  state._connected = true;
+  connected();
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setTimeout(r, 0));
+  expect(relays.has(relay.url)).toBe(false);
+  expect(leasedOutboxRelayCount()).toBe(0);
 });

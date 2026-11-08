@@ -11,6 +11,12 @@ import type { Filter } from 'nostr-tools/filter';
 import { querySyncAbortable } from './relayQuery';
 import { DM_INBOX_LIMIT, KIND4_REPLAY_OVERLAP_SECONDS } from './dmInboxFetchPolicy';
 import { fetchProfilesBatch } from './nostrProfileBatch';
+import {
+  fetchMissingProfileEvents,
+  newFallbackGeneration,
+  scheduleMissingProfileFallback,
+} from './profileOutboxFallback';
+import { getCurrentUserPubkey } from './nostrActiveAccount';
 import { pool, connectedRelays, trackRelays } from './nostrPool';
 import { DEFAULT_RELAYS, PROFILE_RELAYS } from './nostrRelayDefaults';
 import * as nip19 from 'nostr-tools/nip19';
@@ -18,7 +24,7 @@ import * as nip04 from 'nostr-tools/nip04';
 import { nostrFinalizeEvent } from './nostrCrypto';
 import * as nip59 from 'nostr-tools/nip59';
 import type { NostrProfile, NostrContact, RelayConfig } from '../types/nostr';
-import { slimDisplayProfile } from '../utils/profileSanitize';
+import { displayProfile } from '../utils/profileSanitize';
 import { fetchFollowSnapshot } from './contactFollowFreshness';
 import type { DmSendResult } from './nostrDmPublish';
 import { LP_CLIENT_TAG } from './nip89ClientTag';
@@ -119,76 +125,46 @@ export function nprofileEncode(pubkey: string, relays: string[] = []): string {
   return nip19.nprofileEncode({ pubkey, relays });
 }
 
-// Best-effort relay hints to embed in an outgoing nprofile. Prefers the
-// contact's own kind-3 relay (where the user's follow entry suggests they
-// publish), falls back to the viewer's NIP-65 read relays (the places we
-// already trust for profile fetches), and finally to a small default slice
-// so the nprofile never carries zero hints — an empty hint list defeats
-// the purpose of nprofile vs. npub. Dedupes and caps at 3 to keep URIs
-// compact; receiving clients still search their own relays on top.
-export function buildProfileRelayHints(
-  targetPubkey: string,
-  viewerContacts: { pubkey: string; relay: string | null }[],
-  viewerReadRelays: string[],
-): string[] {
-  const hints: string[] = [];
-  const contactRelay = viewerContacts.find((c) => c.pubkey === targetPubkey)?.relay;
-  if (contactRelay) hints.push(contactRelay);
-  for (const r of viewerReadRelays) hints.push(r);
-  for (const r of enabledAppRelays('default', DEFAULT_RELAYS)) hints.push(r);
-  const deduped: string[] = [];
-  for (const r of hints) {
-    if (!r) continue;
-    if (deduped.includes(r)) continue;
-    deduped.push(r);
-    if (deduped.length >= 3) break;
-  }
-  return deduped;
-}
-
-// Relay hints to embed in the user's OWN nprofile when sharing it to an
-// NFC tag / QR for first contact (#755). A conference badge is a cold
-// first-contact medium: the scanner doesn't follow us yet, so the hints
-// must point at our NIP-65 *write* (outbox) relays — the places we
-// actually publish kind-0 + notes — so their client resolves us even on
-// niche relays. Capped at `max` (default 2) to keep the payload inside an
-// NTAG213's ~144 B and limit staleness if we later migrate relays. Falls
-// back to the app defaults when the user has published no write relays,
-// since a hint (even a generic one) still beats a bare npub. The bare
-// pubkey is always in the nprofile, so a reader can fall back to outbox
-// discovery if these hints go dead.
-export function buildOwnProfileRelayHints(ownWriteRelays: string[], max = 2): string[] {
-  const deduped: string[] = [];
-  for (const r of [...ownWriteRelays, ...enabledAppRelays('default', DEFAULT_RELAYS)]) {
-    if (!r) continue;
-    if (deduped.includes(r)) continue;
-    deduped.push(r);
-    if (deduped.length >= max) break;
-  }
-  return deduped;
-}
+// nprofile relay hints live in ./profileRelayHints; re-exported for importers.
+export { buildOwnProfileRelayHints, buildProfileRelayHints } from './profileRelayHints';
 
 export { decodeProfileReference, type DecodedProfileReference } from '../utils/profileReference';
 
 // Kind-0 parsing lives in utils/profileContent (pure); re-exported for importers.
 export { parseProfileContent };
 
-export async function fetchProfile(pubkey: string, relays: string[]): Promise<NostrProfile | null> {
+/** `outboxFallback` (default on): on a miss, try the person's own relays and
+ * `hints` (#1390, ./profileOutboxFallback). Off for background tasks. */
+export async function fetchProfile(
+  pubkey: string,
+  relays: string[],
+  opts: { outboxFallback?: boolean; hints?: readonly string[] } = {},
+): Promise<NostrProfile | null> {
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
   trackRelays(allRelays);
   const lud16Generation = verifiedLud16Generation(); // a wipe mid-fetch skips the cache
+  // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
+  // fetch feeds payment destinations (`lud16`), so verify it for real. One
+  // that fails is a miss: the person's own relays may hold the real one.
+  const genuine = (e: NostrEvent | null): e is NostrEvent => {
+    if (!e || (e.pubkey === pubkey && verifyEventCached(e))) return !!e;
+    console.warn('Nostr profile failed verification, ignoring:', pubkey);
+    return false;
+  };
   try {
-    const event = await pool.get(allRelays, {
-      kinds: [0],
-      authors: [pubkey],
-    });
-    if (!event) return null;
-    // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
-    // fetch feeds payment destinations (`lud16`), so verify it for real here.
-    if (event.pubkey !== pubkey || !verifyEventCached(event)) {
-      console.warn('Nostr profile failed verification, ignoring:', pubkey);
-      return null;
+    let event = await pool.get(allRelays, { kinds: [0], authors: [pubkey] });
+    if (!genuine(event)) event = null;
+    if (!event && opts.outboxFallback !== false) {
+      const key = pubkey.toLowerCase();
+      const found = await fetchMissingProfileEvents([key], {
+        purpose: 'verified',
+        alreadyAsked: allRelays,
+        lookupRelays: relays,
+        hints: opts.hints && new Map([[key, opts.hints]]),
+      });
+      event = found.get(key) ?? null;
     }
+    if (!genuine(event)) return null;
 
     const parsed = parseProfileContent(event.content);
     // Cache the verified address so the next open shows it at once. Newest
@@ -199,7 +175,7 @@ export async function fetchProfile(pubkey: string, relays: string[]): Promise<No
       event.created_at,
       lud16Generation,
     ).catch(() => parsed.lud16);
-    return { pubkey, npub: npubEncode(pubkey), ...parsed, lud16 };
+    return { pubkey, npub: npubEncode(pubkey), ...parsed, lud16, createdAt: event.created_at };
   } catch (error) {
     console.warn('Failed to fetch Nostr profile:', error);
     return null;
@@ -271,13 +247,27 @@ export async function fetchRelayListEvent(
   }
 }
 
+/**
+ * Kind-0s for `pubkeys`, streamed through `onBatch`. With `onBatch`, people
+ * still missing at the end are looked up on their own relays IN THE
+ * BACKGROUND (#1390): this resolves as fast as without it. Anything found
+ * later arrives as one more `onBatch` call with ONLY the new profiles (merge
+ * them newest-wins on `createdAt`), then `onLateProfiles` (e.g. to persist).
+ * The owner and the cancellation are taken when this STARTS: an account
+ * switch, or a newer `fetchProfiles` for the same owner, drops it.
+ */
 export async function fetchProfiles(
   pubkeys: string[],
   relays: string[],
   onBatch?: (profiles: Map<string, NostrProfile>) => void,
+  /** `owner`: whose refresh this is (default: the active account) — a stale
+   * one (the account changed meanwhile) never runs the background fallback. */
+  opts?: { owner?: string | null; onLateProfiles?: (profiles: Map<string, NostrProfile>) => void },
 ): Promise<Map<string, NostrProfile>> {
   const profiles = new Map<string, NostrProfile>();
   if (pubkeys.length === 0) return profiles;
+  const owner = opts?.owner === undefined ? getCurrentUserPubkey() : opts.owner;
+  const lateSignal = onBatch ? newFallbackGeneration(owner) : undefined;
 
   // Include profile aggregator relays for better coverage
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
@@ -310,18 +300,7 @@ export async function fetchProfiles(
   };
 
   const ingest = (event: { pubkey: string; content: string; created_at: number }): void => {
-    const parsed = parseProfileContent(event.content);
-    // Batch-fetched kind-0 events skip schnorr verification (see the
-    // pool.verifyEvent fast-path) — strip payment-relevant fields so a
-    // forged relay reply can't redirect a zap. Display-only path.
-    profiles.set(
-      event.pubkey,
-      slimDisplayProfile({
-        pubkey: event.pubkey,
-        npub: npubEncode(event.pubkey),
-        ...parsed,
-      }),
-    );
+    profiles.set(event.pubkey, displayProfile(event));
     scheduleEmit();
   };
 
@@ -376,6 +355,25 @@ export async function fetchProfiles(
         );
         flushNow();
       }
+    }
+
+    // Still missing: their own write relays (#1390), later — never awaited here.
+    const unresolved = pubkeys.filter((pk) => !profiles.has(pk));
+    if (unresolved.length > 0 && onBatch) {
+      const fallback = {
+        purpose: 'display',
+        alreadyAsked: allRelays,
+        lookupRelays: relays,
+      } as const;
+      const options = { ...fallback, viewerPubkey: owner, signal: lateSignal };
+      scheduleMissingProfileFallback(unresolved, options, (found) => {
+        // Verified (the fallback checks every candidate), so dated: these
+        // merge newest-wins and can't replace a newer copy.
+        const late = new Map<string, NostrProfile>();
+        found.forEach((event) => late.set(event.pubkey, displayProfile(event, true)));
+        onBatch(late); // only the new ones: never replay a snapshot over newer data
+        opts?.onLateProfiles?.(late);
+      });
     }
   } catch (error) {
     console.warn('Failed to batch fetch profiles:', error);

@@ -4,8 +4,23 @@
 // subscription fetches the newest page; older pages come from a bounded,
 // abortable `until` query. Every filter carries a `limit`.
 import type { Event, Filter } from 'nostr-tools';
+import {
+  AUTHOR_FEED_PAGE_SIZE,
+  OUTBOX_FEED_EVENT_BUDGET_FACTOR,
+  outboxFramesForLimit,
+} from './authorFeedLimits';
+import {
+  authorWriteRelays,
+  leaseOutboxRelays,
+  MAX_AUTHOR_OUTBOX_RELAYS,
+  quarantineOutboxRelay,
+  whenOwnRelaysHydrated,
+  withoutRelays,
+} from './authorOutboxRelays';
+import { getCurrentUserOwnRelays } from './nostrActiveAccount';
 import { pool, trackRelays } from './nostrPool';
-import { relayKey, selectHealthyRelays } from './relayHealth';
+import { normalizeRelayUrl } from '../utils/relayListKey';
+import { isRelayParked, recordRelayFailure, relayKey, selectHealthyRelays } from './relayHealth';
 import { querySyncAbortable } from './relayQuery';
 import { PROFILE_FEED_KINDS } from '../utils/noteMedia';
 import { COMMENT_KIND } from '../utils/nip22';
@@ -15,7 +30,8 @@ export type AuthorFeedEvent = Pick<
   'id' | 'pubkey' | 'kind' | 'created_at' | 'content' | 'tags'
 >;
 
-export const AUTHOR_FEED_PAGE_SIZE = 30;
+// The feed's bounds live in ./authorFeedLimits (shared with the outbox budgets).
+export { AUTHOR_FEED_PAGE_SIZE, OUTBOX_FEED_EVENT_BUDGET_FACTOR };
 const PAGE_TIMEOUT_MS = 6000;
 
 const toFeedEvent = (ev: Event): AuthorFeedEvent => ({
@@ -67,7 +83,8 @@ export function subscribeAuthorFeed(input: {
   authorPubkey: string;
   relays: string[];
   limit?: number;
-  onEvent: (event: AuthorFeedEvent) => void;
+  /** `relay`: the relay it came from. */
+  onEvent: (event: AuthorFeedEvent, relay: string) => void;
   /** Every relay has sent its stored events (or failed). */
   onEose?: () => void;
   /** The first relay really answered (a real EOSE, not a failure), even if
@@ -76,6 +93,13 @@ export function subscribeAuthorFeed(input: {
   /** Every relay closed the subscription (failed / unreachable) before any
    *  event arrived: "couldn't ask", which is not the same as "no posts". */
   onUnavailable?: () => void;
+  /** Hardening for relays the viewer didn't choose: a relay that sends more
+   *  events than this has its subscription closed and is reported through
+   *  `onFlood`. Counted in `alreadyHaveEvent`, which nostr-tools calls BEFORE
+   *  parsing and verifying, so off-filter events (other authors, which the
+   *  SDK drops before `onevent`) count too, and the excess is skipped unverified. */
+  maxEventsPerRelay?: number;
+  onFlood?: (relay: string) => void;
 }): () => void {
   trackRelays(input.relays);
   // One per relay (deduped on the normalised URL, original spelling kept),
@@ -92,20 +116,50 @@ export function subscribeAuthorFeed(input: {
   let eoseCount = 0;
   let closedCount = 0;
   let closedByUs = false;
+  // A relay we cut off for flooding closed by intent, not by failing.
+  let floodClosed = false;
   const filter = feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE);
   // Monotonic, like the SDK's own timer: a wall-clock change can't skew it.
   const startedAt = performance.now();
   // One subscription per relay (still one REQ per relay on the wire), so a
   // relay that really answered can be told apart while another stays silent:
   // the pool only reports EOSE once EVERY relay has sent one.
-  const subs = relays.map((relay) => {
+  // Closed (by us or by the relay): nostr-tools' closers aren't idempotent —
+  // a second close drives the relay's operation count negative.
+  const done: boolean[] = relays.map(() => false);
+  const closeSub = (i: number) => {
+    if (done[i]) return;
+    done[i] = true;
+    try {
+      subs[i].close();
+    } catch {
+      // best-effort
+    }
+  };
+  const budget = input.maxEventsPerRelay;
+  const subs = relays.map((relay, i) => {
     let eose = false;
     let closed = false;
+    let received = 0;
+    let flooded = false;
+    const countEvent = () => {
+      if (flooded) return true;
+      if (++received <= budget!) return false;
+      flooded = true;
+      floodClosed = true;
+      // Out of the SDK's message handler before closing.
+      void Promise.resolve().then(() => {
+        closeSub(i);
+        input.onFlood?.(relay);
+      });
+      return true; // skip it: never parsed or verified
+    };
     return pool.subscribeMany([relay], filter, {
+      ...(budget !== undefined ? { alreadyHaveEvent: countEvent } : {}),
       onevent: (ev: Event) => {
         if (ev.pubkey !== input.authorPubkey || !AUTHOR_FEED_KINDS.includes(ev.kind)) return;
         gotEvent = true;
-        input.onEvent(toFeedEvent(ev));
+        input.onEvent(toFeedEvent(ev), relay);
       },
       oneose: () => {
         if (eose) return;
@@ -127,10 +181,11 @@ export function subscribeAuthorFeed(input: {
       // answered stays open. Every relay closing early with nothing received
       // means none was reachable. A close we asked for isn't reported.
       onclose: () => {
+        done[i] = true;
         if (closed) return;
         closed = true;
         if (++closedCount < relays.length) return;
-        if (!closedByUs && !gotEvent && !answered) input.onUnavailable?.();
+        if (!closedByUs && !floodClosed && !gotEvent && !answered) input.onUnavailable?.();
       },
       // Only a relay's real EOSE counts as an answer: without this the SDK
       // fakes one after 4.4 s for a connected relay that never replies.
@@ -139,13 +194,7 @@ export function subscribeAuthorFeed(input: {
   });
   return () => {
     closedByUs = true;
-    for (const sub of subs) {
-      try {
-        sub.close();
-      } catch {
-        // best-effort — the sub may already be closed
-      }
-    }
+    subs.forEach((_, i) => closeSub(i));
   };
 }
 
@@ -191,5 +240,120 @@ export async function fetchAuthorFeedPage(input: {
       !input.signal?.aborted &&
       Date.now() - startedAt < PAGE_TIMEOUT_MS - 50 &&
       allConnected(input.relays),
+  };
+}
+
+/**
+ * The same live feed on the AUTHOR's own write relays (#1390), for people who
+ * publish where the viewer doesn't read. Never delays the main feed: the
+ * caller subscribes `currentRelays` first, and this resolves the author's
+ * relays (cached, or one bounded lookup) in the background, then subscribes
+ * only the ones not already in `currentRelays` — at most
+ * MAX_AUTHOR_OUTBOX_RELAYS, within the app-wide lease ceiling. The author's
+ * pubkey goes only to the author's relays. Each relay has its own lease and
+ * an event budget: one that floods is closed, released, quarantined and
+ * reported unhealthy. `onRelays` reports the relays subscribed (again when
+ * one is dropped), so older pages read them too. The returned closer ends
+ * the subscriptions and releases the leases (and any socket they opened).
+ */
+export function subscribeAuthorOutboxFeed(input: {
+  authorPubkey: string;
+  currentRelays: string[];
+  /** The viewer's other relays (e.g. their DM inbox relays): never leased either. */
+  excludeRelays?: readonly string[];
+  viewerPubkey?: string | null;
+  limit?: number;
+  /** `relay`: which of the author's relays it came from (each pages on its own). */
+  onEvent: (event: AuthorFeedEvent, relay: string) => void;
+  onAnswered?: () => void;
+  onRelays?: (relays: string[]) => void;
+}): () => void {
+  let closed = false;
+  const open = new Map<string, () => void>();
+  const limit = input.limit ?? AUTHOR_FEED_PAGE_SIZE;
+  // Closing early also cancels an uncached relay-list lookup.
+  const lookup = new AbortController();
+  void authorWriteRelays(input.authorPubkey, {
+    viewerPubkey: input.viewerPubkey,
+    lookupRelays: input.currentRelays,
+    signal: lookup.signal,
+  }).then((write) => {
+    if (closed) return;
+    // Nothing is leased before the viewer's own relays are known: a profile
+    // opened at cold start subscribes its author relays once they are (the
+    // viewer-relay sub is untouched meanwhile).
+    stopWaiting = whenOwnRelaysHydrated(() => {
+      if (!closed) armAuthorRelays(write);
+    });
+  });
+  let stopWaiting: (() => void) | undefined;
+  const armAuthorRelays = (write: readonly string[]) => {
+    // Every candidate (deduped, minus the relays already subscribed) until the
+    // cap is GRANTED — a quarantined, over-ceiling or parked relay doesn't use
+    // up a slot that a healthy later one could fill. A parked relay is skipped
+    // outright: it's in backoff, and the viewer didn't choose it.
+    const candidates = withoutRelays(write, input.currentRelays, Infinity);
+    // The viewer's other relays (e.g. a DM-only inbox relay) the author also
+    // writes to: read on the viewer's own socket, never leased or budgeted.
+    const own = new Set(
+      [...(input.excludeRelays ?? []), ...getCurrentUserOwnRelays()].map(normalizeRelayUrl),
+    );
+    for (const url of candidates) {
+      if (open.size >= MAX_AUTHOR_OUTBOX_RELAYS) break;
+      if (isRelayParked(url)) continue;
+      // Drop this relay: its sub, its lease, and from the relays older pages ask.
+      const drop = () => {
+        open.get(url)?.();
+        open.delete(url);
+        if (!closed) input.onRelays?.([...open.keys()]);
+      };
+      if (own.has(url)) {
+        const unsubscribe = subscribeAuthorFeed({
+          authorPubkey: input.authorPubkey,
+          relays: [url],
+          limit,
+          onEvent: (event) => input.onEvent(event, url),
+          onAnswered: input.onAnswered,
+          maxEventsPerRelay: OUTBOX_FEED_EVENT_BUDGET_FACTOR * limit,
+          // The viewer's own relay: just stop reading it for this feed — no
+          // quarantine or health failure that would hurt the viewer's own use.
+          onFlood: drop,
+        });
+        open.set(url, unsubscribe);
+        continue;
+      }
+      // Revoked when its socket blows the frame budget (authorOutboxRelays).
+      const lease = leaseOutboxRelays([url], drop, outboxFramesForLimit(limit));
+      if (lease.relays.length === 0) {
+        lease.release();
+        continue;
+      }
+      const unsubscribe = subscribeAuthorFeed({
+        authorPubkey: input.authorPubkey,
+        relays: lease.relays,
+        limit,
+        onEvent: (event) => input.onEvent(event, url),
+        onAnswered: input.onAnswered,
+        // Fast path: counted per subscription before parse / verify.
+        maxEventsPerRelay: OUTBOX_FEED_EVENT_BUDGET_FACTOR * limit,
+        onFlood: () => {
+          quarantineOutboxRelay(url);
+          recordRelayFailure(url);
+          drop();
+        },
+      });
+      open.set(url, () => {
+        unsubscribe();
+        lease.release();
+      });
+    }
+    if (open.size > 0) input.onRelays?.([...open.keys()]);
+  };
+  return () => {
+    closed = true;
+    lookup.abort();
+    stopWaiting?.();
+    for (const close of open.values()) close();
+    open.clear();
   };
 }

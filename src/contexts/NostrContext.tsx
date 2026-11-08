@@ -1,10 +1,12 @@
 import { useAppNetworkRelays } from '../hooks/useAppNetworkRelays';
 import { useReadRelays } from '../hooks/useReadRelays';
 import { enabledAppRelays } from '../services/appRelayPrefs';
+import { zapReceiptRelays } from '../services/authorOutboxRelays';
 import { useActiveNostrAccount } from './useActiveNostrAccount';
 import { useFollowHydration } from './useFollowHydration';
 import { reconcileCachedContactFollows } from './reconcileContactFollows';
 import { buildFollowSet } from '../utils/followPubkeys';
+import { mergeContactProfiles } from '../utils/profileFreshness';
 import { readFollowSnapshot } from '../services/contactFollowFreshness';
 import { useRelayAuthSigner } from './useRelayAuthSigner';
 import React, {
@@ -77,7 +79,7 @@ import {
   CACHE_MAX_AGE_MS,
   MISSING_PROFILE_RETRY_MS,
   readCachedWithTtl,
-  persistMergedProfileCache,
+  profilePersisterFor,
 } from './nostrCacheKeys';
 import type { SignedEvent, ConversationMessage } from './nostrContextTypes';
 import { useOwnProfile } from './useOwnProfile';
@@ -314,6 +316,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const {
     nip65Relays,
     dmInboxRelays,
+    relayListsHydrated,
     resetRelayLists,
     applyPublishedDmInbox,
     loadRelaysFromCache,
@@ -390,14 +393,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   useEffect(() => {
-    // Publish read relays so zap-receipt queries from WalletContext hit
-    // the user's configured relays in addition to the app-level defaults.
+    // Published so WalletContext's zap-receipt queries also hit the user's read relays.
     const read = relays.filter((r) => r.read).map((r) => r.url);
     nostrService.setCurrentUserReadRelays(read);
   }, [relays]);
 
   // Identity changes only when the set of read relays does (see the hook).
-  const getReadRelays = useReadRelays(relays, dmInboxRelays);
+  const getReadRelays = useReadRelays(relays, dmInboxRelays, relayListsHydrated);
 
   // DM inbox + conversation cluster (#703). State, refs, callbacks, and
   // the live-DM subscription effect for the NIP-04/NIP-17 inbox live in
@@ -450,10 +452,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const { loadProfile, loadProfileFromCache } = useOwnProfile(profileSetterFor);
 
-  // Batch-fetch kind-0 profiles for arbitrary pubkeys (e.g. non-followed DM
-  // senders, which `loadContacts`/`fetchProfiles` never fetch). Reads from the
-  // user's relays; nostrService.fetchProfiles unions PROFILE_RELAYS for
-  // coverage. Returns a pubkey→profile map; the caller owns caching (#664).
+  // Kind-0s for arbitrary pubkeys (e.g. non-followed DM senders) from the user's relays +
+  // PROFILE_RELAYS (misses: people's own relays). The caller owns caching (#664).
   const fetchProfilesForPubkeys = useCallback(
     async (pubkeys: string[]): Promise<Map<string, NostrProfile>> => {
       if (pubkeys.length === 0) return new Map();
@@ -545,6 +545,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       opts?: { force?: boolean; awaitProfiles?: boolean },
     ) => {
       const setContacts = contactsSetterFor(pk);
+      // Bound to the cache epoch NOW: a load that outlives a sign-out writes nothing back.
+      const persist = profilePersisterFor(pk);
       const finishFollowHydration = followHydratedSetterFor(pk);
       const { fetchedContacts, cachedProfileMap, cacheAgeMs } = await reconcileCachedContactFollows(
         pk,
@@ -591,41 +593,31 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return;
       }
 
-      // Cache stale — refresh all contacts' profiles. (When cacheFresh is
-      // true we've already returned via one of the two fast paths above, so
-      // the dropped "X served from cache" suffix would always be 0.)
+      // Cache stale (a fresh cache returned via a fast path above): refresh all.
       const pubkeysToFetch = fetchedContacts.map((c) => c.pubkey);
 
-      // The kind-0 profile batch is the slow part (~90s cold for a 571-contact
-      // list). The contact LIST — everything the follow-gate and DM-inbox
-      // refresh depend on — is already resolved and in state by this point.
-      // Callers that own a pull-to-refresh spinner (see `refreshContacts`,
-      // `awaitProfiles: false`) let this batch run fire-and-forget: its
-      // `onBatch` hook streams avatars in progressively, so the spinner can
-      // clear the moment contacts are in rather than after every profile
-      // lands. All other callers keep the original awaited behaviour. (#852)
+      // The kind-0 profile batch is the slow part (~90s cold for a 571-contact list). The
+      // contact LIST — everything the follow-gate and DM-inbox refresh depend on — is already
+      // resolved and in state by this point. Callers that own a pull-to-refresh spinner (see
+      // `refreshContacts`, `awaitProfiles: false`) let this batch run fire-and-forget: its
+      // `onBatch` hook streams avatars in progressively, so the spinner can clear the moment
+      // contacts are in. All other callers keep the original awaited behaviour. (#852)
       const runProfileFetch = async (): Promise<void> => {
         const t1 = Date.now();
+        // Batches stream into contacts (newest kind-0 winning); `owner` keeps a
+        // stale load's background fallback (#1390) from running for another account.
         const profileMap = await nostrService.fetchProfiles(
           pubkeysToFetch,
           relayUrls,
-          (partial) => {
-            // Update UI incrementally as each batch of profiles arrives
-            startTransition(() =>
-              setContacts((prev) =>
-                prev.map((c) => ({
-                  ...c,
-                  profile: partial.get(c.pubkey) ?? c.profile,
-                })),
-              ),
-            );
-          },
+          (partial) =>
+            startTransition(() => setContacts((prev) => mergeContactProfiles(prev, partial))),
+          { owner: pk, onLateProfiles: (late) => void persist(cachedProfileMap, late) },
         );
         if (__DEV__)
           console.log(
             `[Nostr] fetchProfiles: ${Date.now() - t1}ms, ${profileMap.size}/${pubkeysToFetch.length} profiles loaded`,
           );
-        await persistMergedProfileCache(pk, cachedProfileMap, profileMap);
+        await persist(cachedProfileMap, profileMap);
       };
 
       if (opts?.awaitProfiles === false) {
@@ -1324,7 +1316,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         pubkey,
         recipientPubkey,
         amountSats * 1000,
-        getReadRelays(),
+        zapReceiptRelays(recipientPubkey, getReadRelays()),
         comment,
         zapEventId,
       );

@@ -59,6 +59,10 @@ export interface PeerRelayLookupOptions {
   viewerPubkey?: string | null;
   /** The viewer's own read relays, asked alongside the indexers and defaults. */
   lookupRelays?: readonly string[];
+  /** Cancels this caller's NEW lookups (closes their REQs). An aborted lookup
+   * is never cached and never shared with other callers; lookups already in
+   * flight for someone else are awaited, not cancelled. */
+  signal?: AbortSignal;
 }
 
 export const PEER_LIST_TTL_MS = 10 * 60_000;
@@ -310,7 +314,14 @@ async function lookupBatch(
   pubkeys: string[],
   viewer: string | null | undefined,
   lookupRelays: readonly string[] | undefined,
+  signal?: AbortSignal,
 ): Promise<LookupBatch> {
+  if (signal?.aborted) {
+    return {
+      entries: new Map(pubkeys.map((pk) => [pk, unknownEntry('aborted')])),
+      cacheable: false,
+    };
+  }
   const relays = peerLookupRelays(viewer, lookupRelays);
   const started = Date.now();
   const out = new Map<string, CacheEntry>();
@@ -334,6 +345,7 @@ async function lookupBatch(
       { kinds: [10002], authors: pubkeys, limit: pubkeys.length },
     ];
     const events = await pool.querySyncFilters(relays, filters, PEER_LOOKUP_MAX_WAIT_MS, {
+      abort: signal,
       requireAnswer: true,
       onClose: (reasons) => {
         complete = reasons.includes(EOSE_REASON);
@@ -341,7 +353,13 @@ async function lookupBatch(
     });
     const at = Date.now();
     for (const pubkey of pubkeys)
-      out.set(pubkey, peerEntryFromEvents(events, pubkey, complete, at));
+      out.set(
+        pubkey,
+        // Cut short by the caller: it can't tell "absent" from "not asked".
+        signal?.aborted
+          ? unknownEntry('aborted', at)
+          : peerEntryFromEvents(events, pubkey, complete, at),
+      );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     for (const pubkey of pubkeys) out.set(pubkey, unknownEntry(message));
@@ -360,7 +378,7 @@ async function lookupBatch(
     `peerRelayLists lookup owner=${perfOwnerTag(viewer ?? null)} n=${pubkeys.length} ` +
       `ok=${found} complete=${complete} relays=${relays.length} ${Date.now() - started}ms`,
   );
-  return { entries: out, cacheable: !redirected };
+  return { entries: out, cacheable: !redirected && !signal?.aborted };
 }
 
 /** The fresh cached knowledge, without any network — a kind that expired (and
@@ -407,9 +425,10 @@ export async function getManyPeerRelayLists(
     queued.add(pubkey);
     toFetch.push(pubkey);
   }
+  const { signal } = options;
   for (let i = 0; i < toFetch.length; i += MAX_AUTHORS_PER_LOOKUP) {
     const chunk = toFetch.slice(i, i + MAX_AUTHORS_PER_LOOKUP);
-    const batch = lookupBatch(chunk, viewer, options.lookupRelays);
+    const batch = lookupBatch(chunk, viewer, options.lookupRelays, signal);
     for (const pubkey of chunk) {
       const key = cacheKey(pubkey, viewer);
       const run = batch
@@ -422,7 +441,8 @@ export async function getManyPeerRelayLists(
         .finally(() => {
           if (inFlight.get(key) === run) inFlight.delete(key);
         });
-      inFlight.set(key, run);
+      // A cancellable lookup isn't shared: another caller mustn't inherit its abort.
+      if (!signal) inFlight.set(key, run);
       pending.set(pubkey, run);
     }
   }

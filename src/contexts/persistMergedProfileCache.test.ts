@@ -11,7 +11,12 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { persistMergedProfileCache, PROFILES_CACHE_KEY_BASE } from './nostrCacheKeys';
+import {
+  persistMergedProfileCache,
+  PROFILES_CACHE_KEY_BASE,
+  profilePersisterFor,
+  retireProfilePersists,
+} from './nostrCacheKeys';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
 
@@ -69,6 +74,77 @@ describe('persistMergedProfileCache (#852)', () => {
 
     const result = await readCache();
     expect(result.a.name).toBe('a-new');
+  });
+
+  it('never lets an older kind-0 (a late fallback) overwrite a newer cached one (#1390)', async () => {
+    const dated = (name: string, createdAt: number) => ({ ...profile(name), createdAt });
+    await AsyncStorage.setItem(key, JSON.stringify({ a: dated('a-new', 200), b: dated('b', 1) }));
+
+    const fetched = new Map<string, NostrProfile>([
+      ['a', dated('a-stale', 100)],
+      ['b', dated('b-newer', 2)],
+    ]);
+    await persistMergedProfileCache(PK, {}, fetched);
+
+    const result = await readCache();
+    expect(result.a.name).toBe('a-new');
+    expect(result.b.name).toBe('b-newer');
+  });
+
+  it('serialises overlapping persists: no lost additions, no older kind-0 written last (#1390)', async () => {
+    const dated = (name: string, createdAt: number) => ({ ...profile(name), createdAt });
+    // Both start before either writes: unsynchronised, both would read the
+    // same (empty) cache and the second write would win outright.
+    const first = persistMergedProfileCache(
+      PK,
+      {},
+      new Map<string, NostrProfile>([
+        ['a', dated('a-new', 200)],
+        ['c', dated('c', 1)],
+      ]),
+    );
+    const second = persistMergedProfileCache(
+      PK,
+      {},
+      new Map<string, NostrProfile>([
+        ['a', dated('a-stale', 100)],
+        ['b', dated('b', 1)],
+      ]),
+    );
+    await Promise.all([first, second]);
+
+    const result = await readCache();
+    expect(result.a.name).toBe('a-new');
+    expect(Object.keys(result).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('a persist queued before the account is wiped never writes after it (#1390)', async () => {
+    // A late outbox find's persist is queued behind a running one...
+    const first = persistMergedProfileCache(PK, {}, new Map([['a', profile('a')]]));
+    const late = persistMergedProfileCache(PK, {}, new Map([['b', profile('b')]]));
+    // ...then sign-out wipes the account: in-flight writes finish first...
+    await retireProfilePersists(PK);
+    await AsyncStorage.removeItem(key); // ...the wipe's own removal
+    await Promise.all([first, late]);
+    // ...and nothing queued before the wipe recreates the cache.
+    expect(await AsyncStorage.getItem(key)).toBeNull();
+    // A persist after the wipe (signed back in) writes as usual.
+    await persistMergedProfileCache(PK, {}, new Map([['c', profile('c')]]));
+    expect(Object.keys(await readCache())).toEqual(['c']);
+  });
+
+  it('a load that STARTED before sign-out writes nothing back when it finishes after (#1390)', async () => {
+    // The contacts load starts (and binds its persister) while signed in...
+    const persist = profilePersisterFor(PK);
+    // ...sign-out wipes the account before the load's fetch has finished...
+    await retireProfilePersists(PK);
+    await AsyncStorage.removeItem(key);
+    // ...then the fetch finishes and persists: nothing comes back.
+    await persist({}, new Map([['a', profile('a')]]));
+    expect(await AsyncStorage.getItem(key)).toBeNull();
+    // A load started after the wipe persists as usual.
+    await profilePersisterFor(PK)({}, new Map([['b', profile('b')]]));
+    expect(Object.keys(await readCache())).toEqual(['b']);
   });
 
   it('falls back to the caller snapshot when the on-disk cache is corrupt', async () => {

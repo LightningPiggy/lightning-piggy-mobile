@@ -8,6 +8,14 @@ import {
   getVerifiedLud16,
 } from './verifiedLud16Cache';
 
+// A forged main-path event now counts as a miss (#1390): the outbox fallback
+// (covered in nostrService.profileFallback.test) finds nothing here.
+jest.mock('./profileOutboxFallback', () => ({
+  fetchMissingProfileEvents: jest.fn(async () => new Map()),
+  scheduleMissingProfileFallback: jest.fn(() => () => {}),
+  newFallbackGeneration: jest.fn(() => new AbortController().signal),
+}));
+
 // fetchProfile feeds payment destinations, so only a signature-verified
 // kind-0 BY the requested pubkey may reach the Lightning-address cache (#1719).
 const sk = generateSecretKey();

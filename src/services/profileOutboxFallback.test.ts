@@ -1,0 +1,440 @@
+import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
+import { __resetOutboxLeasesForTests, leaseOutboxRelays } from './authorOutboxRelays';
+import { getManyPeerRelayLists, type PeerRelayListResult } from './peerRelayLists';
+import {
+  __resetProfileFallbackForTests,
+  fetchMissingProfileEvents,
+  FALLBACK_HYDRATION_WAIT_MS,
+  FALLBACK_RETRY_THROTTLE_MS,
+  FALLBACK_START_DELAY_MS,
+  MAX_FALLBACK_PEOPLE,
+  MAX_VERIFIED_CANDIDATES,
+  scheduleMissingProfileFallback,
+} from './profileOutboxFallback';
+import { setCurrentUserOwnRelays, setCurrentUserPubkey } from './nostrActiveAccount';
+import { querySyncAbortable } from './relayQuery';
+import { verifyEventCached } from './nostrVerifyCache';
+
+jest.mock('./nostrPool', () => ({
+  pool: {},
+  pooledRelayUrls: jest.fn(() => new Set<string>()),
+  pruneIdleRelays: jest.fn(),
+  releaseNewIdleRelays: jest.fn(),
+}));
+jest.mock('./peerRelayLists', () => ({
+  getManyPeerRelayLists: jest.fn(),
+  getPeerRelayLists: jest.fn(),
+  peekPeerRelayLists: jest.fn(),
+}));
+jest.mock('./relayQuery', () => ({ querySyncAbortable: jest.fn() }));
+// The test events carry no signatures: "forged" ones are named so.
+jest.mock('./nostrVerifyCache', () => ({
+  verifyEventCached: jest.fn((ev: { id: string }) => !ev.id.startsWith('forged')),
+}));
+const mockMaybeYield = jest.fn(async () => {});
+jest.mock('../contexts/nostrDecryptPacing', () => ({
+  createYieldScheduler: () => ({ maybeYield: mockMaybeYield, yieldCount: 0, dispose: () => {} }),
+}));
+
+const viewer = 'f'.repeat(64);
+const alice = 'a'.repeat(64);
+const bob = 'b'.repeat(64);
+const pk = (n: number) => n.toString(16).padStart(64, '0');
+const relay = (name: string) => `wss://${name}.example/`;
+const lists = jest.mocked(getManyPeerRelayLists);
+const query = jest.mocked(querySyncAbortable);
+
+const ok = (write: string[] | null): PeerRelayListResult => ({
+  status: 'ok',
+  lists: { inbox: undefined, read: undefined, write },
+});
+const kind0 = (pubkey: string, created_at = 1) =>
+  ({
+    id: `${pubkey}-${created_at}`,
+    pubkey,
+    kind: 0,
+    created_at,
+    content: '{}',
+    tags: [],
+  }) as never;
+
+const writeLists = (byPerson: Record<string, PeerRelayListResult>) =>
+  lists.mockImplementation(async (pubkeys) => {
+    const out = new Map<string, PeerRelayListResult>();
+    for (const p of pubkeys) out.set(p, byPerson[p] ?? ok(null));
+    return out;
+  });
+
+const opts = { purpose: 'display' as const, alreadyAsked: [relay('mine')], viewerPubkey: viewer };
+
+/** Switch the active account; its relay lists load (own relays: none here). */
+const become = (pubkey: string) => {
+  setCurrentUserPubkey(pubkey);
+  setCurrentUserOwnRelays([], true);
+};
+
+it("asks nothing until the viewer's own relays are known, giving up after a bounded wait (c)", async () => {
+  setCurrentUserOwnRelays(['wss://default.example/'], false);
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const run = fetchMissingProfileEvents([alice], opts);
+  await jest.advanceTimersByTimeAsync(FALLBACK_HYDRATION_WAIT_MS);
+  expect((await run).size).toBe(0);
+  expect(lists).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
+  // Once hydrated it runs, and the earlier call recorded no miss.
+  setCurrentUserOwnRelays([], true);
+  await fetchMissingProfileEvents([alice], opts);
+  expect(query).toHaveBeenCalledTimes(1);
+});
+
+it('a fallback that arrives before hydration runs as soon as the own relays are known', async () => {
+  setCurrentUserOwnRelays(['wss://default.example/'], false);
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  query.mockResolvedValue([kind0(alice)]);
+  const run = fetchMissingProfileEvents([alice], opts);
+  await jest.advanceTimersByTimeAsync(1_000);
+  expect(lists).not.toHaveBeenCalled();
+  setCurrentUserOwnRelays(['wss://mine.example/'], true); // the lists load
+  expect((await run).has(alice)).toBe(true);
+});
+
+it('an abort while waiting for hydration stops it', async () => {
+  setCurrentUserOwnRelays([], false);
+  const controller = new AbortController();
+  const run = fetchMissingProfileEvents([alice], { ...opts, signal: controller.signal });
+  controller.abort();
+  expect((await run).size).toBe(0);
+  setCurrentUserOwnRelays([], true);
+  await jest.advanceTimersByTimeAsync(10);
+  expect(lists).not.toHaveBeenCalled();
+});
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  jest.useFakeTimers();
+  __resetOutboxLeasesForTests();
+  __resetProfileFallbackForTests();
+  setCurrentUserOwnRelays([], true);
+  query.mockResolvedValue([]);
+});
+
+it("never LEASES the viewer's own relays, but asks one the caller didn't (on the viewer's socket)", async () => {
+  // e.g. the contact screen's fetchProfile, whose already-asked list is read relays only.
+  setCurrentUserOwnRelays(['wss://mine.example/', 'wss://DM-inbox.example'], true);
+  writeLists({ [alice]: ok([relay('dm-inbox'), relay('alice1')]) });
+  await fetchMissingProfileEvents([alice], { ...opts, alreadyAsked: [relay('mine')] });
+  expect(query).toHaveBeenCalledTimes(1);
+  // alice1 is leased; the viewer's own DM inbox relay is asked too, unleased.
+  expect(query.mock.calls[0][1]).toEqual([relay('alice1'), relay('dm-inbox')]);
+  expect(leaseOutboxRelays([relay('dm-inbox')]).relays).toEqual([]);
+  // A person whose only relay is the viewer's (unasked) DM inbox is still found.
+  query.mockClear();
+  query.mockResolvedValue([kind0(bob)]);
+  writeLists({ [bob]: ok([relay('dm-inbox')]) });
+  const found = await fetchMissingProfileEvents([bob], { ...opts, alreadyAsked: [] });
+  expect(query.mock.calls[0][1]).toEqual([relay('dm-inbox')]);
+  expect(found.has(bob)).toBe(true);
+  // Already asked by the caller: not asked again.
+  query.mockClear();
+  await fetchMissingProfileEvents([bob], {
+    ...opts,
+    purpose: 'verified',
+    alreadyAsked: [relay('dm-inbox')],
+  });
+  expect(query).not.toHaveBeenCalled();
+});
+
+it('a relay that ignores `limit` costs at most a few Schnorr checks per person', async () => {
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const verify = jest.mocked(verifyEventCached);
+  verify.mockClear();
+  // Twenty forged copies, newest first, with the genuine one oldest of all.
+  query.mockResolvedValue([
+    ...Array.from(
+      { length: 20 },
+      (_, i) => ({ ...(kind0(alice, 100 + i) as object), id: `forged-${i}` }) as never,
+    ),
+    kind0(alice, 1),
+  ]);
+  const found = await fetchMissingProfileEvents([alice], { ...opts, purpose: 'verified' });
+  expect(verify).toHaveBeenCalledTimes(MAX_VERIFIED_CANDIDATES);
+  // Paced: the budget-gated scheduler runs between Schnorr checks.
+  expect(mockMaybeYield).toHaveBeenCalledTimes(MAX_VERIFIED_CANDIDATES - 1);
+  // Only the newest few were checked: the buried genuine copy isn't reached.
+  expect(found.has(alice)).toBe(false);
+  // Events by someone else or of another kind are never verified.
+  verify.mockClear();
+  query.mockResolvedValue([
+    { ...(kind0(bob, 9) as object), id: 'other-author' } as never,
+    { ...(kind0(alice, 9) as object), id: 'other-kind', kind: 1 } as never,
+    kind0(alice, 5),
+  ]);
+  expect(
+    (await fetchMissingProfileEvents([alice], { ...opts, purpose: 'verified' })).get(alice)
+      ?.created_at,
+  ).toBe(5);
+  expect(verify).toHaveBeenCalledTimes(1);
+});
+
+it('an unasked own relay is never crowded out, and one cap covers both sets (3 per person)', async () => {
+  setCurrentUserOwnRelays([relay('dm-inbox')], true);
+  writeLists({ [alice]: ok([relay('w1'), relay('w2'), relay('w3'), relay('dm-inbox')]) });
+  await fetchMissingProfileEvents([alice], { ...opts, alreadyAsked: [] });
+  // The own relay is kept (filtered before the cap); leased ones fill the rest.
+  expect(query.mock.calls[0][1]).toEqual([relay('w1'), relay('w2'), relay('dm-inbox')]);
+});
+
+it('an account switch while waiting for hydration never resumes the lookup for the next account', async () => {
+  setCurrentUserPubkey('d'.repeat(64)); // account A, lists not loaded yet
+  setCurrentUserOwnRelays([], false);
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const run = fetchMissingProfileEvents([alice], { ...opts, viewerPubkey: undefined });
+  // The user switches to B, whose lists load.
+  setCurrentUserPubkey('e'.repeat(64));
+  setCurrentUserOwnRelays([relay('b-only')], true);
+  expect((await run).size).toBe(0);
+  expect(lists).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
+  setCurrentUserPubkey(null);
+});
+
+it('a forged newer copy never displaces a genuine one from another relay (CodeRabbit)', async () => {
+  writeLists({ [alice]: ok([relay('alice1'), relay('alice2')]) });
+  query.mockResolvedValue([
+    { ...(kind0(alice, 9) as object), id: 'forged-new' } as never,
+    kind0(alice, 5),
+  ]);
+  const found = await fetchMissingProfileEvents([alice], opts);
+  expect(found.get(alice)?.created_at).toBe(5);
+  // Only forged copies: nothing.
+  query.mockResolvedValue([{ ...(kind0(alice, 9) as object), id: 'forged-only' } as never]);
+  expect((await fetchMissingProfileEvents([alice], { ...opts, purpose: 'verified' })).size).toBe(0);
+});
+
+it("asks each person's own relays, one person per query (never batched)", async () => {
+  writeLists({
+    [alice]: ok([relay('alice1'), relay('shared'), relay('mine')]),
+    [bob]: ok([relay('bob1'), relay('shared')]),
+  });
+  query.mockImplementation(async (_pool, _relays, filter) => [kind0(filter.authors![0])]);
+  const found = await fetchMissingProfileEvents([alice, bob], opts);
+  expect([...found.keys()].sort()).toEqual([alice, bob]);
+  const calls = query.mock.calls.map(([, relays, filter]) => ({ relays, filter }));
+  expect(calls).toEqual(
+    expect.arrayContaining([
+      {
+        relays: [relay('alice1'), relay('shared')],
+        filter: { kinds: [0], authors: [alice], limit: 1 },
+      },
+      {
+        relays: [relay('bob1'), relay('shared')],
+        filter: { kinds: [0], authors: [bob], limit: 1 },
+      },
+    ]),
+  );
+  // Privacy: every query carries exactly one author, sent only to that author's relays.
+  for (const { relays, filter } of calls) {
+    expect(filter.authors).toHaveLength(1);
+    expect(relays).not.toContain(relay('mine'));
+  }
+});
+
+it('caps relays per person and people per call; hints are sanitised and come after write relays', async () => {
+  const many = Array.from({ length: MAX_FALLBACK_PEOPLE + 5 }, (_, i) => pk(i + 1));
+  writeLists(
+    Object.fromEntries(
+      many.map((p) => [p, ok([relay(`${p.slice(-2)}w1`), relay(`${p.slice(-2)}w2`)])]),
+    ),
+  );
+  const hints = new Map([[many[0], ['ws://192.168.1.10:7777', relay('hint'), relay('extra')]]]);
+  const run = fetchMissingProfileEvents(many, { ...opts, hints });
+  await jest.runAllTimersAsync();
+  await run;
+  expect(jest.mocked(lists).mock.calls[0][0]).toHaveLength(MAX_FALLBACK_PEOPLE);
+  expect(query).toHaveBeenCalledTimes(MAX_FALLBACK_PEOPLE);
+  const first = query.mock.calls.find(([, , f]) => f.authors![0] === many[0])!;
+  expect(first[1]).toEqual([relay('01w1'), relay('01w2'), relay('hint')]);
+  for (const [, relays] of query.mock.calls) expect(relays.length).toBeLessThanOrEqual(3);
+});
+
+it('throttles a miss for a while, per purpose, and never persists it', async () => {
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  await fetchMissingProfileEvents([alice], opts);
+  expect(query).toHaveBeenCalledTimes(1);
+  await fetchMissingProfileEvents([alice], opts);
+  expect(query).toHaveBeenCalledTimes(1);
+  // A display-only miss doesn't suppress the verified fetch (lud16 path).
+  await fetchMissingProfileEvents([alice], { ...opts, purpose: 'verified' });
+  expect(query).toHaveBeenCalledTimes(2);
+  jest.advanceTimersByTime(FALLBACK_RETRY_THROTTLE_MS);
+  await fetchMissingProfileEvents([alice], opts);
+  expect(query).toHaveBeenCalledTimes(3);
+});
+
+it('never throttles a verified (user-driven) lookup: a relay back up or a new hint is tried at once', async () => {
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const verified = { ...opts, purpose: 'verified' as const };
+  await fetchMissingProfileEvents([alice], verified);
+  await fetchMissingProfileEvents([alice], verified);
+  expect(query).toHaveBeenCalledTimes(2);
+  // A new kind-3 hint is asked on the very next open.
+  await fetchMissingProfileEvents([alice], {
+    ...verified,
+    hints: new Map([[alice, [relay('hint')]]]),
+  });
+  expect(query.mock.calls[2][1]).toEqual([relay('alice1'), relay('hint')]);
+});
+
+it('a failed relay-list lookup is not throttled', async () => {
+  lists.mockResolvedValue(new Map([[alice, { status: 'failed', error: 'offline' }]]));
+  await fetchMissingProfileEvents([alice], opts);
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  await fetchMissingProfileEvents([alice], opts);
+  expect(query).toHaveBeenCalledTimes(1);
+});
+
+it('skips people whose relays are all already asked, without a query', async () => {
+  writeLists({ [alice]: ok([relay('mine')]) });
+  expect((await fetchMissingProfileEvents([alice], opts)).size).toBe(0);
+  expect(query).not.toHaveBeenCalled();
+});
+
+it("ignores events by someone else, and keeps the person's newest kind-0", async () => {
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  query.mockResolvedValue([kind0(bob, 9), kind0(alice, 2), kind0(alice, 5)]);
+  const found = await fetchMissingProfileEvents([alice], opts);
+  expect(found.get(alice)?.created_at).toBe(5);
+  expect(found.has(bob)).toBe(false);
+});
+
+it('over the global relay ceiling it skips (no query, no throttle)', async () => {
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const hog = leaseOutboxRelays(Array.from({ length: 25 }, (_, i) => relay(`hog${i}`)));
+  await fetchMissingProfileEvents([alice], opts);
+  expect(query).not.toHaveBeenCalled();
+  hog.release();
+  await fetchMissingProfileEvents([alice], opts);
+  expect(query).toHaveBeenCalledTimes(1);
+});
+
+it('a test account in lockdown makes no lookups at all', async () => {
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const found = await fetchMissingProfileEvents([alice], {
+    ...opts,
+    viewerPubkey: TEST_ACCOUNT_KEYS.big,
+  });
+  expect(found.size).toBe(0);
+  expect(lists).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
+});
+
+describe('scheduleMissingProfileFallback (background, never awaited)', () => {
+  beforeEach(() => {
+    become(viewer);
+    writeLists({ [alice]: ok([relay('alice1')]) });
+  });
+
+  it('starts only after the stagger delay and reports what it found', async () => {
+    query.mockResolvedValue([kind0(alice)]);
+    const onFound = jest.fn();
+    scheduleMissingProfileFallback([alice], opts, onFound);
+    await jest.advanceTimersByTimeAsync(FALLBACK_START_DELAY_MS - 1);
+    expect(lists).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1);
+    await jest.runAllTimersAsync();
+    expect(onFound).toHaveBeenCalledTimes(1);
+    expect([...onFound.mock.calls[0][0].keys()]).toEqual([alice]);
+  });
+
+  it('stays quiet when nothing was found', async () => {
+    const onFound = jest.fn();
+    scheduleMissingProfileFallback([alice], opts, onFound);
+    await jest.runAllTimersAsync();
+    expect(query).toHaveBeenCalled();
+    expect(onFound).not.toHaveBeenCalled();
+  });
+
+  it('is cancelled by its closer before it starts', async () => {
+    const cancel = scheduleMissingProfileFallback([alice], opts, jest.fn());
+    cancel();
+    await jest.runAllTimersAsync();
+    expect(lists).not.toHaveBeenCalled();
+  });
+
+  it('an account switch cancels it, before it starts or while it runs', async () => {
+    scheduleMissingProfileFallback([alice], opts, jest.fn());
+    become(bob);
+    await jest.runAllTimersAsync();
+    expect(lists).not.toHaveBeenCalled();
+
+    become(viewer);
+    let answer!: (events: never[]) => void;
+    query.mockReturnValue(new Promise((r) => (answer = r)));
+    const onFound = jest.fn();
+    scheduleMissingProfileFallback([alice], opts, onFound);
+    await jest.advanceTimersByTimeAsync(FALLBACK_START_DELAY_MS);
+    expect(query).toHaveBeenCalled();
+    become(bob);
+    answer([kind0(alice)] as never[]);
+    await jest.runAllTimersAsync();
+    // The previous account's result is dropped.
+    expect(onFound).not.toHaveBeenCalled();
+  });
+
+  it('runs nothing when the account already changed since the caller started (#4)', async () => {
+    become(bob); // the owner passed in is `viewer`
+    scheduleMissingProfileFallback([alice], opts, jest.fn());
+    await jest.runAllTimersAsync();
+    expect(lists).not.toHaveBeenCalled();
+  });
+
+  it("an aborted caller's signal stops it (a newer refresh)", async () => {
+    const generation = new AbortController();
+    scheduleMissingProfileFallback([alice], { ...opts, signal: generation.signal }, jest.fn());
+    generation.abort();
+    await jest.runAllTimersAsync();
+    expect(lists).not.toHaveBeenCalled();
+  });
+});
+
+describe('cancellation stops running work (#5)', () => {
+  it('passes the signal to the relay-list lookup and to every query', async () => {
+    writeLists({ [alice]: ok([relay('alice1')]) });
+    const controller = new AbortController();
+    await fetchMissingProfileEvents([alice], { ...opts, signal: controller.signal });
+    // Uncached relay-list discovery is cancelled too (#5).
+    expect(lists.mock.calls[0][1]).toMatchObject({ signal: controller.signal });
+    expect(query.mock.calls[0][3]).toMatchObject({ signal: controller.signal });
+  });
+
+  it('no new round, socket or throttle entry after an abort mid-run', async () => {
+    const people = Array.from({ length: 8 }, (_, i) => pk(i + 1));
+    writeLists(Object.fromEntries(people.map((p) => [p, ok([relay(`p${p.slice(-1)}`)])])));
+    const controller = new AbortController();
+    // The whole first round (5 people) is in flight when the user cancels.
+    query.mockImplementation(async () => {
+      if (query.mock.calls.length === 5) controller.abort();
+      return [];
+    });
+    const run = fetchMissingProfileEvents(people, { ...opts, signal: controller.signal });
+    await jest.runAllTimersAsync();
+    expect((await run).size).toBe(0);
+    // One round of 5, never the second.
+    expect(query).toHaveBeenCalledTimes(5);
+    // Aborted lookups aren't misses: a later call asks again.
+    query.mockReset();
+    query.mockResolvedValue([]);
+    await fetchMissingProfileEvents(people.slice(0, 1), opts);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('an abort before the relay lists land opens no sockets', async () => {
+    const controller = new AbortController();
+    lists.mockImplementation(async (pubkeys) => {
+      controller.abort();
+      return new Map(pubkeys.map((p) => [p, ok([relay('alice1')])]));
+    });
+    await fetchMissingProfileEvents([alice], { ...opts, signal: controller.signal });
+    expect(query).not.toHaveBeenCalled();
+  });
+});

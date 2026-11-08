@@ -368,3 +368,126 @@ describe('cold-start re-sets with unchanged content (relay subs must not re-arm)
     expect(result.current.dmInboxRelays).toHaveLength(2);
   });
 });
+
+describe('relayListsHydrated (#1390: outbox leasing waits for it)', () => {
+  it('stays false while the DM inbox read is pending, even with a fresh NIP-65 cache', async () => {
+    // A fresh NIP-65 cache: loadRelays settles at once...
+    await AsyncStorage.setItem(
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, PK),
+      JSON.stringify([{ url: 'wss://relay.primal.net', read: true, write: true }]),
+    );
+    await AsyncStorage.setItem(
+      perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, PK),
+      String(Date.now()),
+    );
+    // ...but no inbox was ever cached, and the relays haven't answered yet.
+    let answer!: (event: unknown) => void;
+    fetchLatest.mockReturnValueOnce(new Promise((resolve) => (answer = resolve)));
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    expect(result.current.relayListsHydrated).toBe(false);
+    await act(async () => {
+      answer(inboxEvent(['wss://inbox.example']));
+    });
+    await waitFor(() => expect(result.current.relayListsHydrated).toBe(true));
+    expect(result.current.dmInboxRelays).toEqual(['wss://inbox.example']);
+  });
+
+  it('a cached inbox list (even an empty one) makes the inbox known before the relays answer', async () => {
+    await AsyncStorage.setItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, PK), '[]');
+    fetchLatest.mockReturnValueOnce(new Promise(() => {})); // never answers
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    await waitFor(() => expect(result.current.relayListsHydrated).toBe(true));
+  });
+
+  it('a failed discovery restores the expired cached list before it counts as known', async () => {
+    const cachedList = [{ url: 'wss://cached-only.example', read: true, write: true }];
+    await AsyncStorage.setItem(
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, PK),
+      JSON.stringify(cachedList),
+    );
+    // Expired: the network is asked, and fails.
+    await AsyncStorage.setItem(perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, PK), '1');
+    fetchList.mockResolvedValueOnce(null);
+    fetchLatest.mockResolvedValue(null);
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    // The cached relays are in the viewer's lists (so never leased as someone else's).
+    expect(result.current.nip65Relays).toEqual(cachedList);
+    await waitFor(() => expect(result.current.relayListsHydrated).toBe(true));
+  });
+
+  it('adopting just one list does not hydrate; both known does', async () => {
+    fetchLatest.mockResolvedValue(null);
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.applyPublishedRelayList(PK, [
+        { url: 'wss://nostr.mom', read: true, write: true },
+      ]);
+    });
+    expect(result.current.relayListsHydrated).toBe(false);
+    await act(async () => {
+      await result.current.applyPublishedDmInbox(PK, ['wss://inbox.example']);
+    });
+    expect(result.current.relayListsHydrated).toBe(true);
+    await act(async () => {
+      result.current.resetRelayLists();
+    });
+    expect(result.current.relayListsHydrated).toBe(false);
+    // The inbox alone doesn't either.
+    await act(async () => {
+      await result.current.applyPublishedDmInbox(PK, ['wss://inbox.example']);
+    });
+    expect(result.current.relayListsHydrated).toBe(false);
+  });
+
+  it('hydrates when the editor adopts a NIP-65 list during discovery (the inbox read still runs)', async () => {
+    fetchLatest.mockResolvedValue(null);
+    let finish!: (list: unknown) => void;
+    fetchList.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const { result } = renderHook(() => useNip65Relays());
+    let loading!: Promise<string[]>;
+    act(() => {
+      loading = result.current.loadRelays(PK);
+    });
+    // The editor adopts a NIP-65 list mid-load: that invalidates the load's
+    // generation, so it no longer adopts its own result...
+    await act(async () => {
+      await result.current.applyPublishedRelayList(PK, [
+        { url: 'wss://nostr.mom', read: true, write: true },
+      ]);
+    });
+    expect(result.current.relayListsHydrated).toBe(false);
+    // ...but the load still settles, and still reads the inbox.
+    await act(async () => {
+      finish([{ url: 'wss://relay.primal.net', read: true, write: true }]);
+      await loading;
+    });
+    await waitFor(() => expect(result.current.relayListsHydrated).toBe(true));
+    expect(fetchLatest).toHaveBeenCalled();
+  });
+
+  it('a load for a previous identity, finishing after a reset, does not hydrate the next', async () => {
+    fetchLatest.mockResolvedValue(null);
+    let finish!: (list: unknown) => void;
+    fetchList.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
+    const { result } = renderHook(() => useNip65Relays());
+    let loading!: Promise<string[]>;
+    act(() => {
+      loading = result.current.loadRelays(PK);
+    });
+    await act(async () => {
+      result.current.resetRelayLists(); // logout / account switch mid-load
+      finish([{ url: 'wss://relay.primal.net', read: true, write: true }]);
+      await loading;
+    });
+    expect(result.current.relayListsHydrated).toBe(false);
+  });
+});

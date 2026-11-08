@@ -157,12 +157,15 @@ const ContactProfileScreen: React.FC = () => {
   // strictly more useful than a bare npub for a cold-contact scanner, who
   // can resolve this person's metadata even on niche relays (#755). Mirrors
   // the relay-hint sourcing used by the OS/DM share handlers below.
+  // Recomputed when the QR / NFC sheet opens, so a write relay discovered
+  // after the first render (the outbox lookup, #1390) is in the hints.
   const nprofileRef = useMemo(() => {
     if (!contact.pubkey) return undefined;
     const readRelays = relays.filter((r) => r.read).map((r) => r.url);
     const relayHints = buildProfileRelayHints(contact.pubkey, contacts, readRelays);
     return `nostr:${nprofileEncode(contact.pubkey, relayHints)}`;
-  }, [contact.pubkey, contacts, relays]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contact.pubkey, contacts, relays, qrSheetOpen, nfcWriteVisible]);
 
   // Probe NFC capability once on mount.
   useEffect(() => {
@@ -185,9 +188,22 @@ const ContactProfileScreen: React.FC = () => {
   // doesn't grey out a known address. Keyed on the pubkey alone, so seeding
   // the address can't cancel the fetch.
   const relaysRef = useRef(relays);
+  const contactsRef = useRef(contacts);
   useEffect(() => {
     relaysRef.current = relays;
-  }, [relays]);
+    contactsRef.current = contacts;
+  }, [relays, contacts]);
+  // The contact's kind-3 relay hint, for a profile missing from the viewer's
+  // relays (#1390): every fetch of this profile passes it.
+  // Who the screen shows NOW, for lookups that finish after it changed.
+  const shownPubkeyRef = useRef(contact.pubkey);
+  useEffect(() => {
+    shownPubkeyRef.current = contact.pubkey;
+  }, [contact.pubkey]);
+  const hintsFor = useCallback((pubkey: string) => {
+    const hint = contactsRef.current.find((c) => c.pubkey === pubkey)?.relay;
+    return hint ? [hint] : undefined;
+  }, []);
   useEffect(() => {
     const pubkey = contact.pubkey;
     if (!pubkey) return;
@@ -202,7 +218,9 @@ const ContactProfileScreen: React.FC = () => {
           : prev,
       );
     });
-    Promise.all([fetchProfile(pubkey, readRelays), cachedLud16])
+    // A profile missing from those relays is looked for on the person's own
+    // relays and their kind-3 hint (#1390).
+    Promise.all([fetchProfile(pubkey, readRelays, { hints: hintsFor(pubkey) }), cachedLud16])
       .then(([profile, cached]) => {
         if (cancelled || !profile) return;
         setContact((prev) => {
@@ -233,7 +251,7 @@ const ContactProfileScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [contact.pubkey]);
+  }, [contact.pubkey, hintsFor]);
 
   // Pull-to-refresh: unlike the gap-fill effect above (which only fills
   // missing about/lud16, once), this re-fetches the kind-0 from relays and
@@ -243,21 +261,28 @@ const ContactProfileScreen: React.FC = () => {
   // without waiting out the 24h profile cache. `fetchProfile` is a direct
   // relay query, so there's no cache to bypass.
   const handleRefresh = useCallback(async () => {
-    if (!contact.pubkey) return;
+    const pubkey = contact.pubkey;
+    if (!pubkey) return;
     setRefreshing(true);
     try {
       const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const fresh = await fetchProfile(contact.pubkey, readRelays);
-      if (fresh) {
-        setContact((prev) => ({
-          ...prev,
-          name: fresh.displayName ?? fresh.name ?? prev.name,
-          picture: fresh.picture ?? null,
-          banner: fresh.banner ?? null,
-          about: fresh.about ?? null,
-          lightningAddress: fresh.lud16 ?? null,
-          nip05: fresh.nip05 ?? null,
-        }));
+      const fresh = await fetchProfile(pubkey, readRelays, { hints: hintsFor(pubkey) });
+      // The screen may show someone else by now: never apply this person's
+      // profile (or Lightning address) to them.
+      if (fresh && shownPubkeyRef.current === pubkey) {
+        setContact((prev) =>
+          prev.pubkey !== pubkey
+            ? prev
+            : {
+                ...prev,
+                name: fresh.displayName ?? fresh.name ?? prev.name,
+                picture: fresh.picture ?? null,
+                banner: fresh.banner ?? null,
+                about: fresh.about ?? null,
+                lightningAddress: fresh.lud16 ?? null,
+                nip05: fresh.nip05 ?? null,
+              },
+        );
       }
     } catch {
       // best-effort — a failed refresh leaves the current data in place
@@ -266,7 +291,7 @@ const ContactProfileScreen: React.FC = () => {
     }
     // Re-query the kind-1 note feed for new posts too.
     setNotesReloadNonce((n) => n + 1);
-  }, [contact.pubkey, relays]);
+  }, [contact.pubkey, relays, hintsFor]);
 
   useEffect(() => {
     if (contact.pubkey) {
@@ -307,15 +332,20 @@ const ContactProfileScreen: React.FC = () => {
       return;
     }
     let address = contact.lightningAddress;
-    if (!address && contact.pubkey) {
+    const pubkey = contact.pubkey;
+    if (!address && pubkey) {
       // The on-mount verified fetch may not have finished yet (or failed) —
       // resolve once more on demand so a present lud16 isn't false-negatived
       // into a "no Lightning address" alert.
       const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const verified = await fetchProfile(contact.pubkey, readRelays);
+      const verified = await fetchProfile(pubkey, readRelays, { hints: hintsFor(pubkey) });
+      // Moved on to someone else meanwhile: never pay them this address.
+      if (shownPubkeyRef.current !== pubkey) return;
       if (verified?.lud16) {
         address = verified.lud16;
-        setContact((prev) => ({ ...prev, lightningAddress: verified.lud16 }));
+        setContact((prev) =>
+          prev.pubkey === pubkey ? { ...prev, lightningAddress: verified.lud16 } : prev,
+        );
       }
     }
     if (!address) {
@@ -326,7 +356,7 @@ const ContactProfileScreen: React.FC = () => {
       return;
     }
     setSendSheetOpen(true);
-  }, [hasWallets, contact.lightningAddress, contact.pubkey, contact.name, relays, t]);
+  }, [hasWallets, contact.lightningAddress, contact.pubkey, contact.name, relays, t, hintsFor]);
 
   const handleSetLightningAddress = useCallback(
     async (address: string) => {

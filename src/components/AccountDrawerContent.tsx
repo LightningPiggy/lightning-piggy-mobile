@@ -204,7 +204,10 @@ const AccountDrawerContent: React.FC<DrawerContentComponentProps> = (props) => {
         if (cancelled) return;
         if (seeded[id.pubkey] || profileById[id.pubkey]) continue;
         try {
-          const fetched = await nostrService.fetchProfile(id.pubkey, fanOut);
+          // The device's own accounts: no outbox fallback (#1390).
+          const fetched = await nostrService.fetchProfile(id.pubkey, fanOut, {
+            outboxFallback: false,
+          });
           if (cancelled) return;
           if (fetched) setProfileById((prev) => ({ ...prev, [id.pubkey]: fetched }));
         } catch {
