@@ -348,3 +348,213 @@ describe('event-driven own-caches rearm (#1016)', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('relay-set keying (cold-start re-arm churn)', () => {
+  type Props = { pubkey: string | null; getReadRelays: () => string[] };
+  const renderWith = (initialProps: Props) =>
+    renderHook((props: Props) => useCacheNotifications(props), { initialProps });
+
+  it('does not re-arm or refetch when a new getter returns the same relays', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(1));
+
+    // Same relays, new array and new getter (a re-parsed relay list).
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://one/'] });
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await act(async () => {});
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    expect(mockedFoundLogs).toHaveBeenCalledTimes(1);
+    expect(mockedComments).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-arms on the new relays at once when the set changes, without bypassing the throttle', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(1));
+
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://one', 'wss://two'] });
+    await act(async () => {});
+    // Re-subscribed on the new relay set straight away, reusing the coords
+    // fetched moments ago instead of a second fetchCachesByAuthor.
+    expect(mockedFoundLogs).toHaveBeenCalledTimes(2);
+    expect(mockedFoundLogs.mock.calls.at(-1)![0]).toEqual(
+      expect.objectContaining({ relays: ['wss://one', 'wss://two'], cacheCoords: [COORD_A] }),
+    );
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+
+    // The throttle carried across the re-run: an AppState burst inside the gap
+    // still doesn't fetch...
+    const onChange = (AppState.addEventListener as jest.Mock).mock.calls.at(-1)![1];
+    await act(async () => {
+      onChange('active');
+      jest.advanceTimersByTime(3_000);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    // ...and once the gap has elapsed, ONE discovery runs on the new relays.
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    expect(mockedFetch.mock.calls[1][1]).toEqual(['wss://one', 'wss://two']);
+    await act(async () => {
+      onChange('active');
+      jest.advanceTimersByTime(3_000);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('rediscovers on the new relays after the gap when the old ones found no caches', async () => {
+    mockedFetch.mockResolvedValueOnce([]).mockResolvedValue([{ coord: COORD_A }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+    await act(async () => {});
+    expect(mockedFoundLogs).not.toHaveBeenCalled();
+
+    // Hydration adds the relay that actually holds the viewer's caches.
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://one', 'wss://caches'] });
+    await act(async () => {});
+    expect(mockedFetch).toHaveBeenCalledTimes(1); // still inside the gap
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(1));
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
+    expect(mockedFetch.mock.calls[1][1]).toEqual(['wss://one', 'wss://caches']);
+    expect(mockedFoundLogs.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ relays: ['wss://one', 'wss://caches'], cacheCoords: [COORD_A] }),
+    );
+  });
+
+  it('rediscovers after the gap when a joined in-flight fetch found nothing', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch
+      .mockReturnValueOnce(
+        new Promise<{ coord: string }[]>((res) => {
+          resolveFirst = res;
+        }),
+      )
+      .mockResolvedValue([{ coord: COORD_B }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://two'] });
+    await act(async () => {
+      resolveFirst([]);
+    });
+    expect(mockedFoundLogs).not.toHaveBeenCalled();
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(1));
+    expect(mockedFetch.mock.calls[1][1]).toEqual(['wss://two']);
+  });
+
+  it('keeps a cache publish queued across a relay change and runs it on the new relays', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch
+      .mockReturnValueOnce(
+        new Promise<{ coord: string }[]>((res) => {
+          resolveFirst = res;
+        }),
+      )
+      .mockResolvedValue([{ coord: COORD_B }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    // A publish lands mid-fetch (queued), then the relay set changes.
+    await act(async () => {
+      notifyOwnCachesChanged();
+    });
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://two'] });
+    await act(async () => {
+      resolveFirst([{ coord: COORD_A }]);
+    });
+    // The queued follow-up still runs, straight away, on the latest relays.
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    expect(mockedFetch.mock.calls[1][1]).toEqual(['wss://two']);
+    await waitFor(() =>
+      expect(mockedFoundLogs.mock.calls.at(-1)![0]).toEqual(
+        expect.objectContaining({ relays: ['wss://two'], cacheCoords: [COORD_B] }),
+      ),
+    );
+    // It already covered the new relays, so the post-gap rediscovery is skipped.
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('joins a fetch still in flight when the relay set changes instead of overlapping it', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch.mockReturnValueOnce(
+      new Promise<{ coord: string }[]>((res) => {
+        resolveFirst = res;
+      }),
+    );
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://two'] });
+    await act(async () => {
+      resolveFirst([{ coord: COORD_B }]);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    // Armed once, on the new relay set only.
+    expect(mockedFoundLogs).toHaveBeenCalledTimes(1);
+    expect(mockedFoundLogs.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ relays: ['wss://two'], cacheCoords: [COORD_B] }),
+    );
+  });
+
+  it('runs a publish queued before sign-out when the same account signs back in', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch
+      .mockReturnValueOnce(
+        new Promise<{ coord: string }[]>((res) => {
+          resolveFirst = res;
+        }),
+      )
+      .mockResolvedValue([{ coord: COORD_A }, { coord: COORD_B }]);
+    const relays = () => ['wss://one'];
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: relays });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    // Publish mid-fetch (queued), sign out, the fetch settles, sign back in
+    // with the same relays inside the gap.
+    await act(async () => {
+      notifyOwnCachesChanged();
+    });
+    rerender({ pubkey: null, getReadRelays: relays });
+    await act(async () => {
+      resolveFirst([{ coord: COORD_A }]);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    rerender({ pubkey: VIEWER, getReadRelays: relays });
+
+    // The cached coords arm at once, and the queued discovery runs now.
+    expect(mockedFoundLogs.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ cacheCoords: [COORD_A] }),
+    );
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    expect(mockedFetch.mock.calls[1]).toEqual([VIEWER, ['wss://one']]);
+    await waitFor(() =>
+      expect(mockedFoundLogs.mock.calls.at(-1)![0]).toEqual(
+        expect.objectContaining({ cacheCoords: [COORD_A, COORD_B] }),
+      ),
+    );
+    // Consumed once: nothing more fetches before the safety net.
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('fetches straight away for a new account, whatever the previous throttle', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+    rerender({ pubkey: OTHER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    expect(mockedFetch.mock.calls[1][0]).toBe(OTHER);
+  });
+});

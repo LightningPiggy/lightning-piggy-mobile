@@ -1,4 +1,5 @@
 import { useAppNetworkRelays } from '../hooks/useAppNetworkRelays';
+import { useReadRelays } from '../hooks/useReadRelays';
 import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useActiveNostrAccount } from './useActiveNostrAccount';
 import { useFollowHydration } from './useFollowHydration';
@@ -393,13 +394,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     nostrService.setCurrentUserReadRelays(read);
   }, [relays]);
 
-  const getReadRelays = useCallback((): string[] => {
-    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const base =
-      readRelays.length > 0 ? readRelays : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
-    // Others deliver NIP-17 DMs to the user's own DM inbox relays — read them too.
-    return [...new Set([...base, ...dmInboxRelays])];
-  }, [relays, dmInboxRelays]);
+  // Identity changes only when the set of read relays does (see the hook).
+  const getReadRelays = useReadRelays(relays, dmInboxRelays);
 
   // DM inbox + conversation cluster (#703). State, refs, callbacks, and
   // the live-DM subscription effect for the NIP-04/NIP-17 inbox live in

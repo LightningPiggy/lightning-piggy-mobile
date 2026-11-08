@@ -33,7 +33,7 @@
  * synchronously per request.
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { normalizeURL } from 'nostr-tools/utils';
+import { normalizeRelayUrl } from '../utils/relayListKey';
 
 export const PARK_AFTER_FAILURES = 2;
 export const PARK_BASE_MS = 15 * 60_000;
@@ -105,11 +105,7 @@ function noteSuccess(source: string, now: number): void {
 
 /** Normalise like the pool does, so `wss://x` and `wss://X/` share an entry. */
 export function relayKey(url: string): string {
-  try {
-    return normalizeURL(url);
-  } catch {
-    return url.trim();
-  }
+  return normalizeRelayUrl(url);
 }
 
 function backoffMs(failures: number): number {

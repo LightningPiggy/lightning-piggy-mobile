@@ -8,6 +8,7 @@ import {
   skipSetRecheckDone,
 } from '../services/dmRepliedPartners';
 import { useLiveFollowGate } from './useLiveFollowGate';
+import { useStableRelayList } from '../hooks/useStableRelayList';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Kind4RetryStore } from './kind4RetryStore';
 import * as nostrService from '../services/nostrService';
@@ -889,16 +890,11 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     setLiveSubArmed(true);
   }, []);
 
-  // In-memory dedup Set that survives live-DM-sub re-opens. The sub
-  // useEffect below re-runs when getReadRelays changes — e.g. when the
-  // relay-list refresh adds a new relay 9 s into cold start. Without
-  // this ref, the new effect instance creates a fresh Set and re-seeds
-  // it from AsyncStorage's wrap cache. That snapshot is stale by the
-  // deferred-write window, so all wraps the prior sub already
-  // decrypted re-stream from the relays (same `since` cursor) and get
-  // re-routed/re-decrypted. Carrying the Set forward keeps the
-  // early-return in handleInboxEvent honest across the re-open.
-  // Reset only when the viewer changes (sign out / account switch).
+  // In-memory dedup Set that survives live-DM-sub re-opens (the sub below
+  // re-arms when the read-relay set changes, e.g. a relay added mid cold
+  // start). Without it a re-opened sub re-seeds from the wrap cache, which is
+  // stale by the deferred-write window, so wraps the prior sub decrypted
+  // re-stream and get re-decrypted. Reset only when the viewer changes.
   const knownWrapIdsRef = useRef<{ pubkey: string | null; set: Set<string> }>({
     pubkey: null,
     set: new Set(),
@@ -933,6 +929,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // rumors persist for Orders regardless of Messages policy; their inbox
   // entries and alerts use the latest include-non-follows view setting.
   // Store writes run through the subscription's serial queue.
+  // Keyed on the relay set, so a new getter with the same relays doesn't re-arm.
+  const liveReadRelays = useStableRelayList(getReadRelays);
   useEffect(() => {
     if (!isLoggedIn || !pubkey || !signerType) return;
     // Keep the gift-wrap inbox armed throughout the signed-in session.
@@ -947,7 +945,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       isCurrentOwner: () => activeOwnerRef.current === pubkey,
       pubkey,
       signerType,
-      readRelays: getReadRelays(),
+      readRelays: liveReadRelays,
       knownWrapIdsRef,
       followPubkeysRef,
       followHydratedRef,
@@ -973,7 +971,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     isLoggedIn,
     pubkey,
     signerType,
-    getReadRelays,
+    liveReadRelays,
     liveSubArmed,
     inboxSetterFor,
     setDeferredReplay,
