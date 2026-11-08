@@ -1,10 +1,22 @@
 import * as expoFetch from 'expo/fetch';
 import { discoverRelayReqLimit } from './relayReqLimit';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { TEST_ACCOUNT_PUBKEYS } from '../config/testRelayLockdown';
 
 jest.mock('expo/fetch', () => ({ fetch: jest.fn() }));
 
 beforeEach(() => jest.mocked(expoFetch.fetch).mockReset());
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => {
+  jest.restoreAllMocks();
+  setCurrentUserPubkey(null);
+});
+
+test('test accounts in lockdown never make a NIP-11 request', async () => {
+  const fetch = jest.spyOn(expoFetch, 'fetch');
+  setCurrentUserPubkey([...TEST_ACCOUNT_PUBKEYS][0]);
+  expect(await discoverRelayReqLimit('wss://lockdown.example.com/')).toBeUndefined();
+  expect(fetch).not.toHaveBeenCalled();
+});
 
 test('NIP-11 discovery uses HTTPS, advertises NIP-11, caches and respects a smaller max', async () => {
   const fetch = (

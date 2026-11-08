@@ -1,3 +1,5 @@
+import { isTestRelayLockdown } from '../config/testRelayLockdown';
+import { getCurrentUserPubkey } from './nostrActiveAccount';
 import { isPublicRelayUrl } from '../utils/publicUrl';
 
 // NIP-11 is advisory. Never delay arming the inbox for HTTP discovery. Bound
@@ -5,6 +7,8 @@ import { isPublicRelayUrl } from '../utils/publicUrl';
 const cache = new Map<string, Promise<number | undefined>>();
 let active = 0;
 export function discoverRelayReqLimit(url: string): Promise<number | undefined> {
+  // Test accounts never contact public hosts, even for advisory NIP-11 discovery.
+  if (isTestRelayLockdown(getCurrentUserPubkey())) return Promise.resolve(undefined);
   const hit = cache.get(url);
   if (hit) return hit;
   if (!isPublicRelayUrl(url) || active >= 2 || cache.size >= 100) return Promise.resolve(undefined);

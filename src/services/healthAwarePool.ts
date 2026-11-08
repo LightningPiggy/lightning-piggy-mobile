@@ -202,7 +202,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
           notify(reason);
         }
       };
-      handle = this.budget(url).add(
+      // Key by the connected (possibly lockdown-redirected) URL, never the caller's.
+      handle = this.budget(relay.url || url).add(
         reqPriority(filters),
         () => {
           const current = ++generation;

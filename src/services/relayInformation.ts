@@ -1,5 +1,7 @@
 import { activeAccountRelays } from './testRelayRouting';
 import { relayKey } from './relayHealth';
+import { isTestRelayLockdown, TEST_RELAY_URL } from '../config/testRelayLockdown';
+import { getCurrentUserPubkey } from './nostrActiveAccount';
 
 export interface RelayFee {
   amount: number;
@@ -144,6 +146,9 @@ const cache = new Map<string, { until: number; request: Promise<RelayInformation
 /** One bounded HTTP GET, shared across screens; never opens a Nostr subscription. */
 export function fetchRelayInformation(url: string): Promise<RelayInformation | null> {
   const key = relayKey(activeAccountRelays([url])[0]);
+  // Defence in depth: under lockdown only the LAN test relay may be contacted.
+  if (isTestRelayLockdown(getCurrentUserPubkey()) && key !== relayKey(TEST_RELAY_URL))
+    return Promise.resolve(null);
   const previous = cache.get(key);
   if (previous && previous.until > Date.now()) return previous.request;
   let http: URL;
