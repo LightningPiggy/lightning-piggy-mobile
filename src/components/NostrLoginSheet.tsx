@@ -30,6 +30,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createNostrLoginSheetStyles } from '../styles/NostrLoginSheet.styles';
 import { setUpNewAccountContactList } from '../services/newAccountContactList';
+import { publishNewAccountDmInbox } from '../contexts/defaultDmInbox';
 import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
 import * as nostrConnectService from '../services/nostrConnectService';
@@ -50,7 +51,14 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createNostrLoginSheetStyles(colors), [colors]);
-  const { loginWithNsec, loginWithAmber, loginWithNip46, publishProfile, isLoggingIn } = useNostr();
+  const {
+    loginWithNsec,
+    loginWithAmber,
+    loginWithNip46,
+    publishProfile,
+    applyPublishedDmInbox,
+    isLoggingIn,
+  } = useNostr();
   const [nsecInput, setNsecInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -177,6 +185,15 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
       relays: enabledAppRelays('default', nostrService.DEFAULT_RELAYS, newPubkey),
     }).catch((e) => {
       if (__DEV__) console.warn('[ContactList] new-account setup failed:', e);
+    });
+    // And its DM inbox list (#1628): the key is brand new, so no list can
+    // exist anywhere yet. Some apps won't message an account without one.
+    void publishNewAccountDmInbox({
+      pubkey: newPubkey,
+      secretKey,
+      adopt: applyPublishedDmInbox,
+    }).catch((e) => {
+      if (__DEV__) console.warn('[Nostr] new-account DM inbox list failed:', e);
     });
 
     // Publish initial profile with display name (best-effort, don't block)

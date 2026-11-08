@@ -3771,5 +3771,22 @@
       "marmot": "Es posible que no se encuentren las claves de grupo",
       "market": "No se cargarán los anuncios del mercado"
     }
+  },
+  "dmInboxSuggestion": {
+    "title": "Permite que otras apps de Nostr te envíen mensajes",
+    "body": "Aún no has publicado los relays de tu bandeja de mensajes. Algunas apps de Nostr solo pueden enviarte mensajes privados después de que los publiques.",
+    "signerHint": "Tu firmador te pedirá que lo apruebes.",
+    "otherAppHint": "¿Ya configuraste relays para tu bandeja de entrada de mensajes en otra app de Nostr? Toca «Ahora no».",
+    "relays": "Relays sugeridos: {{relays}}",
+    "publish": "Publicar relays de la bandeja",
+    "notNow": "Ahora no",
+    "publishedTitle": "Relays de la bandeja de mensajes publicados",
+    "publishedBody": "Otras apps de Nostr ya pueden enviarte mensajes privados.",
+    "existsTitle": "Ya tienes relays para tu bandeja de mensajes",
+    "existsBody": "Otra app los publicó, así que no se cambió nada.",
+    "checkFailed": "No se pudo comprobar si ya tienes relays para tu bandeja de mensajes. Inténtalo de nuevo en un momento.",
+    "noRelays": "No se puede conectar con ningún relay adecuado en este momento. Inténtalo de nuevo en un momento.",
+    "confirmChangedTitle": "¿Publicar estos relays en su lugar?",
+    "confirmChangedBody": "Tus relays han cambiado desde que se mostró esta sugerencia. Al publicar, se incluirán: {{relays}}"
   }
 }

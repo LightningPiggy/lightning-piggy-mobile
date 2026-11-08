@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNip65Relays } from './useNip65Relays';
+import { readAdoptedCreatedAt, useNip65Relays } from './useNip65Relays';
 import {
   DM_INBOX_RELAYS_CACHE_KEY_BASE,
   RELAY_LIST_CACHE_KEY_BASE,
@@ -9,6 +9,7 @@ import {
 import { perAccountKey } from '../services/perAccountStorage';
 import { fetchLatestReplaceable } from '../services/nostrRelayLists';
 import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
+import * as nostrService from '../services/nostrService';
 
 jest.mock('../services/nostrRelayLists', () => ({ fetchLatestReplaceable: jest.fn() }));
 jest.mock('../services/backgroundDmService', () => ({
@@ -489,5 +490,172 @@ describe('relayListsHydrated (#1390: outbox leasing waits for it)', () => {
       await loading;
     });
     expect(result.current.relayListsHydrated).toBe(false);
+  });
+});
+
+describe('default DM inbox support (#1628)', () => {
+  it('of two racing inbox loads, an older list resolving last never replaces the newer one', async () => {
+    let older!: (v: unknown) => void;
+    let newer!: (v: unknown) => void;
+    fetchLatest
+      .mockReturnValueOnce(new Promise((r) => (older = r)))
+      .mockReturnValueOnce(new Promise((r) => (newer = r)));
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+      await result.current.loadRelays(PK);
+    });
+    await waitFor(() => expect(fetchLatest).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      newer(inboxEvent(['wss://newer.example'], 200));
+    });
+    await act(async () => {
+      older(inboxEvent(['wss://older.example'], 100));
+    });
+    expect(result.current.dmInboxRelays).toEqual(['wss://newer.example']);
+    expect(result.current.dmInboxLive.relays()).toEqual(['wss://newer.example']);
+    expect(
+      JSON.parse((await AsyncStorage.getItem(perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, PK)))!),
+    ).toEqual(['wss://newer.example']);
+  });
+
+  it('readAdoptedCreatedAt never turns a read error into "none" (0)', async () => {
+    expect(await readAdoptedCreatedAt(PK, 10050)).toBe(0); // genuinely nothing stored
+    await AsyncStorage.setItem(perAccountKey('nostr_dm_inbox_created_at_v1', PK), '123');
+    expect(await readAdoptedCreatedAt(PK, 10050)).toBe(123);
+    await AsyncStorage.setItem(perAccountKey('nostr_dm_inbox_created_at_v1', PK), 'garbage');
+    await expect(readAdoptedCreatedAt(PK, 10050)).rejects.toThrow('unreadable');
+  });
+
+  it('an adoption bound to a session is refused after a reset (account switch)', async () => {
+    const { result } = renderHook(() => useNip65Relays());
+    const session = result.current.dmInboxLive.session();
+    act(() => result.current.resetRelayLists());
+    let r: unknown;
+    await act(async () => {
+      r = await result.current.applyPublishedDmInbox(PK, ['wss://a-relays.example'], 10, session);
+    });
+    expect(r).toMatchObject({ adopted: false });
+    expect(result.current.dmInboxRelays).toEqual([]);
+    // The current session is accepted.
+    await act(async () => {
+      r = await result.current.applyPublishedDmInbox(
+        PK,
+        ['wss://b.example'],
+        10,
+        result.current.dmInboxLive.session(),
+      );
+    });
+    expect(r).toMatchObject({ adopted: true });
+  });
+
+  it('the live inbox getter sees an adoption at once and is cleared on reset', async () => {
+    const { result } = renderHook(() => useNip65Relays());
+    let seen: string[] = [];
+    await act(async () => {
+      const pending = result.current.applyPublishedDmInbox(PK, ['wss://now.example'], 10);
+      await Promise.resolve();
+      await pending;
+      seen = result.current.dmInboxLive.relays();
+    });
+    expect(seen).toEqual(['wss://now.example']);
+    // Its created_at is held in memory too (a failed cache write can't hide it).
+    expect(result.current.dmInboxLive.createdAt(PK)).toBe(10);
+    act(() => result.current.resetRelayLists());
+    expect(result.current.dmInboxLive.relays()).toEqual([]);
+  });
+});
+
+describe("refreshing the user's own NIP-65 list (#1628 F5)", () => {
+  const fetchEvent = () => nostrService.fetchRelayListEvent as jest.Mock;
+  const listA = [{ url: 'wss://first.example', read: true, write: true }];
+  const listB = [{ url: 'wss://newer.example', read: true, write: true }];
+  /** First reply resolves at once; a NEWER copy from another relay arrives later. */
+  const lateCopy = (late: { list: typeof listA; createdAt: number }) => {
+    let deliver!: () => void;
+    fetchEvent().mockImplementationOnce(
+      async (_pk: string, _relays: string[], opts?: { onLatest?: (v: unknown) => void }) => {
+        deliver = () => opts?.onLatest?.(late);
+        return { list: listA, createdAt: 100 };
+      },
+    );
+    return () => deliver();
+  };
+
+  it('asks the indexers and the cached write relays, not only the defaults', async () => {
+    fetchLatest.mockResolvedValue(null);
+    await AsyncStorage.setItem(
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, PK),
+      JSON.stringify([
+        { url: 'wss://my-write.example', read: false, write: true },
+        { url: 'wss://my-read.example', read: true, write: false },
+      ]),
+    ); // no timestamp: stale, so the network path runs
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    const relays = fetchEvent().mock.calls[0][1] as string[];
+    expect(relays).toEqual(
+      expect.arrayContaining([
+        'wss://my-write.example',
+        'wss://relay.damus.io',
+        'wss://purplepag.es',
+        'wss://user.kindpag.es',
+      ]),
+    );
+    expect(relays).not.toContain('wss://my-read.example');
+    expect(typeof fetchEvent().mock.calls[0][2]?.onLatest).toBe('function');
+  });
+
+  it('newest wins: a newer copy held elsewhere replaces the first reply', async () => {
+    fetchLatest.mockResolvedValue(null);
+    const deliver = lateCopy({ list: listB, createdAt: 200 });
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    expect(result.current.nip65Relays).toEqual(listA);
+    await act(async () => {
+      deliver();
+    });
+    await waitFor(() => expect(result.current.nip65Relays).toEqual(listB));
+    // ...and its write relays are searched for the DM inbox list too.
+    await waitFor(() =>
+      expect(
+        fetchLatest.mock.calls.some(([, , rs]) => (rs as string[]).includes('wss://newer.example')),
+      ).toBe(true),
+    );
+  });
+
+  it('a late copy older than the list the app holds is refused', async () => {
+    fetchLatest.mockResolvedValue(null);
+    const held = [{ url: 'wss://held.example', read: true, write: true }];
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.applyPublishedRelayList(PK, held, 500);
+    });
+    await AsyncStorage.setItem(perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, PK), '0');
+    const deliver = lateCopy({ list: listB, createdAt: 300 });
+    await act(async () => {
+      await result.current.loadRelays(PK);
+      deliver();
+    });
+    await act(async () => {});
+    expect(result.current.nip65Relays).toEqual(held);
+  });
+
+  it('a late copy arriving after an identity reset is ignored', async () => {
+    fetchLatest.mockResolvedValue(null);
+    const deliver = lateCopy({ list: listB, createdAt: 200 });
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    act(() => result.current.resetRelayLists());
+    await act(async () => {
+      deliver();
+    });
+    expect(result.current.nip65Relays).toEqual([]);
   });
 });

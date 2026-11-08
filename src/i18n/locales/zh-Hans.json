@@ -3771,5 +3771,22 @@
       "marmot": "群组密钥发现可能无法正常工作",
       "market": "市场商品将无法加载"
     }
+  },
+  "dmInboxSuggestion": {
+    "title": "让其他 Nostr 应用给你发消息",
+    "body": "你还没有发布消息收件箱中继。发布后，部分 Nostr 应用才能向你发送私信。",
+    "signerHint": "你的签名器会请求你批准。",
+    "otherAppHint": "已经在其他 Nostr 应用中设置了消息收件箱中继？点击“暂时不要”。",
+    "relays": "建议的中继：{{relays}}",
+    "publish": "发布收件箱中继",
+    "notNow": "暂时不要",
+    "publishedTitle": "消息收件箱中继已发布",
+    "publishedBody": "其他 Nostr 应用现在可以向你发送私信了。",
+    "existsTitle": "你已有消息收件箱中继",
+    "existsBody": "其他应用已发布这些中继，因此未作任何更改。",
+    "checkFailed": "无法检查你是否已有消息收件箱中继。请稍后重试。",
+    "noRelays": "目前无法连接到合适的中继。请稍后重试。",
+    "confirmChangedTitle": "改为发布这些中继？",
+    "confirmChangedBody": "此建议显示后，你的中继已发生变化。发布时将列出：{{relays}}"
   }
 }

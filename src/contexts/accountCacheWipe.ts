@@ -86,6 +86,8 @@ import {
   DM_INBOX_RELAYS_CACHE_KEY_BASE,
   DM_INBOX_CREATED_AT_KEY_BASE,
   retireProfilePersists,
+  DM_INBOX_DEFAULT_STATE_KEY_BASE,
+  DM_INBOX_DEFAULT_BACKOFF_KEY_BASE,
 } from './nostrCacheKeys';
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
@@ -154,6 +156,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
     perAccountKey(RELAY_LIST_CREATED_AT_KEY_BASE, loggedOutPubkey),
     perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, loggedOutPubkey),
     perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, loggedOutPubkey),
+    perAccountKey(DM_INBOX_DEFAULT_STATE_KEY_BASE, loggedOutPubkey),
+    perAccountKey(DM_INBOX_DEFAULT_BACKOFF_KEY_BASE, loggedOutPubkey),
     perAccountKey(AMBER_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
     perAccountKey(NSEC_NIP17_CACHE_KEY_BASE, loggedOutPubkey),
     // Notification-watcher choices + registration record. The key is gone,

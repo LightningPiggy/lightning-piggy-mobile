@@ -262,6 +262,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       params: Parameters<AbstractSimplePool['subscribeMap']>[1] & {
         reqOptions?: ReqOptions;
         onReqOpen?: () => void;
+        /** See `openRelayReq`: report auth-required instead of signing. */
+        noAuth?: boolean;
       },
     ): ReturnType<AbstractSimplePool['subscribeMap']> {
       requests = activeAccountRelayRequests(requests);
@@ -386,6 +388,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       params: Parameters<AbstractSimplePool['subscribeEose']>[2] &
         Pick<Parameters<AbstractSimplePool['subscribeMap']>[1], 'alreadyHaveEvent'> & {
           reqOptions?: ReqOptions;
+          noAuth?: boolean;
         },
     ): ReturnType<AbstractSimplePool['subscribeEose']> {
       urls = activeAccountRelays(urls);

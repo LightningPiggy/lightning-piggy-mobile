@@ -3835,5 +3835,22 @@
       "marmot": "Wyszukiwanie kluczy grup może nie działać",
       "market": "Oferty na rynku nie będą się ładować"
     }
+  },
+  "dmInboxSuggestion": {
+    "title": "Odbieraj wiadomości z innych aplikacji Nostr",
+    "body": "Twoje przekaźniki skrzynki odbiorczej nie zostały jeszcze opublikowane. Niektóre aplikacje Nostr mogą wysyłać ci prywatne wiadomości dopiero po ich opublikowaniu.",
+    "signerHint": "Aplikacja do podpisywania poprosi cię o zatwierdzenie.",
+    "otherAppHint": "Masz już skonfigurowane przekaźniki skrzynki odbiorczej w innej aplikacji Nostr? Naciśnij „Nie teraz”.",
+    "relays": "Sugerowane przekaźniki: {{relays}}",
+    "publish": "Opublikuj przekaźniki skrzynki",
+    "notNow": "Nie teraz",
+    "publishedTitle": "Opublikowano przekaźniki skrzynki odbiorczej",
+    "publishedBody": "Inne aplikacje Nostr mogą teraz wysyłać ci prywatne wiadomości.",
+    "existsTitle": "Masz już przekaźniki skrzynki odbiorczej",
+    "existsBody": "Inna aplikacja już je opublikowała, więc nic nie zmieniono.",
+    "checkFailed": "Nie udało się sprawdzić, czy masz już przekaźniki skrzynki odbiorczej. Spróbuj ponownie za chwilę.",
+    "noRelays": "Żaden odpowiedni przekaźnik nie jest teraz dostępny. Spróbuj ponownie za chwilę.",
+    "confirmChangedTitle": "Opublikować te przekaźniki zamiast poprzednich?",
+    "confirmChangedBody": "Twoje przekaźniki zmieniły się od wyświetlenia tej sugestii. Po opublikowaniu lista będzie zawierać: {{relays}}"
   }
 }

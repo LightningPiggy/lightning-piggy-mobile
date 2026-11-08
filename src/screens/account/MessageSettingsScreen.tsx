@@ -17,6 +17,7 @@ import { useThemeColors } from '../../contexts/ThemeContext';
 import { createSharedAccountStyles } from './sharedStyles';
 import type { WotTier } from '../../services/wotSettingsService';
 import AmberPermissionSection from '../../components/AmberPermissionSection';
+import DmInboxSuggestionCard from '../../components/DmInboxSuggestionCard';
 import SettingsSection from '../../components/SettingsSection';
 import WebOfTrustBottomSheet from '../../components/WebOfTrustBottomSheet';
 
@@ -71,6 +72,7 @@ const MessageSettingsScreen: React.FC = () => {
   return (
     <AccountScreenLayout title={t('messageSettingsScreen.title')}>
       <AmberPermissionSection />
+      <DmInboxSuggestionCard />
       <SettingsSection scope="account" testID="messages-account">
         <SettingsRow
           kind="navigate"

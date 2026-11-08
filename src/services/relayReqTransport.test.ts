@@ -222,3 +222,32 @@ test.each([
   expect(relay.auth).toHaveBeenCalledTimes(1);
   pool.destroy();
 });
+
+test('noAuth reports CLOSED auth-required instead of signing (no background signer prompt)', async () => {
+  const secret = new Uint8Array(32).fill(5);
+  const pubkey = getPublicKey(secret);
+  setCurrentUserPubkey(pubkey);
+  const sign = jest.fn(async (event) => finalizeEvent(event, secret));
+  setRelayAuthAccount({ pubkey, signerType: 'amber', ownRelays: [url], sign });
+  const pool = new TestPool();
+  const relay = new AbstractRelay(url, { verifyEvent: (() => true) as never });
+  Object.assign(relay, { _connected: true, connectionPromise: Promise.resolve() });
+  const send = jest.spyOn(relay, 'send').mockResolvedValue();
+  jest.spyOn(relay, 'auth');
+  Object.assign(relay, { ws: { readyState: 1, send } });
+  relay._onmessage({ data: JSON.stringify(['AUTH', 'test-challenge']) } as MessageEvent);
+  jest.spyOn(pool, 'ensureRelay').mockResolvedValue(relay);
+  const onclose = jest.fn();
+  pool.subscribeEose([url], { kinds: [10050] }, { maxWait: 8000, noAuth: true, onclose });
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  const sub = [...relay.openSubs.values()][0];
+  relay._onmessage({
+    data: JSON.stringify(['CLOSED', sub.id, 'auth-required: authenticate first']),
+  } as MessageEvent);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  expect(sign).not.toHaveBeenCalled();
+  expect(relay.auth).not.toHaveBeenCalled();
+  expect(send.mock.calls.filter(([message]) => message.startsWith('["AUTH"'))).toHaveLength(0);
+  expect(onclose).toHaveBeenCalledWith([expect.stringMatching(/auth-required/)]);
+  pool.destroy();
+});

@@ -3771,5 +3771,22 @@
       "marmot": "Előfordulhat, hogy a csoportkulcsok nem találhatók",
       "market": "A piactéri hirdetések nem töltődnek be"
     }
+  },
+  "dmInboxSuggestion": {
+    "title": "Fogadj üzeneteket más Nostr-alkalmazásokból",
+    "body": "Még nem tetted közzé az üzenetfogadó reléidet. Egyes Nostr-alkalmazások csak ezután tudnak privát üzeneteket küldeni neked.",
+    "signerHint": "Az aláíró alkalmazásod jóváhagyást fog kérni.",
+    "otherAppHint": "Már beállítottad a bejövő üzenetek reléit egy másik Nostr alkalmazásban? Koppints a „Most nem” gombra.",
+    "relays": "Javasolt relék: {{relays}}",
+    "publish": "Üzenetfogadó relék közzététele",
+    "notNow": "Most nem",
+    "publishedTitle": "Üzenetfogadó relék közzétéve",
+    "publishedBody": "Mostantól más Nostr-alkalmazások is küldhetnek neked privát üzeneteket.",
+    "existsTitle": "Már vannak üzenetfogadó reléid",
+    "existsBody": "Egy másik alkalmazás már közzétette őket, így semmi sem változott.",
+    "checkFailed": "Nem sikerült ellenőrizni, hogy vannak-e már üzenetfogadó reléid. Próbáld újra egy kis idő múlva.",
+    "noRelays": "Jelenleg nem érhetők el megfelelő relék. Próbáld újra egy kis idő múlva.",
+    "confirmChangedTitle": "Inkább ezeket a reléket teszed közzé?",
+    "confirmChangedBody": "A reléid megváltoztak a javaslat megjelenítése óta. Közzétételkor ezek kerülnek a listára: {{relays}}"
   }
 }

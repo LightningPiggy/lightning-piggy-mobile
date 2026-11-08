@@ -8,7 +8,13 @@ export function openRelayReq(
   pool: Pick<AbstractSimplePool, 'ensureRelay' | 'seenOn' | 'trackRelays'>,
   url: string,
   filters: Parameters<AbstractSimplePool['subscribe']>[1][],
-  params: Params & { onReqOpen?: () => void; eoseTimeout?: number },
+  params: Params & {
+    onReqOpen?: () => void;
+    eoseTimeout?: number;
+    /** Never answer CLOSED auth-required by signing (no signer prompt): the
+     * relay's refusal is reported to `onclose` as is. */
+    noAuth?: boolean;
+  },
   connectedRelay?: Awaited<ReturnType<AbstractSimplePool['ensureRelay']>>,
 ) {
   let stopped = false;
@@ -44,7 +50,7 @@ export function openRelayReq(
           if (stopped || retired) return;
           retired = true; // SDK CLOSED leaves the old EOSE timer alive
           sub = undefined; // CLOSED/socket close already retired this physical sub
-          if (!authenticated && /^(?:ERROR:\s*)?auth-required:/i.test(reason))
+          if (!authenticated && !params.noAuth && /^(?:ERROR:\s*)?auth-required:/i.test(reason))
             void authenticateRelay(relay)
               .then(() => arm(true))
               .catch(fail);

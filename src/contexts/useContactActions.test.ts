@@ -7,6 +7,8 @@ import type { ContactListFetchResult } from '../services/contactListSync';
 import type { NostrContact, RelayConfig } from '../types/nostr';
 import { useContactActions } from './useContactActions';
 import { clearFollowGateStores } from '../services/followSetEvents';
+import { relayAllowsKind } from '../services/relayKindPolicy';
+import * as amberService from '../services/amberService';
 import {
   __resetForTests,
   isAccountCreatedHere,
@@ -26,6 +28,7 @@ jest.mock('../services/nostrService', () => ({
   fetchProfile: jest.fn(async () => null),
 }));
 jest.mock('../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
+jest.mock('../services/relayKindPolicy', () => ({ relayAllowsKind: jest.fn(async () => true) }));
 
 const mockFetch = jest.fn<Promise<ContactListFetchResult>, [string, string[]]>();
 jest.mock('../services/contactListSync', () => {
@@ -284,4 +287,49 @@ describe('useContactActions follow path (#1271)', () => {
       [LITTLE],
     );
   });
+});
+
+it('publishes the follow list to the write relays and the indexers that store kind 3', async () => {
+  mockFetch.mockResolvedValue({
+    status: 'found',
+    base: { tags: [['p', BIG]], content: '', createdAt: 10 },
+  });
+  const { result } = setup([]);
+  await act(async () => {
+    await result.current.followContact(NEW);
+  });
+  const targets = (nostrService.signAndPublishEvent as jest.Mock).mock.calls[0][2];
+  expect(targets).toEqual(['wss://mine', 'wss://purplepag.es', 'wss://user.kindpag.es']);
+});
+
+it('an account switch during the publish-target lookup never asks the signer', async () => {
+  mockFetch.mockResolvedValue({
+    status: 'found',
+    base: { tags: [['p', BIG]], content: '', createdAt: 10 },
+  });
+  const sign = jest.spyOn(amberService, 'requestEventSignature');
+  // The indexer kind check is the await before signing: switch accounts there.
+  (relayAllowsKind as jest.Mock).mockImplementationOnce(async () => {
+    clearFollowGateStores();
+    return true;
+  });
+  const { result } = renderHook(() =>
+    useContactActions({
+      pubkey: ME,
+      isLoggedIn: true,
+      signerType: 'amber',
+      relays,
+      contacts: [],
+      setContacts: jest.fn(),
+      getReadRelays: () => ['wss://mine'],
+      loadContacts: jest.fn(async () => {}),
+    }),
+  );
+  let ok = true;
+  await act(async () => {
+    ok = await result.current.followContact(NEW);
+  });
+  expect(ok).toBe(false);
+  expect(sign).not.toHaveBeenCalled();
+  expect(nostrService.publishSignedEvent).not.toHaveBeenCalled();
 });

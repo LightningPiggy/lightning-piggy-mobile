@@ -177,7 +177,8 @@ export function useRelayListEditor() {
           setInboxBaseline(knownInboxRef.current);
           if (!dirtyRef.current.inbox) setInboxDraft(knownInboxRef.current);
           for (const kind of [10002, 10050] as const) {
-            const stored = await readAdoptedCreatedAt(pubkey, kind);
+            // Unreadable storage keeps the baseline already held (as before).
+            const stored = await readAdoptedCreatedAt(pubkey, kind).catch(() => 0);
             latestCreatedAtRef.current[kind] = Math.max(
               latestCreatedAtRef.current[kind] ?? 0,
               stored,
