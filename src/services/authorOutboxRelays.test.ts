@@ -7,17 +7,18 @@ import {
   leaseOutboxRelays,
   MAX_AUTHOR_OUTBOX_RELAYS,
   MAX_OUTBOX_EXTRA_RELAYS,
-  OUTBOX_RELEASE_RETRY_MS,
+  OUTBOX_QUARANTINE_MS,
   personOutboxRelays,
+  quarantineOutboxRelay,
   withoutRelays,
   zapReceiptRelays,
 } from './authorOutboxRelays';
-import { pooledRelayUrls, pruneIdleRelays, releaseNewIdleRelays } from './nostrPool';
+import { claimPendingRelease, pooledRelayUrls, releaseNewIdleRelays } from './nostrPool';
 import { getPeerRelayLists, peekPeerRelayLists, type PeerRelayLists } from './peerRelayLists';
 
 jest.mock('./nostrPool', () => ({
+  claimPendingRelease: jest.fn(() => false),
   pooledRelayUrls: jest.fn(() => new Set<string>()),
-  pruneIdleRelays: jest.fn(),
   releaseNewIdleRelays: jest.fn(),
 }));
 jest.mock('./peerRelayLists', () => ({
@@ -30,6 +31,9 @@ const alice = 'a'.repeat(64);
 const testViewer = TEST_ACCOUNT_KEYS.big;
 const peek = jest.mocked(peekPeerRelayLists);
 const lookup = jest.mocked(getPeerRelayLists);
+const pooled = jest.mocked(pooledRelayUrls);
+const claim = jest.mocked(claimPendingRelease);
+const release = jest.mocked(releaseNewIdleRelays);
 
 const lists = (partial: Partial<PeerRelayLists>) => ({
   status: 'ok' as const,
@@ -41,7 +45,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.useFakeTimers();
   __resetOutboxLeasesForTests();
-  jest.mocked(pooledRelayUrls).mockReturnValue(new Set());
+  pooled.mockReturnValue(new Set());
+  claim.mockReturnValue(false);
 });
 
 describe('withoutRelays / personOutboxRelays', () => {
@@ -62,6 +67,15 @@ describe('withoutRelays / personOutboxRelays', () => {
     );
     expect(out).toEqual([relay(1), relay(2)]);
   });
+
+  it('caps after dropping relays already asked, hints included (L2)', () => {
+    const out = personOutboxRelays(
+      [relay(1), relay(2), relay(3)],
+      [relay(4), relay(5)],
+      [relay(1), relay(2), relay(3)],
+    );
+    expect(out).toEqual([relay(4), relay(5)]);
+  });
 });
 
 describe('author write relays', () => {
@@ -78,9 +92,13 @@ describe('author write relays', () => {
     expect(cachedAuthorWriteRelays(alice, viewer)).toEqual([]);
   });
 
-  it('looks up and caps; a failed lookup is empty', async () => {
-    lookup.mockResolvedValueOnce(lists({ write: [relay(1), relay(2), relay(3), relay(4)] }));
-    expect(await authorWriteRelays(alice, { viewerPubkey: viewer })).toHaveLength(3);
+  it("caps only after dropping the viewer's relays (L2); a failed lookup is empty", async () => {
+    // The author's first three write relays are the viewer's own.
+    const mine = ['wss://mine1.example/', 'wss://mine2.example/', 'wss://mine3.example/'];
+    lookup.mockResolvedValueOnce(lists({ write: [...mine, relay(4)] }));
+    const all = await authorWriteRelays(alice, { viewerPubkey: viewer });
+    expect(all).toEqual([...mine, relay(4)]);
+    expect(withoutRelays(all, mine)).toEqual([relay(4)]);
     lookup.mockResolvedValueOnce({ status: 'failed', error: 'x' });
     expect(await authorWriteRelays(alice, { viewerPubkey: viewer })).toEqual([]);
   });
@@ -117,40 +135,71 @@ describe('zapReceiptRelays (F11)', () => {
 
 describe('leaseOutboxRelays (global ceiling)', () => {
   it(`grants at most ${MAX_OUTBOX_EXTRA_RELAYS} distinct relays app-wide`, () => {
-    const leases = [];
-    for (let i = 0; i < 10; i++) leases.push(leaseOutboxRelays([relay(i * 3), relay(i * 3 + 1)]));
+    for (let i = 0; i < 10; i++) leaseOutboxRelays([relay(i * 3), relay(i * 3 + 1)]);
     expect(leasedOutboxRelayCount()).toBe(20);
     const next = leaseOutboxRelays([relay(100), relay(101), relay(102), relay(103), relay(104)]);
     expect(next.relays).toHaveLength(5);
     expect(leasedOutboxRelayCount()).toBe(MAX_OUTBOX_EXTRA_RELAYS);
-    const full = leaseOutboxRelays([relay(200)]);
-    expect(full.relays).toEqual([]);
+    expect(leaseOutboxRelays([relay(200)]).relays).toEqual([]);
     // An already-leased relay is shared, not a new socket.
     expect(leaseOutboxRelays([relay(0)]).relays).toEqual([relay(0)]);
     expect(leasedOutboxRelayCount()).toBe(MAX_OUTBOX_EXTRA_RELAYS);
-    next.release();
+    next.release(); // never connected: nothing left to close
     expect(leaseOutboxRelays([relay(200)]).relays).toEqual([relay(200)]);
   });
 
-  it('releases a socket only after its last lease, and only if it opened it', () => {
-    jest.mocked(pooledRelayUrls).mockReturnValue(new Set([relay(2)]));
+  it('releases a socket after its last lease, only if it opened it, and is idempotent', () => {
+    pooled.mockReturnValue(new Set([relay(2)]));
     const a = leaseOutboxRelays([relay(1), relay(2)]);
+    pooled.mockReturnValue(new Set([relay(1), relay(2)]));
     const b = leaseOutboxRelays([relay(1)]);
     a.release();
-    a.release(); // idempotent
-    expect(releaseNewIdleRelays).not.toHaveBeenCalled();
+    a.release();
+    expect(release).not.toHaveBeenCalled();
     b.release();
-    expect(releaseNewIdleRelays).toHaveBeenCalledTimes(1);
-    expect(jest.mocked(releaseNewIdleRelays).mock.calls[0][0]).toEqual([relay(1)]);
-    expect(leasedOutboxRelayCount()).toBe(0);
-    jest.advanceTimersByTime(OUTBOX_RELEASE_RETRY_MS);
-    expect(pruneIdleRelays).toHaveBeenCalledWith([relay(1)]);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls[0][0]).toEqual([relay(1)]);
   });
 
-  it('skips the retry prune for a relay leased again meanwhile', () => {
+  it('a busy socket keeps counting against the ceiling until it is actually closed (#6)', () => {
+    const lease = leaseOutboxRelays([relay(1)]);
+    // Still open after release (its read hasn't finished): the pool closes it later.
+    pooled.mockReturnValue(new Set([relay(1)]));
+    lease.release();
+    expect(leasedOutboxRelayCount()).toBe(1);
+    const fill = leaseOutboxRelays(
+      Array.from({ length: MAX_OUTBOX_EXTRA_RELAYS }, (_, i) => relay(50 + i)),
+    );
+    expect(fill.relays).toHaveLength(MAX_OUTBOX_EXTRA_RELAYS - 1);
+    // Once the pool has closed it, it stops counting.
+    pooled.mockReturnValue(new Set());
+    expect(leasedOutboxRelayCount()).toBe(MAX_OUTBOX_EXTRA_RELAYS - 1);
+  });
+
+  it('re-leasing a socket whose release is pending claims it back and still closes it later (M1)', () => {
+    const first = leaseOutboxRelays([relay(1)]);
+    pooled.mockReturnValue(new Set([relay(1)])); // R is pooled, waiting to be released
+    first.release();
+    expect(release).toHaveBeenCalledTimes(1);
+    claim.mockReturnValueOnce(true);
+    const second = leaseOutboxRelays([relay(1)]);
+    expect(claim).toHaveBeenCalledWith(relay(1));
+    second.release();
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(release.mock.calls[1][0]).toEqual([relay(1)]);
+  });
+
+  it("claims a pooled socket that's only pending release instead of treating it as someone else's (M1)", () => {
+    pooled.mockReturnValue(new Set([relay(1)]));
+    claim.mockReturnValueOnce(true); // e.g. a one-off socket waiting to close
     leaseOutboxRelays([relay(1)]).release();
-    leaseOutboxRelays([relay(1)]);
-    jest.advanceTimersByTime(OUTBOX_RELEASE_RETRY_MS);
-    expect(pruneIdleRelays).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith([relay(1)], new Set());
+  });
+
+  it('never grants a quarantined relay until the quarantine ends', () => {
+    quarantineOutboxRelay(relay(9));
+    expect(leaseOutboxRelays([relay(9), relay(8)]).relays).toEqual([relay(8)]);
+    jest.advanceTimersByTime(OUTBOX_QUARANTINE_MS);
+    expect(leaseOutboxRelays([relay(9)]).relays).toEqual([relay(9)]);
   });
 });

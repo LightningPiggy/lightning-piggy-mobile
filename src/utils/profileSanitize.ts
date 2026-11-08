@@ -19,11 +19,31 @@
  * quick-profile sheet renders the banner (#666/#18) and the bio should not
  * be empty just because a profile arrived via the batch path.
  */
+import { npubEncode } from 'nostr-tools/nip19';
 import type { NostrProfile } from '../types/nostr';
+import { parseProfileContent } from './profileContent';
 
 export function slimDisplayProfile(profile: NostrProfile): NostrProfile {
   // `|| profile.hasLud16 === true` keeps the function idempotent: re-slimming
   // an already-slim profile (lud16 already null) must not lose the recorded
   // presence.
   return { ...profile, lud16: null, hasLud16: profile.lud16 != null || profile.hasLud16 === true };
+}
+
+/**
+ * A display profile from an UNVERIFIED batch-fetched kind-0 (see above):
+ * slimmed, and dated with the event's `created_at` so copies merge
+ * newest-wins (utils/profileFreshness).
+ */
+export function displayProfile(event: {
+  pubkey: string;
+  content: string;
+  created_at: number;
+}): NostrProfile {
+  return slimDisplayProfile({
+    pubkey: event.pubkey,
+    npub: npubEncode(event.pubkey),
+    ...parseProfileContent(event.content),
+    createdAt: event.created_at,
+  });
 }

@@ -2,7 +2,7 @@ import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { sanitizePeerRelayUrls } from '../utils/peerRelayUrls';
 import { normalizeRelayUrl } from '../utils/relayListKey';
 import { getCurrentUserPubkey } from './nostrActiveAccount';
-import { pooledRelayUrls, pruneIdleRelays, releaseNewIdleRelays } from './nostrPool';
+import { claimPendingRelease, pooledRelayUrls, releaseNewIdleRelays } from './nostrPool';
 import { getPeerRelayLists, peekPeerRelayLists } from './peerRelayLists';
 
 // Reading someone else's posts and profile from THEIR relays (#1390) — the
@@ -16,9 +16,15 @@ import { getPeerRelayLists, peekPeerRelayLists } from './peerRelayLists';
 //   - globally: at most MAX_OUTBOX_EXTRA_RELAYS distinct extra relays leased at
 //     once, across every open feed and profile lookup. A lease that would go
 //     past the ceiling gets fewer relays (or none), never more sockets.
-// A relay the pool hadn't opened before its first lease is released once its
-// last lease ends (the #1570 idle-release path), so browsing many profiles
-// doesn't leave a trail of open sockets.
+// A relay the pool hadn't opened before its first lease (or one already
+// waiting to be released) is "owned": when its last lease ends it's handed to
+// the pool's deferred release (the #1570 path), which closes it as soon as
+// its last read or publish ends — and it keeps counting against the ceiling
+// until its socket is actually closed. Browsing many profiles doesn't leave
+// a trail of open sockets.
+//
+// Hardening: a relay that floods an outbox feed is quarantined for a while
+// (never leased again) — see authorFeedService.
 //
 // Privacy: a query for person X only ever goes to X's own relays (plus the
 // viewer's), with `authors: [X]`. Callers never batch several people onto one
@@ -32,8 +38,10 @@ import { getPeerRelayLists, peekPeerRelayLists } from './peerRelayLists';
 export const MAX_AUTHOR_OUTBOX_RELAYS = 3;
 /** Most distinct extra (outbox) relays leased at once, app-wide. */
 export const MAX_OUTBOX_EXTRA_RELAYS = 25;
-/** A released socket that was still busy is retried once after this long. */
-export const OUTBOX_RELEASE_RETRY_MS = 5_000;
+/** How long a quarantined relay isn't leased. */
+export const OUTBOX_QUARANTINE_MS = 30 * 60_000;
+/** Most quarantined relays remembered (oldest dropped first). */
+const MAX_QUARANTINED = 64;
 
 /** Ordered, deduped `urls` minus anything in `exclude` (normalised), capped. */
 export function withoutRelays(
@@ -64,7 +72,8 @@ export function cachedAuthorWriteRelays(
   return (peek.lists.write ?? []).slice(0, MAX_AUTHOR_OUTBOX_RELAYS);
 }
 
-/** A person's cached read (inbox) relays (no network), capped. Empty under lockdown. */
+/** A person's cached read (inbox) relays (no network; sanitised, ≤ 4). Empty
+ * under lockdown. Cap AFTER dropping your own relays (`withoutRelays`). */
 export function cachedAuthorReadRelays(
   pubkey: string,
   viewerPubkey: string | null | undefined = getCurrentUserPubkey(),
@@ -72,13 +81,15 @@ export function cachedAuthorReadRelays(
   if (isTestRelayLockdown(viewerPubkey)) return [];
   const peek = peekPeerRelayLists(pubkey, viewerPubkey);
   if (peek?.status !== 'ok') return [];
-  return (peek.lists.read ?? []).slice(0, MAX_AUTHOR_OUTBOX_RELAYS);
+  return peek.lists.read ?? [];
 }
 
 /**
  * A person's NIP-65 write relays — cached, or looked up once (shared, bounded,
- * TTL'd by ./peerRelayLists). Sanitised and capped; empty when unknown or
- * under lockdown. Never rejects.
+ * TTL'd by ./peerRelayLists). Sanitised (≤ 4), not yet capped: callers drop
+ * their own relays first, then cap (`withoutRelays`), so an author whose first
+ * relays overlap the viewer's still gets extras. Empty when unknown or under
+ * lockdown. Never rejects.
  */
 export async function authorWriteRelays(
   pubkey: string,
@@ -91,7 +102,7 @@ export async function authorWriteRelays(
     lookupRelays: options.lookupRelays,
   });
   if (result.status !== 'ok') return [];
-  return (result.lists.write ?? []).slice(0, MAX_AUTHOR_OUTBOX_RELAYS);
+  return result.lists.write ?? [];
 }
 
 /**
@@ -103,10 +114,7 @@ export function personOutboxRelays(
   hints: readonly unknown[],
   alreadyAsked: readonly string[],
 ): string[] {
-  return withoutRelays(
-    [...writeRelays, ...sanitizePeerRelayUrls(hints, MAX_AUTHOR_OUTBOX_RELAYS)],
-    alreadyAsked,
-  );
+  return withoutRelays([...writeRelays, ...sanitizePeerRelayUrls(hints)], alreadyAsked);
 }
 
 /**
@@ -135,36 +143,73 @@ export interface OutboxRelayLease {
 }
 
 interface Leased {
+  /** Open leases; 0 while an owned socket waits to be closed. */
   count: number;
-  /** Pooled before its first lease: someone else's socket, never released here. */
-  wasPooled: boolean;
+  /** Opened by a lease (or claimed back from a pending release): we close it. */
+  owned: boolean;
 }
 
 const leased = new Map<string, Leased>();
+const quarantined = new Map<string, number>();
 
-/** Distinct extra relays leased right now (tests, perf logs). */
+/** Stop leasing `url` for OUTBOX_QUARANTINE_MS (it misbehaved). */
+export function quarantineOutboxRelay(url: string, now = Date.now()): void {
+  const key = normalizeRelayUrl(url);
+  quarantined.delete(key);
+  quarantined.set(key, now + OUTBOX_QUARANTINE_MS);
+  while (quarantined.size > MAX_QUARANTINED) quarantined.delete(quarantined.keys().next().value!);
+}
+
+function isQuarantined(url: string, now: number): boolean {
+  const until = quarantined.get(url);
+  if (until === undefined) return false;
+  if (until > now) return true;
+  quarantined.delete(url);
+  return false;
+}
+
+/** Owned sockets whose leases ended stop counting once the pool closed them. */
+function forgetClosed(): void {
+  let pooled: ReadonlySet<string> | undefined;
+  for (const [url, held] of leased) {
+    if (held.count > 0) continue;
+    pooled ??= pooledRelayUrls();
+    if (!pooled.has(url)) leased.delete(url);
+  }
+}
+
+/** Distinct extra relays leased or still closing right now (tests, perf logs). */
 export function leasedOutboxRelayCount(): number {
+  forgetClosed();
   return leased.size;
 }
 
 /**
  * Lease extra relays for one person's reads. A relay already leased is shared
  * (no new socket); a new one is granted only while fewer than
- * MAX_OUTBOX_EXTRA_RELAYS are leased.
+ * MAX_OUTBOX_EXTRA_RELAYS are leased or still closing. Quarantined relays are
+ * never granted.
  */
 export function leaseOutboxRelays(urls: readonly string[]): OutboxRelayLease {
+  forgetClosed();
   const granted: string[] = [];
+  const now = Date.now();
   let pooled: ReadonlySet<string> | undefined;
   for (const raw of urls) {
     const url = normalizeRelayUrl(raw);
-    if (granted.includes(url)) continue;
+    if (granted.includes(url) || isQuarantined(url, now)) continue;
     const held = leased.get(url);
     if (held) {
+      // Back in use before its socket closed: stop the pending release.
+      if (held.count === 0 && held.owned) claimPendingRelease(url);
       held.count++;
     } else {
       if (leased.size >= MAX_OUTBOX_EXTRA_RELAYS) continue;
       pooled ??= pooledRelayUrls();
-      leased.set(url, { count: 1, wasPooled: pooled.has(url) });
+      // A pooled socket that's only waiting to be released is still a one-off:
+      // claim it, or nobody would ever close it.
+      const owned = !pooled.has(url) || claimPendingRelease(url);
+      leased.set(url, { count: 1, owned });
     }
     granted.push(url);
   }
@@ -177,35 +222,24 @@ export function leaseOutboxRelays(urls: readonly string[]): OutboxRelayLease {
       const toRelease: string[] = [];
       for (const url of granted) {
         const held = leased.get(url);
-        if (!held) continue;
-        if (--held.count > 0) continue;
-        leased.delete(url);
-        if (!held.wasPooled) toRelease.push(url);
+        if (!held || --held.count > 0) continue;
+        // Someone else's socket: just stop counting it. Ours: keep counting it
+        // until the pool has closed it.
+        if (held.owned) toRelease.push(url);
+        else leased.delete(url);
       }
-      if (toRelease.length > 0) releaseSockets(toRelease);
+      if (toRelease.length === 0) return;
+      try {
+        releaseNewIdleRelays(toRelease, new Set());
+      } catch {
+        // Releasing is best-effort.
+      }
     },
   };
-}
-
-function releaseSockets(urls: string[]): void {
-  try {
-    releaseNewIdleRelays(urls, new Set());
-  } catch {
-    // Releasing is best-effort.
-  }
-  // A socket still connecting (or finishing a CLOSE) isn't idle yet: try once more.
-  setTimeout(() => {
-    const idle = urls.filter((url) => !leased.has(url));
-    if (idle.length === 0) return;
-    try {
-      pruneIdleRelays(idle);
-    } catch {
-      // Best-effort.
-    }
-  }, OUTBOX_RELEASE_RETRY_MS);
 }
 
 /** Forget every lease (tests). */
 export function __resetOutboxLeasesForTests(): void {
   leased.clear();
+  quarantined.clear();
 }

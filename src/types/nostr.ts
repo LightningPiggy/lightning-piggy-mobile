@@ -14,6 +14,9 @@ export interface NostrProfile {
   // was stripped, so display surfaces can show/grey the zap affordance without
   // exposing the (unverified, forgeable) address value.
   hasLud16?: boolean;
+  // `created_at` of the kind-0 this profile came from, when known: copies
+  // merge newest-wins on it (utils/profileFreshness).
+  createdAt?: number;
 }
 
 export interface NostrContact {

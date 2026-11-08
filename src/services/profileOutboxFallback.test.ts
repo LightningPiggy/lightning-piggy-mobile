@@ -219,4 +219,59 @@ describe('scheduleMissingProfileFallback (background, never awaited)', () => {
     // The previous account's result is dropped.
     expect(onFound).not.toHaveBeenCalled();
   });
+
+  it('runs nothing when the account already changed since the caller started (#4)', async () => {
+    setCurrentUserPubkey(bob); // the owner passed in is `viewer`
+    scheduleMissingProfileFallback([alice], opts, jest.fn());
+    await jest.runAllTimersAsync();
+    expect(lists).not.toHaveBeenCalled();
+  });
+
+  it("an aborted caller's signal stops it (a newer refresh)", async () => {
+    const generation = new AbortController();
+    scheduleMissingProfileFallback([alice], { ...opts, signal: generation.signal }, jest.fn());
+    generation.abort();
+    await jest.runAllTimersAsync();
+    expect(lists).not.toHaveBeenCalled();
+  });
+});
+
+describe('cancellation stops running work (#5)', () => {
+  it('passes the signal to every query', async () => {
+    writeLists({ [alice]: ok([relay('alice1')]) });
+    const controller = new AbortController();
+    await fetchMissingProfileEvents([alice], { ...opts, signal: controller.signal });
+    expect(query.mock.calls[0][3]).toMatchObject({ signal: controller.signal });
+  });
+
+  it('no new round, socket or throttle entry after an abort mid-run', async () => {
+    const people = Array.from({ length: 8 }, (_, i) => pk(i + 1));
+    writeLists(Object.fromEntries(people.map((p) => [p, ok([relay(`p${p.slice(-1)}`)])])));
+    const controller = new AbortController();
+    // The whole first round (5 people) is in flight when the user cancels.
+    query.mockImplementation(async () => {
+      if (query.mock.calls.length === 5) controller.abort();
+      return [];
+    });
+    const run = fetchMissingProfileEvents(people, { ...opts, signal: controller.signal });
+    await jest.runAllTimersAsync();
+    expect((await run).size).toBe(0);
+    // One round of 5, never the second.
+    expect(query).toHaveBeenCalledTimes(5);
+    // Aborted lookups aren't misses: a later call asks again.
+    query.mockReset();
+    query.mockResolvedValue([]);
+    await fetchMissingProfileEvents(people.slice(0, 1), opts);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it('an abort before the relay lists land opens no sockets', async () => {
+    const controller = new AbortController();
+    lists.mockImplementation(async (pubkeys) => {
+      controller.abort();
+      return new Map(pubkeys.map((p) => [p, ok([relay('alice1')])]));
+    });
+    await fetchMissingProfileEvents([alice], { ...opts, signal: controller.signal });
+    expect(query).not.toHaveBeenCalled();
+  });
 });

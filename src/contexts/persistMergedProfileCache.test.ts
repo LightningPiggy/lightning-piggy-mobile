@@ -71,6 +71,21 @@ describe('persistMergedProfileCache (#852)', () => {
     expect(result.a.name).toBe('a-new');
   });
 
+  it('never lets an older kind-0 (a late fallback) overwrite a newer cached one (#1390)', async () => {
+    const dated = (name: string, createdAt: number) => ({ ...profile(name), createdAt });
+    await AsyncStorage.setItem(key, JSON.stringify({ a: dated('a-new', 200), b: dated('b', 1) }));
+
+    const fetched = new Map<string, NostrProfile>([
+      ['a', dated('a-stale', 100)],
+      ['b', dated('b-newer', 2)],
+    ]);
+    await persistMergedProfileCache(PK, {}, fetched);
+
+    const result = await readCache();
+    expect(result.a.name).toBe('a-new');
+    expect(result.b.name).toBe('b-newer');
+  });
+
   it('falls back to the caller snapshot when the on-disk cache is corrupt', async () => {
     await AsyncStorage.setItem(key, '{not valid json');
 

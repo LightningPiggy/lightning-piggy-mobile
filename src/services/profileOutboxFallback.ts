@@ -1,11 +1,7 @@
 import type { Event } from 'nostr-tools';
 import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { perfLog } from '../utils/perfLog';
-import {
-  leaseOutboxRelays,
-  MAX_AUTHOR_OUTBOX_RELAYS,
-  personOutboxRelays,
-} from './authorOutboxRelays';
+import { leaseOutboxRelays, personOutboxRelays } from './authorOutboxRelays';
 import { getCurrentUserPubkey, onCurrentUserPubkeyChange } from './nostrActiveAccount';
 import { pool } from './nostrPool';
 import { getManyPeerRelayLists } from './peerRelayLists';
@@ -55,6 +51,8 @@ export interface ProfileFallbackOptions {
   hints?: ReadonlyMap<string, readonly unknown[]>;
   /** Whose lookup this is; defaults to the active account. */
   viewerPubkey?: string | null;
+  /** Stops the work: no new lookup, round or socket after it aborts, and open queries close. */
+  signal?: AbortSignal;
 }
 
 const recentMisses = new Map<string, number>();
@@ -87,11 +85,16 @@ function newestProfile(events: readonly Event[], pubkey: string): Event | undefi
   return best;
 }
 
-/** `skipped`: over the app-wide relay ceiling — not a miss, just not now. */
+/** `skipped`: over the app-wide relay ceiling, or cancelled — not a miss, just not now. */
 type LookupOutcome = Event | 'miss' | 'skipped';
 
 /** One person's kind-0 from their own relays only. */
-async function lookupOne(pubkey: string, relays: readonly string[]): Promise<LookupOutcome> {
+async function lookupOne(
+  pubkey: string,
+  relays: readonly string[],
+  signal: AbortSignal | undefined,
+): Promise<LookupOutcome> {
+  if (signal?.aborted) return 'skipped'; // before any socket opens
   const lease = leaseOutboxRelays(relays);
   if (lease.relays.length === 0) return 'skipped';
   try {
@@ -99,11 +102,12 @@ async function lookupOne(pubkey: string, relays: readonly string[]): Promise<Loo
       pool,
       lease.relays,
       { kinds: [0], authors: [pubkey], limit: 1 },
-      { maxWait: FALLBACK_QUERY_MAX_WAIT_MS },
+      { maxWait: FALLBACK_QUERY_MAX_WAIT_MS, signal },
     );
+    if (signal?.aborted) return 'skipped';
     return newestProfile(events, pubkey) ?? 'miss';
   } catch {
-    return 'miss';
+    return signal?.aborted ? 'skipped' : 'miss';
   } finally {
     lease.release();
   }
@@ -120,8 +124,9 @@ export async function fetchMissingProfileEvents(
   options: ProfileFallbackOptions,
 ): Promise<Map<string, Event>> {
   const found = new Map<string, Event>();
+  const { signal } = options;
   const viewer = options.viewerPubkey === undefined ? getCurrentUserPubkey() : options.viewerPubkey;
-  if (isTestRelayLockdown(viewer)) return found;
+  if (isTestRelayLockdown(viewer) || signal?.aborted) return found;
   const now = Date.now();
   const people: string[] = [];
   for (const raw of pubkeys) {
@@ -137,12 +142,14 @@ export async function fetchMissingProfileEvents(
     viewerPubkey: viewer,
     lookupRelays: options.lookupRelays,
   });
+  if (signal?.aborted) return found;
   const plans: { pubkey: string; relays: string[] }[] = [];
   for (const pubkey of people) {
     const result = lists.get(pubkey);
     const write = result?.status === 'ok' ? (result.lists.write ?? []) : [];
+    // Capped after dropping the relays already asked (personOutboxRelays).
     const relays = personOutboxRelays(
-      write.slice(0, MAX_AUTHOR_OUTBOX_RELAYS),
+      write,
       options.hints?.get(pubkey) ?? [],
       options.alreadyAsked,
     );
@@ -155,8 +162,9 @@ export async function fetchMissingProfileEvents(
     plans.push({ pubkey, relays });
   }
   for (let i = 0; i < plans.length; i += FALLBACK_CONCURRENCY) {
+    if (signal?.aborted) break;
     const round = plans.slice(i, i + FALLBACK_CONCURRENCY);
-    const outcomes = await Promise.all(round.map((p) => lookupOne(p.pubkey, p.relays)));
+    const outcomes = await Promise.all(round.map((p) => lookupOne(p.pubkey, p.relays, signal)));
     round.forEach(({ pubkey }, j) => {
       const outcome = outcomes[j];
       if (outcome === 'miss') recordMiss(throttleKey(options.purpose, viewer, pubkey), Date.now());
@@ -174,8 +182,10 @@ export async function fetchMissingProfileEvents(
  * `fetchMissingProfileEvents` in the background, for a batch caller that
  * mustn't wait on it (cold-start contact profiles): starts after
  * FALLBACK_START_DELAY_MS, and `onFound` runs only when something was found.
- * Cancelled by the returned function or by an account switch (a result for
- * the previous account is dropped).
+ * Stopped — timer, lookups, open queries and the result — by the returned
+ * function, by `options.signal`, or by an account switch away from
+ * `options.viewerPubkey` (pass the owner captured when the caller's work
+ * STARTED: if the account already changed, nothing runs at all).
  */
 export function scheduleMissingProfileFallback(
   pubkeys: readonly string[],
@@ -183,31 +193,62 @@ export function scheduleMissingProfileFallback(
   onFound: (found: Map<string, Event>) => void,
 ): () => void {
   const viewer = options.viewerPubkey === undefined ? getCurrentUserPubkey() : options.viewerPubkey;
-  let cancelled = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const cancel = () => {
-    cancelled = true;
-    if (timer !== undefined) clearTimeout(timer);
-    stopWatching();
-  };
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  if (options.signal?.aborted || getCurrentUserPubkey() !== viewer) {
+    cancel();
+    return cancel;
+  }
   const stopWatching = onCurrentUserPubkeyChange((pubkey) => {
     if (pubkey !== viewer) cancel();
   });
-  timer = setTimeout(() => {
-    timer = undefined;
-    void fetchMissingProfileEvents(pubkeys, { ...options, viewerPubkey: viewer })
+  options.signal?.addEventListener('abort', cancel, { once: true });
+  const cleanUp = () => {
+    stopWatching();
+    options.signal?.removeEventListener('abort', cancel);
+  };
+  const timer = setTimeout(() => {
+    void fetchMissingProfileEvents(pubkeys, {
+      ...options,
+      viewerPubkey: viewer,
+      signal: controller.signal,
+    })
       .then((found) => {
-        if (!cancelled && found.size > 0) onFound(found);
+        if (!controller.signal.aborted && found.size > 0) onFound(found);
       })
       .catch(() => {
         // Best-effort: the profiles just stay missing until the next retry.
       })
-      .finally(stopWatching);
+      .finally(cleanUp);
   }, FALLBACK_START_DELAY_MS);
+  controller.signal.addEventListener(
+    'abort',
+    () => {
+      clearTimeout(timer);
+      cleanUp();
+    },
+    { once: true },
+  );
   return cancel;
+}
+
+const latestGeneration = new Map<string, AbortController>();
+
+/**
+ * A cancellation token for one batch refresh's background fallback, taken
+ * when the refresh STARTS. The next refresh for the same owner aborts it, so
+ * a fallback from an older refresh can never apply over a newer one.
+ */
+export function newFallbackGeneration(owner: string | null): AbortSignal {
+  const key = owner ?? '';
+  latestGeneration.get(key)?.abort();
+  const controller = new AbortController();
+  latestGeneration.set(key, controller);
+  return controller.signal;
 }
 
 /** Forget the retry throttle (tests). */
 export function __resetProfileFallbackForTests(): void {
   recentMisses.clear();
+  latestGeneration.clear();
 }

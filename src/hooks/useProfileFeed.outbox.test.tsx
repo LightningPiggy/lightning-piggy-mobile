@@ -97,22 +97,86 @@ it("merges the author's relay results into the same feed, coalesced and deduped"
   expect(result.current.events.map((e) => e.id)).toEqual(['theirs', 'mine']);
 });
 
-it("pages older posts from the union of the viewer's and the author's relays", async () => {
-  jest.mocked(fetchAuthorFeedPage).mockResolvedValue({ events: [], complete: true });
+const pageCalls = () =>
+  jest
+    .mocked(fetchAuthorFeedPage)
+    .mock.calls.map(([input]) => ({ relays: input.relays, until: input.until }));
+
+it('pages each relay set from its own cursor, so no posts are skipped (#1)', async () => {
+  jest.mocked(fetchAuthorFeedPage).mockResolvedValue({ events: [], complete: false });
   const { result } = renderHook(() => useProfileFeed(alice, 0));
   act(() => {
-    main.onEvent(note('mine', 2));
+    // The viewer's relays only have an old post; the author's have 971–1000.
+    main.onEvent(note('old', 100));
     main.onEose?.();
     outbox.onRelays?.(['wss://alice.example/']);
+    outbox.onEvent(note('n1000', 1000));
+    outbox.onEvent(note('n971', 971));
   });
   await act(async () => {
     await result.current.loadMore();
   });
-  expect(jest.mocked(fetchAuthorFeedPage).mock.calls[0][0]).toMatchObject({
-    authorPubkey: alice,
-    relays: ['wss://mine.example/', 'wss://alice.example/'],
-    until: 2,
+  expect(pageCalls()).toEqual(
+    expect.arrayContaining([
+      { relays: ['wss://mine.example/'], until: 100 },
+      // Not `until: 100`, which would skip 101–970 for good.
+      { relays: ['wss://alice.example/'], until: 971 },
+    ]),
+  );
+  expect(pageCalls()).toHaveLength(2);
+});
+
+it('one set reaching its end leaves the other paging; the end is only when both are done', async () => {
+  const page = jest.mocked(fetchAuthorFeedPage);
+  page.mockImplementation(async ({ relays }) =>
+    relays[0] === 'wss://mine.example/'
+      ? { events: [], complete: true }
+      : { events: [note('n900', 900)], complete: true },
+  );
+  const { result } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    main.onEvent(note('old', 100));
+    outbox.onRelays?.(['wss://alice.example/']);
+    outbox.onEvent(note('n971', 971));
   });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(result.current.reachedEnd).toBe(false);
+  page.mockClear();
+  page.mockResolvedValue({ events: [], complete: true });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  // Only the author's set is still paged, from its advanced cursor.
+  expect(pageCalls()).toEqual([{ relays: ['wss://alice.example/'], until: 900 }]);
+  expect(result.current.reachedEnd).toBe(true);
+});
+
+it("late-found author relays re-open paging after the viewer's relays ended (#2)", async () => {
+  const page = jest.mocked(fetchAuthorFeedPage);
+  page.mockResolvedValue({ events: [], complete: true });
+  const { result } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    main.onEvent(note('old', 100));
+    main.onEose?.();
+  });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(result.current.reachedEnd).toBe(true);
+  // The author's relays turn up afterwards, with posts.
+  act(() => {
+    outbox.onRelays?.(['wss://alice.example/']);
+    outbox.onEvent(note('n500', 500));
+  });
+  expect(result.current.reachedEnd).toBe(false);
+  page.mockClear();
+  page.mockResolvedValue({ events: [], complete: false });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(pageCalls()).toEqual([{ relays: ['wss://alice.example/'], until: 500 }]);
 });
 
 it('closes both subscriptions on blur / unmount', () => {

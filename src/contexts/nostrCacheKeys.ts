@@ -3,6 +3,7 @@ import { InteractionManager } from 'react-native';
 
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
+import { newerProfile } from '../utils/profileFreshness';
 
 // Cache key bases — each is suffixed with `_${pubkey}` via perAccountKey()
 // at every call site (#288). The legacy un-suffixed keys are migrated on
@@ -88,10 +89,11 @@ export async function persistMergedProfileCache(
   } catch {
     // Corrupt / unreadable cache — keep the caller's snapshot as the base.
   }
-  // This fetch's results are the most authoritative for the keys it covers.
+  // This fetch's results are the most authoritative for the keys it covers —
+  // unless the cached copy is from a newer kind-0 (a late fallback, #1390).
   const merged: Record<string, NostrProfile> = { ...base };
   fetched.forEach((v, k) => {
-    merged[k] = v;
+    merged[k] = newerProfile(merged[k], v) ?? v;
   });
   // Await both writes (still swallowing errors) so the function only resolves
   // once persistence has completed. Callers that `await` this (e.g.

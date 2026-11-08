@@ -3,12 +3,14 @@ import { fetchProfile, fetchProfiles, pool } from './nostrService';
 import { fetchProfilesBatch } from './nostrProfileBatch';
 import { fetchMissingProfileEvents, scheduleMissingProfileFallback } from './profileOutboxFallback';
 import { PROFILE_RELAYS } from './nostrRelayDefaults';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
 
 // The missing-profile fallback (#1390) only runs for profiles that didn't
 // resolve; a profile that resolves keeps the existing path untouched.
 jest.mock('./profileOutboxFallback', () => ({
   fetchMissingProfileEvents: jest.fn(),
   scheduleMissingProfileFallback: jest.fn(() => () => {}),
+  newFallbackGeneration: jest.requireActual('./profileOutboxFallback').newFallbackGeneration,
 }));
 jest.mock('./nostrProfileBatch', () => ({ fetchProfilesBatch: jest.fn() }));
 
@@ -96,7 +98,7 @@ describe('fetchProfiles', () => {
     expect(opts).toMatchObject({ purpose: 'display', lookupRelays: ['wss://mine.example'] });
   });
 
-  it('merges late finds through onBatch and hands only the new ones to onLateProfiles', async () => {
+  it('delivers ONLY the newly found profiles, dated, never a full snapshot (#3)', async () => {
     resolveFoundOnly();
     const onBatch = jest.fn();
     const onLateProfiles = jest.fn();
@@ -106,16 +108,41 @@ describe('fetchProfiles', () => {
     onFound(
       new Map([[missing, batchEvent(missing, '{"name":"C","lud16":"c@example.com"}') as never]]),
     );
-    const snapshot: Map<string, { name?: string; lud16?: string | null }> =
+    const delivered: Map<string, { name?: string; lud16?: string | null; createdAt?: number }> =
       onBatch.mock.calls[0][0];
-    expect([...snapshot.keys()].sort()).toEqual([found, missing]);
-    expect(snapshot.get(missing)?.name).toBe('C');
+    // No replay of `found`'s (possibly older) copy.
+    expect([...delivered.keys()]).toEqual([missing]);
+    expect(delivered.get(missing)?.name).toBe('C');
+    // Dated, so the caller merges newest-wins on it.
+    expect(delivered.get(missing)?.createdAt).toBe(1);
     // Display-only path: payment fields stripped like any batch profile.
-    expect(snapshot.get(missing)?.lud16 ?? null).toBeNull();
-    const late: Map<string, unknown> = onLateProfiles.mock.calls[0][0];
-    expect([...late.keys()]).toEqual([missing]);
+    expect(delivered.get(missing)?.lud16 ?? null).toBeNull();
+    expect(onLateProfiles.mock.calls[0][0]).toBe(delivered);
     // The map already returned is left as it was.
     expect(profiles.has(missing)).toBe(false);
+  });
+
+  it("a newer refresh cancels the older refresh's fallback (generation, #3)", async () => {
+    resolveFoundOnly();
+    await fetchProfiles([found, missing], [], jest.fn());
+    const older = schedule.mock.calls[0][1].signal!;
+    expect(older.aborted).toBe(false);
+    await fetchProfiles([found, missing], [], jest.fn());
+    expect(older.aborted).toBe(true);
+    expect(schedule.mock.calls[1][1].signal!.aborted).toBe(false);
+  });
+
+  it('takes the owner when it STARTS, so a switch mid-batch is not handed on (#4)', async () => {
+    const owner = 'd'.repeat(64);
+    setCurrentUserPubkey(owner);
+    batch.mockImplementation(async (pubkeys, _r, _t, onEvent) => {
+      // The user switches account while the main batch is still running.
+      setCurrentUserPubkey('e'.repeat(64));
+      if (pubkeys.includes(found)) onEvent(batchEvent(found, '{}'));
+    });
+    await fetchProfiles([found, missing], [], jest.fn());
+    expect(schedule.mock.calls[0][1].viewerPubkey).toBe(owner);
+    setCurrentUserPubkey(null);
   });
 
   it('schedules nothing when every profile resolved, or without an onBatch to deliver to', async () => {

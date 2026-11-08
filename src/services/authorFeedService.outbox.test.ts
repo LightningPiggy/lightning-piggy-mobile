@@ -1,7 +1,12 @@
 import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
-import { subscribeAuthorOutboxFeed } from './authorFeedService';
-import { __resetOutboxLeasesForTests, leasedOutboxRelayCount } from './authorOutboxRelays';
+import { OUTBOX_FEED_EVENT_BUDGET_FACTOR, subscribeAuthorOutboxFeed } from './authorFeedService';
+import {
+  __resetOutboxLeasesForTests,
+  leasedOutboxRelayCount,
+  leaseOutboxRelays,
+} from './authorOutboxRelays';
 import { releaseNewIdleRelays } from './nostrPool';
+import { recordRelayFailure } from './relayHealth';
 import { getPeerRelayLists } from './peerRelayLists';
 
 // The author-relay half of a profile feed (#1390): background, bounded,
@@ -10,11 +15,12 @@ const mockSubscribeMany = jest.fn();
 jest.mock('./nostrPool', () => ({
   pool: { subscribeMany: (...args: unknown[]) => mockSubscribeMany(...args) },
   trackRelays: jest.fn(),
+  claimPendingRelease: jest.fn(() => false),
   pooledRelayUrls: jest.fn(() => new Set<string>()),
-  pruneIdleRelays: jest.fn(),
   releaseNewIdleRelays: jest.fn(),
 }));
 jest.mock('./relayHealth', () => ({
+  recordRelayFailure: jest.fn(),
   selectHealthyRelays: (urls: string[]) => urls,
   relayKey: (url: string) => url,
 }));
@@ -126,4 +132,44 @@ it('a test account in lockdown adds no author relays', async () => {
   await jest.runAllTimersAsync();
   expect(lookup).not.toHaveBeenCalled();
   expect(mockSubscribeMany).not.toHaveBeenCalled();
+});
+
+it('cuts off a relay that floods the feed: closed, released, reported and quarantined (M2)', async () => {
+  write(['wss://noisy.example/', 'wss://quiet.example/']);
+  const closers = new Map<string, jest.Mock>();
+  mockSubscribeMany.mockImplementation(([relay]: string[]) => {
+    const closeOne = jest.fn();
+    closers.set(relay, closeOne);
+    return { close: closeOne };
+  });
+  const onEvent = jest.fn();
+  const onRelays = jest.fn();
+  arm({ onEvent, onRelays, limit: 10 });
+  await jest.runAllTimersAsync();
+  expect(onRelays).toHaveBeenLastCalledWith(['wss://noisy.example/', 'wss://quiet.example/']);
+  const noisy = mockSubscribeMany.mock.calls.find(([[r]]) => r === 'wss://noisy.example/')![2];
+  const budget = OUTBOX_FEED_EVENT_BUDGET_FACTOR * 10;
+  // Events by anyone count: the cost is paid before the author check.
+  for (let i = 0; i < budget + 50; i++) {
+    noisy.onevent({ id: `e${i}`, pubkey: viewer, kind: 1, created_at: i, content: '', tags: [] });
+  }
+  expect(closers.get('wss://noisy.example/')).toHaveBeenCalled();
+  expect(closers.get('wss://quiet.example/')).not.toHaveBeenCalled();
+  expect(recordRelayFailure).toHaveBeenCalledWith('wss://noisy.example/');
+  expect(releaseNewIdleRelays).toHaveBeenCalledWith(['wss://noisy.example/'], new Set());
+  // Older pages stop asking it, and it isn't leased again for a while.
+  expect(onRelays).toHaveBeenLastCalledWith(['wss://quiet.example/']);
+  expect(leaseOutboxRelays(['wss://noisy.example/']).relays).toEqual([]);
+});
+
+it('a relay within its budget is left alone', async () => {
+  write(['wss://alice1.example/']);
+  arm({ limit: 10 });
+  await jest.runAllTimersAsync();
+  const handlers = mockSubscribeMany.mock.calls[0][2];
+  for (let i = 0; i < OUTBOX_FEED_EVENT_BUDGET_FACTOR * 10; i++) {
+    handlers.onevent({ id: `e${i}`, pubkey: alice, kind: 1, created_at: i, content: '', tags: [] });
+  }
+  expect(close).not.toHaveBeenCalled();
+  expect(recordRelayFailure).not.toHaveBeenCalled();
 });
