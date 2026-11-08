@@ -54,7 +54,8 @@ export interface SendNip17RumorInput {
   rumor: UnsignedRumor;
   recipientPubkey: string;
   /**
-   * The user directly chose this recipient (a Gamma order to its seller), so
+   * The user directly chose this recipient (a Gamma order to its seller, or
+   * the seller's invoice / status reply to that buyer's order), so
    * the wrap also goes to their own inbox relays. Otherwise the trust tier
    * decides (#1749).
    */

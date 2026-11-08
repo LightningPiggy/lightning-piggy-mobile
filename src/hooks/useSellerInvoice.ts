@@ -148,6 +148,9 @@ export function useSellerInvoice(
         relays,
         rumor,
         recipientPubkey: buyerPubkey ?? '',
+        // Answering an order the buyer placed is choosing to message them:
+        // reach them at their own inbox relays too (#1749).
+        recipientChosen: true,
       }),
     [pubkey, signerType, relays, buyerPubkey],
   );

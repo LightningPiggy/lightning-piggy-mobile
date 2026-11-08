@@ -76,6 +76,9 @@ it('creates the invoice on the CHOSEN wallet and sends a Gamma type-2 payment re
   expect(makeInvoiceForWallet).toHaveBeenCalledWith('shop-wallet', 4200, expect.any(String));
   const first = (sendNip17Rumor as jest.Mock).mock.calls[0][0];
   expect(first).toMatchObject({ senderPubkey: SELLER, recipientPubkey: BUYER });
+  // Answering the buyer's order counts as choosing them: their own inbox
+  // relays are reached whatever the seller's trust tier (#1749).
+  expect(first.recipientChosen).toBe(true);
   expect(first.rumor.kind).toBe(16);
   expect(first.rumor.tags).toEqual(
     expect.arrayContaining([
@@ -132,6 +135,8 @@ it('watches the wallet the invoice was made on — not the active one — and ma
     await result.current.markPaid();
   });
   const status = (sendNip17Rumor as jest.Mock).mock.calls.at(-1)![0].rumor;
+  // Status updates answer the same order, so the buyer is chosen there too.
+  expect((sendNip17Rumor as jest.Mock).mock.calls.at(-1)![0].recipientChosen).toBe(true);
   expect(status.tags).toEqual(
     expect.arrayContaining([
       ['type', '3'],
