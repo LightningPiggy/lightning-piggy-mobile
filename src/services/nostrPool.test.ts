@@ -1,7 +1,14 @@
 import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { SimplePool } from 'nostr-tools/pool';
 import type { Event, VerifiedEvent } from 'nostr-tools';
-import { connectedRelays, pool, pruneIdleRelays, trackRelays } from './nostrPool';
+import {
+  connectedRelays,
+  pool,
+  pooledRelayUrls,
+  pruneIdleRelays,
+  releaseNewIdleRelays,
+  trackRelays,
+} from './nostrPool';
 
 jest.mock('./relayHealth', () => ({
   hydrateRelayHealth: jest.fn(),
@@ -95,3 +102,76 @@ it.each([false, true])(
     }
   },
 );
+
+it('prunes only the listed relays when given URLs, keeping other idle sockets', () => {
+  addRelay('wss://outbox/');
+  addRelay('wss://other/');
+  pruneIdleRelays(['wss://OUTBOX:443']);
+  expect([...relays.keys()]).toEqual(['wss://other/']);
+  expect([...connectedRelays]).toEqual(['wss://other/']);
+  // An empty or unparsable list prunes nothing (never "everything").
+  pruneIdleRelays([]);
+  pruneIdleRelays(['::not a url::']);
+  expect([...relays.keys()]).toEqual(['wss://other/']);
+});
+
+it('releases only the sockets a batch opened, never ones pooled before it', () => {
+  addRelay('wss://already/');
+  const before = pooledRelayUrls();
+  addRelay('wss://one-off/');
+  const busy = addRelay('wss://busy/');
+  busy.prepareSubscription([{ kinds: [1], limit: 1 }], {});
+  busy.idleSince = undefined;
+  releaseNewIdleRelays(['wss://already', 'wss://one-off', 'wss://busy'], before);
+  expect([...relays.keys()].sort()).toEqual(['wss://already/', 'wss://busy/']);
+});
+
+it('never prunes a socket that is still connecting', () => {
+  const relay = addRelay('wss://connecting/');
+  const state = relay as unknown as { connectionPromise?: Promise<void> };
+  state.connectionPromise = new Promise(() => {});
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(true);
+  state.connectionPromise = undefined;
+  pruneIdleRelays();
+  expect(relays.has(relay.url)).toBe(false);
+});
+
+it("releases a one-off socket when another send's last publish to it settles", async () => {
+  const relay = addRelay('wss://shared-outbox/');
+  const pending: ((message: string) => void)[] = [];
+  const publish = jest
+    .spyOn(SimplePool.prototype, 'publish')
+    .mockImplementation((urls) => urls.map(() => new Promise((resolve) => pending.push(resolve))));
+  try {
+    // Send A opened the socket; send B publishes to it too.
+    const first = pool.publish(['wss://shared-outbox'], {} as Event)[0];
+    const second = pool.publish(['wss://shared-outbox'], {} as Event)[0];
+    pending[0]('saved');
+    await first;
+    // A finishes and releases what it opened, but B is still publishing.
+    releaseNewIdleRelays(['wss://shared-outbox'], new Set());
+    expect(relays.has(relay.url)).toBe(true);
+    pending[1]('saved');
+    await second;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(relays.has(relay.url)).toBe(false);
+  } finally {
+    pending.forEach((resolve) => resolve('cleanup'));
+    publish.mockRestore();
+  }
+});
+
+it('leaves sockets never marked for release open after their publishes drain', async () => {
+  const relay = addRelay('wss://long-lived/');
+  const publish = jest
+    .spyOn(SimplePool.prototype, 'publish')
+    .mockImplementation((urls) => urls.map(() => Promise.resolve('saved')));
+  try {
+    await pool.publish(['wss://long-lived'], {} as Event)[0];
+    await new Promise((r) => setTimeout(r, 0));
+    expect(relays.has(relay.url)).toBe(true);
+  } finally {
+    publish.mockRestore();
+  }
+});

@@ -31,20 +31,29 @@ export async function fetchLatestReplaceable(
     const events = await pool.querySync(relays, { kinds: [kind], authors: [pubkey] } as Filter, {
       maxWait: maxWaitMs,
     });
-    let best: Event | null = null;
-    for (const e of events) {
-      if (e.pubkey !== pubkey || e.kind !== kind) continue;
-      if (
-        !best ||
-        e.created_at > best.created_at ||
-        (e.created_at === best.created_at && e.id < best.id)
-      )
-        best = e;
-    }
-    return best;
+    return pickLatestReplaceable(events, pubkey, kind);
   } catch {
     return null;
   }
+}
+
+/** Newest `kind` event by `pubkey` in `events` (ties: lowest id, per NIP-01). */
+export function pickLatestReplaceable(
+  events: readonly Event[],
+  pubkey: string,
+  kind: number,
+): Event | null {
+  let best: Event | null = null;
+  for (const e of events) {
+    if (e.pubkey !== pubkey || e.kind !== kind) continue;
+    if (
+      !best ||
+      e.created_at > best.created_at ||
+      (e.created_at === best.created_at && e.id < best.id)
+    )
+      best = e;
+  }
+  return best;
 }
 
 /**

@@ -62,7 +62,9 @@ There is no scheduled removal date. Removal will be announced one release ahead 
 
 * **Damus** (as of April 2026 master) does not subscribe to kind 1059 — its `HomeModel` filter is kind-4-only. A message Lightning Piggy sends to a Damus-only peer will not appear in their UI until Damus ships NIP-17. Other major clients (Amethyst, 0xchat, Snort, Coracle, Primal) accept NIP-17 and will display Lightning Piggy's outgoing DMs.
 * The `subject` tag on a kind-14 is what 0xchat / Amethyst / Quartz read to display the conversation title — `createGroupChatRumor` always emits one; `createDirectMessageRumor` deliberately omits it (a 1:1 thread has no name). See issue #271 for the cross-client subject-tag interop work.
-* Lightning Piggy does **not** publish a kind-10050 NIP-17 DM relay-list event. We rely on the user's existing NIP-65 write-relay list plus the DEFAULT_RELAYS fallback. If a recipient publishes their own kind-10050 we do not currently honour it — they must accept wraps on at least one relay we publish to.
+* Lightning Piggy does **not** publish a kind-10050 NIP-17 DM relay-list event. We rely on the user's existing NIP-65 write-relay list plus the DEFAULT_RELAYS fallback. If a recipient publishes their own kind-10050, each gift wrap also goes to that recipient's inbox relays (the self-copy to the sender's own 10050), and a NIP-04 message to the recipient's NIP-65 read relays (#1570). This is best-effort, alongside the usual set, sanitised and capped (see `src/services/peerOutboxDelivery.ts`).
++
+*Privacy:* the recipient chooses those relays, so whoever operates them sees the sender's IP address and when a message was sent. That covers each group member's inbox relays and, for Gamma orders, the seller's. They do not learn who sent it: the gift wrap is signed by a throwaway key, and the app never answers a relay's AUTH challenge when publishing.
 
 ==== Direct chat versus a two-person named group (#1599)
 

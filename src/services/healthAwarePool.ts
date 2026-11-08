@@ -442,7 +442,14 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       /** `requireAnswer`: reject an EMPTY read no relay completed (all failed,
        * timed out in the REQ budget, or were skipped), so the caller can tell
        * "nothing published" from "couldn't ask". Timing is unchanged. */
-      options: { abort?: AbortSignal; requireEose?: boolean; requireAnswer?: boolean } = {},
+      /** `onClose`: every relay's close reason, before the read settles — a
+       * real EOSE reads `closed automatically on eose`. */
+      options: {
+        abort?: AbortSignal;
+        requireEose?: boolean;
+        requireAnswer?: boolean;
+        onClose?: (reasons: string[]) => void;
+      } = {},
     ): Promise<NostrEvent[]> {
       return new Promise((resolve, reject) => {
         const events: NostrEvent[] = [];
@@ -468,6 +475,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
               // slow relay (and the health layer always keeps two), so demanding
               // EOSE from every relay would hold live delivery for ever. Only a
               // read that no relay completed (failed, timed out, skipped) rejects.
+              options.onClose?.(reasons);
               const eosed = reasons.filter((reason) => reason === 'closed automatically on eose');
               if (options.requireEose && !options.abort?.aborted && eosed.length === 0)
                 reject(new Error('Group recovery did not reach EOSE: ' + reasons.join('; ')));

@@ -1,6 +1,6 @@
-import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback } from 'react';
 import { sendNip04Message } from '../services/nostrNip04Send';
+import { nip17LookupRelays, nip17TargetRelays } from '../services/nip17RumorSend';
 import { sendMarmotDm } from '../services/marmotSend';
 import type { DmProtocol } from '../utils/dmProtocol';
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
@@ -120,11 +120,10 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       // Union the user's published write relays with DEFAULT_RELAYS. Publish
       // uses Promise.any, so one responsive relay is enough — but a user
       // whose NIP-65 list has a single entry (and no in-app UI to edit it)
-      // hits a single-point failure the moment that relay is slow.
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(
-        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
-      );
+      // hits a single-point failure the moment that relay is slow. Each
+      // message also goes to the recipient's own inbox relays (#1570).
+      const targetRelays = nip17TargetRelays(relays, pubkey);
+      const peerRouting = { lookupRelays: nip17LookupRelays(relays) };
       try {
         if (protocol === 'nip04') {
           const result = await sendNip04Message({
@@ -133,6 +132,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             plaintext,
             signerType,
             relays: targetRelays,
+            peerRouting,
             hooks,
           });
           return toTextSendResult(result, result.rumorCreatedAt);
@@ -157,6 +157,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
           });
           // Return the per-relay delivery so the bubble can settle to its final
@@ -173,6 +174,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plain, recipient) =>
               amberService.requestNip44Encrypt(plain, recipient, currentUser),
@@ -204,6 +206,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plain, recipient) =>
               nostrConnectService.requestNip44Encrypt(plain, recipient, currentUser),
@@ -274,10 +277,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         if (!peer) return { success: false, error: 'No valid recipients' };
         return sendMarmotDm(pubkey, peer, rumor, hooks);
       }
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(
-        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
-      );
+      const targetRelays = nip17TargetRelays(relays, pubkey);
+      const peerRouting = { lookupRelays: nip17LookupRelays(relays) };
       try {
         const eventId = directMessageRumorEventId(rumor);
         hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
@@ -291,6 +292,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: normalized,
             relays: targetRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
           });
           return {
@@ -307,6 +309,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: normalized,
             relays: targetRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plain, recipient) =>
               amberService.requestNip44Encrypt(plain, recipient, currentUser),
@@ -339,6 +342,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: normalized,
             relays: targetRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plain, recipient) =>
               nostrConnectService.requestNip44Encrypt(plain, recipient, currentUser),
@@ -386,10 +390,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       if (!/^[0-9a-f]{64}$/.test(normalizedRecipientPubkey)) {
         return { success: false, error: 'Invalid public key format' };
       }
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(
-        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
-      );
+      const targetRelays = nip17TargetRelays(relays, pubkey);
+      const peerRouting = { lookupRelays: nip17LookupRelays(relays) };
       try {
         const rumor = createFileMessageRumor({
           senderPubkey: pubkey,
@@ -415,6 +417,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
           });
           if (result.wrapsPublished === 0) {
             return { success: false, error: result.errors[0] ?? 'No wraps published' };
@@ -436,6 +439,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
             signerNip44Encrypt: (plain, recipient) =>
               amberService.requestNip44Encrypt(plain, recipient, currentUser),
             signerSignSeal: async (unsignedSeal) => {
@@ -470,6 +474,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
             signerNip44Encrypt: (plain, recipient) =>
               nostrConnectService.requestNip44Encrypt(plain, recipient, currentUser),
             signerSignSeal: async (unsignedSeal) => {
@@ -525,10 +530,8 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       if (!/^[0-9a-f]{64}$/.test(normalizedRecipientPubkey)) {
         return { success: false, error: 'Invalid public key format' };
       }
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(
-        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
-      );
+      const targetRelays = nip17TargetRelays(relays, pubkey);
+      const peerRouting = { lookupRelays: nip17LookupRelays(relays) };
       try {
         const rumor = {
           pubkey,
@@ -554,6 +557,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
           });
           // Strict success: at least one wrap published AND no signer/publish
           // errors — `delivery.delivered` alone can be true when only the
@@ -569,6 +573,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
             signerNip44Encrypt: (plain, recipient) =>
               amberService.requestNip44Encrypt(plain, recipient, currentUser),
             signerSignSeal: async (unsignedSeal) => {
@@ -597,6 +602,7 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
             rumor,
             recipientPubkeys: [normalizedRecipientPubkey],
             relays: targetRelays,
+            peerRouting,
             signerNip44Encrypt: (plain, recipient) =>
               nostrConnectService.requestNip44Encrypt(plain, recipient, currentUser),
             signerSignSeal: async (unsignedSeal) => {

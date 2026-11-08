@@ -66,7 +66,7 @@ function makePool(behaviour: Record<string, Behaviour>) {
       urls: string[],
       filters: object[],
       wait: number,
-      opts?: { requireAnswer?: boolean },
+      opts?: { requireAnswer?: boolean; onClose?: (reasons: string[]) => void },
     ) => Promise<Event[]>;
   };
 }
@@ -140,5 +140,27 @@ describe('querySyncFilters requireAnswer', () => {
     await expect(
       pool.querySyncFilters([A, B], [FILTER], 6000, { requireAnswer: true }),
     ).resolves.toEqual([EVENT]);
+  });
+
+  it('reports close reasons so callers can tell a completed read from a partial one', async () => {
+    const partial = jest.fn();
+    await makePool({ [A]: 'down', [B]: 'event-then-drop' }).querySyncFilters(
+      [A, B],
+      [FILTER],
+      6000,
+      {
+        requireAnswer: true,
+        onClose: partial,
+      },
+    );
+    expect(partial).toHaveBeenCalledTimes(1);
+    expect(partial.mock.calls[0][0]).not.toContain('closed automatically on eose');
+
+    const completed = jest.fn();
+    await makePool({ [A]: 'down', [B]: 'eose' }).querySyncFilters([A, B], [FILTER], 6000, {
+      requireAnswer: true,
+      onClose: completed,
+    });
+    expect(completed.mock.calls[0][0]).toContain('closed automatically on eose');
   });
 });

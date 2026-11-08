@@ -5,6 +5,8 @@ import * as nostrConnectService from './nostrConnectService';
 import { pool, trackRelays } from './nostrPool';
 import { publishWrapsTrackingRelays, type DmSendResult } from './nostrDmPublish';
 import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
+import { deliverToPeerRelays, type PeerRoutingOptions } from './peerOutboxDelivery';
+import { lockRelays } from '../config/testRelayLockdown';
 import type { SendHooks } from '../contexts/useMessageSend';
 import type { SignerType } from '../types/nostr';
 
@@ -16,6 +18,8 @@ export async function sendNip04Message(input: {
   signerType: SignerType | null;
   relays: string[];
   hooks?: SendHooks;
+  /** Outbox routing (#1570): also deliver to the recipient's NIP-65 read relays. */
+  peerRouting?: PeerRoutingOptions;
 }): Promise<DmSendResult & { rumorCreatedAt: number }> {
   const { senderPubkey, recipientPubkey, plaintext, signerType, relays, hooks } = input;
   let signed: VerifiedEvent;
@@ -66,6 +70,14 @@ export async function sendNip04Message(input: {
   }
   hooks?.onRumorReady?.({ eventId: signed.id, kind: 4, relays });
   trackRelays(relays);
+  // Best-effort and alongside the usual publish; never changes the result.
+  void deliverToPeerRelays({
+    events: [signed],
+    senderPubkey,
+    baseRelays: [...lockRelays(relays, senderPubkey)],
+    role: 'read',
+    lookupRelays: input.peerRouting?.lookupRelays,
+  });
   const result = await publishWrapsTrackingRelays(
     [signed],
     relays,

@@ -13,6 +13,7 @@ import type { RelayConfig, SignerType } from '../types/nostr';
 import type { DeliveryStatus } from '../utils/dmDeliveryStatus';
 import { isNip171GroupId } from '../utils/nip171';
 import { nip171Outgoing } from '../services/nip171Groups';
+import { nip17LookupRelays, nip17TargetRelays } from '../services/nip17RumorSend';
 import { isMarmotGroupId } from '../services/marmotSession';
 import { sendMarmotGroupRumor } from '../services/marmotSend';
 import { mentionedPubkeys } from '../utils/chatMentions';
@@ -129,10 +130,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
       if (!pubkey || !isLoggedIn) return { success: false, error: 'Not logged in' };
       const text = (input.text ?? '').trim();
       if (!input.file && !text) return { success: false, error: 'Empty message' };
-      const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-      const targetRelays = Array.from(
-        new Set([...writeRelays, ...enabledAppRelays('default', nostrService.DEFAULT_RELAYS)]),
-      );
+      const targetRelays = nip17TargetRelays(relays, pubkey);
       // NIP-171: one wrap to the group's current epoch key, tagged per the
       // draft, instead of a per-member fan-out (and no self-copy).
       const nip171 = isNip171GroupId(input.groupId)
@@ -144,6 +142,9 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
       const recipients = nip171 ? nip171.recipientPubkeys : input.memberPubkeys;
       const sendRelays = nip171 ? nip171.relays : targetRelays;
       const includeSelf = !nip171;
+      // Each member's wrap also goes to THAT member's kind-10050 inbox (#1570);
+      // a NIP-171 epoch key is not a person with an inbox.
+      const peerRouting = nip171 ? (false as const) : { lookupRelays: nip17LookupRelays(relays) };
       try {
         // kind-15 encrypted file (voice note, #235) when a `file` is given;
         // otherwise the standard kind-14 group chat rumor.
@@ -200,6 +201,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
           });
           if (result.wrapsPublished === 0) {
@@ -238,6 +240,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               amberService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
@@ -296,6 +299,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
             recipientPubkeys: recipients,
             includeSelf,
             relays: sendRelays,
+            peerRouting,
             onDeliveryFinalized: hooks?.onDeliveryFinalized,
             signerNip44Encrypt: (plaintext, recipientPubkey) =>
               nostrConnectService.requestNip44Encrypt(plaintext, recipientPubkey, currentUser),
