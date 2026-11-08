@@ -2,7 +2,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { MutableRefObject } from 'react';
 import type { WalletMetadata, WalletState, WalletTransaction } from '../types/wallet';
 import { readCachedWalletBalance } from '../services/walletBalanceCache';
-import { perfLog } from '../utils/perfLog';
+import { perfLog, perfOwnerTag } from '../utils/perfLog';
+
+export type WalletHydrationSource = 'startup' | 'startup-prefetch' | 'account-change';
+let hydrationCount = 0;
+/** [Perf] marker per committed wallet-list hydration; cold start should log #1 only. */
+export function logWalletHydration(
+  source: WalletHydrationSource,
+  owner: string | null,
+  wallets: number,
+): void {
+  hydrationCount += 1;
+  perfLog(
+    `wallet hydration #${hydrationCount} source=${source} owner=${perfOwnerTag(owner)} wallets=${wallets}`,
+  );
+}
 
 /** Hydrate cached wallet data without initialising BDK or connecting to relays. */
 export async function hydrateWalletStates(

@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { WalletMetadata } from '../types/wallet';
 import { perAccountKey } from './perAccountStorage';
+import { writeWalletOwnerHint } from './walletOwnerHint';
+import { perfLog, perfOwnerTag } from '../utils/perfLog';
 
 // Per-account namespacing landed with multi-account switching (#288).
 // Wallets are scoped to the active Nostr identity so signing into a
@@ -24,40 +26,57 @@ let _activePubkey: string | null = null;
 // list against the new account's namespaced storage. Without this,
 // switching identities leaves the previous identity's wallets visible
 // in-memory until the next cold start (see #288 review).
-type ActivePubkeyListener = (pk: string | null) => void;
+//
+// `change.startup` is true for the one publish that opens the cold-start
+// wallet gate below. WalletContext's startup hydration owns that load, so
+// its identity-change hydration skips it rather than loading the list twice.
+export interface ActivePubkeyChange {
+  startup: boolean;
+}
+type ActivePubkeyListener = (pk: string | null, change?: ActivePubkeyChange) => void;
 const _activePubkeyListeners = new Set<ActivePubkeyListener>();
 
-// Resolves on the first `setActivePubkeyForWalletStorage` call —
-// regardless of whether the value is a hex pubkey or null. Used by
-// WalletContext's startup to gate the initial `getWalletList()` until
-// NostrContext has hydrated identity from SecureStore. Without this
-// gate WalletContext could read `wallet_list` (no suffix) on cold
-// start, missing the per-account `wallet_list_${pubkey}` and showing
-// the wrong identity's wallets — that's the root cause of the
-// wallet-leak symptom (#461 / Copilot review on #442).
-let _firstSetResolve: (() => void) | null = null;
-const _firstSetPromise = new Promise<void>((resolve) => {
-  _firstSetResolve = resolve;
+// Cold-start wallet-owner gate. WalletContext waits here before its first
+// wallet-list read, so it reads the real account's `wallet_list_${pubkey}`
+// rather than the legacy unsuffixed key — the wallet-leak root cause (#461 /
+// Copilot review on #442). It opens once per process, for the real owner:
+//   - when NostrContext publishes a signed-in pubkey, or
+//   - when auto-login reports its outcome via `resolveStartupWalletOwner` and
+//     that owner is already the published one (logged out: null).
+// NostrProvider's bootstrap `null` publish on first commit does NOT open it.
+// It used to, which started a throwaway hydration for the signed-out key and
+// then a second one when the real pubkey landed (#816).
+type WalletGateState = 'pending' | 'timedOut' | 'open';
+let _gateState: WalletGateState = 'pending';
+let _startupOwnerDecided = false;
+let _gateResolve: () => void = () => {};
+let _gatePromise = new Promise<void>((resolve) => {
+  _gateResolve = resolve;
 });
 
+/** Returns true when startup was still waiting (the timeout hadn't fired). */
+function openWalletGate(owner: string | null): boolean {
+  if (_gateState === 'open') return false;
+  const startup = _gateState === 'pending';
+  _gateState = 'open';
+  _gateResolve();
+  perfLog(`wallet gate resolved owner=${perfOwnerTag(owner)}${startup ? '' : ' (after timeout)'}`);
+  return startup;
+}
+
 export function setActivePubkeyForWalletStorage(pk: string | null): void {
-  if (_activePubkey === pk) {
-    // Idempotent same-value call still counts as "Nostr has spoken" —
-    // resolve the gate even if the value matches the bootstrap null.
-    if (_firstSetResolve) {
-      _firstSetResolve();
-      _firstSetResolve = null;
-    }
-    return;
-  }
+  // Same-value publishes are no-ops — including the bootstrap null, which
+  // must not open the gate (see above).
+  if (_activePubkey === pk) return;
   _activePubkey = pk;
-  if (_firstSetResolve) {
-    _firstSetResolve();
-    _firstSetResolve = null;
-  }
+  // A published signed-in pubkey is always the real owner.
+  const startup = pk !== null && openWalletGate(pk);
+  // Remember the owner for the next cold start once it's a real one.
+  if (_gateState === 'open') writeWalletOwnerHint(pk);
+  const change: ActivePubkeyChange = { startup };
   for (const listener of _activePubkeyListeners) {
     try {
-      listener(pk);
+      listener(pk, change);
     } catch (e) {
       // Don't let one buggy subscriber break the others.
       if (__DEV__) console.warn('[walletStorage] listener threw:', e);
@@ -66,24 +85,57 @@ export function setActivePubkeyForWalletStorage(pk: string | null): void {
 }
 
 /**
- * Resolves once NostrContext has called `setActivePubkeyForWalletStorage`
- * at least once — i.e. the activePubkey has been hydrated (whether to a
- * hex pubkey for a signed-in identity or to null for a logged-out
- * install). Race-fixes the cold-start window where WalletProvider
- * mounts before NostrProvider and would otherwise read the wrong
- * AsyncStorage key.
+ * NostrContext's auto-login outcome: the account whose wallets cold start
+ * should load (null = definitely logged out). First call wins. A signed-in
+ * owner opens the gate when NostrContext publishes it, so wallets and every
+ * other active-pubkey consumer flip to the account in the same commit.
+ */
+export function resolveStartupWalletOwner(owner: string | null): void {
+  if (_startupOwnerDecided) return;
+  _startupOwnerDecided = true;
+  if (owner !== _activePubkey) return;
+  openWalletGate(owner);
+  writeWalletOwnerHint(owner);
+}
+
+export function isWalletOwnerGateOpen(): boolean {
+  return _gateState === 'open';
+}
+
+/**
+ * Resolves once the cold-start wallet owner is known (see the gate above).
+ * Race-fixes the cold-start window where WalletProvider mounts before
+ * NostrProvider and would otherwise read the wrong AsyncStorage key.
  *
- * Safe-fallback timeout (default 2 s) means a wedged NostrContext
- * doesn't permanently block wallet UI — callers fall through to
- * whatever `_activePubkey` happens to be (still null) and hit the
- * legacy unsuffixed key, matching pre-#288 behaviour.
+ * Safe-fallback timeout (default 2 s) means a wedged NostrContext doesn't
+ * permanently block wallet UI — the caller falls through to whatever
+ * `_activePubkey` is (still null) and hits the legacy unsuffixed key,
+ * matching pre-#288 behaviour. The owner's later publish is then an ordinary
+ * account change, which re-hydrates for it.
  */
 export async function awaitActivePubkeyHydrated(timeoutMs = 2000): Promise<void> {
-  if (_firstSetResolve === null) return;
+  if (_gateState !== 'pending') return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
-    _firstSetPromise,
-    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    _gatePromise,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, timeoutMs);
+    }),
   ]);
+  clearTimeout(timer);
+  if (_gateState === 'pending') {
+    _gateState = 'timedOut';
+    perfLog(`wallet gate timed out after ${timeoutMs}ms owner=${perfOwnerTag(_activePubkey)}`);
+  }
+}
+
+/** Test-only: return the gate to its cold-start state. */
+export function __resetWalletOwnerGateForTests(): void {
+  _gateState = 'pending';
+  _startupOwnerDecided = false;
+  _gatePromise = new Promise<void>((resolve) => {
+    _gateResolve = resolve;
+  });
 }
 
 export function subscribeActivePubkey(listener: ActivePubkeyListener): () => void {

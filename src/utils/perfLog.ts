@@ -32,6 +32,11 @@ export function perfLog(tag: string): void {
   console.log(`[Perf] ${tag} +${Date.now() - t}ms`);
 }
 
+/** Short account tag for perf lines: an 8-char pubkey prefix, or `none` when signed out. */
+export function perfOwnerTag(pubkey: string | null): string {
+  return pubkey ? pubkey.slice(0, 8) : 'none';
+}
+
 // Mark T0 explicitly. Call this from index.ts so T0 is anchored at
 // the FIRST module-eval moment, not whenever this file happens to
 // be imported.
