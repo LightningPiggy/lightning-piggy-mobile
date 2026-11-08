@@ -1,4 +1,5 @@
 import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
+import { setCurrentUserOwnRelays } from './nostrActiveAccount';
 import {
   __resetOutboxLeasesForTests,
   authorWriteRelays,
@@ -249,5 +250,15 @@ describe('raw-frame budget for owned sockets (round 3 #1)', () => {
     pooled.mockReturnValue(new Set()); // the socket is gone
     expect(leasedOutboxRelayCount()).toBe(0);
     expect(clearRelayFrameBudget).toHaveBeenCalledWith(relay(1));
+  });
+});
+
+describe("the viewer's own relays", () => {
+  afterEach(() => setCurrentUserOwnRelays([]));
+
+  it('are never leased (or budgeted), whoever asks', () => {
+    setCurrentUserOwnRelays(['wss://R5.example', relay(7)]);
+    expect(leaseOutboxRelays([relay(5), relay(6), relay(7)]).relays).toEqual([relay(6)]);
+    expect(jest.mocked(addRelayFrameBudget).mock.calls.map(([url]) => url)).toEqual([relay(6)]);
   });
 });

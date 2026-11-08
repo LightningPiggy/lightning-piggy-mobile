@@ -2,7 +2,7 @@ import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { OUTBOX_FRAMES_PER_LEASE } from './authorFeedLimits';
 import { sanitizePeerRelayUrls } from '../utils/peerRelayUrls';
 import { normalizeRelayUrl } from '../utils/relayListKey';
-import { getCurrentUserPubkey } from './nostrActiveAccount';
+import { getCurrentUserOwnRelays, getCurrentUserPubkey } from './nostrActiveAccount';
 import { claimPendingRelease, pooledRelayUrls, releaseNewIdleRelays } from './nostrPool';
 import { addRelayFrameBudget, clearRelayFrameBudget } from './nostrRelayReceiveQueue';
 import { getPeerRelayLists, peekPeerRelayLists } from './peerRelayLists';
@@ -226,9 +226,10 @@ export function leasedOutboxRelayCount(): number {
 /**
  * Lease extra relays for one person's reads. A relay already leased is shared
  * (no new socket); a new one is granted only while fewer than
- * MAX_OUTBOX_EXTRA_RELAYS are leased or still closing. Quarantined relays are
- * never granted. Each lease on an owned socket adds OUTBOX_FRAMES_PER_LEASE to
- * its frame budget; `onRevoked` runs if that budget is blown (drop the lease).
+ * MAX_OUTBOX_EXTRA_RELAYS are leased or still closing. Quarantined relays, and
+ * the viewer's own relays (read + DM inbox, whoever asks), are never granted.
+ * Each lease on an owned socket adds OUTBOX_FRAMES_PER_LEASE to its frame
+ * budget; `onRevoked` runs if that budget is blown (drop the lease).
  */
 export function leaseOutboxRelays(
   urls: readonly string[],
@@ -237,10 +238,11 @@ export function leaseOutboxRelays(
   forgetClosed();
   const granted: string[] = [];
   const now = Date.now();
+  const own = new Set(getCurrentUserOwnRelays().map(normalizeRelayUrl));
   let pooled: ReadonlySet<string> | undefined;
   for (const raw of urls) {
     const url = normalizeRelayUrl(raw);
-    if (granted.includes(url) || isQuarantined(url, now)) continue;
+    if (granted.includes(url) || own.has(url) || isQuarantined(url, now)) continue;
     let held = leased.get(url);
     if (held) {
       // Back in use before its socket closed: stop the pending release.

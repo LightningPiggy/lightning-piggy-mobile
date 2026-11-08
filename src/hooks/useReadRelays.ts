@@ -1,6 +1,7 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { RelayConfig } from '../types/nostr';
 import { enabledAppRelays } from '../services/appRelayPrefs';
+import { setCurrentUserOwnRelays } from '../services/nostrActiveAccount';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import { relayListKey } from '../utils/relayListKey';
 import { useAppRelayPrefs } from './useAppRelayPrefs';
@@ -24,6 +25,9 @@ export function useReadRelays(relays: RelayConfig[], dmInboxRelays: string[]): (
   }, [relays, dmInboxRelays, prefsRevision]);
   const key = useMemo(() => relayListKey(list), [list]);
   const stable = useStableByKey(list, key);
+  // Published module-wide, so no outbox lease (feed or profile fallback, from
+  // any caller) ever takes one of the viewer's own relays (#1390).
+  useEffect(() => setCurrentUserOwnRelays(stable), [stable]);
   // A copy per call, as before, so a caller can't mutate the shared list.
   return useCallback(() => [...stable], [stable]);
 }

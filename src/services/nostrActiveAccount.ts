@@ -27,6 +27,18 @@ export function setCurrentUserReadRelays(relays: string[]): void {
 export function getCurrentUserReadRelays(): string[] {
   return _currentUserReadRelays;
 }
+
+// Every relay the viewer reads from — read relays AND DM inbox relays (the
+// `getReadRelays()` set). Never leased as someone else's outbox relay
+// (#1390): the viewer's own subs (e.g. the live DM inbox) must never share a
+// budgeted outbox socket, whichever caller asks.
+let _currentUserOwnRelays: readonly string[] = [];
+export function setCurrentUserOwnRelays(relays: readonly string[]): void {
+  _currentUserOwnRelays = [...relays];
+}
+export function getCurrentUserOwnRelays(): readonly string[] {
+  return _currentUserOwnRelays;
+}
 export function onCurrentUserPubkeyChange(fn: (pubkey: string | null) => void): () => void {
   _pubkeyListeners.add(fn);
   return () => _pubkeyListeners.delete(fn);

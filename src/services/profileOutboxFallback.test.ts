@@ -9,7 +9,7 @@ import {
   MAX_FALLBACK_PEOPLE,
   scheduleMissingProfileFallback,
 } from './profileOutboxFallback';
-import { setCurrentUserPubkey } from './nostrActiveAccount';
+import { setCurrentUserOwnRelays, setCurrentUserPubkey } from './nostrActiveAccount';
 import { querySyncAbortable } from './relayQuery';
 
 jest.mock('./nostrPool', () => ({
@@ -61,7 +61,22 @@ beforeEach(() => {
   jest.useFakeTimers();
   __resetOutboxLeasesForTests();
   __resetProfileFallbackForTests();
+  setCurrentUserOwnRelays([]);
   query.mockResolvedValue([]);
+});
+
+it("never asks (or leases) the viewer's own DM inbox relays, whatever the caller passes", async () => {
+  // e.g. the contact screen's fetchProfile, whose already-asked list is read relays only.
+  setCurrentUserOwnRelays(['wss://mine.example/', 'wss://DM-inbox.example']);
+  writeLists({ [alice]: ok([relay('dm-inbox'), relay('alice1')]) });
+  await fetchMissingProfileEvents([alice], { ...opts, alreadyAsked: [relay('mine')] });
+  expect(query).toHaveBeenCalledTimes(1);
+  expect(query.mock.calls[0][1]).toEqual([relay('alice1')]);
+  // A person whose only relay is the viewer's DM inbox gets no query at all.
+  query.mockClear();
+  writeLists({ [bob]: ok([relay('dm-inbox')]) });
+  await fetchMissingProfileEvents([bob], { ...opts, alreadyAsked: [] });
+  expect(query).not.toHaveBeenCalled();
 });
 
 it("asks each person's own relays, one person per query (never batched)", async () => {

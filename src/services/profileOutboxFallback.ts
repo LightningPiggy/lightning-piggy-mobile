@@ -2,7 +2,11 @@ import type { Event } from 'nostr-tools';
 import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { perfLog } from '../utils/perfLog';
 import { leaseOutboxRelays, personOutboxRelays } from './authorOutboxRelays';
-import { getCurrentUserPubkey, onCurrentUserPubkeyChange } from './nostrActiveAccount';
+import {
+  getCurrentUserOwnRelays,
+  getCurrentUserPubkey,
+  onCurrentUserPubkeyChange,
+} from './nostrActiveAccount';
 import { pool } from './nostrPool';
 import { getManyPeerRelayLists } from './peerRelayLists';
 import { querySyncAbortable } from './relayQuery';
@@ -145,15 +149,14 @@ export async function fetchMissingProfileEvents(
   });
   if (signal?.aborted) return found;
   const plans: { pubkey: string; relays: string[] }[] = [];
+  // The viewer's own relays (read + DM inbox) count as asked whoever calls:
+  // they're never leased as someone else's outbox relay.
+  const asked = [...options.alreadyAsked, ...getCurrentUserOwnRelays()];
   for (const pubkey of people) {
     const result = lists.get(pubkey);
     const write = result?.status === 'ok' ? (result.lists.write ?? []) : [];
     // Capped after dropping the relays already asked (personOutboxRelays).
-    const relays = personOutboxRelays(
-      write,
-      options.hints?.get(pubkey) ?? [],
-      options.alreadyAsked,
-    );
+    const relays = personOutboxRelays(write, options.hints?.get(pubkey) ?? [], asked);
     // Nothing new to ask (no list, or only relays already asked): a miss —
     // unless the lookup itself failed, which a later call may get past.
     if (relays.length === 0) {
