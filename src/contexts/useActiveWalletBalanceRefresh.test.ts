@@ -114,6 +114,44 @@ describe('useActiveWalletBalanceRefresh', () => {
     expect(mockedGetBalance).toHaveBeenCalledTimes(1);
   });
 
+  it('still refreshes on the next resume when the previous refresh failed', async () => {
+    mockedGetBalance.mockResolvedValueOnce(null);
+    mount();
+    await advance(1_000);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(1);
+    await setAppState('background');
+    await setAppState('active');
+    await advance(BALANCE_RESUME_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let another wallet's fresh balance suppress the resume refresh", async () => {
+    const both = [
+      { id: 'a', walletType: 'nwc', isConnected: true, balance: 1 },
+      { id: 'b', walletType: 'nwc', isConnected: true, balance: 1 },
+    ] as WalletState[];
+    const update = jest.fn();
+    const view = renderHook(
+      ({ id }: { id: string }) =>
+        useActiveWalletBalanceRefresh({
+          activeWalletId: id,
+          activeWalletConnected: true,
+          balancePollDemand: 1,
+          walletsRef: { current: both },
+          captureIdentity,
+          updateWalletInState: update,
+        }),
+      { initialProps: { id: 'a' } },
+    );
+    await advance(1_000); // wallet a refreshed
+    await setAppState('background');
+    view.rerender({ id: 'b' }); // b becomes active; focus refresh is skipped while backgrounded
+    mockedGetBalance.mockClear();
+    await setAppState('active');
+    await advance(BALANCE_RESUME_DELAY_MS);
+    expect(mockedGetBalance).toHaveBeenCalledWith('b', expect.anything());
+  });
+
   it('clears the pending resume timer and subscription on unmount', async () => {
     const { unmount } = mount();
     await advance(BALANCE_RESUME_MIN_GAP_MS);

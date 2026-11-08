@@ -43,7 +43,8 @@ export function useActiveWalletBalanceRefresh({
   captureIdentity,
   updateWalletInState,
 }: Params): void {
-  const lastRefreshAt = useRef(0);
+  // Per wallet: another wallet's fresh balance says nothing about the active one.
+  const lastRefresh = useRef<{ walletId: string; at: number } | null>(null);
 
   useEffect(() => {
     if (!activeWalletId || !activeWalletConnected) return;
@@ -58,7 +59,11 @@ export function useActiveWalletBalanceRefresh({
       const isCurrent = () => !disposed && isIdentityCurrent();
       if (!isCurrent()) return;
       const b = await nwcService.getBalance(activeWalletId, { replyTimeoutMs: 8000 });
-      if (b !== null && isCurrent()) updateWalletInState(activeWalletId, { balance: b });
+      if (b === null || !isCurrent()) return;
+      // Only a committed balance counts as fresh: a failed refresh must not
+      // suppress the next resume retry.
+      lastRefresh.current = { walletId: activeWalletId, at: Date.now() };
+      updateWalletInState(activeWalletId, { balance: b });
     });
     const refreshOnce = () => {
       // Bail if the wallet has since disconnected — read through `walletsRef`
@@ -68,7 +73,6 @@ export function useActiveWalletBalanceRefresh({
       // Skip a parked (dead/timing-out) relay so a refresh can't re-arm the
       // churn the cooldown is trying to suppress (#656).
       if (nwcService.isRelayInCooldown(activeWalletId)) return;
-      lastRefreshAt.current = Date.now();
       pollBalance().catch(() => {});
     };
 
@@ -80,7 +84,9 @@ export function useActiveWalletBalanceRefresh({
       clearTimeout(resumeTimer);
       resumeTimer = undefined;
       if (next !== 'active') return; // background / inactive cancel a pending resume
-      if (Date.now() - lastRefreshAt.current < BALANCE_RESUME_MIN_GAP_MS) return;
+      const last = lastRefresh.current;
+      if (last?.walletId === activeWalletId && Date.now() - last.at < BALANCE_RESUME_MIN_GAP_MS)
+        return;
       resumeTimer = setTimeout(() => {
         resumeTimer = undefined;
         perfLog('wallet balance resume refresh (staggered)');
