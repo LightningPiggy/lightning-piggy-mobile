@@ -316,6 +316,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const {
     nip65Relays,
     dmInboxRelays,
+    relayListsHydrated,
     resetRelayLists,
     applyPublishedDmInbox,
     loadRelaysFromCache,
@@ -392,14 +393,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   useEffect(() => {
-    // Publish read relays so zap-receipt queries from WalletContext hit
-    // the user's configured relays in addition to the app-level defaults.
+    // Published so WalletContext's zap-receipt queries also hit the user's read relays.
     const read = relays.filter((r) => r.read).map((r) => r.url);
     nostrService.setCurrentUserReadRelays(read);
   }, [relays]);
 
   // Identity changes only when the set of read relays does (see the hook).
-  const getReadRelays = useReadRelays(relays, dmInboxRelays);
+  const getReadRelays = useReadRelays(relays, dmInboxRelays, relayListsHydrated);
 
   // DM inbox + conversation cluster (#703). State, refs, callbacks, and
   // the live-DM subscription effect for the NIP-04/NIP-17 inbox live in

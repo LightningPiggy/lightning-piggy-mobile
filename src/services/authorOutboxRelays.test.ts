@@ -1,5 +1,5 @@
 import { TEST_ACCOUNT_KEYS } from '../utils/testAccounts';
-import { setCurrentUserOwnRelays } from './nostrActiveAccount';
+import { setCurrentUserOwnRelays, setCurrentUserPubkey } from './nostrActiveAccount';
 import {
   __resetOutboxLeasesForTests,
   authorWriteRelays,
@@ -54,6 +54,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.useFakeTimers();
   __resetOutboxLeasesForTests();
+  // The viewer's lists have loaded (own relays: none here).
+  setCurrentUserOwnRelays([], true);
   pooled.mockReturnValue(new Set());
   claim.mockReturnValue(false);
 });
@@ -254,11 +256,49 @@ describe('raw-frame budget for owned sockets (round 3 #1)', () => {
 });
 
 describe("the viewer's own relays", () => {
-  afterEach(() => setCurrentUserOwnRelays([]));
-
   it('are never leased (or budgeted), whoever asks', () => {
-    setCurrentUserOwnRelays(['wss://R5.example', relay(7)]);
+    setCurrentUserOwnRelays(['wss://R5.example', relay(7)], true);
     expect(leaseOutboxRelays([relay(5), relay(6), relay(7)]).relays).toEqual([relay(6)]);
     expect(jest.mocked(addRelayFrameBudget).mock.calls.map(([url]) => url)).toEqual([relay(6)]);
+  });
+
+  it('nothing is leased before they are known (cold start, before the lists hydrate) (c)', () => {
+    // A defaults-based own list, not yet this identity's.
+    setCurrentUserOwnRelays(['wss://default.example/'], false);
+    expect(leaseOutboxRelays([relay(1)]).relays).toEqual([]);
+    expect(addRelayFrameBudget).not.toHaveBeenCalled();
+    expect(leasedOutboxRelayCount()).toBe(0);
+    // A new identity starts unhydrated again.
+    setCurrentUserOwnRelays([], true);
+    setCurrentUserPubkey('e'.repeat(64));
+    expect(leaseOutboxRelays([relay(1)]).relays).toEqual([]);
+    setCurrentUserPubkey(null);
+  });
+
+  it('a leased relay that BECOMES an own relay loses its grant at once and stays open (a)', () => {
+    const lease = leaseOutboxRelays([relay(1)]);
+    pooled.mockReturnValue(new Set([relay(1)])); // the viewer's DM sub keeps it pooled
+    setCurrentUserOwnRelays([relay(1)], true); // e.g. a relay edit / account switch
+    expect(clearRelayFrameBudget).toHaveBeenCalledWith(relay(1));
+    expect(claim).toHaveBeenCalledWith(relay(1));
+    expect(leasedOutboxRelayCount()).toBe(0);
+    // The old lease ending doesn't hand the viewer's socket to the deferred release.
+    lease.release();
+    expect(release).not.toHaveBeenCalled();
+  });
+});
+
+describe('revocation (b)', () => {
+  it('drops the grant once no holder is left, instead of lingering', () => {
+    const revoked = jest.fn();
+    let lease!: ReturnType<typeof leaseOutboxRelays>;
+    // The holder releases its lease when revoked (as the feed does).
+    revoked.mockImplementation(() => lease.release());
+    lease = leaseOutboxRelays([relay(1)], revoked);
+    pooled.mockReturnValue(new Set([relay(1)])); // the socket hasn't gone yet
+    jest.mocked(addRelayFrameBudget).mock.calls[0][2]();
+    expect(revoked).toHaveBeenCalled();
+    expect(clearRelayFrameBudget).toHaveBeenCalledWith(relay(1));
+    expect(leasedOutboxRelayCount()).toBe(0);
   });
 });

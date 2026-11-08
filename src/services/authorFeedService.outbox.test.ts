@@ -5,6 +5,7 @@ import {
   leasedOutboxRelayCount,
   leaseOutboxRelays,
 } from './authorOutboxRelays';
+import { setCurrentUserOwnRelays } from './nostrActiveAccount';
 import { releaseNewIdleRelays } from './nostrPool';
 import { recordRelayFailure } from './relayHealth';
 import { getPeerRelayLists } from './peerRelayLists';
@@ -49,6 +50,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   jest.useFakeTimers();
   __resetOutboxLeasesForTests();
+  setCurrentUserOwnRelays([], true); // the viewer's lists have loaded
   mockSubscribeMany.mockReturnValue({ close });
 });
 

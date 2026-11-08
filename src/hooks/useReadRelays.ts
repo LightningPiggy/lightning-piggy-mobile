@@ -13,8 +13,15 @@ import { useStableByKey } from './useStableRelayList';
  * The getter's identity changes only when that set of relays changes, so the
  * live DM sub, cache notifications and `refreshDmInbox` (and the Messages
  * focus effect keyed on it) don't re-run for a re-parsed, identical list.
+ *
+ * `hydrated`: the lists are this identity's own (loaded), not the defaults
+ * used before then — published with the set, so outbox leasing waits for it.
  */
-export function useReadRelays(relays: RelayConfig[], dmInboxRelays: string[]): () => string[] {
+export function useReadRelays(
+  relays: RelayConfig[],
+  dmInboxRelays: string[],
+  hydrated = false,
+): () => string[] {
   // The default fallback reads the app-relay preference store.
   const prefsRevision = useAppRelayPrefs();
   const list = useMemo(() => {
@@ -27,7 +34,7 @@ export function useReadRelays(relays: RelayConfig[], dmInboxRelays: string[]): (
   const stable = useStableByKey(list, key);
   // Published module-wide, so no outbox lease (feed or profile fallback, from
   // any caller) ever takes one of the viewer's own relays (#1390).
-  useEffect(() => setCurrentUserOwnRelays(stable), [stable]);
+  useEffect(() => setCurrentUserOwnRelays(stable, hydrated), [stable, hydrated]);
   // A copy per call, as before, so a caller can't mutate the shared list.
   return useCallback(() => [...stable], [stable]);
 }

@@ -58,6 +58,10 @@ export function useNip65Relays() {
   // The user's own DM inbox relays: others deliver NIP-17 DMs there, so the
   // app must READ them too (merged into getReadRelays by NostrContext).
   const [dmInboxRelays, setDmInboxRelays] = useState<string[]>([]);
+  // True once this identity's lists are known from its own cache or relays —
+  // the NIP-65 list settled and the cached DM inbox read — not the defaults
+  // used before then. Outbox reads (#1390) never lease a relay until then.
+  const [relayListsHydrated, setRelayListsHydrated] = useState(false);
 
   // Bumped by resetRelayLists (logout / identity switch): a background load
   // started for the previous identity must not restore its relays afterwards.
@@ -104,6 +108,8 @@ export function useNip65Relays() {
       } catch {
         /* corrupt cache — the network read below replaces it */
       }
+      // Called once the NIP-65 list is settled; the cached inbox is now in.
+      if (current()) setRelayListsHydrated(true);
       const cachedAt = await baselineOf(perAccountKey(DM_INBOX_CREATED_AT_KEY_BASE, pk));
       // The NEWEST published list across relays, not the first reply — also on
       // the user's NIP-65 write relays and the inbox relays themselves, where
@@ -148,6 +154,7 @@ export function useNip65Relays() {
     nip65GenerationRef.current += 1;
     setNip65Relays(keepIfSameConfigs([]));
     setDmInboxRelays(keepIfSameUrls([]));
+    setRelayListsHydrated(false);
   }, []);
 
   /** Eagerly hydrate `relays` state from the per-account cache so
@@ -285,6 +292,7 @@ export function useNip65Relays() {
   return {
     nip65Relays,
     dmInboxRelays,
+    relayListsHydrated,
     resetRelayLists,
     applyPublishedDmInbox,
     loadRelaysFromCache,

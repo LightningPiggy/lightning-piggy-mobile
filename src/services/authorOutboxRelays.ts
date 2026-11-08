@@ -2,7 +2,12 @@ import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { OUTBOX_FRAMES_PER_LEASE } from './authorFeedLimits';
 import { sanitizePeerRelayUrls } from '../utils/peerRelayUrls';
 import { normalizeRelayUrl } from '../utils/relayListKey';
-import { getCurrentUserOwnRelays, getCurrentUserPubkey } from './nostrActiveAccount';
+import {
+  areCurrentUserOwnRelaysHydrated,
+  getCurrentUserOwnRelays,
+  getCurrentUserPubkey,
+  onCurrentUserOwnRelaysChange,
+} from './nostrActiveAccount';
 import { claimPendingRelease, pooledRelayUrls, releaseNewIdleRelays } from './nostrPool';
 import { addRelayFrameBudget, clearRelayFrameBudget } from './nostrRelayReceiveQueue';
 import { getPeerRelayLists, peekPeerRelayLists } from './peerRelayLists';
@@ -183,12 +188,28 @@ function revokeOutboxRelay(url: string): void {
   const held = leased.get(url);
   if (!held) return;
   for (const revoke of [...held.holders]) revoke();
+  // Nobody holds it any more: drop the grant now rather than linger until
+  // the pool notices the closed socket.
+  if (leased.get(url)?.holders.size === 0) forget(url);
 }
 
 function forget(url: string): void {
   leased.delete(url);
   clearRelayFrameBudget(url);
 }
+
+// A leased relay that BECOMES one of the viewer's own relays (account switch,
+// relay edit) is theirs now: drop its grant and frame count at once — the
+// viewer's own subs (e.g. the live DM inbox) keep the socket open — and take
+// it back from any pending release, so it isn't closed under them.
+onCurrentUserOwnRelaysChange((relays) => {
+  for (const raw of relays) {
+    const url = normalizeRelayUrl(raw);
+    if (!leased.has(url)) continue;
+    claimPendingRelease(url);
+    forget(url);
+  }
+});
 const quarantined = new Map<string, number>();
 
 /** Stop leasing `url` for OUTBOX_QUARANTINE_MS (it misbehaved). */
@@ -227,7 +248,9 @@ export function leasedOutboxRelayCount(): number {
  * Lease extra relays for one person's reads. A relay already leased is shared
  * (no new socket); a new one is granted only while fewer than
  * MAX_OUTBOX_EXTRA_RELAYS are leased or still closing. Quarantined relays, and
- * the viewer's own relays (read + DM inbox, whoever asks), are never granted.
+ * the viewer's own relays (read + DM inbox, whoever asks), are never granted —
+ * and nothing is granted before the viewer's own relays are known (their lists
+ * hydrated), so a cold start can't take one of them as an outbox socket.
  * Each lease on an owned socket adds OUTBOX_FRAMES_PER_LEASE to its frame
  * budget; `onRevoked` runs if that budget is blown (drop the lease).
  */
@@ -235,6 +258,7 @@ export function leaseOutboxRelays(
   urls: readonly string[],
   onRevoked?: () => void,
 ): OutboxRelayLease {
+  if (!areCurrentUserOwnRelaysHydrated()) return { relays: [], release: () => {} };
   forgetClosed();
   const granted: string[] = [];
   const now = Date.now();

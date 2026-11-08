@@ -56,18 +56,36 @@ const writeLists = (byPerson: Record<string, PeerRelayListResult>) =>
 
 const opts = { purpose: 'display' as const, alreadyAsked: [relay('mine')], viewerPubkey: viewer };
 
+/** Switch the active account; its relay lists load (own relays: none here). */
+const become = (pubkey: string) => {
+  setCurrentUserPubkey(pubkey);
+  setCurrentUserOwnRelays([], true);
+};
+
+it("is a no-op until the viewer's own relays are known (cold start) (c)", async () => {
+  setCurrentUserOwnRelays(['wss://default.example/'], false);
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  expect((await fetchMissingProfileEvents([alice], opts)).size).toBe(0);
+  expect(lists).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
+  // Once hydrated it runs, and the earlier call recorded no miss.
+  setCurrentUserOwnRelays([], true);
+  await fetchMissingProfileEvents([alice], opts);
+  expect(query).toHaveBeenCalledTimes(1);
+});
+
 beforeEach(() => {
   jest.clearAllMocks();
   jest.useFakeTimers();
   __resetOutboxLeasesForTests();
   __resetProfileFallbackForTests();
-  setCurrentUserOwnRelays([]);
+  setCurrentUserOwnRelays([], true);
   query.mockResolvedValue([]);
 });
 
 it("never asks (or leases) the viewer's own DM inbox relays, whatever the caller passes", async () => {
   // e.g. the contact screen's fetchProfile, whose already-asked list is read relays only.
-  setCurrentUserOwnRelays(['wss://mine.example/', 'wss://DM-inbox.example']);
+  setCurrentUserOwnRelays(['wss://mine.example/', 'wss://DM-inbox.example'], true);
   writeLists({ [alice]: ok([relay('dm-inbox'), relay('alice1')]) });
   await fetchMissingProfileEvents([alice], { ...opts, alreadyAsked: [relay('mine')] });
   expect(query).toHaveBeenCalledTimes(1);
@@ -184,7 +202,7 @@ it('a test account in lockdown makes no lookups at all', async () => {
 
 describe('scheduleMissingProfileFallback (background, never awaited)', () => {
   beforeEach(() => {
-    setCurrentUserPubkey(viewer);
+    become(viewer);
     writeLists({ [alice]: ok([relay('alice1')]) });
   });
 
@@ -217,18 +235,18 @@ describe('scheduleMissingProfileFallback (background, never awaited)', () => {
 
   it('an account switch cancels it, before it starts or while it runs', async () => {
     scheduleMissingProfileFallback([alice], opts, jest.fn());
-    setCurrentUserPubkey(bob);
+    become(bob);
     await jest.runAllTimersAsync();
     expect(lists).not.toHaveBeenCalled();
 
-    setCurrentUserPubkey(viewer);
+    become(viewer);
     let answer!: (events: never[]) => void;
     query.mockReturnValue(new Promise((r) => (answer = r)));
     const onFound = jest.fn();
     scheduleMissingProfileFallback([alice], opts, onFound);
     await jest.advanceTimersByTimeAsync(FALLBACK_START_DELAY_MS);
     expect(query).toHaveBeenCalled();
-    setCurrentUserPubkey(bob);
+    become(bob);
     answer([kind0(alice)] as never[]);
     await jest.runAllTimersAsync();
     // The previous account's result is dropped.
@@ -236,7 +254,7 @@ describe('scheduleMissingProfileFallback (background, never awaited)', () => {
   });
 
   it('runs nothing when the account already changed since the caller started (#4)', async () => {
-    setCurrentUserPubkey(bob); // the owner passed in is `viewer`
+    become(bob); // the owner passed in is `viewer`
     scheduleMissingProfileFallback([alice], opts, jest.fn());
     await jest.runAllTimersAsync();
     expect(lists).not.toHaveBeenCalled();

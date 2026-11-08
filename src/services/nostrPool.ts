@@ -35,7 +35,9 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
       paceRelayReceive(relay);
       relay.onclose = () => {
         if (this.relays.get(key) === relay) this.relays.delete(key);
-        // Its outbox frame count goes with it: the next socket starts fresh.
+        // Tidy-up only. What guarantees a fresh outbox frame count is that it's
+        // keyed per WebSocket (a new socket, or a reconnect, starts at zero);
+        // pruning and nostr-tools' auto-reconnect don't come through here.
         forgetRelayFrames(relay);
       };
       this.relays.set(key, relay);

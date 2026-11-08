@@ -15,6 +15,7 @@ import {
   leasedOutboxRelayCount,
   leaseOutboxRelays,
 } from './authorOutboxRelays';
+import { setCurrentUserOwnRelays } from './nostrActiveAccount';
 
 jest.mock('./relayHealth', () => ({
   hydrateRelayHealth: jest.fn(),
@@ -213,6 +214,7 @@ it('sockets never marked for release stay open when their reads end', async () =
 
 it('an outbox read cancelled mid-connect still closes the socket and frees the cap once it connects', async () => {
   __resetOutboxLeasesForTests();
+  setCurrentUserOwnRelays([], true); // the viewer's lists have loaded
   const lease = leaseOutboxRelays(['wss://slow-outbox/']);
   const relay = addRelay('wss://slow-outbox/');
   // Still connecting when the read is cancelled and the lease released.

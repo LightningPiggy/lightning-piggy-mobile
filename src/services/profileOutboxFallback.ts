@@ -3,6 +3,7 @@ import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { perfLog } from '../utils/perfLog';
 import { leaseOutboxRelays, personOutboxRelays } from './authorOutboxRelays';
 import {
+  areCurrentUserOwnRelaysHydrated,
   getCurrentUserOwnRelays,
   getCurrentUserPubkey,
   onCurrentUserPubkeyChange,
@@ -131,6 +132,8 @@ export async function fetchMissingProfileEvents(
   const { signal } = options;
   const viewer = options.viewerPubkey === undefined ? getCurrentUserPubkey() : options.viewerPubkey;
   if (isTestRelayLockdown(viewer) || signal?.aborted) return found;
+  // Not before the viewer's own relays are known: one of them could be leased.
+  if (!areCurrentUserOwnRelaysHydrated()) return found;
   const now = Date.now();
   const people: string[] = [];
   for (const raw of pubkeys) {
