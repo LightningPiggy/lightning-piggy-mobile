@@ -2182,6 +2182,7 @@
   "walletCard": {
     "zaplie": "Zaplie",
     "zaplieBolt": "Zaplie Bolt",
+    "checking": "正在检查…",
     "connected": "已连接",
     "notResponding": "无响应",
     "disconnected": "已断开",
@@ -3565,7 +3566,8 @@
       "ok": "正常",
       "warn": "需要关注",
       "error": "错误",
-      "unknown": "未知"
+      "unknown": "未知",
+      "checking": "正在检查…"
     },
     "opensInBrowser": "在浏览器中打开"
   },

@@ -38,10 +38,54 @@ const relayCooldownUntil = new Map<string, number>();
 // must NOT clear it (#785).
 const relayRateLimitUntil = new Map<string, number>();
 const relayRateLimitStrikes = new Map<string, number>();
+// Per-wallet timestamp of the last time the WALLET SERVICE actually answered a
+// NIP-47 request (a result or a wallet-level error). An open relay socket with
+// no failures is NOT evidence the wallet is up — the wallet backend can be
+// down for hours while the relay socket stays healthy (#1768). Green
+// "Connected" requires an answer within `WALLET_REPLY_FRESH_MS`.
+const lastWalletReplyAt = new Map<string, number>();
+// Per-wallet timestamp of the last liveness probe we sent, so the watchdog
+// can't probe more often than `WALLET_PROBE_AFTER_MS` (#1768).
+const lastWalletProbeAt = new Map<string, number>();
+
+// Listeners told "this wallet's health inputs just changed" so the watchdog can
+// re-read `getWalletHealth` promptly (coalesced) instead of waiting up to 30 s
+// for its next tick — otherwise a wallet that answered at startup would sit on
+// grey "Checking…" for half a minute (#1768).
+const healthListeners = new Set<(walletId: string) => void>();
+function notifyHealthChanged(walletId: string): void {
+  for (const listener of healthListeners) {
+    try {
+      listener(walletId);
+    } catch {
+      // a UI-side listener throwing must not break request bookkeeping
+    }
+  }
+}
+
+/** Subscribe to health-input changes; returns the unsubscribe function. */
+export function subscribeWalletHealth(listener: (walletId: string) => void): () => void {
+  healthListeners.add(listener);
+  return () => {
+    healthListeners.delete(listener);
+  };
+}
 
 export const RELAY_DEAD_AFTER_FAILURES = 3;
 export const RELAY_COOLDOWN_BASE_MS = 30_000;
 export const RELAY_COOLDOWN_MAX_MS = 5 * 60_000;
+/**
+ * How long a wallet reply keeps the card green (#1768). Past this with no
+ * further answer the health decays to neutral `checking` until the next
+ * request (a balance refresh or the watchdog probe) answers.
+ */
+export const WALLET_REPLY_FRESH_MS = 5 * 60_000;
+/**
+ * Idle age after which the watchdog sends a liveness probe (one `get_balance`),
+ * and the minimum gap between probes. A minute under the freshness window so a
+ * wallet that keeps answering stays green without flickering grey (#1768).
+ */
+export const WALLET_PROBE_AFTER_MS = 4 * 60_000;
 
 /**
  * Does this error look like the relay rate-limiting / throttling / temp-banning
@@ -64,9 +108,53 @@ export function isRateLimitError(error: unknown): boolean {
  * request must not reset it (#785). The rate-limit timer clears itself in
  * `isRelayInCooldown` once it lapses.
  */
-export function markRelayResponsive(walletId: string): void {
+export function markRelayResponsive(walletId: string, now: number = Date.now()): void {
   relayFailures.set(walletId, 0);
   relayCooldownUntil.delete(walletId);
+  lastWalletReplyAt.set(walletId, now);
+  notifyHealthChanged(walletId);
+}
+
+/**
+ * A fresh relay socket was just opened (connect / reconnect): forget the last
+ * wallet reply so the card shows neutral `checking` until the new connection
+ * actually gets an answer (#1768). Like the failure counter (#654), a socket
+ * open proves nothing about whether the wallet service is up.
+ */
+export function resetWalletReply(walletId: string): void {
+  lastWalletReplyAt.delete(walletId);
+  notifyHealthChanged(walletId);
+}
+
+/**
+ * Forget the reply / probe timestamps — on `disconnect` (wallet removed or
+ * identity switched) so the Maps follow the wallet lifecycle. Deliberately
+ * leaves the failure counter and back-offs alone (same as before #1768).
+ */
+export function clearWalletLiveness(walletId: string): void {
+  lastWalletReplyAt.delete(walletId);
+  lastWalletProbeAt.delete(walletId);
+}
+
+/**
+ * Should the watchdog send a liveness probe to this wallet now (#1768)? Only
+ * when the wallet hasn't answered for `WALLET_PROBE_AFTER_MS` AND we haven't
+ * probed it within that same gap — so an idle foregrounded app costs at most
+ * one `get_balance` per wallet per ~4 min. Callers must still skip a parked
+ * relay (`isRelayInCooldown`) and a handshake in flight; this is just the
+ * age/throttle half so it stays pure and testable.
+ */
+export function shouldProbeWallet(walletId: string, now: number = Date.now()): boolean {
+  const lastReply = lastWalletReplyAt.get(walletId);
+  if (lastReply !== undefined && now - lastReply < WALLET_PROBE_AFTER_MS) return false;
+  const lastProbe = lastWalletProbeAt.get(walletId);
+  if (lastProbe !== undefined && now - lastProbe < WALLET_PROBE_AFTER_MS) return false;
+  return true;
+}
+
+/** Record that a liveness probe was just sent (throttles `shouldProbeWallet`). */
+export function markWalletProbed(walletId: string, now: number = Date.now()): void {
+  lastWalletProbeAt.set(walletId, now);
 }
 
 /**
@@ -90,6 +178,7 @@ export function recordRelayOutcome(walletId: string, error?: unknown): void {
       );
       relayCooldownUntil.set(walletId, Date.now() + backoff);
     }
+    notifyHealthChanged(walletId);
   } else {
     markRelayResponsive(walletId);
   }
@@ -105,6 +194,7 @@ export function recordRateLimited(walletId: string): void {
   relayRateLimitStrikes.set(walletId, strikes);
   const backoff = Math.min(RELAY_COOLDOWN_BASE_MS * 2 ** (strikes - 1), RELAY_COOLDOWN_MAX_MS);
   relayRateLimitUntil.set(walletId, Date.now() + backoff);
+  notifyHealthChanged(walletId);
 }
 
 /**
@@ -153,21 +243,31 @@ export function isRelayDead(walletId: string): boolean {
   return (relayFailures.get(walletId) ?? 0) >= RELAY_DEAD_AFTER_FAILURES;
 }
 
-export type WalletConnectionHealth = 'responsive' | 'degraded' | 'disconnected';
+export type WalletConnectionHealth = 'checking' | 'responsive' | 'degraded' | 'disconnected';
 
 /**
- * Tri-state health for the wallet card (#786):
- *  - `disconnected` — the WebSocket isn't connected;
- *  - `degraded` — connected but the relay is parked (cooldown/rate-limit) OR
- *    has recent reply-timeouts; shown as amber "Not responding". This is a LIVE
- *    read — it clears to `responsive` as soon as a request answers, since
- *    `markRelayResponsive` zeroes `relayFailures`;
- *  - `responsive` — connected and answering.
+ * Four-state health for the wallet card (#786, #1768):
+ *  - `disconnected` (red) — the WebSocket isn't connected;
+ *  - `degraded` (amber "Not responding") — connected but the relay is parked
+ *    (cooldown/rate-limit) OR has recent reply-timeouts. A LIVE read: it clears
+ *    as soon as a request answers, since `markRelayResponsive` zeroes
+ *    `relayFailures`;
+ *  - `responsive` (green "Connected") — connected AND the wallet service
+ *    answered within `WALLET_REPLY_FRESH_MS`;
+ *  - `checking` (grey "Checking…") — connected, nothing has failed, but the
+ *    wallet hasn't answered recently (fresh start, just reconnected, or idle
+ *    past the window). Neutral, not a failure: Send / Receive stay enabled.
  */
-export function getWalletHealth(walletId: string, isWsConnected: boolean): WalletConnectionHealth {
+export function getWalletHealth(
+  walletId: string,
+  isWsConnected: boolean,
+  now: number = Date.now(),
+): WalletConnectionHealth {
   if (!isWsConnected) return 'disconnected';
   if (isRelayInCooldown(walletId) || (relayFailures.get(walletId) ?? 0) > 0) {
     return 'degraded';
   }
-  return 'responsive';
+  const lastReply = lastWalletReplyAt.get(walletId);
+  if (lastReply !== undefined && now - lastReply < WALLET_REPLY_FRESH_MS) return 'responsive';
+  return 'checking';
 }

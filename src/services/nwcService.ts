@@ -22,9 +22,11 @@ import { createReplyTimeoutError, isConnectionError, throwIfAborted } from './nw
 // `isRelayInCooldown` from here.
 import {
   isRateLimitError,
+  clearWalletLiveness,
   isRelayDead,
   recordRateLimited,
   recordRelayOutcome,
+  resetWalletReply,
 } from './nwcRelayHealth';
 import {
   beginConnectionAttempt,
@@ -63,7 +65,13 @@ const reconnectsInFlight = new Map<string, Promise<NostrWebLNProvider>>();
 // gets a fresh response.
 const getBalancesInFlight = new Map<string, Promise<number | null>>();
 
-export { getWalletHealth, isRelayInCooldown } from './nwcRelayHealth';
+export {
+  getWalletHealth,
+  isRelayInCooldown,
+  markWalletProbed,
+  shouldProbeWallet,
+  subscribeWalletHealth,
+} from './nwcRelayHealth';
 export type { WalletConnectionHealth } from './nwcRelayHealth';
 
 // Per-wallet timestamp of the most recent relay-publish failure. Used
@@ -181,6 +189,8 @@ export async function connect(
     // established even if getBalance fails (e.g. slow relay response).
     providers.set(walletId, provider);
     nwcUrls.set(walletId, nwcUrl.trim());
+    // New socket: neutral "Checking…" until the probe below gets an answer (#1768).
+    resetWalletReply(walletId);
     attempt.settle(); // wakes reconnect waiters; still in progress until the probe ends
     // Enable relay-pool keepalive pings so a dead link is noticed promptly
     // rather than lingering in TCP ESTABLISHED for ~2h (#654). Best-effort —
@@ -256,6 +266,7 @@ export function disconnect(walletId: string): void {
   clearFailedLookupCache(walletId);
   // Forget the cached encryption decision so a re-add re-probes fresh (#737).
   clearEncryptionDecision(walletId);
+  clearWalletLiveness(walletId);
 }
 
 /**
@@ -448,6 +459,8 @@ async function reconnect(
     if (isCurrent()) await pinNip04IfNoInfoEvent(provider, walletId);
     if (isCurrent()) {
       providers.set(walletId, provider);
+      // New socket: neutral "Checking…" until the caller's request answers (#1768).
+      resetWalletReply(walletId);
       return provider;
     }
   } catch (error) {

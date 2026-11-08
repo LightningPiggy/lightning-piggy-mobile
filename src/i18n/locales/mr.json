@@ -2182,6 +2182,7 @@
   "walletCard": {
     "zaplie": "Zaplie",
     "zaplieBolt": "Zaplie Bolt",
+    "checking": "तपासत आहे…",
     "connected": "कनेक्ट झाले",
     "notResponding": "प्रतिसाद देत नाही",
     "disconnected": "डिस्कनेक्ट झाले",
@@ -3565,7 +3566,8 @@
       "ok": "ठीक आहे",
       "warn": "लक्ष देण्याची गरज आहे",
       "error": "त्रुटी",
-      "unknown": "अज्ञात"
+      "unknown": "अज्ञात",
+      "checking": "तपासत आहे…"
     },
     "opensInBrowser": "ब्राउझरमध्ये उघडते"
   },

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { walletCardGradientColors } from '../utils/walletCardColors';
+import { resolveWalletHealth } from '../utils/walletHealthDisplay';
 import { View, Text, Image, TouchableOpacity, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Grayscale } from 'react-native-color-matrix-image-filters';
@@ -48,7 +49,6 @@ const CardContent: React.FC<{
   balance?: number | null;
   btcPrice?: number | null;
   currency?: FiatCurrency;
-  isConnected?: boolean;
   connectionHealth?: WalletConnectionHealth;
   walletType?: 'nwc' | 'onchain';
   walletAlias?: string | null;
@@ -62,7 +62,6 @@ const CardContent: React.FC<{
   balance,
   btcPrice,
   currency,
-  isConnected,
   connectionHealth,
   walletType = 'nwc',
   walletAlias,
@@ -74,24 +73,21 @@ const CardContent: React.FC<{
   const colors = useThemeColors();
   const { t, formatLocale } = useLocale();
 
-  // Tri-state relay status for the dot + label (#786). On-chain wallets have no
-  // relay, so they stay binary (balance present → Connected). For NWC we prefer
-  // the live `connectionHealth`; before the first connection check it's
-  // undefined, so we fall back to the binary `isConnected`.
-  const health: WalletConnectionHealth =
-    walletType === 'onchain'
-      ? balance !== null
-        ? 'responsive'
-        : 'disconnected'
-      : (connectionHealth ?? (isConnected ? 'responsive' : 'disconnected'));
-  const statusColor =
-    health === 'responsive' ? colors.green : health === 'degraded' ? colors.amber : colors.red;
-  const statusLabel =
-    health === 'responsive'
-      ? t('walletCard.connected')
-      : health === 'degraded'
-        ? t('walletCard.notResponding')
-        : t('walletCard.disconnected');
+  // Four-state status for the dot + label (#786, #1768): grey "Checking…"
+  // until the wallet has actually answered, then green / amber / red.
+  const health = resolveWalletHealth({ walletType, balance: balance ?? null, connectionHealth });
+  const statusColor = {
+    checking: colors.textSupplementary,
+    responsive: colors.green,
+    degraded: colors.amber,
+    disconnected: colors.red,
+  }[health];
+  const statusLabel = {
+    checking: t('walletCard.checking'),
+    responsive: t('walletCard.connected'),
+    degraded: t('walletCard.notResponding'),
+    disconnected: t('walletCard.disconnected'),
+  }[health];
 
   const gradientColors = useMemo(
     () => walletCardGradientColors(theme.gradientColors, isWatchOnly),
@@ -287,7 +283,6 @@ const WalletCard: React.FC<WalletCardProps> = ({
         balance={wallet.balance}
         btcPrice={btcPrice}
         currency={currency}
-        isConnected={wallet.isConnected}
         connectionHealth={wallet.connectionHealth}
         walletType={wallet.walletType}
         walletAlias={wallet.walletAlias}

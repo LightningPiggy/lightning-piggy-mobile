@@ -2190,6 +2190,7 @@
   "walletCard": {
     "zaplie": "Zaplie",
     "zaplieBolt": "Zaplie Bolt",
+    "checking": "Sprawdzanie…",
     "connected": "Połączono",
     "notResponding": "Nie odpowiada",
     "disconnected": "Rozłączono",
@@ -3629,7 +3630,8 @@
       "ok": "W porządku",
       "warn": "Wymaga uwagi",
       "error": "Błąd",
-      "unknown": "Nieznany"
+      "unknown": "Nieznany",
+      "checking": "Sprawdzanie…"
     },
     "opensInBrowser": "Otwiera się w przeglądarce"
   },

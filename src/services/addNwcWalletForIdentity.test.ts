@@ -6,6 +6,8 @@ jest.mock('./nwcService', () => ({
   connect: jest.fn(),
   getInfo: jest.fn(),
   disconnect: jest.fn(),
+  getWalletHealth: jest.fn(() => 'responsive'),
+  isSocketConnected: jest.fn(() => true),
 }));
 jest.mock('./walletStorageService', () => ({
   getActivePubkey: jest.fn(() => 'B'),
@@ -36,6 +38,7 @@ beforeEach(() => {
   });
   jest.mocked(nwc.connect).mockResolvedValue({ success: true, balance: 7 });
   jest.mocked(nwc.getInfo).mockResolvedValue(null);
+  jest.mocked(nwc.getWalletHealth).mockReturnValue('responsive');
 });
 it('cancels an import when identity changes while connecting', async () => {
   const slow = deferred<{ success: boolean }>();
@@ -74,6 +77,9 @@ it('pins an already-started list write to its original owner, then suppresses UI
 it('returns the connected wallet only to the still-current owner', async () => {
   await expect(
     addNwcWalletForIdentity(url, 'Test', 'coinos', [], () => true),
-  ).resolves.toMatchObject({ success: true, state: { id: 'new-wallet', balance: 7 } });
+  ).resolves.toMatchObject({
+    success: true,
+    state: { id: 'new-wallet', balance: 7, connectionHealth: 'responsive' },
+  });
   expect(nwc.disconnect).not.toHaveBeenCalled();
 });

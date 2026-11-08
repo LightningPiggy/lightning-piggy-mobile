@@ -7,7 +7,8 @@
  *  - the rate-limit publish back-off (#785), whose KEY regression is that a
  *    successful READ must NOT clear it (rate-limiting is about publish volume,
  *    not backend health);
- *  - `getWalletHealth` returning responsive / degraded / disconnected.
+ *  - `getWalletHealth` returning checking / responsive / degraded / disconnected,
+ *    plus the liveness-probe throttle (#1768).
  *
  * These functions hold module-level Maps keyed by walletId, so every test uses
  * a UNIQUE walletId to stay isolated (no shared mutable state across cases).
@@ -21,9 +22,16 @@ import {
   isRateLimitError,
   isRelayDead,
   isRelayInCooldown,
+  WALLET_PROBE_AFTER_MS,
+  WALLET_REPLY_FRESH_MS,
+  clearWalletLiveness,
   markRelayResponsive,
+  markWalletProbed,
   recordRateLimited,
   recordRelayOutcome,
+  resetWalletReply,
+  shouldProbeWallet,
+  subscribeWalletHealth,
 } from './nwcRelayHealth';
 
 // A connection error that recordRelayOutcome counts toward "dead". The message
@@ -201,8 +209,9 @@ describe('getWalletHealth (#786)', () => {
     expect(getWalletHealth(id, false)).toBe('disconnected');
   });
 
-  it('is responsive when connected and the relay is answering', () => {
+  it('is responsive when connected and the wallet has answered', () => {
     const id = freshId();
+    recordRelayOutcome(id); // answered
     expect(getWalletHealth(id, true)).toBe('responsive');
   });
 
@@ -225,5 +234,109 @@ describe('getWalletHealth (#786)', () => {
     expect(getWalletHealth(id, true)).toBe('degraded');
     recordRelayOutcome(id); // answered
     expect(getWalletHealth(id, true)).toBe('responsive');
+  });
+});
+
+describe('checking state — green only after a real wallet reply (#1768)', () => {
+  const T0 = 1_700_000_000_000;
+
+  it('starts neutral: an open socket with no failures is checking, not responsive', () => {
+    const id = freshId();
+    expect(getWalletHealth(id, true, T0)).toBe('checking');
+  });
+
+  it('turns responsive on a wallet reply (result or wallet-level error)', () => {
+    const id = freshId();
+    markRelayResponsive(id, T0);
+    expect(getWalletHealth(id, true, T0 + 1_000)).toBe('responsive');
+
+    const id2 = freshId();
+    recordRelayOutcome(id2, new Error('NOT_IMPLEMENTED: get_balance')); // wallet answered
+    expect(getWalletHealth(id2, true)).toBe('responsive');
+  });
+
+  it('decays back to checking once the last reply is older than the freshness window', () => {
+    const id = freshId();
+    markRelayResponsive(id, T0);
+    expect(getWalletHealth(id, true, T0 + WALLET_REPLY_FRESH_MS - 1)).toBe('responsive');
+    expect(getWalletHealth(id, true, T0 + WALLET_REPLY_FRESH_MS)).toBe('checking');
+  });
+
+  it('goes back to checking after a reconnect (fresh socket proves nothing)', () => {
+    const id = freshId();
+    markRelayResponsive(id, T0);
+    resetWalletReply(id);
+    expect(getWalletHealth(id, true, T0 + 1_000)).toBe('checking');
+  });
+
+  it('keeps amber / red exactly as before', () => {
+    const id = freshId();
+    markRelayResponsive(id, T0);
+    recordRelayOutcome(id, connErr()); // a timeout after a reply → amber, not green
+    expect(getWalletHealth(id, true)).toBe('degraded');
+    expect(getWalletHealth(id, false)).toBe('disconnected');
+    // A stale wallet whose probe then times out reads amber, not checking.
+    const id2 = freshId();
+    recordRelayOutcome(id2, connErr());
+    expect(getWalletHealth(id2, true, T0 + WALLET_REPLY_FRESH_MS * 10)).toBe('degraded');
+  });
+
+  it('clearWalletLiveness forgets the reply (wallet removed)', () => {
+    const id = freshId();
+    markRelayResponsive(id, T0);
+    clearWalletLiveness(id);
+    expect(getWalletHealth(id, true, T0)).toBe('checking');
+  });
+});
+
+describe('shouldProbeWallet (#1768)', () => {
+  const T0 = 1_700_000_000_000;
+
+  it('probes a wallet that has never answered', () => {
+    expect(shouldProbeWallet(freshId(), T0)).toBe(true);
+  });
+
+  it('does not probe while the last reply is recent', () => {
+    const id = freshId();
+    markRelayResponsive(id, T0);
+    expect(shouldProbeWallet(id, T0 + WALLET_PROBE_AFTER_MS - 1)).toBe(false);
+    expect(shouldProbeWallet(id, T0 + WALLET_PROBE_AFTER_MS)).toBe(true);
+  });
+
+  it('probes a minute before the freshness window lapses, so a live wallet stays green', () => {
+    expect(WALLET_PROBE_AFTER_MS).toBeLessThan(WALLET_REPLY_FRESH_MS);
+  });
+
+  it('throttles repeat probes to one per WALLET_PROBE_AFTER_MS', () => {
+    const id = freshId();
+    markWalletProbed(id, T0);
+    expect(shouldProbeWallet(id, T0 + 30_000)).toBe(false);
+    expect(shouldProbeWallet(id, T0 + WALLET_PROBE_AFTER_MS)).toBe(true);
+  });
+});
+
+describe('subscribeWalletHealth (#1768)', () => {
+  it('notifies on replies, failures, rate limits and resets; stops after unsubscribe', () => {
+    const id = freshId();
+    const seen: string[] = [];
+    const unsubscribe = subscribeWalletHealth((walletId) => seen.push(walletId));
+    recordRelayOutcome(id);
+    recordRelayOutcome(id, connErr());
+    recordRateLimited(id);
+    resetWalletReply(id);
+    expect(seen).toEqual([id, id, id, id]);
+    unsubscribe();
+    recordRelayOutcome(id);
+    expect(seen).toHaveLength(4);
+  });
+
+  it('a throwing listener does not break request bookkeeping', () => {
+    const id = freshId();
+    const unsubscribe = subscribeWalletHealth(() => {
+      throw new Error('ui blew up');
+    });
+    expect(() => recordRelayOutcome(id)).not.toThrow();
+    expect(getWalletHealth(id, true)).toBe('responsive');
+    unsubscribe();
   });
 });

@@ -133,13 +133,17 @@ export function walletLabel(w: { alias: string; walletType: WalletType }): strin
 }
 
 /**
- * Tri-state relay health for the wallet card (#786). `responsive` shows green
- * "Connected", `degraded` shows amber "Not responding" (connected socket but
- * the relay is parked / not answering), `disconnected` shows red. Optional /
- * may be absent before the first connection check, in which case the card
- * falls back to the binary `isConnected`.
+ * Four-state NWC health for the wallet card (#786, #1768). `checking` shows
+ * grey "Checking…" (socket open, nothing failed, but the wallet hasn't answered
+ * a request in the last 5 min — fresh start, just reconnected, or idle);
+ * `responsive` shows green "Connected" (the wallet actually answered recently);
+ * `degraded` shows amber "Not responding" (connected socket but the relay is
+ * parked / not answering); `disconnected` shows red. Absent before the
+ * watchdog's first sync, in which case the card shows neutral `checking` (see
+ * `resolveWalletHealth`). Display only: Send / Receive gate on `isConnected`,
+ * which stays true through `checking`.
  */
-export type WalletConnectionHealth = 'responsive' | 'degraded' | 'disconnected';
+export type WalletConnectionHealth = 'checking' | 'responsive' | 'degraded' | 'disconnected';
 
 export interface WalletState extends WalletMetadata {
   isConnected: boolean;

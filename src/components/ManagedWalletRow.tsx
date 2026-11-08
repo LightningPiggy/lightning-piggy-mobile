@@ -8,9 +8,10 @@ import type { useWallet } from '../contexts/WalletContext';
 import type { WalletState } from '../types/wallet';
 import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import { createManagedWalletRowStyles } from '../styles/ManagedWalletRow.styles';
+import { resolveWalletHealth } from '../utils/walletHealthDisplay';
 
 type WalletActions = ReturnType<typeof useWallet>;
-type Status = 'ok' | 'warn' | 'error' | 'unknown';
+type Status = 'ok' | 'warn' | 'error' | 'unknown' | 'checking';
 interface Props {
   wallet: WalletState;
   index: number;
@@ -27,8 +28,11 @@ const HIT_SLOP = { top: 8, bottom: 8, left: 0, right: 0 };
 
 function walletStatus(w: WalletState): Status {
   if (w.walletType === 'onchain') return w.balance === null ? 'unknown' : 'ok';
-  if (w.connectionHealth === 'degraded') return 'warn';
-  return w.isConnected ? 'ok' : 'error';
+  // Same four-state health as the wallet card (#1768): grey until it answers.
+  const health = resolveWalletHealth(w);
+  if (health === 'checking') return 'checking';
+  if (health === 'degraded') return 'warn';
+  return health === 'responsive' ? 'ok' : 'error';
 }
 
 /**
@@ -65,6 +69,7 @@ const ManagedWalletRow = memo(function ManagedWalletRow({
     warn: colors.amber,
     error: colors.red,
     unknown: colors.textSupplementary,
+    checking: colors.textSupplementary,
   }[status];
   const isFirst = index === 0;
   const isLast = index === walletCount - 1;

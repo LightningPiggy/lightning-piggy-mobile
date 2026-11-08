@@ -52,6 +52,10 @@ export async function addNwcWalletForIdentity(
       state: {
         ...metadata,
         isConnected: true,
+        // Seed the four-state health so a wallet whose connect probe already
+        // answered shows green immediately, not "Checking…" until the
+        // watchdog's next sync (#1768).
+        connectionHealth: nwc.getWalletHealth(id, nwc.isSocketConnected(id)),
         balance: result.balance ?? null,
         walletAlias: info?.alias || null,
         transactions: [],

@@ -2182,6 +2182,7 @@
   "walletCard": {
     "zaplie": "Zaplie",
     "zaplieBolt": "Zaplie Bolt",
+    "checking": "Checking…",
     "connected": "Connected",
     "notResponding": "Not responding",
     "disconnected": "Disconnected",
@@ -3565,7 +3566,8 @@
       "ok": "OK",
       "warn": "Needs attention",
       "error": "Error",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "checking": "Checking…"
     },
     "opensInBrowser": "Opens in browser"
   },
