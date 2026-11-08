@@ -111,8 +111,11 @@ const ShareTargetSheet: React.FC<Props> = ({ share, owner, onDone }) => {
   );
 
   // Dismissed (swipe, back, backdrop) before a chat was picked: keep nothing.
+  // A sheet replaced by a newer share still gets its modal's `onDismiss`
+  // after unmounting; the host already dropped its share, and passing it on
+  // would drop the newer one.
   const handleClose = useCallback(() => {
-    if (pickedRef.current) return;
+    if (pickedRef.current || !mountedRef.current) return;
     pickedRef.current = true;
     onDone(false);
   }, [onDone]);
