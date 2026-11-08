@@ -288,7 +288,8 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
       const since = receiving ? receivedAt : Date.now();
       const complete = () => {
         if (closed || relay.openSubs.get(sub.id) !== sub) return;
-        if (inbox) recordInboxEoseLatency(Date.now() - since);
+        // A timeout and a wire EOSE can both complete; the SDK fires oneose once.
+        if (inbox && !sub.eosed) recordInboxEoseLatency(Date.now() - since);
         eose();
       };
       // Wire EOSE already occupies its ordered queue position: complete it
