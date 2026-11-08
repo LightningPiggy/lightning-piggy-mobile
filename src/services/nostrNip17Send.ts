@@ -9,6 +9,41 @@ import {
 } from './nostrDmPublish';
 import { nip44EncryptForRecipient, nostrFinalizeEvent, nostrGetEventHash } from './nostrCrypto';
 import { yieldToEventLoop } from '../contexts/nostrDecryptPacing';
+import { deliverToPeerRelays, type PeerRoutingOptions } from './peerOutboxDelivery';
+import { getManyPeerRelayLists } from './peerRelayLists';
+
+/**
+ * Outbox routing (#1570): each wrap ALSO goes to its recipient's kind-10050
+ * inbox (the self-copy to the sender's own), best-effort and alongside the
+ * usual publish — see ./peerOutboxDelivery. `false` turns it off (a NIP-171
+ * epoch key is not a person with an inbox).
+ */
+type PeerRouting = PeerRoutingOptions | false | undefined;
+
+/** Start the inbox lookups early so they overlap signing. */
+function prefetchInboxes(recipients: string[], senderPubkey: string, routing: PeerRouting): void {
+  if (routing === false || recipients.length === 0) return;
+  void getManyPeerRelayLists(recipients, {
+    viewerPubkey: senderPubkey,
+    lookupRelays: routing?.lookupRelays,
+  });
+}
+
+function routeToInboxes(
+  wraps: VerifiedEvent[],
+  senderPubkey: string,
+  relays: string[],
+  routing: PeerRouting,
+): void {
+  if (routing === false || wraps.length === 0) return;
+  void deliverToPeerRelays({
+    events: wraps,
+    senderPubkey,
+    baseRelays: relays,
+    role: 'inbox',
+    lookupRelays: routing?.lookupRelays,
+  });
+}
 
 /**
  * NIP-17 multi-recipient send (nsec path). Inlines `wrapManyEvents` with
@@ -25,6 +60,7 @@ export async function sendNip17ToManyWithNsec(input: {
   /** Also wrap to the sender (default). A NIP-171 group message goes to its
    * epoch key only: the sender reads it from there. */
   includeSelf?: boolean;
+  peerRouting?: PeerRouting;
 }): Promise<DmSendResult> {
   const senderPublicKey = getPublicKey(input.senderSecretKey);
   // Bind the destination policy to the sender before any yield or signer await.
@@ -38,12 +74,14 @@ export async function sendNip17ToManyWithNsec(input: {
       ...input.recipientPubkeys.map((p) => p.toLowerCase()),
     ]),
   );
+  prefetchInboxes(recipients, senderPublicKey, input.peerRouting);
   const signedWraps: VerifiedEvent[] = [];
   for (let i = 0; i < recipients.length; i++) {
     if (i > 0) await yieldToEventLoop();
     const wrap = nip59.wrapEvent(input.rumor as Parameters<typeof nip59.wrapEvent>[0], input.senderSecretKey, recipients[i]); // prettier-ignore
     signedWraps.push(wrap as VerifiedEvent);
   }
+  routeToInboxes(signedWraps, senderPublicKey, relays, input.peerRouting);
   return publishWrapsTrackingRelays(signedWraps, relays, pool, { eventId, kind: input.rumor.kind }, input.onDeliveryFinalized); // prettier-ignore
 }
 
@@ -93,6 +131,7 @@ export async function sendNip17ToManyWithSigner(input: {
   onDeliveryFinalized?: OnDeliveryFinalized; // Background settle for the tick (#857).
   /** Also wrap to the sender (default); see sendNip17ToManyWithNsec. */
   includeSelf?: boolean;
+  peerRouting?: PeerRouting;
 }): Promise<DmSendResult> {
   const relays = [...lockRelays(input.relays, input.senderPubkey)];
   trackRelays(relays);
@@ -108,6 +147,7 @@ export async function sendNip17ToManyWithSigner(input: {
       ),
     ),
   );
+  prefetchInboxes(recipients, input.senderPubkey, input.peerRouting);
 
   // Compute the rumor id once. The rumor is never signed (nostr-tools
   // calls this a "rumor" precisely because it has no signature) — only
@@ -163,6 +203,7 @@ export async function sendNip17ToManyWithSigner(input: {
     }
   }
 
+  routeToInboxes(signedWraps, input.senderPubkey, relays, input.peerRouting);
   // Any signer-step errors collected above are merged with the publish
   // results so the caller still sees both failure classes.
   const publishResult = await publishWrapsTrackingRelays(

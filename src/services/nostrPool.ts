@@ -76,9 +76,11 @@ class HealthAwarePool extends withResumableSubscriptions(withRelayHealth(SimpleP
     }
   }
 
-  pruneIdleRelays(idleThresholdMs = 10000): string[] {
+  /** `only`: normalised URLs to consider; all relays when omitted. */
+  pruneIdleRelays(idleThresholdMs = 10000, only?: ReadonlySet<string>): string[] {
     const pruned: string[] = [];
     for (const [url, relay] of this.relays) {
+      if (only && !only.has(url)) continue;
       // nostr-tools marks EVENT sends idle before OK and does not count COUNT
       // requests. These private maps are runtime fields in the installed SDK;
       // fail closed if a future version stops exposing them.
@@ -137,9 +139,44 @@ export function trackRelays(relays: string[]): void {
   activeAccountRelays(relays).forEach((r) => connectedRelays.add(r));
 }
 
-/** Release idle sockets after transient batches, preserving active subscriptions. */
-export function pruneIdleRelays(): void {
-  const pruned = new Set(pool.pruneIdleRelays(0));
+/** Release idle sockets after transient batches, preserving active subscriptions.
+ * `urls` limits it to those relays (e.g. a send's one-off outbox relays). */
+export function pruneIdleRelays(urls?: readonly string[]): void {
+  let only: Set<string> | undefined;
+  if (urls) {
+    only = new Set();
+    for (const url of urls) {
+      try {
+        only.add(normalizeURL(url));
+      } catch {
+        // Invalid URLs never opened a connection.
+      }
+    }
+    if (only.size === 0) return;
+  }
+  const pruned = new Set(pool.pruneIdleRelays(0, only));
+  forgetPruned(pruned);
+}
+
+/** Normalised URLs of every relay the pool holds a socket for right now — snapshot
+ * it before a transient batch to release only the sockets that batch opened. */
+export function pooledRelayUrls(): Set<string> {
+  return new Set(pool.listConnectionStatus().keys());
+}
+
+/** Release the sockets in `urls` that weren't pooled in `before`, once idle. */
+export function releaseNewIdleRelays(urls: readonly string[], before: ReadonlySet<string>): void {
+  const opened = urls.filter((url) => {
+    try {
+      return !before.has(normalizeURL(url));
+    } catch {
+      return false;
+    }
+  });
+  if (opened.length > 0) pruneIdleRelays(opened);
+}
+
+function forgetPruned(pruned: ReadonlySet<string>): void {
   for (const url of connectedRelays) {
     try {
       if (pruned.has(normalizeURL(url))) connectedRelays.delete(url);

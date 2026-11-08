@@ -48,8 +48,9 @@ export interface SendNip17RumorInput {
   /** Active identity (hex) — must equal `rumor.pubkey`. */
   senderPubkey: string | null;
   signerType: string | null | undefined;
-  /** User's relay list; write relays are unioned with the defaults. */
-  relays: Pick<RelayConfig, 'url' | 'write'>[];
+  /** User's relay list; write relays are unioned with the defaults, read
+   * relays help find the recipient's inbox (#1570). */
+  relays: (Pick<RelayConfig, 'url' | 'write'> & Partial<Pick<RelayConfig, 'read'>>)[];
   rumor: UnsignedRumor;
   recipientPubkey: string;
 }
@@ -75,6 +76,13 @@ export function nip17TargetRelays(
   );
 }
 
+/** The sender's read relays: where to look up recipients' inbox lists (#1570). */
+export function nip17LookupRelays(
+  relays: (Pick<RelayConfig, 'url'> & Partial<Pick<RelayConfig, 'read'>>)[],
+): string[] {
+  return relays.filter((r) => r.read).map((r) => r.url);
+}
+
 /**
  * Seal + gift-wrap `rumor` to `recipientPubkey` (and a self-copy) and publish.
  * Resolves when the recipient wrap reaches a relay. Self-copy failures stay
@@ -92,6 +100,8 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSend
     throw new Nip17SendError('noRecipient', 'Recipient has no valid Nostr pubkey');
   }
   const targetRelays = nip17TargetRelays(input.relays, pubkey);
+  // The recipient's wrap also goes to their kind-10050 inbox (#1570).
+  const peerRouting = { lookupRelays: nip17LookupRelays(input.relays) };
 
   let result: DmSendResult;
   if (signerType === 'nsec') {
@@ -109,6 +119,7 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSend
       rumor,
       recipientPubkeys: [recipient],
       relays: targetRelays,
+      peerRouting,
     });
   } else if (signerType === 'amber' || signerType === 'nip46') {
     const signer = signerType === 'amber' ? amberService : nostrConnectService;
@@ -117,6 +128,7 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSend
       rumor,
       recipientPubkeys: [recipient],
       relays: targetRelays,
+      peerRouting,
       signerNip44Encrypt: (plain, to) => signer.requestNip44Encrypt(plain, to, pubkey),
       signerSignSeal: async (unsignedSeal) => {
         // Keep pubkey on the seal — Amber misroutes kind=13 sign_event

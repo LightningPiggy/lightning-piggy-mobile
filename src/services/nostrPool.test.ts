@@ -1,7 +1,14 @@
 import { AbstractRelay } from 'nostr-tools/abstract-relay';
 import { SimplePool } from 'nostr-tools/pool';
 import type { Event, VerifiedEvent } from 'nostr-tools';
-import { connectedRelays, pool, pruneIdleRelays, trackRelays } from './nostrPool';
+import {
+  connectedRelays,
+  pool,
+  pooledRelayUrls,
+  pruneIdleRelays,
+  releaseNewIdleRelays,
+  trackRelays,
+} from './nostrPool';
 
 jest.mock('./relayHealth', () => ({
   hydrateRelayHealth: jest.fn(),
@@ -95,3 +102,26 @@ it.each([false, true])(
     }
   },
 );
+
+it('prunes only the listed relays when given URLs, keeping other idle sockets', () => {
+  addRelay('wss://outbox/');
+  addRelay('wss://other/');
+  pruneIdleRelays(['wss://OUTBOX:443']);
+  expect([...relays.keys()]).toEqual(['wss://other/']);
+  expect([...connectedRelays]).toEqual(['wss://other/']);
+  // An empty or unparsable list prunes nothing (never "everything").
+  pruneIdleRelays([]);
+  pruneIdleRelays(['::not a url::']);
+  expect([...relays.keys()]).toEqual(['wss://other/']);
+});
+
+it('releases only the sockets a batch opened, never ones pooled before it', () => {
+  addRelay('wss://already/');
+  const before = pooledRelayUrls();
+  addRelay('wss://one-off/');
+  const busy = addRelay('wss://busy/');
+  busy.prepareSubscription([{ kinds: [1], limit: 1 }], {});
+  busy.idleSince = undefined;
+  releaseNewIdleRelays(['wss://already', 'wss://one-off', 'wss://busy'], before);
+  expect([...relays.keys()].sort()).toEqual(['wss://already/', 'wss://busy/']);
+});
