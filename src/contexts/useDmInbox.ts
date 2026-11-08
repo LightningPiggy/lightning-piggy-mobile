@@ -65,7 +65,7 @@ import {
   type ScopedDmInbox,
 } from './dmInboxScope';
 import { useDmRefreshCoordinator, canJoinDmRefresh } from './dmRefreshCoordinator';
-import { knownInboxEvent } from './knownInboxEvent';
+import { knownInboxEvent, type KnownWrapIdsState } from './knownInboxEvent';
 
 type DmInboxSetter = React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
 
@@ -120,7 +120,7 @@ export interface UseDmInboxResult {
   hydrateDmInboxFromCache: (pk: string) => Promise<void>;
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
   setAmberNip44Permission: React.Dispatch<React.SetStateAction<'unknown' | 'granted' | 'denied'>>;
-  knownWrapIdsRef: React.MutableRefObject<{ pubkey: string | null; set: Set<string> }>;
+  knownWrapIdsRef: React.MutableRefObject<KnownWrapIdsState>;
 }
 
 export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
@@ -897,7 +897,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // start). Without it a re-opened sub re-seeds from the wrap cache, which is
   // stale by the deferred-write window, so wraps the prior sub decrypted
   // re-stream and get re-decrypted. Reset only when the viewer changes.
-  const knownWrapIdsRef = useRef<{ pubkey: string | null; set: Set<string> }>({
+  const knownWrapIdsRef = useRef<KnownWrapIdsState>({
     pubkey: null,
     set: new Set(),
   });

@@ -679,3 +679,50 @@ it('recovers a slow relay’s SENT kind-4 after a quorum cut, and only then adva
   expect(fetchMock.mock.calls[2][2]).toMatchObject({ quorum: false });
   unmount();
 });
+
+it('a wrap the live follow gate dropped is still fetched and shown once the user follows the sender', async () => {
+  const strangerWrap: RawGiftWrapEvent = { ...wrap, id: '5'.repeat(64) };
+  fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
+    kind4: [],
+    // The SDK path: ids the predicate reports known never reach the result.
+    kind1059: [wrap, strangerWrap].filter((w) => !opts?.isKnownEvent?.(w.id)),
+    complete: true,
+  }));
+  ingestMock.mockImplementation(async ({ wraps, passesFollowGate }) => ({
+    entries: wraps
+      .filter((w) => w.id === strangerWrap.id && passesFollowGate(STRANGER))
+      .map(() => ({
+        id: strangerWrap.id,
+        partnerPubkey: STRANGER,
+        fromMe: false,
+        createdAt: BASE + 50,
+        text: 'Hi, it is Grandma with a new number',
+        wireKind: 14,
+      })),
+    alreadyKnown: 0,
+    skipHits: 0,
+    misses: 1,
+    stored: 1,
+    yields: 0,
+  }));
+  const { result, rerender, unmount } = renderInbox();
+  // The live sub claimed and dropped the stranger's wrap (follow gate): it is
+  // in knownWrapIds but was never stored. `wrap` was stored.
+  result.current.knownWrapIdsRef.current = {
+    pubkey: OWNER,
+    set: new Set([wrap.id, strangerWrap.id]),
+    persisted: new Set([wrap.id]),
+  };
+  // The user follows the sender, then the inbox refreshes.
+  rerender({
+    pubkey: OWNER,
+    isLoggedIn: true,
+    signerType: 'nip46',
+    followPubkeys: new Set([FRIEND, STRANGER]),
+    getReadRelays: () => ['wss://relay.example'],
+  });
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  expect(ingestMock.mock.calls.at(-1)?.[0].wraps.map((w) => w.id)).toEqual([strangerWrap.id]);
+  expect(result.current.dmInbox.some((e) => e.id === strangerWrap.id)).toBe(true);
+  unmount();
+});
