@@ -3291,7 +3291,7 @@
   "messageSettingsScreen": {
     "title": "Nachrichten",
     "trustTitle": "Wen du siehst",
-    "trustHint": "Dieser Filter für das Vertrauensnetz bestimmt auch, was du auf der Karte, bei Events und in Gruppen siehst.",
+    "trustHint": "Dieser Filter für das Vertrauensnetz bestimmt auch, bei welchen Nachrichten du benachrichtigt wirst und was du auf der Karte, bei Events und in Gruppen siehst.",
     "trustRowA11y": "Wen du siehst: {{tier}}"
   },
   "hermesProfiler": {

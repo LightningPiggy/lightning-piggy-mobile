@@ -34,8 +34,10 @@ export interface LiveSubFollowGateBuffer {
   // pass are removed and handed to `onPass` (newest-last); the rest stay
   // buffered in case follows are still partially hydrated.
   reevaluate: (follows: Set<string>, onPass: (item: DeferredFollowGateEntry) => void) => void;
-  // Drop strangers after reconciliation, or everything on account switch/sign-out.
-  clear: () => void;
+  // Drop strangers after reconciliation (each handed to `onDrop`, which may
+  // still notify per the Web of Trust tier), or everything on account
+  // switch/sign-out (no `onDrop`).
+  clear: (onDrop?: (item: DeferredFollowGateEntry) => void) => void;
   /** Earliest deferred kind-4 timestamp, retained across drains and re-opens. */
   readonly kind4RecoverySince?: number;
   // Test/observability hook.
@@ -81,8 +83,10 @@ export function createLiveSubFollowGateBuffer(
         }
       }
     },
-    clear() {
+    clear(onDrop) {
+      const dropped = onDrop ? [...deferred.values()] : [];
       deferred.clear();
+      for (const item of dropped) onDrop?.(item);
     },
     get kind4RecoverySince() {
       return kind4RecoverySince;

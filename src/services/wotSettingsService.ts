@@ -91,6 +91,24 @@ export const loadWotSettings = async (pubkey: string | null): Promise<WotSetting
   }
 };
 
+/**
+ * The account's tier for a reader with no React tree (the background DM
+ * watch). Unlike `loadWotSettings`, a storage failure returns `null` rather
+ * than the wide 'all' default, so the caller can fail closed. A tier that was
+ * never chosen is still 'all' — what the Messages list applies too.
+ */
+export const readStoredWotTier = async (pubkey: string): Promise<WotTier | null> => {
+  try {
+    await ensureSafetySettingsMigrated(pubkey);
+    const known = peekAccountSetting(WOT_STORAGE_KEY_BASE, pubkey);
+    if (known !== undefined) return parseWotSettings(known).wotTier;
+    const raw = await AsyncStorage.getItem(perAccountKey(WOT_STORAGE_KEY_BASE, pubkey));
+    return parseWotSettings(raw).wotTier;
+  } catch {
+    return null;
+  }
+};
+
 export const saveWotSettings = async (
   settings: WotSettings,
   pubkey: string | null,

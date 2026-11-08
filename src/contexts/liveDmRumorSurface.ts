@@ -1,5 +1,6 @@
 import { admitOrderLifecycle, admitUnfollowedOrder, isBoundedOrderRumor } from './orderRumorIngest';
 import { gateLiveDm } from './liveDmFollowGateDecision';
+import { audienceAlert, mayAudienceNotify } from './liveDmAudienceNotify';
 import { isChatReactionKind } from '../utils/nip17Reactions';
 import { placeOwnChatReaction } from './chatReactionPartner';
 import { hasRepliedTo } from '../services/dmRepliedPartners';
@@ -311,18 +312,19 @@ export function createLiveRumorSurfacer(
     } catch {
       rumorId = undefined;
     }
+    const gateEntry: DmInboxEntry = {
+      id: wrapId,
+      partnerPubkey: partnership.partnerPubkey,
+      fromMe: partnership.fromMe,
+      createdAt: rumor.created_at,
+      text: textForRumor(rumor),
+      wireKind: rumor.kind,
+      ...(rumorId ? { rumorId } : {}),
+    };
     const decision = order
       ? 'pass'
       : gateLiveDm({
-          entry: {
-            id: wrapId,
-            partnerPubkey: partnership.partnerPubkey,
-            fromMe: partnership.fromMe,
-            createdAt: rumor.created_at,
-            text: textForRumor(rumor),
-            wireKind: rumor.kind,
-            ...(rumorId ? { rumorId } : {}),
-          },
+          entry: gateEntry,
           kind: 1059,
           // A deferred reaction replays through this function (like a group
           // rumor), so it is stored as a reaction, never queued as a message.
@@ -338,7 +340,22 @@ export function createLiveRumorSurfacer(
           replied: hasRepliedTo(viewerPubkey, partnership.partnerPubkey),
         });
     if (decision !== 'pass') {
-      if (decision === 'drop') nothingToSee();
+      // Kept out of Messages, but the Web of Trust tier may still let it
+      // notify. Not a two-party room chat: its thread isn't the 1:1 one.
+      if (
+        decision === 'drop' &&
+        !routeResult.deferredGroupRumor &&
+        mayAudienceNotify(viewerPubkey, gateEntry, isFreshArrival(rumor.created_at))
+      ) {
+        const alert = audienceAlert(
+          viewerPubkey,
+          gateEntry,
+          dmRowPreview(gateEntry.text, rumor.kind, getAppFormatLocale()),
+        );
+        if (claimWrapNotification(wrapId) || placeholder)
+          alertReplacing(alert.threadId, () => fireMessageNotification(alert));
+        else markWrapHandled(wrapId); // alerted already
+      } else if (decision === 'drop') nothingToSee();
       else if (placeholder) noteContentlessWrapAlert(wrapId);
       return;
     }

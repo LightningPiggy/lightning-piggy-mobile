@@ -299,6 +299,14 @@ describe('mayNotifyFrom (WoT phantoms)', () => {
     expect(mayNotifyFrom(PEER, new Set())).toBe(true);
     expect(mayNotifyFrom(PEER, undefined)).toBe(true);
   });
+
+  it('widens to the Web of Trust tier: friends of friends, or All', () => {
+    const follows = new Set(['c'.repeat(64)]);
+    expect(mayNotifyFrom(PEER, follows, { tier: 'friends', fof: null })).toBe(false);
+    expect(mayNotifyFrom(PEER, follows, { tier: 'fof', fof: new Set([PEER]) })).toBe(true);
+    expect(mayNotifyFrom(PEER, follows, { tier: 'fof', fof: null })).toBe(false);
+    expect(mayNotifyFrom(PEER, follows, { tier: 'all', fof: null })).toBe(true);
+  });
 });
 
 describe('our own Marmot messages never alert (any device)', () => {

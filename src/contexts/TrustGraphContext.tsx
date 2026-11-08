@@ -24,6 +24,10 @@ import {
   type WotSettings,
   type WotTier,
 } from '../services/wotSettingsService';
+import {
+  publishNotificationAudience,
+  unpublishNotificationAudience,
+} from '../services/notificationAudience';
 
 // Pre-#565 uncapped L2 blob (~2 MB, the CursorWindow freeze). Deleted on
 // launch; the capped set now lives under friendsOfFriendsService's keys.
@@ -205,6 +209,17 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     wotTierReady,
     persistTier,
   });
+  // Message notifications follow this tier too (notificationAudience): the
+  // live DM gate reads it per message, so a change applies without a
+  // restart. Unknown tier (hydrating) publishes nothing — follows only.
+  useEffect(() => {
+    if (!pubkey || !wotTierReady) return;
+    publishNotificationAudience(pubkey, {
+      tier: wotTier,
+      fof: wotTier === 'fof' && l2Follows.size > 0 ? l2Follows : null,
+    });
+    return () => unpublishNotificationAudience(pubkey);
+  }, [pubkey, wotTier, wotTierReady, l2Follows]);
   const l2Loading = l2Status.building;
   const l2Empty = l2Follows.size === 0;
 

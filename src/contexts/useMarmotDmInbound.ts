@@ -18,6 +18,11 @@ import { EditLedger, isNewerEdit, parseMarmotEdit, type MarmotEdit } from '../se
 import { MARMOT_NON_MESSAGE_KINDS, marmotRumorToDmRow } from '../services/marmotInbox';
 import { subscribeMarmotSession, type MarmotMessageEvent } from '../services/marmotSession';
 import { fireMessageNotification } from '../services/notificationService';
+import {
+  audienceAdmits,
+  liveNotificationAudience,
+  type NotificationAudience,
+} from '../services/notificationAudience';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { dmThreadId } from '../utils/dmProtocol';
 import { dmRowPreview } from '../utils/dmRowPreview';
@@ -25,11 +30,16 @@ import { notifyDmMessage } from './nostrEventBus';
 
 const FLUSH_MS = 150;
 
-/** Pure: may a Marmot DM from `peer` alert? Only a followed peer — unless the
- * follow list isn't known yet (empty / absent), which fails open. */
-export function mayNotifyFrom(peer: string, follows: ReadonlySet<string> | undefined): boolean {
+/** Pure: may a Marmot DM from `peer` alert? A followed peer, or one the Web
+ * of Trust tier admits (friends of friends / All) — unless the follow list
+ * isn't known yet (empty / absent), which fails open. */
+export function mayNotifyFrom(
+  peer: string,
+  follows: ReadonlySet<string> | undefined,
+  audience?: NotificationAudience | null,
+): boolean {
   if (!follows || follows.size === 0) return true;
-  return follows.has(peer.toLowerCase());
+  return follows.has(peer.toLowerCase()) || audienceAdmits(audience, peer);
 }
 const NOTIFY_SKEW_SEC = 120;
 
@@ -276,10 +286,11 @@ export function useMarmotDmInbound(
 
     const notifyMessage = (row: DmMessageRow, groupId: string) => {
       if (!row.fromMe && row.createdAt >= openedAtSec - NOTIFY_SKEW_SEC) {
-        // Same follow gate as the NIP-17 live path: the Messages list hides a
-        // stranger's thread, so an alert for it would show nothing (a phantom).
+        // Same follow + tier gate as the NIP-17 live path: the Messages list
+        // hides a thread outside the tier, so an alert would be a phantom.
         // Follows not loaded yet (empty) → fail open rather than lose alerts.
-        if (!mayNotifyFrom(row.conversation, followsRef.current)) return;
+        if (!mayNotifyFrom(row.conversation, followsRef.current, liveNotificationAudience(pubkey)))
+          return;
         void fireMessageNotification({
           kind: 'dm',
           threadId: dmThreadId(row.conversation, 'marmot'),

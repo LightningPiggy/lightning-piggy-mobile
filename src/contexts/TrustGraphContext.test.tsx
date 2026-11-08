@@ -2,6 +2,7 @@ import React from 'react';
 import { act, renderHook } from '@testing-library/react-native';
 import { TrustGraphProvider, useTrustGraph } from './TrustGraphContext';
 import type { WotSettings } from '../services/wotSettingsService';
+import { liveNotificationAudience } from '../services/notificationAudience';
 
 const STRANGER = 'f'.repeat(64);
 let mockPubkey = 'big';
@@ -72,4 +73,22 @@ it('a load that resolves after the user picks a tier does not roll it back', asy
   expect(result.current.wotTier).toBe('friends');
   await act(async () => mockPending.get('big')!({ wotTier: 'all' }));
   expect(result.current.wotTier).toBe('friends');
+});
+
+it('publishes the tier for notifications per account, live, and nothing while it loads', async () => {
+  mockKnown.set('middle', { wotTier: 'friends' });
+  const { result, rerender, unmount } = renderHook(() => useTrustGraph(), { wrapper });
+  // 'big' still loading: no audience, so notifications stay follows-only.
+  expect(liveNotificationAudience('big')).toBeNull();
+  await act(async () => mockPending.get('big')!({ wotTier: 'friends' }));
+  expect(liveNotificationAudience('big')).toEqual({ tier: 'friends', fof: null });
+  act(() => result.current.setWotTier('all'));
+  expect(liveNotificationAudience('big')).toEqual({ tier: 'all', fof: null });
+  // Switching away retracts the previous account's audience.
+  mockPubkey = 'middle';
+  rerender({});
+  expect(liveNotificationAudience('big')).toBeNull();
+  expect(liveNotificationAudience('middle')?.tier).toBe('friends');
+  unmount();
+  expect(liveNotificationAudience('middle')).toBeNull();
 });
