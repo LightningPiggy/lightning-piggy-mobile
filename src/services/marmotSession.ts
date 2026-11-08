@@ -234,7 +234,7 @@ export class MarmotSession {
     // A repaired 1:1's old group is no longer used: its unsaved mark goes too.
     this.superseded = new DmSuperseded(
       this.backend,
-      (id) => void this.stateSaves.forget(toMlsGroupId(id)),
+      (id) => void this.stateSaves.dismiss(toMlsGroupId(id)),
     );
 
     const store = <T>(ns: string) => createMarmotKvStore<T>(this.backend, ns);

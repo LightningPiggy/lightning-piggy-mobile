@@ -51,14 +51,16 @@ export class MarmotStateSaves {
   private readonly retries = new Map<string, Promise<void>>();
   /** Groups with a failure newer than their running retry's latest save. */
   private readonly rerun = new Set<string>();
-  /** Pending backoff sleeps, woken early by stop(). */
-  private readonly sleeps = new Set<() => void>();
+  /** Each retry loop's pending backoff, woken early by stop() / forget(). */
+  private readonly sleeps = new Map<string, () => void>();
+  /** Groups left / destroyed mid-retry: never write their state back. */
+  private readonly gone = new Set<string>();
   private halted = false;
 
   constructor(private readonly deps: MarmotStateSavesDeps) {}
 
-  private stopped(): boolean {
-    return this.halted || this.deps.stopped();
+  private stopped(mlsId?: string): boolean {
+    return this.halted || this.deps.stopped() || (!!mlsId && this.gone.has(mlsId));
   }
 
   /** Inspect one publish's results; a failed save is retried in the background. */
@@ -71,9 +73,11 @@ export class MarmotStateSaves {
     // A failure landing while that loop's save is already in flight may be
     // for a newer state than the one being written — the loop goes again.
     if (this.retries.has(group.idStr)) return void this.rerun.add(group.idStr);
+    this.gone.delete(group.idStr); // it's live again (e.g. re-joined)
     const run = this.retry(group).finally(() => {
       this.retries.delete(group.idStr);
       this.rerun.delete(group.idStr);
+      this.gone.delete(group.idStr);
     });
     this.retries.set(group.idStr, run);
   }
@@ -113,15 +117,25 @@ export class MarmotStateSaves {
     this.publish();
   }
 
-  /** The group is gone from this device (left / removed / destroyed). */
+  /** A Repair replaced this 1:1: no more sends go there, so drop its mark.
+   * Any retry carries on — the old group still receives. */
+  async dismiss(mlsId: string): Promise<void> {
+    await this.clear(mlsId);
+  }
+
+  /** The group is gone from this device (left / removed / destroyed): drop
+   * its mark and end any retry — writing its state back would resurrect a
+   * group that was just deleted. */
   async forget(mlsId: string): Promise<void> {
+    if (this.retries.has(mlsId)) this.gone.add(mlsId);
+    this.sleeps.get(mlsId)?.();
     await this.clear(mlsId);
   }
 
   /** Session stopped: no more retries (pending backoffs end now) or UI marks. */
   stop(): void {
     this.halted = true;
-    for (const wake of [...this.sleeps]) wake();
+    for (const wake of [...this.sleeps.values()]) wake();
     clearMarmotUnsavedState(this.deps.owner);
   }
 
@@ -129,19 +143,19 @@ export class MarmotStateSaves {
     for (;;) {
       const saved = await this.retryOnce(group);
       // Go again only if a failure arrived during the successful save (rare).
-      if (!saved || !this.rerun.has(group.idStr) || this.stopped()) return;
+      if (!saved || !this.rerun.has(group.idStr) || this.stopped(group.idStr)) return;
     }
   }
 
-  private sleep(ms: number): Promise<void> {
+  private sleep(mlsId: string, ms: number): Promise<void> {
     return new Promise((resolve) => {
       const wake = () => {
         clearTimeout(timer);
-        this.sleeps.delete(wake);
+        this.sleeps.delete(mlsId);
         resolve();
       };
       const timer = setTimeout(wake, ms);
-      this.sleeps.add(wake);
+      this.sleeps.set(mlsId, wake);
     });
   }
 
@@ -149,8 +163,8 @@ export class MarmotStateSaves {
   private async retryOnce(group: SavableGroup): Promise<boolean> {
     const delays = this.deps.retryMs ?? STATE_SAVE_RETRY_MS;
     for (const [i, ms] of delays.entries()) {
-      await this.sleep(ms);
-      if (this.stopped()) return false;
+      await this.sleep(group.idStr, ms);
+      if (this.stopped(group.idStr)) return false;
       const started = Date.now();
       // Failures reported from here on may postdate the state this writes.
       this.rerun.delete(group.idStr);
@@ -172,7 +186,7 @@ export class MarmotStateSaves {
       }
     }
     // The mark records the CURRENT epoch, so it covers any later failure too.
-    if (!this.stopped()) await this.mark(group);
+    if (!this.stopped(group.idStr)) await this.mark(group);
     return false;
   }
 

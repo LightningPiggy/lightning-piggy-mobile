@@ -194,6 +194,33 @@ describe('MarmotStateSaves (#1754)', () => {
     expect(group.save).not.toHaveBeenCalled();
   });
 
+  it('never writes back the state of a group left while its retry waits', async () => {
+    const backend = createMemoryMarmotBackend();
+    const saves = new MarmotStateSaves({
+      owner: OWNER,
+      backend,
+      stopped: () => false,
+      retryMs: [60_000, 60_000],
+    });
+    const group = fakeGroup(Infinity);
+    saves.check(group, [FAILED]);
+    await saves.forget(ID); // left: marmot-ts just deleted its state
+    await saves.settled(ID); // the backoff ended at once
+    expect(group.save).not.toHaveBeenCalled();
+    expect(saves.isUnsaved(ID)).toBe(false);
+    expect(await backend.keys('unsavedState')).toEqual([]);
+  });
+
+  it('a Repair only drops the mark (the replaced 1:1 still receives)', async () => {
+    const { saves } = makeSaves();
+    const group = fakeGroup(Infinity);
+    saves.check(group, [FAILED]);
+    await saves.settled(ID);
+    expect(uiFlag()).toBe(true);
+    await saves.dismiss(ID);
+    expect(uiFlag()).toBe(false);
+  });
+
   it('forgets a group that left the device', async () => {
     const { saves, backend } = makeSaves();
     const group = fakeGroup(Infinity);
