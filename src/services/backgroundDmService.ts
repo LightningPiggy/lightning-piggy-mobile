@@ -209,7 +209,8 @@ async function resolveSenderName(pubkey: string, readRelays: string[]): Promise<
     // fall through to relay fetch
   }
   try {
-    const profile = await nostrService.fetchProfile(pubkey, readRelays);
+    // A notification never waits on the outbox fallback (#1390).
+    const profile = await nostrService.fetchProfile(pubkey, readRelays, { outboxFallback: false });
     const name = profile?.displayName || profile?.name;
     if (name) return name;
   } catch {

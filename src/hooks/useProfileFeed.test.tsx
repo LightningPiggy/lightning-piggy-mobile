@@ -6,6 +6,8 @@ jest.mock('../services/authorFeedService', () => ({
   AUTHOR_FEED_PAGE_SIZE: 30,
   subscribeAuthorFeed: jest.fn(),
   fetchAuthorFeedPage: jest.fn(),
+  // The author-relay half (#1390) is covered in useProfileFeed.outbox.test.tsx.
+  subscribeAuthorOutboxFeed: jest.fn(() => () => {}),
 }));
 const mockRelays = [{ url: 'wss://example.com', read: true, write: true }];
 jest.mock('../contexts/NostrContext', () => ({ useNostr: () => ({ relays: mockRelays }) }));

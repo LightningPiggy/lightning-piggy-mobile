@@ -185,9 +185,11 @@ const ContactProfileScreen: React.FC = () => {
   // doesn't grey out a known address. Keyed on the pubkey alone, so seeding
   // the address can't cancel the fetch.
   const relaysRef = useRef(relays);
+  const contactsRef = useRef(contacts);
   useEffect(() => {
     relaysRef.current = relays;
-  }, [relays]);
+    contactsRef.current = contacts;
+  }, [relays, contacts]);
   useEffect(() => {
     const pubkey = contact.pubkey;
     if (!pubkey) return;
@@ -202,7 +204,11 @@ const ContactProfileScreen: React.FC = () => {
           : prev,
       );
     });
-    Promise.all([fetchProfile(pubkey, readRelays), cachedLud16])
+    // A profile missing from those relays is looked for on the person's own
+    // relays and their kind-3 hint (#1390).
+    const hint = contactsRef.current.find((c) => c.pubkey === pubkey)?.relay;
+    const hints = hint ? [hint] : undefined;
+    Promise.all([fetchProfile(pubkey, readRelays, { hints }), cachedLud16])
       .then(([profile, cached]) => {
         if (cancelled || !profile) return;
         setContact((prev) => {

@@ -1,6 +1,7 @@
 import { useAppNetworkRelays } from '../hooks/useAppNetworkRelays';
 import { useReadRelays } from '../hooks/useReadRelays';
 import { enabledAppRelays } from '../services/appRelayPrefs';
+import { zapReceiptRelays } from '../services/authorOutboxRelays';
 import { useActiveNostrAccount } from './useActiveNostrAccount';
 import { useFollowHydration } from './useFollowHydration';
 import { reconcileCachedContactFollows } from './reconcileContactFollows';
@@ -450,10 +451,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const { loadProfile, loadProfileFromCache } = useOwnProfile(profileSetterFor);
 
-  // Batch-fetch kind-0 profiles for arbitrary pubkeys (e.g. non-followed DM
-  // senders, which `loadContacts`/`fetchProfiles` never fetch). Reads from the
-  // user's relays; nostrService.fetchProfiles unions PROFILE_RELAYS for
-  // coverage. Returns a pubkey→profile map; the caller owns caching (#664).
+  // Kind-0s for arbitrary pubkeys (e.g. non-followed DM senders) from the user's relays +
+  // PROFILE_RELAYS (misses: people's own relays). The caller owns caching (#664).
   const fetchProfilesForPubkeys = useCallback(
     async (pubkeys: string[]): Promise<Map<string, NostrProfile>> => {
       if (pubkeys.length === 0) return new Map();
@@ -1324,7 +1323,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         pubkey,
         recipientPubkey,
         amountSats * 1000,
-        getReadRelays(),
+        zapReceiptRelays(recipientPubkey, getReadRelays()),
         comment,
         zapEventId,
       );

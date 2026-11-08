@@ -8,6 +8,7 @@ import {
   AUTHOR_FEED_PAGE_SIZE,
   fetchAuthorFeedPage,
   subscribeAuthorFeed,
+  subscribeAuthorOutboxFeed,
   type AuthorFeedEvent,
 } from '../services/authorFeedService';
 
@@ -23,6 +24,11 @@ const MAX_PAGES = 10;
  * while the screen is focused. Events land through `useCoalescedMap`, so a
  * relay backfill commits a few batched updates instead of a setState per
  * event. `loadMore` pages backwards with a bounded `until` query.
+ *
+ * The feed is the union of the viewer's read relays and the author's own
+ * NIP-65 write relays (#1390). The viewer's relays are subscribed at once;
+ * the author's relays join in the background once known (capped, see
+ * services/authorOutboxRelays), so they never hold up the first posts.
  */
 export function useProfileFeed(authorPubkey: string | null, reloadNonce: number) {
   const { relays } = useNostr();
@@ -60,6 +66,8 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
   // screen's auto-paging re-arming after the aborted request settles) can
   // query relays behind another screen.
   const focusedRef = useRef(false);
+  // The author's own relays the live feed added (#1390), so older pages ask them too.
+  const outboxRelaysRef = useRef<string[]>([]);
 
   // A different person starts from scratch. Refocusing, or a pull-to-refresh,
   // keeps what's loaded (and the scroll position) and merges new events in.
@@ -81,6 +89,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
   useFocusEffect(
     useCallback(() => {
       focusedRef.current = true;
+      outboxRelaysRef.current = [];
       if (!authorPubkey || readRelays.length === 0) {
         setLoading(false);
         return;
@@ -98,20 +107,29 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         setUnavailable(false);
         setLoading(true);
       }
+      const onEvent = (event: AuthorFeedEvent) => {
+        if (!live) return;
+        // Once per attempt, not per event (CLAUDE.md: no setState per relay event).
+        if (!answered) {
+          answered = true;
+          answeredAuthorRef.current = authorPubkey;
+          setUnavailable(false);
+        }
+        enqueue(event.id, event);
+      };
+      // One relay really answered: when the grace period ends with no
+      // posts, that's "No posts yet", even if another relay is still silent.
+      const onAnswered = () => {
+        if (!live) return;
+        answered = true;
+        answeredAuthorRef.current = authorPubkey;
+        setUnavailable(false);
+      };
       const unsubscribe = subscribeAuthorFeed({
         authorPubkey,
         relays: readRelays,
         limit: AUTHOR_FEED_PAGE_SIZE,
-        onEvent: (event) => {
-          if (!live) return;
-          // Once per attempt, not per event (CLAUDE.md: no setState per relay event).
-          if (!answered) {
-            answered = true;
-            answeredAuthorRef.current = authorPubkey;
-            setUnavailable(false);
-          }
-          enqueue(event.id, event);
-        },
+        onEvent,
         // Every relay is done, but that includes relays that failed or timed
         // out: only onEvent / onAnswered count as an answer.
         onEose: () => {
@@ -119,14 +137,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
           flush();
           setLoading(false);
         },
-        // One relay really answered: when the grace period ends with no
-        // posts, that's "No posts yet", even if another relay is still silent.
-        onAnswered: () => {
-          if (!live) return;
-          answered = true;
-          answeredAuthorRef.current = authorPubkey;
-          setUnavailable(false);
-        },
+        onAnswered,
         onUnavailable: () => {
           if (!live) return;
           // A late event or answer after this must clear the error again.
@@ -134,6 +145,18 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
           answeredAuthorRef.current = null;
           setUnavailable(true);
           setLoading(false);
+        },
+      });
+      // Armed after the viewer's relays, and resolved in the background: the
+      // author's own relays merge into the same coalesced map when they land.
+      const unsubscribeOutbox = subscribeAuthorOutboxFeed({
+        authorPubkey,
+        currentRelays: readRelays,
+        limit: AUTHOR_FEED_PAGE_SIZE,
+        onEvent,
+        onAnswered,
+        onRelays: (urls) => {
+          if (live) outboxRelaysRef.current = urls;
         },
       });
       const grace = setTimeout(() => {
@@ -148,6 +171,8 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         focusedRef.current = false;
         clearTimeout(grace);
         unsubscribe();
+        unsubscribeOutbox();
+        outboxRelaysRef.current = [];
         flush();
         moreAbortRef.current?.abort();
       };
@@ -184,12 +209,13 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     moreAbortRef.current = controller;
     try {
       const known = (e: AuthorFeedEvent) => feed.map.has(e.id);
+      const relays = [...readRelays, ...outboxRelaysRef.current];
       // `until` is inclusive: events sharing the oldest second come back too
       // and the id-keyed map drops the repeats. If a whole page is repeats
       // from that one second, step past it rather than stall.
       let page = await fetchAuthorFeedPage({
         authorPubkey,
-        relays: readRelays,
+        relays,
         until: oldest,
         signal: controller.signal,
       });
@@ -200,7 +226,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
       ) {
         page = await fetchAuthorFeedPage({
           authorPubkey,
-          relays: readRelays,
+          relays,
           until: oldest - 1,
           signal: controller.signal,
         });

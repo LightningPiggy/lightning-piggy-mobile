@@ -4,6 +4,7 @@
 // subscription fetches the newest page; older pages come from a bounded,
 // abortable `until` query. Every filter carries a `limit`.
 import type { Event, Filter } from 'nostr-tools';
+import { authorWriteRelays, leaseOutboxRelays, withoutRelays } from './authorOutboxRelays';
 import { pool, trackRelays } from './nostrPool';
 import { relayKey, selectHealthyRelays } from './relayHealth';
 import { querySyncAbortable } from './relayQuery';
@@ -191,5 +192,56 @@ export async function fetchAuthorFeedPage(input: {
       !input.signal?.aborted &&
       Date.now() - startedAt < PAGE_TIMEOUT_MS - 50 &&
       allConnected(input.relays),
+  };
+}
+
+/**
+ * The same live feed on the AUTHOR's own write relays (#1390), for people who
+ * publish where the viewer doesn't read. Never delays the main feed: the
+ * caller subscribes `currentRelays` first, and this resolves the author's
+ * relays (cached, or one bounded lookup) in the background, then subscribes
+ * only the ones not already in `currentRelays` — at most
+ * MAX_AUTHOR_OUTBOX_RELAYS, within the app-wide lease ceiling. The author's
+ * pubkey goes only to the author's relays. `onRelays` reports the relays
+ * subscribed, so older pages can read them too. The returned closer ends the
+ * subscription and releases the lease (and any socket it opened).
+ */
+export function subscribeAuthorOutboxFeed(input: {
+  authorPubkey: string;
+  currentRelays: string[];
+  viewerPubkey?: string | null;
+  limit?: number;
+  onEvent: (event: AuthorFeedEvent) => void;
+  onAnswered?: () => void;
+  onRelays?: (relays: string[]) => void;
+}): () => void {
+  let closed = false;
+  let close: (() => void) | undefined;
+  void authorWriteRelays(input.authorPubkey, {
+    viewerPubkey: input.viewerPubkey,
+    lookupRelays: input.currentRelays,
+  }).then((write) => {
+    if (closed) return;
+    const extra = withoutRelays(write, input.currentRelays);
+    if (extra.length === 0) return;
+    const lease = leaseOutboxRelays(extra);
+    if (lease.relays.length === 0) return lease.release();
+    const unsubscribe = subscribeAuthorFeed({
+      authorPubkey: input.authorPubkey,
+      relays: lease.relays,
+      limit: input.limit,
+      onEvent: input.onEvent,
+      onAnswered: input.onAnswered,
+    });
+    close = () => {
+      unsubscribe();
+      lease.release();
+    };
+    input.onRelays?.(lease.relays);
+  });
+  return () => {
+    closed = true;
+    close?.();
+    close = undefined;
   };
 }
