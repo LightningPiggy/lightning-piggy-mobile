@@ -1,6 +1,6 @@
 import { useAppRelayPrefs } from '../hooks/useAppRelayPrefs';
 import { enabledAppRelays } from '../services/appRelayPrefs';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { AppState } from 'react-native';
 
 import { Toast } from '../components/BrandedToast';
@@ -9,6 +9,7 @@ import { startMarmotPushRegistration } from '../services/marmotPushRegistration'
 import { getMarmotSession, MarmotSession, setMarmotSession } from '../services/marmotSession';
 import { DEFAULT_RELAYS } from '../services/nostrService';
 import { RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
+import { relayConfigListKey } from '../utils/relayListKey';
 import { useNostr } from './NostrContext';
 
 // Defer the MLS bring-up past cold start: loading group state + opening one
@@ -110,10 +111,13 @@ export function MarmotBridge(): null {
     };
   }, [isLoggedIn, pubkey, signerType]);
 
+  // Keyed on the relays' content (read/write flags included), so an identical
+  // re-parsed relay list doesn't re-open every group's relay sub.
+  const relaysKey = useMemo(() => relayConfigListKey(relays), [relays]);
   useEffect(() => {
     const session = getMarmotSession();
     if (session?.pubkey === pubkey) session.refreshRelaySubscriptions();
-  }, [pubkey, relays, relayScope]);
+  }, [pubkey, relaysKey, relayScope]);
 
   return null;
 }

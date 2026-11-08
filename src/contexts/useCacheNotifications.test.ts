@@ -348,3 +348,86 @@ describe('event-driven own-caches rearm (#1016)', () => {
     expect(mockedFetch).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('relay-set keying (cold-start re-arm churn)', () => {
+  type Props = { pubkey: string; getReadRelays: () => string[] };
+  const renderWith = (initialProps: Props) =>
+    renderHook((props: Props) => useCacheNotifications(props), { initialProps });
+
+  it('does not re-arm or refetch when a new getter returns the same relays', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(1));
+
+    // Same relays, new array and new getter (a re-parsed relay list).
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://one/'] });
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await act(async () => {});
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    expect(mockedFoundLogs).toHaveBeenCalledTimes(1);
+    expect(mockedComments).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-arms on the new relays at once when the set changes, without bypassing the throttle', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFoundLogs).toHaveBeenCalledTimes(1));
+
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://one', 'wss://two'] });
+    await act(async () => {});
+    // Re-subscribed on the new relay set straight away, reusing the coords
+    // fetched moments ago instead of a second fetchCachesByAuthor.
+    expect(mockedFoundLogs).toHaveBeenCalledTimes(2);
+    expect(mockedFoundLogs.mock.calls.at(-1)![0]).toEqual(
+      expect.objectContaining({ relays: ['wss://one', 'wss://two'], cacheCoords: [COORD_A] }),
+    );
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+
+    // The throttle carried across the re-run: an AppState burst inside the gap
+    // still doesn't fetch...
+    const onChange = (AppState.addEventListener as jest.Mock).mock.calls.at(-1)![1];
+    await act(async () => {
+      onChange('active');
+      jest.advanceTimersByTime(3_000);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    // ...but one after the gap does.
+    await act(async () => {
+      jest.advanceTimersByTime(10_000);
+      onChange('active');
+      jest.advanceTimersByTime(3_000);
+    });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+  });
+
+  it('joins a fetch still in flight when the relay set changes instead of overlapping it', async () => {
+    let resolveFirst!: (v: { coord: string }[]) => void;
+    mockedFetch.mockReturnValueOnce(
+      new Promise<{ coord: string }[]>((res) => {
+        resolveFirst = res;
+      }),
+    );
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+
+    rerender({ pubkey: VIEWER, getReadRelays: () => ['wss://two'] });
+    await act(async () => {
+      resolveFirst([{ coord: COORD_B }]);
+    });
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    // Armed once, on the new relay set only.
+    expect(mockedFoundLogs).toHaveBeenCalledTimes(1);
+    expect(mockedFoundLogs.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ relays: ['wss://two'], cacheCoords: [COORD_B] }),
+    );
+  });
+
+  it('fetches straight away for a new account, whatever the previous throttle', async () => {
+    mockedFetch.mockResolvedValue([{ coord: COORD_A }]);
+    const { rerender } = renderWith({ pubkey: VIEWER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(1));
+    rerender({ pubkey: OTHER, getReadRelays: () => ['wss://one'] });
+    await waitFor(() => expect(mockedFetch).toHaveBeenCalledTimes(2));
+    expect(mockedFetch.mock.calls[1][0]).toBe(OTHER);
+  });
+});

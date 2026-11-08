@@ -8,6 +8,7 @@ import type { RelayConfig } from '../types/nostr';
 import { fetchLatestReplaceable } from '../services/nostrRelayLists';
 import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
 import { dmInboxRelaysFromTags, RELAY_LIST_INDEXERS } from '../utils/relayListEvents';
+import { sameRelayConfigs, sameRelayUrls } from '../utils/relayListKey';
 
 import {
   RELAY_LIST_CACHE_KEY_BASE,
@@ -44,6 +45,14 @@ export const readAdoptedCreatedAt = (pk: string, kind: 10002 | 10050): Promise<n
     ),
   );
 
+// State updaters that keep the current array when the new list has the same
+// entries. Cold start sets each list several times (cache, then network) with
+// fresh, identical arrays; a new identity would re-arm every relay sub.
+const keepIfSameConfigs = (next: RelayConfig[]) => (prev: RelayConfig[]) =>
+  sameRelayConfigs(prev, next) ? prev : next;
+const keepIfSameUrls = (next: string[]) => (prev: string[]) =>
+  sameRelayUrls(prev, next) ? prev : next;
+
 export function useNip65Relays() {
   const [nip65Relays, setNip65Relays] = useState<RelayConfig[]>([]);
   // The user's own DM inbox relays: others deliver NIP-17 DMs there, so the
@@ -69,7 +78,7 @@ export function useNip65Relays() {
   /** Adopt a DM inbox list (in memory first; caching is best-effort so a
    * full device can't break the caller) and re-arm the background watch. */
   const adoptDmInbox = useCallback(async (pk: string, list: string[], createdAt?: number) => {
-    setDmInboxRelays(list);
+    setDmInboxRelays(keepIfSameUrls(list));
     const key = perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, pk);
     const before = await AsyncStorage.getItem(key).catch(() => null);
     await AsyncStorage.setItem(key, JSON.stringify(list)).catch(() => {});
@@ -91,7 +100,7 @@ export function useNip65Relays() {
         const parsed = raw ? (JSON.parse(raw) as unknown) : null;
         if (Array.isArray(parsed))
           cached = parsed.filter((u): u is string => typeof u === 'string');
-        if (current() && cached.length > 0) setDmInboxRelays(cached);
+        if (current() && cached.length > 0) setDmInboxRelays(keepIfSameUrls(cached));
       } catch {
         /* corrupt cache — the network read below replaces it */
       }
@@ -137,8 +146,8 @@ export function useNip65Relays() {
   const resetRelayLists = useCallback(() => {
     generationRef.current += 1;
     nip65GenerationRef.current += 1;
-    setNip65Relays([]);
-    setDmInboxRelays([]);
+    setNip65Relays(keepIfSameConfigs([]));
+    setDmInboxRelays(keepIfSameUrls([]));
   }, []);
 
   /** Eagerly hydrate `relays` state from the per-account cache so
@@ -154,7 +163,7 @@ export function useNip65Relays() {
       if (!Array.isArray(cached)) return false;
       // Cached relay-list is the NIP-65 slice; the user overrides are
       // hydrated separately by the `getUserRelays()` effect.
-      setNip65Relays(cached);
+      setNip65Relays(keepIfSameConfigs(cached));
       return true;
     } catch (error) {
       console.warn('Failed to load relays cache:', error);
@@ -181,7 +190,7 @@ export function useNip65Relays() {
         perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, pk),
       );
       if (cached && ageMs < CACHE_MAX_AGE_MS) {
-        if (current()) setNip65Relays(cached);
+        if (current()) setNip65Relays(keepIfSameConfigs(cached));
         // Background: own DM inbox relays (cache first, then network).
         hydrateInbox(cached);
         if (__DEV__) console.log(`[Nostr] fetchRelayList: skipped (cache fresh)`);
@@ -205,7 +214,7 @@ export function useNip65Relays() {
       // A relay that missed the user's last in-app publish can still serve an
       // older copy: keep the newer cached list rather than restore it.
       if (fetched.createdAt < (await baselineOf(createdAtKey))) {
-        if (cached && current()) setNip65Relays(cached);
+        if (cached && current()) setNip65Relays(keepIfSameConfigs(cached));
         hydrateInbox(cached ?? []);
         const read = (cached ?? []).filter((r) => r.read).map((r) => r.url);
         return read.length > 0 ? read : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
@@ -219,7 +228,7 @@ export function useNip65Relays() {
         const read = relayList.filter((r) => r.read).map((r) => r.url);
         return read.length > 0 ? read : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       }
-      setNip65Relays(relayList);
+      setNip65Relays(keepIfSameConfigs(relayList));
       remember(createdAtKey, fetched.createdAt);
       InteractionManager.runAfterInteractions(() => {
         if (!current()) return;
@@ -252,7 +261,7 @@ export function useNip65Relays() {
       if (generation !== nip65GenerationRef.current || (createdAt ?? Infinity) < adoptedAt)
         return { adopted: false, baseline: adoptedAt };
       nip65GenerationRef.current += 1;
-      setNip65Relays(list);
+      setNip65Relays(keepIfSameConfigs(list));
       const key = perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk);
       const before = await AsyncStorage.getItem(key).catch(() => null);
       // Best-effort: the list is already adopted in memory.

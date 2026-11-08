@@ -46,6 +46,7 @@ import { fetchCachesByAuthor } from '../services/nostrPlacesPublisher';
 import { subscribeOwnCachesChanged } from '../services/ownCachesBus';
 import { parseCacheCoord } from '../services/nostrPlacesService';
 import { notifyFoundLog } from './nostrEventBus';
+import { useStableRelayList } from '../hooks/useStableRelayList';
 
 // Tolerate sender/receiver clock drift — matches the DM live sub.
 const NOTIFY_SKEW_SEC = 120;
@@ -95,6 +96,23 @@ const COMMENT_COPY: NotifyCopy = {
   body: 'Open Lightning Piggy to view',
 };
 
+/** The viewer's last coord fetch, shared by every run of the hook's effect. */
+interface CoordFetchState {
+  pubkey: string | null;
+  /** Wall-clock of the last fetch actually started — see REFETCH_MIN_GAP_MS. */
+  startedAt: number;
+  /** Coords the last successful fetch returned; null before the first. */
+  coords: string[] | null;
+  /** The fetch in flight, if any. */
+  pending: Promise<string[]> | null;
+}
+const newCoordFetchState = (pubkey: string | null): CoordFetchState => ({
+  pubkey,
+  startedAt: 0,
+  coords: null,
+  pending: null,
+});
+
 export interface UseCacheNotificationsParams {
   /** Active viewer's hex pubkey. Null when logged out — sub stays closed. */
   pubkey: string | null;
@@ -112,20 +130,22 @@ export interface UseCacheNotificationsParams {
  * between effect runs.
  */
 export function useCacheNotifications(params: UseCacheNotificationsParams): void {
-  const { pubkey, getReadRelays } = params;
+  const { pubkey } = params;
+  // Keyed on the relay set: a new getter with the same relays is a no-op.
+  const readRelays = useStableRelayList(params.getReadRelays);
 
-  // Snapshot the current relays once per effect run — passing
-  // `getReadRelays` itself into the dep array re-opens the sub on every
-  // identity-stable render that recomputed the getter. The actual relays
-  // are captured below and re-evaluated when `getReadRelays` reference
-  // changes (which is what the DM sub already keys on).
-  const lastRelaysRef = useRef<string[] | null>(null);
+  // Coord-fetch state outlives effect re-runs (a relay-set change re-runs the
+  // effect), so a re-run can't bypass REFETCH_MIN_GAP_MS or overlap a fetch
+  // still in flight. Per viewer: an account switch starts afresh.
+  const fetchStateRef = useRef<CoordFetchState>(newCoordFetchState(null));
 
   useEffect(() => {
     if (!pubkey) return;
-    const readRelays = getReadRelays();
-    lastRelaysRef.current = readRelays;
     if (readRelays.length === 0) return;
+    if (fetchStateRef.current.pubkey !== pubkey) {
+      fetchStateRef.current = newCoordFetchState(pubkey);
+    }
+    const fetchState = fetchStateRef.current;
 
     let cancelled = false;
     let unsubscribeComments: (() => void) | null = null;
@@ -133,8 +153,6 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // Coord set the sub is currently armed with. Compared against each
     // refetch to skip tear-down + re-arm when nothing changed.
     let currentCoords: string[] = [];
-    // Wall-clock of the last refetch we actually started — see REFETCH_MIN_GAP_MS.
-    let lastRefetchStartedAt = 0;
     const seen = new Set<string>();
     // Freshness baseline. Reset to "now" every time we (re)arm the relay
     // subscriptions in refetchAndRearm — NOT just once on mount — so the
@@ -203,16 +221,67 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
      * transition. `fetchCachesByAuthor` caps itself at 5 s so this can't
      * pin the hook against a slow relay.
      */
-    // Single-flight state: at most one fetch+rearm pass runs at a time. A
-    // forced pass (own-cache publish, #1016) that lands while another pass is
-    // in flight queues ONE follow-up instead of overlapping it — bypassing the
-    // min-gap throttle must not reintroduce the overlapping-fetch problem the
+    /** (Re-)arm the live subs for `coords` on this effect's relays. A no-op
+     * when they're already armed for the same coord set. */
+    const armFor = (coords: string[]): void => {
+      if (cancelled) return;
+      // Set-equality (order-independent — fetchCachesByAuthor ordering is
+      // not guaranteed). Skip the tear-down + re-arm when unchanged. O(1)
+      // membership via a Set — this runs on every refetch and AppState
+      // resume, and a user can own many caches (Copilot #946).
+      const currentSet = new Set(currentCoords);
+      const sameSet =
+        coords.length === currentCoords.length && coords.every((c) => currentSet.has(c));
+      if (sameSet) return;
+      currentCoords = coords;
+      if (unsubscribeComments) {
+        unsubscribeComments();
+        unsubscribeComments = null;
+      }
+      if (unsubscribeFoundLogs) {
+        unsubscribeFoundLogs();
+        unsubscribeFoundLogs = null;
+      }
+      if (coords.length === 0) return;
+      // Re-baseline the freshness gate to the moment we (re)arm, so the
+      // replay the relay sends for this fresh subscription (since: now−7d)
+      // stays silent — only events created at/after this re-subscribe fire.
+      subOpenedAtSec = Math.floor(Date.now() / 1000);
+      unsubscribeComments = subscribeCacheCommentsForCoords({
+        viewerPubkey: pubkey,
+        relays: readRelays,
+        cacheCoords: coords,
+        onEvent: (ev) => handle(ev, 'A', false, COMMENT_COPY),
+      });
+      unsubscribeFoundLogs = subscribeCacheFoundLogsForCoords({
+        viewerPubkey: pubkey,
+        relays: readRelays,
+        cacheCoords: coords,
+        onEvent: (ev) => handle(ev, 'a', true, FOUND_LOG_COPY),
+      });
+    };
+
+    // Single-flight: at most one fetch runs at a time (tracked in the hoisted
+    // fetchState, so a re-run sees a fetch its predecessor started). A forced
+    // pass (own-cache publish, #1016) that lands while a fetch is in flight
+    // queues ONE follow-up instead of overlapping it — bypassing the min-gap
+    // throttle must not reintroduce the overlapping-fetch problem the
     // throttle exists to prevent (Copilot #1018).
-    let refetchInFlight = false;
     let queuedForce = false;
+    const runQueuedForce = (): void => {
+      if (queuedForce && !cancelled) {
+        queuedForce = false;
+        void refetchAndRearm({ force: true });
+      }
+    };
+    /** Arm with the result of a fetch already in flight (possibly started by
+     * the previous effect run) instead of starting another. */
+    const joinPending = (pending: Promise<string[]>): void => {
+      pending.then(armFor, () => {}).finally(runQueuedForce);
+    };
     const refetchAndRearm = async (opts?: { force?: boolean }): Promise<void> => {
       if (cancelled) return;
-      if (refetchInFlight) {
+      if (fetchState.pending) {
         if (opts?.force) queuedForce = true;
         return;
       }
@@ -221,57 +290,23 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
       // `force` (a just-published own cache, #1016) skips the gap — the whole
       // point of the event-driven re-arm is picking the change up NOW.
       const startNow = Date.now();
-      if (!opts?.force && startNow - lastRefetchStartedAt < REFETCH_MIN_GAP_MS) return;
-      lastRefetchStartedAt = startNow;
-      refetchInFlight = true;
+      if (!opts?.force && startNow - fetchState.startedAt < REFETCH_MIN_GAP_MS) return;
+      fetchState.startedAt = startNow;
+      const pending = fetchCachesByAuthor(pubkey, readRelays).then((caches) =>
+        caches.map((c) => c.coord),
+      );
+      fetchState.pending = pending;
       try {
-        const myCaches = await fetchCachesByAuthor(pubkey, readRelays);
-        if (cancelled) return;
-        const coords = myCaches.map((c) => c.coord);
-        // Set-equality (order-independent — fetchCachesByAuthor ordering is
-        // not guaranteed). Skip the tear-down + re-arm when unchanged. O(1)
-        // membership via a Set — this runs every minute and on AppState
-        // resume, and a user can own many caches (Copilot #946).
-        const currentSet = new Set(currentCoords);
-        const sameSet =
-          coords.length === currentCoords.length && coords.every((c) => currentSet.has(c));
-        if (sameSet) return;
-        currentCoords = coords;
-        if (unsubscribeComments) {
-          unsubscribeComments();
-          unsubscribeComments = null;
-        }
-        if (unsubscribeFoundLogs) {
-          unsubscribeFoundLogs();
-          unsubscribeFoundLogs = null;
-        }
-        if (coords.length === 0) return;
-        // Re-baseline the freshness gate to the moment we (re)arm, so the
-        // replay the relay sends for this fresh subscription (since: now−7d)
-        // stays silent — only events created at/after this re-subscribe fire.
-        subOpenedAtSec = Math.floor(Date.now() / 1000);
-        unsubscribeComments = subscribeCacheCommentsForCoords({
-          viewerPubkey: pubkey,
-          relays: readRelays,
-          cacheCoords: coords,
-          onEvent: (ev) => handle(ev, 'A', false, COMMENT_COPY),
-        });
-        unsubscribeFoundLogs = subscribeCacheFoundLogsForCoords({
-          viewerPubkey: pubkey,
-          relays: readRelays,
-          cacheCoords: coords,
-          onEvent: (ev) => handle(ev, 'a', true, FOUND_LOG_COPY),
-        });
+        const coords = await pending;
+        fetchState.coords = coords;
+        armFor(coords);
       } catch {
         // Non-fatal — leave the previous sub (if any) in place; the next
         // refetch retries. The background detect-and-ping pass also
         // catches anything we miss here.
       } finally {
-        refetchInFlight = false;
-        if (queuedForce && !cancelled) {
-          queuedForce = false;
-          void refetchAndRearm({ force: true });
-        }
+        if (fetchState.pending === pending) fetchState.pending = null;
+        runQueuedForce();
       }
     };
 
@@ -280,7 +315,13 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
     // not stack timers or fire after re-backgrounding — see #554).
     let resumeTimer: ReturnType<typeof setTimeout> | null = null;
 
-    void refetchAndRearm();
+    // First arm for this relay set. A re-run (the relay set changed) reuses
+    // a fetch in flight or a coord set fetched inside the min gap, and only
+    // re-subscribes on the new relays; otherwise it fetches as on mount.
+    if (fetchState.pending) joinPending(fetchState.pending);
+    else if (fetchState.coords && Date.now() - fetchState.startedAt < REFETCH_MIN_GAP_MS)
+      armFor(fetchState.coords);
+    else void refetchAndRearm();
     const interval = setInterval(() => {
       void refetchAndRearm();
     }, REFETCH_COORDS_INTERVAL_MS);
@@ -321,5 +362,5 @@ export function useCacheNotifications(params: UseCacheNotificationsParams): void
       if (unsubscribeComments) unsubscribeComments();
       if (unsubscribeFoundLogs) unsubscribeFoundLogs();
     };
-  }, [pubkey, getReadRelays]);
+  }, [pubkey, readRelays]);
 }

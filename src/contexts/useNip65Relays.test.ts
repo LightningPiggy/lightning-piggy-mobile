@@ -1,7 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNip65Relays } from './useNip65Relays';
-import { RELAY_LIST_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
+import {
+  DM_INBOX_RELAYS_CACHE_KEY_BASE,
+  RELAY_LIST_CACHE_KEY_BASE,
+  RELAY_LIST_TIMESTAMP_KEY_BASE,
+} from './nostrCacheKeys';
 import { perAccountKey } from '../services/perAccountStorage';
 import { fetchLatestReplaceable } from '../services/nostrRelayLists';
 import { rearmBackgroundDmWatchForActiveIdentity } from '../services/backgroundDmService';
@@ -305,4 +309,62 @@ it('keeps a newly adopted list even when saving its timestamp fails (storage ful
   } finally {
     AsyncStorage.setItem = realSet;
   }
+});
+
+describe('cold-start re-sets with unchanged content (relay subs must not re-arm)', () => {
+  const list = () => [{ url: 'wss://relay.primal.net', read: true, write: true }];
+
+  it('keeps the NIP-65 and inbox arrays when the network returns what the cache had', async () => {
+    await AsyncStorage.setItem(
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, PK),
+      JSON.stringify(list()),
+    );
+    await AsyncStorage.setItem(
+      perAccountKey(DM_INBOX_RELAYS_CACHE_KEY_BASE, PK),
+      JSON.stringify(['wss://nostr.mom']),
+    );
+    // Stale cache (no timestamp) → the network path re-parses both lists.
+    fetchList.mockResolvedValue(list());
+    fetchLatest.mockResolvedValue(inboxEvent(['wss://nostr.mom']));
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelaysFromCache(PK);
+    });
+    const nip65 = result.current.nip65Relays;
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    await waitFor(() => expect(fetchLatest).toHaveBeenCalled());
+    const inbox = result.current.dmInboxRelays;
+    expect(inbox).toEqual(['wss://nostr.mom']);
+    expect(result.current.nip65Relays).toBe(nip65);
+    // A second refresh with the same lists keeps both identities.
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    await waitFor(() => expect(fetchLatest).toHaveBeenCalledTimes(2));
+    expect(result.current.nip65Relays).toBe(nip65);
+    expect(result.current.dmInboxRelays).toBe(inbox);
+  });
+
+  it('adopts a list whose content changed', async () => {
+    fetchLatest.mockResolvedValue(null);
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.applyPublishedRelayList(PK, list());
+      await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom']);
+    });
+    const nip65 = result.current.nip65Relays;
+    const inbox = result.current.dmInboxRelays;
+    await act(async () => {
+      await result.current.applyPublishedRelayList(PK, [
+        { url: 'wss://relay.primal.net', read: true, write: false },
+      ]);
+      await result.current.applyPublishedDmInbox(PK, ['wss://nostr.mom', 'wss://auth.nostr1.com']);
+    });
+    expect(result.current.nip65Relays).not.toBe(nip65);
+    expect(result.current.nip65Relays[0].write).toBe(false);
+    expect(result.current.dmInboxRelays).not.toBe(inbox);
+    expect(result.current.dmInboxRelays).toHaveLength(2);
+  });
 });

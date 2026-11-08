@@ -46,6 +46,7 @@ import { ensureNip17GroupHistoryRepaired } from './nip17GroupHistoryRepairRunner
 import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
 import type { RefreshDmInboxOptions } from './nostrContextTypes';
 import { createLiveDmReconnectController } from './nostrLiveDmReconnect';
+import { noteLiveDmSubArm } from './liveDmSubArmPerf';
 
 // Self-re-arm on relay drop / app resume (#934) — the connection lifecycle
 // (open / backoff-reconnect / resume-rearm / the post-reconnect settle timer
@@ -123,6 +124,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     setDeferredReplay,
     onReconnect,
   } = params;
+  noteLiveDmSubArm(viewerPubkey, activeSigner, readRelays);
   const seen = new Set<string>();
   const SEEN_CAP = 4096;
   // Tells the background watch in this context that a decrypting sub owns

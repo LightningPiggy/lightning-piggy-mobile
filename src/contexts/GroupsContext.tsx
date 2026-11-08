@@ -53,6 +53,7 @@ import { isMarmotGroupId } from '../services/marmotSession';
 import { isNip171GroupId } from '../utils/nip171';
 import { useNip171Groups } from './useNip171Groups';
 import { useMarmotGroups } from './useMarmotGroups';
+import { useStableRelayList } from '../hooks/useStableRelayList';
 
 const FOLLOWING_ONLY_KEY_BASE = 'groups_following_only';
 // One-shot migration marker keyed off the legacy followingOnly → wotTier
@@ -838,13 +839,19 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Subscribe to inbound kind-30200 events that p-tag the current viewer
   // so that groups created by other members appear automatically. Filters
   // by `event.kind === GROUP_STATE_KIND` defensively even though the
-  // filter already constrains it.
+  // filter already constrains it. Keyed on the relay set, so an identical
+  // re-parsed relay list doesn't re-arm it.
+  const getGroupStateRelays = useCallback(
+    () => [
+      ...relays.filter((r) => r.read).map((r) => r.url),
+      ...enabledAppRelays('default', DEFAULT_RELAYS),
+    ],
+    [relays],
+  );
+  const groupStateRelays = useStableRelayList(getGroupStateRelays);
   useEffect(() => {
     if (!isLoggedIn || !pubkey) return;
-    const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-    const targetRelays = Array.from(
-      new Set([...readRelays, ...enabledAppRelays('default', DEFAULT_RELAYS)]),
-    );
+    const targetRelays = Array.from(new Set(groupStateRelays));
     let active = true;
     const unsubscribe = subscribeGroupStateForViewer({
       viewerPubkey: pubkey,
@@ -891,7 +898,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       active = false;
       unsubscribe();
     };
-  }, [isLoggedIn, pubkey, relays]);
+  }, [isLoggedIn, pubkey, groupStateRelays]);
 
   // Join visibleGroups × activity. Groups that haven't loaded yet get a
   // placeholder activity (createdAt-based) so they still render without
