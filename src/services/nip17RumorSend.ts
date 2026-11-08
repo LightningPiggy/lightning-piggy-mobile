@@ -53,6 +53,12 @@ export interface SendNip17RumorInput {
   relays: (Pick<RelayConfig, 'url' | 'write'> & Partial<Pick<RelayConfig, 'read'>>)[];
   rumor: UnsignedRumor;
   recipientPubkey: string;
+  /**
+   * The user directly chose this recipient (a Gamma order to its seller), so
+   * the wrap also goes to their own inbox relays. Otherwise the trust tier
+   * decides (#1749).
+   */
+  recipientChosen?: boolean;
 }
 
 /** Signer types that can seal + sign a NIP-17 rumor. */
@@ -101,7 +107,11 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSend
   }
   const targetRelays = nip17TargetRelays(input.relays, pubkey);
   // The recipient's wrap also goes to their kind-10050 inbox (#1570).
-  const peerRouting = { lookupRelays: nip17LookupRelays(input.relays) };
+  // Only the user's own pick of recipient skips the trust gate (#1749).
+  const peerRouting = {
+    lookupRelays: nip17LookupRelays(input.relays),
+    chosenRecipients: input.recipientChosen ? [recipient] : [],
+  };
 
   let result: DmSendResult;
   if (signerType === 'nsec') {

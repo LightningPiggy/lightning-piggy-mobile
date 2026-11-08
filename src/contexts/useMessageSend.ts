@@ -123,7 +123,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       // hits a single-point failure the moment that relay is slow. Each
       // message also goes to the recipient's own inbox relays (#1570).
       const targetRelays = nip17TargetRelays(relays, pubkey);
-      const peerRouting = { lookupRelays: nip17LookupRelays(relays) };
+      // The peer of a 1:1 is chosen: reach them at their own relays (#1749).
+      const peerRouting = {
+        lookupRelays: nip17LookupRelays(relays),
+        chosenRecipients: [normalizedRecipientPubkey],
+      };
       try {
         if (protocol === 'nip04') {
           const result = await sendNip04Message({
@@ -278,7 +282,12 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         return sendMarmotDm(pubkey, peer, rumor, hooks);
       }
       const targetRelays = nip17TargetRelays(relays, pubkey);
-      const peerRouting = { lookupRelays: nip17LookupRelays(relays) };
+      // A single peer was chosen (a 1:1 poll, vote or live-location marker);
+      // several are gated by the trust tier, like a group (#1749).
+      const peerRouting = {
+        lookupRelays: nip17LookupRelays(relays),
+        chosenRecipients: peers.length === 1 ? peers : [],
+      };
       try {
         const eventId = directMessageRumorEventId(rumor);
         hooks?.onRumorReady?.({ eventId, kind: rumor.kind, relays: targetRelays });
@@ -391,7 +400,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         return { success: false, error: 'Invalid public key format' };
       }
       const targetRelays = nip17TargetRelays(relays, pubkey);
-      const peerRouting = { lookupRelays: nip17LookupRelays(relays) };
+      // The peer of a 1:1 is chosen: reach them at their own relays (#1749).
+      const peerRouting = {
+        lookupRelays: nip17LookupRelays(relays),
+        chosenRecipients: [normalizedRecipientPubkey],
+      };
       try {
         const rumor = createFileMessageRumor({
           senderPubkey: pubkey,
@@ -531,7 +544,11 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
         return { success: false, error: 'Invalid public key format' };
       }
       const targetRelays = nip17TargetRelays(relays, pubkey);
-      const peerRouting = { lookupRelays: nip17LookupRelays(relays) };
+      // The peer of a 1:1 is chosen: reach them at their own relays (#1749).
+      const peerRouting = {
+        lookupRelays: nip17LookupRelays(relays),
+        chosenRecipients: [normalizedRecipientPubkey],
+      };
       try {
         const rumor = {
           pubkey,

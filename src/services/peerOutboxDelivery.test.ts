@@ -10,6 +10,14 @@ import {
   planPeerRoutes,
 } from './peerOutboxDelivery';
 import { clearPeerRelayListCache, getPeerRelayLists, peekPeerRelayLists } from './peerRelayLists';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CONTACTS_CACHE_KEY_BASE } from '../contexts/nostrCacheKeys';
+import { __resetAccountSettingsCacheForTests } from './accountSettingsCache';
+import { hasRepliedTo } from './dmRepliedPartners';
+import { clearFollowGateStores, publishFollowSet } from './followSetEvents';
+import { loadFofCache } from './friendsOfFriendsService';
+import { perAccountKey } from './perAccountStorage';
+import { WOT_STORAGE_KEY_BASE, type WotTier } from './wotSettingsService';
 
 jest.mock('./nostrPool', () => ({
   pool: {
@@ -23,6 +31,18 @@ jest.mock('./nostrPool', () => ({
 jest.mock('./appRelayPrefs', () => ({
   enabledAppRelays: (_group: string, list: readonly string[]) => list,
 }));
+jest.mock('./safetySettingsMigration', () => ({
+  ...jest.requireActual('./safetySettingsMigration'),
+  ensureSafetySettingsMigrated: jest.fn(async () => {}),
+}));
+jest.mock('./dmRepliedPartners', () => ({
+  loadRepliedPartners: jest.fn(async () => {}),
+  hasRepliedTo: jest.fn(() => false),
+}));
+jest.mock('./friendsOfFriendsService', () => ({
+  ...jest.requireActual('./friendsOfFriendsService'),
+  loadFofCache: jest.fn(async () => null),
+}));
 
 const publish = jest.mocked(pool.publish);
 const query = jest.mocked(pool.querySyncFilters);
@@ -30,6 +50,8 @@ const sender = 'e'.repeat(64);
 const alice = 'a'.repeat(64);
 const bob = 'b'.repeat(64);
 const base = ['wss://base.example.com'];
+/** Recipients the user picked: routed whatever the trust tier. */
+const chosen = [alice, bob];
 
 const wrapTo = (recipient: string, id = `wrap-${recipient.slice(0, 4)}`): VerifiedEvent =>
   ({
@@ -59,10 +81,13 @@ function publishedInboxes(lists: Record<string, string[]>) {
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   clearPeerRelayListCache();
   jest.clearAllMocks();
   query.mockReset();
+  clearFollowGateStores();
+  __resetAccountSettingsCacheForTests();
+  await AsyncStorage.clear();
 });
 
 describe('planPeerRoutes', () => {
@@ -130,6 +155,7 @@ describe('deliverToPeerRelays', () => {
       senderPubkey: sender,
       baseRelays: base,
       role: 'inbox',
+      chosenRecipients: chosen,
     });
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish.mock.calls[0][0]).toEqual(['wss://alice.example.com/']);
@@ -150,6 +176,7 @@ describe('deliverToPeerRelays', () => {
       senderPubkey: sender,
       baseRelays: base,
       role: 'inbox',
+      chosenRecipients: chosen,
     });
     expect(query).not.toHaveBeenCalled();
     expect(report.cacheHits).toBe(1);
@@ -165,6 +192,7 @@ describe('deliverToPeerRelays', () => {
       senderPubkey: sender,
       baseRelays: base,
       role: 'inbox',
+      chosenRecipients: chosen,
       lookupTimeoutMs: 1_000,
     });
     await new Promise((r) => setTimeout(r, 20));
@@ -182,6 +210,7 @@ describe('deliverToPeerRelays', () => {
       senderPubkey: sender,
       baseRelays: base,
       role: 'inbox',
+      chosenRecipients: chosen,
       lookupTimeoutMs: 5,
     });
     expect(report.relays).toEqual([]);
@@ -206,6 +235,7 @@ describe('deliverToPeerRelays', () => {
         senderPubkey: sender,
         baseRelays: base,
         role: 'inbox',
+        chosenRecipients: chosen,
         lookupTimeoutMs: 10,
       });
       expect(publish).toHaveBeenCalledWith(['wss://alice.example.com/'], wrap);
@@ -219,13 +249,13 @@ describe('deliverToPeerRelays', () => {
     publishedInboxes({ [alice]: ['wss://alice.example.com'] });
     publish.mockImplementationOnce((relays) => relays.map(() => Promise.reject(new Error('no'))));
     await expect(
-      deliverToPeerRelays({ events: [wrapTo(alice)], senderPubkey: sender, baseRelays: base, role: 'inbox' }), // prettier-ignore
+      deliverToPeerRelays({ events: [wrapTo(alice)], senderPubkey: sender, baseRelays: base, role: 'inbox', chosenRecipients: chosen }), // prettier-ignore
     ).resolves.toEqual({ relays: ['wss://alice.example.com/'], accepted: [], cacheHits: 0 });
 
     clearPeerRelayListCache();
     query.mockRejectedValue(new Error('No relay answered'));
     await expect(
-      deliverToPeerRelays({ events: [wrapTo(bob)], senderPubkey: sender, baseRelays: base, role: 'inbox' }), // prettier-ignore
+      deliverToPeerRelays({ events: [wrapTo(bob)], senderPubkey: sender, baseRelays: base, role: 'inbox', chosenRecipients: chosen }), // prettier-ignore
     ).resolves.toEqual({ relays: [], accepted: [], cacheHits: 0 });
   });
 
@@ -236,6 +266,7 @@ describe('deliverToPeerRelays', () => {
       senderPubkey: sender,
       baseRelays: base,
       role: 'inbox',
+      chosenRecipients: chosen,
     });
     await new Promise((r) => setTimeout(r, 0));
     expect(releaseNewIdleRelays).toHaveBeenCalledWith(
@@ -262,6 +293,7 @@ describe('deliverToPeerRelays', () => {
       senderPubkey: sender,
       baseRelays: base,
       role: 'read',
+      chosenRecipients: chosen,
     });
     expect(publish).toHaveBeenCalledTimes(1);
     expect(publish.mock.calls[0][0]).toEqual(['wss://read.example.com/']);
@@ -274,9 +306,113 @@ describe('deliverToPeerRelays', () => {
       senderPubkey: TEST_ACCOUNT_KEYS.little,
       baseRelays: ['wss://relay.damus.io'],
       role: 'inbox',
+      chosenRecipients: chosen,
     });
     for (const [relays] of query.mock.calls) expect(relays).toEqual([TEST_RELAY_URL]);
     for (const [relays] of publish.mock.calls) expect(relays).toEqual([TEST_RELAY_URL]);
     expect(report.relays).toEqual([]);
+  });
+});
+
+describe('deliverToPeerRelays trust gate (#1749)', () => {
+  const carol = 'c'.repeat(64);
+  beforeEach(() => {
+    jest.mocked(hasRepliedTo).mockReturnValue(false);
+    jest.mocked(loadFofCache).mockResolvedValue(null);
+  });
+  const relayOf = (pk: string) => `wss://${pk.slice(0, 4)}.example.com/`;
+  const setTier = (tier: WotTier) =>
+    AsyncStorage.setItem(perAccountKey(WOT_STORAGE_KEY_BASE, sender), JSON.stringify({ wotTier: tier })); // prettier-ignore
+  const follow = (...pks: string[]) =>
+    publishFollowSet(
+      sender,
+      pks.map((pubkey) => ({ pubkey, relay: null, petname: null, profile: null })),
+    );
+  /** A group send to every member, nobody chosen; the recipients routed to their inbox. */
+  async function groupRouted(members: string[], chosenRecipients?: string[]): Promise<string[]> {
+    publishedInboxes(Object.fromEntries(members.map((pk) => [pk, [relayOf(pk)]])));
+    await deliverToPeerRelays({
+      events: members.map((pk) => wrapTo(pk)),
+      senderPubkey: sender,
+      baseRelays: base,
+      role: 'inbox',
+      chosenRecipients,
+    });
+    return publish.mock.calls.map(([, event]) => eventRecipient(event as VerifiedEvent)!);
+  }
+
+  it('routes the chosen peer of a 1:1 even when they are a stranger', async () => {
+    expect(await groupRouted([alice], [alice])).toEqual([alice]);
+  });
+
+  it('keeps a stranger group member on the usual set only', async () => {
+    expect(await groupRouted([alice])).toEqual([]);
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it('routes only the followed member of a group, each wrap gated on its own', async () => {
+    follow(bob);
+    expect(await groupRouted([alice, bob])).toEqual([bob]);
+  });
+
+  it('reads follows from the contacts cache when the live gate has not hydrated', async () => {
+    await AsyncStorage.setItem(
+      perAccountKey(CONTACTS_CACHE_KEY_BASE, sender),
+      JSON.stringify([{ pubkey: bob }]),
+    );
+    expect(await groupRouted([alice, bob])).toEqual([bob]);
+  });
+
+  it('routes someone the user has replied to under Friends', async () => {
+    jest.mocked(hasRepliedTo).mockImplementation((_owner, pk) => pk === alice);
+    expect(await groupRouted([alice, bob])).toEqual([alice]);
+  });
+
+  it('always routes the sender’s own copy', async () => {
+    expect(await groupRouted([sender, alice])).toEqual([sender]);
+  });
+
+  it('counts an unset tier as Friends, not All', async () => {
+    follow(alice);
+    expect(await groupRouted([alice, bob])).toEqual([alice]);
+  });
+
+  it('adds the cached friends of friends under the FoF tier', async () => {
+    await setTier('fof');
+    follow(alice);
+    jest.mocked(loadFofCache).mockResolvedValue({
+      set: new Set([bob]),
+      excludedFriends: 0,
+      computedAt: 0,
+      stale: true,
+    });
+    expect(await groupRouted([alice, bob, carol])).toEqual([alice, bob]);
+  });
+
+  it('keeps friends of friends out under the Friends tier', async () => {
+    await setTier('friends');
+    follow(alice);
+    jest.mocked(loadFofCache).mockResolvedValue({
+      set: new Set([bob]),
+      excludedFriends: 0,
+      computedAt: 0,
+      stale: false,
+    });
+    expect(await groupRouted([alice, bob])).toEqual([alice]);
+  });
+
+  it('routes everyone under the All tier', async () => {
+    await setTier('all');
+    expect(await groupRouted([alice, bob])).toEqual([alice, bob]);
+  });
+
+  it('leaves recipients untrusted when storage fails (fail private)', async () => {
+    follow(bob);
+    const getItem = jest.spyOn(AsyncStorage, 'getItem').mockRejectedValue(new Error('disk'));
+    try {
+      expect(await groupRouted([alice, bob], [alice])).toEqual([alice]);
+    } finally {
+      getItem.mockRestore();
+    }
   });
 });

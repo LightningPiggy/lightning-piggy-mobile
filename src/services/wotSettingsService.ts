@@ -65,6 +65,18 @@ const parseWotSettings = (raw: string | null): WotSettings => {
 };
 
 /**
+ * The tier the user actually chose (a legacy boolean counts), or `null` when
+ * nothing valid was ever stored. Unlike `parseWotSettings`, "never chosen"
+ * doesn't become the wide 'all' default, so a privacy gate can pick its own
+ * fallback.
+ */
+export const parseChosenWotTier = (raw: string | null): WotTier | null => {
+  const parsed = parseWotSettings(raw);
+  // parseWotSettings hands back the DEFAULTS object itself only on fall-through.
+  return parsed === DEFAULTS ? null : parsed.wotTier;
+};
+
+/**
  * The account's tier if it is already known this session (prewarmed at
  * startup for every registered account, or loaded/saved since), else `null`
  * — meaning "unknown: stay gated". Synchronous, for the first render after an

@@ -9,6 +9,7 @@ import {
   peekPeerRelayLists,
   type PeerRelayListResult,
 } from './peerRelayLists';
+import { trustedPeerRecipients } from './peerDeliveryTrust';
 
 // Outbox-model delivery for DMs (#1570): besides the sender's usual set
 // (write relays ∪ defaults, kept for backward compatibility), each signed
@@ -29,6 +30,12 @@ import {
 // across a group's members), and the sockets this opened are released once
 // idle. Test accounts stay on the LAN test relay: extras are locked by the
 // sender, like the rest of the send, before anything is published.
+//
+// Gated per recipient (#1749): whoever runs a recipient's inbox relays sees
+// the sender's IP and send timing, so only trusted recipients get the extra
+// hop — the sender's own copy, the people the user directly chose to message
+// in this send, and whoever the Web of Trust tier admits (./peerDeliveryTrust).
+// Everyone else's event goes to the usual set only, as before #1570.
 
 /** Which of the recipient's lists an event is delivered to. */
 export type PeerRelayRole = 'inbox' | 'read';
@@ -37,6 +44,13 @@ export type PeerRelayRole = 'inbox' | 'read';
 export interface PeerRoutingOptions {
   /** The sender's read relays, asked for the recipients' lists. */
   lookupRelays?: readonly string[];
+  /**
+   * Recipients the user directly chose to message in this send (the peer of
+   * a 1:1, the seller of a Gamma order). Routed regardless of the trust tier:
+   * deliberately messaging someone is consent to reach them where they read.
+   * Group members are never listed here: each is gated by the tier.
+   */
+  chosenRecipients?: readonly string[];
 }
 
 export const PEER_LOOKUP_TIMEOUT_MS = 2_500;
@@ -154,16 +168,29 @@ export async function deliverToPeerRelays(input: {
   baseRelays: readonly string[];
   role: PeerRelayRole;
   lookupRelays?: readonly string[];
+  /** See `PeerRoutingOptions.chosenRecipients`. */
+  chosenRecipients?: readonly string[];
   lookupTimeoutMs?: number;
   publishTimeoutMs?: number;
 }): Promise<PeerDeliveryReport> {
   const empty: PeerDeliveryReport = { relays: [], accepted: [], cacheHits: 0 };
   try {
     const sender = input.senderPubkey.toLowerCase();
-    const recipients = [
+    const addressed = [
       ...new Set(input.events.map(eventRecipient).filter((pk): pk is string => !!pk)),
     ];
-    if (recipients.length === 0) return empty;
+    if (addressed.length === 0) return empty;
+    const recipients = await trustedPeerRecipients(sender, addressed, input.chosenRecipients);
+    const gated = addressed.length - recipients.length;
+    if (recipients.length === 0) {
+      perfLog(`peerOutbox ${input.role} owner=${perfOwnerTag(sender)} recipients=0 gated=${gated}`);
+      return empty;
+    }
+    const trusted = new Set(recipients);
+    const events = input.events.filter((event) => {
+      const recipient = eventRecipient(event);
+      return !!recipient && trusted.has(recipient);
+    });
     const cacheHits = recipients.filter((pk) => peekPeerRelayLists(pk, sender)).length;
     const started = Date.now();
     const lists = await listsWithin(
@@ -178,7 +205,7 @@ export async function deliverToPeerRelays(input: {
     const base = new Set(
       [...lockRelays([...input.baseRelays], sender)].map((url) => normalizeRelayUrl(url)),
     );
-    const routes = planPeerRoutes(input.events, (pk) => peerRelaysFor(lists.get(pk), input.role), [
+    const routes = planPeerRoutes(events, (pk) => peerRelaysFor(lists.get(pk), input.role), [
       ...base,
     ])
       .map((route) => ({
@@ -191,7 +218,7 @@ export async function deliverToPeerRelays(input: {
     const relays = [...new Set(routes.flatMap((route) => route.relays))];
     if (relays.length === 0) {
       perfLog(
-        `peerOutbox ${input.role} owner=${perfOwnerTag(sender)} recipients=${recipients.length} ` +
+        `peerOutbox ${input.role} owner=${perfOwnerTag(sender)} recipients=${recipients.length} gated=${gated} ` +
           `hits=${cacheHits} lookup=${lookupMs}ms extras=0`,
       );
       return { ...empty, cacheHits };
@@ -221,7 +248,7 @@ export async function deliverToPeerRelays(input: {
     });
     await Promise.allSettled(attempts);
     perfLog(
-      `peerOutbox ${input.role} owner=${perfOwnerTag(sender)} recipients=${recipients.length} ` +
+      `peerOutbox ${input.role} owner=${perfOwnerTag(sender)} recipients=${recipients.length} gated=${gated} ` +
         `hits=${cacheHits} lookup=${lookupMs}ms extras=${relays.length} ok=${accepted.size}`,
     );
     return { relays, accepted: relays.filter((url) => accepted.has(url)), cacheHits };

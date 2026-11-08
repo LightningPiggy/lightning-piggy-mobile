@@ -11,22 +11,29 @@ import { nip44EncryptForRecipient, nostrFinalizeEvent, nostrGetEventHash } from 
 import { yieldToEventLoop } from '../contexts/nostrDecryptPacing';
 import { deliverToPeerRelays, type PeerRoutingOptions } from './peerOutboxDelivery';
 import { getManyPeerRelayLists } from './peerRelayLists';
+import { trustedPeerRecipients } from './peerDeliveryTrust';
 
 /**
  * Outbox routing (#1570): each wrap ALSO goes to its recipient's kind-10050
  * inbox (the self-copy to the sender's own), best-effort and alongside the
  * usual publish — see ./peerOutboxDelivery. `false` turns it off (a NIP-171
- * epoch key is not a person with an inbox).
+ * epoch key is not a person with an inbox). Only trusted recipients are
+ * routed (#1749): see `PeerRoutingOptions.chosenRecipients`.
  */
 type PeerRouting = PeerRoutingOptions | false | undefined;
 
-/** Start the inbox lookups early so they overlap signing. */
+/** Start the trusted recipients' inbox lookups early so they overlap signing. */
 function prefetchInboxes(recipients: string[], senderPubkey: string, routing: PeerRouting): void {
   if (routing === false || recipients.length === 0) return;
-  void getManyPeerRelayLists(recipients, {
-    viewerPubkey: senderPubkey,
-    lookupRelays: routing?.lookupRelays,
-  });
+  void trustedPeerRecipients(senderPubkey, recipients, routing?.chosenRecipients).then(
+    (trusted) => {
+      if (trusted.length === 0) return;
+      void getManyPeerRelayLists(trusted, {
+        viewerPubkey: senderPubkey,
+        lookupRelays: routing?.lookupRelays,
+      });
+    },
+  );
 }
 
 function routeToInboxes(
@@ -42,6 +49,7 @@ function routeToInboxes(
     baseRelays: relays,
     role: 'inbox',
     lookupRelays: routing?.lookupRelays,
+    chosenRecipients: routing?.chosenRecipients,
   });
 }
 

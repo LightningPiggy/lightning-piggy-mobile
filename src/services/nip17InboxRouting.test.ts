@@ -1,5 +1,7 @@
 // End-to-end routing of real sends to the recipients' relays (#1570): the
 // NIP-17 1:1, group and Gamma order paths and NIP-04, over a mocked pool.
+// The 1:1 peer and the Gamma seller are passed as chosen (as the app's
+// senders do); group members are reached only when trusted (#1749).
 import type { Event } from 'nostr-tools';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdown';
@@ -10,6 +12,7 @@ import { sendNip17ToManyWithNsec, sendNip17ToManyWithSigner } from './nostrNip17
 import { pool } from './nostrPool';
 import { sendNip17Rumor } from './nip17RumorSend';
 import { clearPeerRelayListCache } from './peerRelayLists';
+import { clearFollowGateStores, publishFollowSet } from './followSetEvents';
 
 jest.mock('./nostrPool', () => ({
   pool: {
@@ -99,6 +102,7 @@ function wrapIdFor(pubkey: string): string {
 
 beforeEach(() => {
   clearPeerRelayListCache();
+  clearFollowGateStores();
   jest.clearAllMocks();
   query.mockReset();
   jest.spyOn(global, 'requestAnimationFrame').mockImplementation((callback) => {
@@ -125,7 +129,7 @@ it('1:1: the recipient wrap goes to their 10050, the self-copy to my own 10050',
     rumor,
     recipientPubkeys: [peer],
     relays: base,
-    peerRouting: { lookupRelays: ['wss://my-read.example.com'] },
+    peerRouting: { lookupRelays: ['wss://my-read.example.com'], chosenRecipients: [peer] },
   });
   await settle();
   expect(result.wrapsPublished).toBe(2);
@@ -147,6 +151,7 @@ it('remote signer: routes the same signed wraps, with no extra signing', async (
     rumor: { ...rumor, pubkey: me },
     recipientPubkeys: [peer],
     relays: base,
+    peerRouting: { chosenRecipients: [peer] },
     signerNip44Encrypt: async () => 'ciphertext',
     signerSignSeal: signSeal,
   });
@@ -155,18 +160,25 @@ it('remote signer: routes the same signed wraps, with no extra signing', async (
   expect(destinations().get(wrapIdFor(peer))).toEqual([base, ['wss://peer-inbox.example.com/']]);
 });
 
-it("group: each member's wrap goes to THAT member's inbox only", async () => {
+it("group: each followed member's wrap goes to THAT member's inbox; a stranger's does not", async () => {
   const myKey = generateSecretKey();
+  const me = getPublicKey(myKey);
   const members = [1, 2, 3].map(() => getPublicKey(generateSecretKey()));
-  published(
-    Object.fromEntries(
+  const stranger = getPublicKey(generateSecretKey());
+  publishFollowSet(
+    me,
+    members.map((pubkey) => ({ pubkey, relay: null, petname: null, profile: null })),
+  );
+  published({
+    ...Object.fromEntries(
       members.map((pk, i) => [pk, { inbox: [`wss://member${i}-inbox.example.com`] }]),
     ),
-  );
+    [stranger]: { inbox: ['wss://stranger-inbox.example.com'] },
+  });
   await sendNip17ToManyWithNsec({
     senderSecretKey: myKey,
     rumor,
-    recipientPubkeys: members,
+    recipientPubkeys: [...members, stranger],
     relays: base,
   });
   await settle();
@@ -174,8 +186,11 @@ it("group: each member's wrap goes to THAT member's inbox only", async () => {
   members.forEach((pk, i) => {
     expect(sent.get(wrapIdFor(pk))).toEqual([base, [`wss://member${i}-inbox.example.com/`]]);
   });
-  // One batched lookup for the whole group (self included).
+  // The stranger's wrap stays on the usual set, and their list isn't even looked up.
+  expect(sent.get(wrapIdFor(stranger))).toEqual([base]);
+  // One batched lookup for the trusted members (self included).
   expect(query).toHaveBeenCalledTimes(1);
+  expect(query.mock.calls[0][1][0].authors).not.toContain(stranger);
 });
 
 it('peerRouting: false (a NIP-171 epoch key) looks nothing up and adds no relays', async () => {
@@ -206,6 +221,7 @@ it('Gamma order: the wrap reaches the seller inbox', async () => {
     relays: [{ url: 'wss://buyer-write.example.com', write: true, read: false }],
     rumor: { pubkey: buyer, kind: 16, created_at: 123, tags: [['p', seller]], content: '{}' },
     recipientPubkey: seller,
+    recipientChosen: true,
   });
   await settle();
   expect(destinations().get(wrapIdFor(seller))).toEqual([
@@ -228,6 +244,7 @@ it('NIP-04: the kind 4 also goes to the recipient NIP-65 read relays', async () 
     plaintext: 'hi',
     signerType: 'nsec',
     relays: base,
+    peerRouting: { chosenRecipients: [peer] },
   });
   await settle();
   const event = publish.mock.calls[0][1];
@@ -245,6 +262,7 @@ it('a late lookup still publishes the SAME signed wrap to the inbox after the se
     rumor,
     recipientPubkeys: [peer],
     relays: base,
+    peerRouting: { chosenRecipients: [peer] },
   });
   // The send resolved without waiting for the lookup: only the usual set so far.
   expect(result.wrapsPublished).toBe(2);
@@ -270,6 +288,7 @@ it('extra relays never change the result or the delivery tick', async () => {
     rumor,
     recipientPubkeys: [peer],
     relays: base,
+    peerRouting: { chosenRecipients: [peer] },
     onDeliveryFinalized,
   });
   await settle();
@@ -301,7 +320,7 @@ it('lockdown: a test account sending to a public 10050 reaches only the test rel
     rumor,
     recipientPubkeys: [peer],
     relays: ['wss://relay.damus.io', ...base],
-    peerRouting: { lookupRelays: ['wss://my-read.example.com'] },
+    peerRouting: { lookupRelays: ['wss://my-read.example.com'], chosenRecipients: [peer] },
   });
   await settle();
   expect(result.wrapsPublished).toBe(2);

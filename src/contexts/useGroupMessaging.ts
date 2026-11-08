@@ -143,7 +143,8 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
       const sendRelays = nip171 ? nip171.relays : targetRelays;
       const includeSelf = !nip171;
       // Each member's wrap also goes to THAT member's kind-10050 inbox (#1570);
-      // a NIP-171 epoch key is not a person with an inbox.
+      // a NIP-171 epoch key is not a person with an inbox. No member is
+      // "chosen": each is reached there only if the trust tier admits them (#1749).
       const peerRouting = nip171 ? (false as const) : { lookupRelays: nip17LookupRelays(relays) };
       try {
         // kind-15 encrypted file (voice note, #235) when a `file` is given;

@@ -140,6 +140,35 @@ describe('nsec checkout', () => {
     expect(result.current.status).toBe('sent');
   });
 
+  test('routes the order to the seller’s own inbox relays: the buyer chose them (#1749)', async () => {
+    (getMemoisedSecretKey as jest.Mock).mockResolvedValue(secretKey);
+    const { result } = renderHook(() => useMarketCheckout());
+    await act(async () => {
+      await result.current.placeOrder(input);
+    });
+    expect(nostrService.sendNip17ToManyWithNsec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        peerRouting: expect.objectContaining({ chosenRecipients: [vendor] }),
+      }),
+    );
+  });
+
+  test('a rumor send that does not mark its recipient chosen leaves them to the trust tier', async () => {
+    (getMemoisedSecretKey as jest.Mock).mockResolvedValue(secretKey);
+    await sendNip17Rumor({
+      senderPubkey: buyer,
+      signerType: 'nsec',
+      recipientPubkey: vendor,
+      relays: [],
+      rumor: { pubkey: buyer, kind: 16, created_at: 1, tags: [], content: '' },
+    });
+    expect(nostrService.sendNip17ToManyWithNsec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        peerRouting: expect.objectContaining({ chosenRecipients: [] }),
+      }),
+    );
+  });
+
   test('fails closed when the stored key does not belong to the active pubkey', async () => {
     (getMemoisedSecretKey as jest.Mock).mockResolvedValue(null);
     const { result } = renderHook(() => useMarketCheckout());

@@ -6,7 +6,12 @@
 //   2. The legacy boolean payload migrates correctly so users on pre-#535
 //      installs don't have their explicit choice ignored.
 
-import { loadWotSettings, peekWotSettings, saveWotSettings } from './wotSettingsService';
+import {
+  loadWotSettings,
+  parseChosenWotTier,
+  peekWotSettings,
+  saveWotSettings,
+} from './wotSettingsService';
 import { __resetAccountSettingsCacheForTests } from './accountSettingsCache';
 
 jest.mock('@react-native-async-storage/async-storage', () => {
@@ -141,5 +146,19 @@ describe('wotSettingsService', () => {
       const settings = await loadWotSettings(PK);
       expect(settings.wotTier).toBe('all');
     });
+  });
+});
+
+describe('parseChosenWotTier (#1749)', () => {
+  it('returns the tier the user chose, including a legacy boolean', () => {
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'fof' }))).toBe('fof');
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'all' }))).toBe('all');
+    expect(parseChosenWotTier(JSON.stringify({ filterEnabled: true }))).toBe('friends');
+  });
+
+  it('returns null when nothing valid was ever chosen, not the wide default', () => {
+    expect(parseChosenWotTier(null)).toBeNull();
+    expect(parseChosenWotTier('not json')).toBeNull();
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'everyone' }))).toBeNull();
   });
 });

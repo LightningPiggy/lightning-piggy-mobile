@@ -38,6 +38,12 @@ export function getFollowGateStore(owner: string): FollowGateStore {
   return store;
 }
 
+/** The owner's follow set once hydrated this session, else null. Never creates a store. */
+export function peekFollowSet(owner: string): ReadonlySet<string> | null {
+  const store = stores.get(owner.toLowerCase());
+  return store?.followHydratedRef.current ? store.followPubkeysRef.current : null;
+}
+
 /** Account switch/sign-out only. Subscription teardown must never call this. */
 export function clearFollowGateStores(): void {
   sessionGeneration++;

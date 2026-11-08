@@ -139,6 +139,8 @@ export function useMarketCheckout(): UseMarketCheckout {
           relays,
           rumor,
           recipientPubkey: vendorPubkey,
+          // Placing an order is choosing to message the seller (#1749).
+          recipientChosen: true,
         });
 
         if (input.title) {

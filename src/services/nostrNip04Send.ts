@@ -18,7 +18,8 @@ export async function sendNip04Message(input: {
   signerType: SignerType | null;
   relays: string[];
   hooks?: SendHooks;
-  /** Outbox routing (#1570): also deliver to the recipient's NIP-65 read relays. */
+  /** Outbox routing (#1570): also deliver to the recipient's NIP-65 read relays
+   * (when trusted or chosen, #1749 — callers list the 1:1 peer as chosen). */
   peerRouting?: PeerRoutingOptions;
 }): Promise<DmSendResult & { rumorCreatedAt: number }> {
   const { senderPubkey, recipientPubkey, plaintext, signerType, relays, hooks } = input;
@@ -77,6 +78,7 @@ export async function sendNip04Message(input: {
     baseRelays: [...lockRelays(relays, senderPubkey)],
     role: 'read',
     lookupRelays: input.peerRouting?.lookupRelays,
+    chosenRecipients: input.peerRouting?.chosenRecipients,
   });
   const result = await publishWrapsTrackingRelays(
     [signed],
