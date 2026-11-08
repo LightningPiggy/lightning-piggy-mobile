@@ -136,8 +136,56 @@ describe('shared build', () => {
     const [ra, rb] = await Promise.all([a, b]);
     expect(fetch).toHaveBeenCalledTimes(batches);
     expect(rb.set).toBe(ra.set);
-    expect(progressA).toHaveBeenLastCalledWith(batches, batches);
-    expect(progressB).toHaveBeenLastCalledWith(batches, batches);
+    // Progress counts friends checked, not batches.
+    expect(progressA).toHaveBeenLastCalledWith(friends.length, friends.length);
+    expect(progressB).toHaveBeenLastCalledWith(friends.length, friends.length);
+  });
+
+  it('reports progress in friends checked, the short last batch included', async () => {
+    const progress: [number, number][] = [];
+    await computeFofSet(user, friends, {
+      fetchKind3,
+      maxSize: FOF_SHARED_MAX,
+      onProgress: (done, total) => progress.push([done, total]),
+    });
+    // 120 friends → batches of 50, 50, 20: the start, then each batch.
+    expect(progress).toEqual([
+      [0, 120],
+      [50, 120],
+      [100, 120],
+      [120, 120],
+    ]);
+  });
+
+  it('counts each friend once when the follow list repeats or varies in case', async () => {
+    const progress: [number, number][] = [];
+    const messy = [...friends.slice(0, 3), friends[0].toUpperCase(), friends[1]];
+    await computeFofSet(user, messy, {
+      fetchKind3,
+      maxSize: FOF_SHARED_MAX,
+      onProgress: (done, total) => progress.push([done, total]),
+    });
+    expect(progress).toEqual([
+      [0, 3],
+      [3, 3],
+    ]);
+  });
+
+  it('a late joiner is told the friends checked so far, in friends', async () => {
+    const { fetch, release } = gated();
+    const a = computeFofSet(user, friends, { fetchKind3: fetch, maxSize: FOF_SHARED_MAX });
+    await flush();
+    const progress = jest.fn();
+    const b = computeFofSet(user, friends, {
+      fetchKind3: jest.fn(),
+      maxSize: FOF_SHARED_MAX,
+      onProgress: progress,
+    });
+    // Joined before the first batch landed: replayed the (0, total) start.
+    expect(progress).toHaveBeenCalledWith(0, friends.length);
+    release();
+    await Promise.all([a, b]);
+    expect(progress).toHaveBeenLastCalledWith(friends.length, friends.length);
   });
 
   it('a late joiner sees the progress so far', async () => {

@@ -107,7 +107,8 @@ it('cancel keeps the tier, persists nothing and clears the progress', async () =
   await act(async () => result.current.enableFof());
   await flush();
   expect(result.current.status.building).toBe(true);
-  expect(result.current.status.progress).toEqual({ done: 0, total: 0 });
+  // The total (friends to check) is known before the first batch lands.
+  expect(result.current.status.progress).toEqual({ done: 0, total: 2 });
   act(() => result.current.cancelL2());
   await flush();
   expect(result.current.status).toEqual({ building: false, progress: null, failed: false });

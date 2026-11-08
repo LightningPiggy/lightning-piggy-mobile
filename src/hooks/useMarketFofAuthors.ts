@@ -11,7 +11,7 @@ import {
 import { fetchFollowLists } from '../services/followListsFetcher';
 import { marketFofAuthors, MARKET_FOF_MAX } from '../utils/marketFofScope';
 
-/** Progress of a friends-of-friends build: follow-list batches done / total. */
+/** Progress of a friends-of-friends build: friends checked / total friends. */
 export interface FofProgress {
   done: number;
   total: number;

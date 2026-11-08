@@ -53,7 +53,11 @@ describe('computeFofSet + cache with a ranked cap', () => {
       onProgress: (done, total) => progress.push([done, total]),
     });
     expect([...result.set]).toEqual([pk('shared')]);
-    expect(progress).toEqual([[1, 1]]);
+    // Two friends, one batch: the start, then both checked.
+    expect(progress).toEqual([
+      [0, 2],
+      [2, 2],
+    ]);
     expect([...(await loadFofCache(user, [a, b], 1))!.set]).toEqual([pk('shared')]);
     // A reader with another cap (or none) must not reuse a capped set.
     expect(await loadFofCache(user, [a, b], 5)).toBeNull();

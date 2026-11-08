@@ -2,7 +2,7 @@
 //
 // Tapping any of the WoT chips (Messages, Hunt, Events) opens this sheet.
 // Choosing "Friends of friends" builds the extended trust set on demand
-// (#565): a progress panel shows "X of Y" follow-list batches with Cancel,
+// (#565): its card shows "X of Y" friends checked with a bar and Cancel,
 // and the tier only switches once the set is ready. Cancel or a relay
 // failure leaves the previous tier in place.
 
@@ -18,7 +18,7 @@ import {
   WOT_FOF_MAX,
   type FofBuildProgress,
 } from '../contexts/TrustGraphContext';
-import { useLocale, useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import {
   createWebOfTrustBottomSheetStyles,
   type WebOfTrustBottomSheetStyles,
@@ -44,31 +44,48 @@ interface TierRowProps {
   active: boolean;
   onSelect: () => void;
   styles: WebOfTrustBottomSheetStyles;
+  /** Status shown inside this tier's card, under the selectable row
+   * (the Friends of friends build progress, failure or size). */
+  children?: React.ReactNode;
 }
 
-const TierRow: React.FC<TierRowProps> = ({ tier, title, subtitle, active, onSelect, styles }) => {
+// One tier's card. The selectable row is its own touchable; any status sits
+// beside it inside the card rather than nested in the touchable, so the
+// Cancel button stays separately reachable (TalkBack/VoiceOver, Maestro).
+const TierRow: React.FC<TierRowProps> = ({
+  tier,
+  title,
+  subtitle,
+  active,
+  onSelect,
+  styles,
+  children,
+}) => {
   const colors = useThemeColors();
   const Icon = tier === 'friends' ? ShieldCheck : tier === 'fof' ? ShieldQuestion : ShieldOff;
   return (
-    <TouchableOpacity
-      style={[styles.tierRow, active ? styles.tierRowActive : null]}
-      onPress={onSelect}
-      testID={`wot-tier-${tier}-chip`}
-      accessibilityRole="radio"
-      accessibilityState={{ selected: active }}
-      accessibilityLabel={title}
-    >
-      <View style={styles.tierIcon}>
-        <Icon size={20} color={colors.textHeader} strokeWidth={2.5} />
-      </View>
-      <View style={styles.tierBody}>
-        <Text style={styles.tierTitle}>{title}</Text>
-        <Text style={styles.tierSubtitle}>{subtitle}</Text>
-      </View>
-      <View style={[styles.radioOuter, active ? styles.radioOuterActive : null]}>
-        {active ? <View style={styles.radioInner} /> : null}
-      </View>
-    </TouchableOpacity>
+    <View style={[styles.tierCard, active ? styles.tierCardActive : null]}>
+      <TouchableOpacity
+        style={styles.tierRow}
+        onPress={onSelect}
+        testID={`wot-tier-${tier}-chip`}
+        accessibilityRole="radio"
+        accessibilityState={{ selected: active }}
+        accessibilityLabel={title}
+      >
+        <View style={styles.tierIcon}>
+          <Icon size={20} color={colors.textHeader} strokeWidth={2.5} />
+        </View>
+        <View style={styles.tierBody}>
+          <Text style={styles.tierTitle}>{title}</Text>
+          <Text style={styles.tierSubtitle}>{subtitle}</Text>
+        </View>
+        <View style={[styles.radioOuter, active ? styles.radioOuterActive : null]}>
+          {active ? <View style={styles.radioInner} /> : null}
+        </View>
+      </TouchableOpacity>
+      {children ? <View style={styles.tierExtras}>{children}</View> : null}
+    </View>
   );
 };
 
@@ -78,15 +95,19 @@ interface FofProgressPanelProps {
   styles: WebOfTrustBottomSheetStyles;
 }
 
-// "Finding friends of friends… 3 of 12" + bar + Cancel. Re-renders once per
-// 50-friend follow-list batch.
+// "Checking who your friends follow… 600 of 680" + bar + Cancel, inside the
+// Friends of friends card. Counted in friends; re-renders once per 50-friend
+// follow-list batch.
 const FofProgressPanel: React.FC<FofProgressPanelProps> = ({ progress, onCancel, styles }) => {
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const total = progress?.total ?? 0;
   const done = progress?.done ?? 0;
   const label =
     total > 0
-      ? t('webOfTrustBottomSheet.fofProgress', { done, total })
+      ? t('webOfTrustBottomSheet.fofProgress', {
+          done: done.toLocaleString(formatLocale),
+          total: total.toLocaleString(formatLocale),
+        })
       : t('webOfTrustBottomSheet.fofProgressStarting');
   const fraction = total > 0 ? Math.min(1, done / total) : 0;
   return (
@@ -137,6 +158,25 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
     setWotTier(next);
   };
 
+  // The Friends of friends card's status line: build progress, a failure, or
+  // the size of the set once it's the active tier.
+  let fofStatus: React.ReactNode = null;
+  if (status.building) {
+    fofStatus = <FofProgressPanel progress={status.progress} onCancel={cancelL2} styles={styles} />;
+  } else if (status.failed) {
+    fofStatus = (
+      <Text style={styles.errorText} testID="wot-fof-error" accessibilityLiveRegion="polite">
+        {t('webOfTrustBottomSheet.fofFailed')}
+      </Text>
+    );
+  } else if (activeTier === 'fof' && l2Size > 0) {
+    fofStatus = (
+      <Text style={styles.metaText} testID="wot-fof-meta">
+        {t('webOfTrustBottomSheet.fofCount', { count: l2Size })}
+      </Text>
+    );
+  }
+
   return (
     <Modal
       visible={visible}
@@ -165,7 +205,13 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+        {/* The scroll shrinks to fit the sheet's max height so the fixed
+            Done button never covers the last option. */}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           <Text style={styles.explainer}>{t('webOfTrustBottomSheet.explainer')}</Text>
 
           <TierRow
@@ -183,20 +229,9 @@ const WebOfTrustBottomSheet: React.FC<Props> = ({ visible, onClose, currentTier 
             active={activeTier === 'fof'}
             onSelect={() => handleSelect('fof')}
             styles={styles}
-          />
-          {status.building ? (
-            <FofProgressPanel progress={status.progress} onCancel={cancelL2} styles={styles} />
-          ) : null}
-          {!status.building && status.failed ? (
-            <Text style={styles.errorText} testID="wot-fof-error" accessibilityLiveRegion="polite">
-              {t('webOfTrustBottomSheet.fofFailed')}
-            </Text>
-          ) : null}
-          {!status.building && !status.failed && activeTier === 'fof' && l2Size > 0 ? (
-            <Text style={styles.metaText} testID="wot-fof-meta">
-              {t('webOfTrustBottomSheet.fofCount', { count: l2Size })}
-            </Text>
-          ) : null}
+          >
+            {fofStatus}
+          </TierRow>
           <TierRow
             tier="all"
             title={t('webOfTrustBottomSheet.allTitle')}
