@@ -746,7 +746,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // forget its keys.
       if (isNip171GroupId(groupId)) {
         return nip171.leave(groupId, async (groupPubkey) => {
-          await sendDirectMessage(groupPubkey, '-', { protocol: 'nip17' });
+          // The group key is not a person: no inbox-relay routing (#1749).
+          await sendDirectMessage(groupPubkey, '-', { protocol: 'nip17', peerRouting: false });
         });
       }
       await persist((curr) => curr.filter((g) => g.id !== groupId));

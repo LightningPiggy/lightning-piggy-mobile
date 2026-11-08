@@ -51,6 +51,9 @@ export interface SendHooks {
   protocol?: DmProtocol;
   onRumorReady?: (meta: { eventId: string; kind: number; relays: string[] }) => void;
   onDeliveryFinalized?: (delivery: DeliveryStatus) => void;
+  /** `false`: no outbox routing for this send. The recipient is a key, not a
+   * person with an inbox (a NIP-171 group's leave request, #1749). */
+  peerRouting?: false;
 }
 
 /**
@@ -124,10 +127,13 @@ export function useMessageSend({ pubkey, isLoggedIn, signerType, relays }: UseMe
       // message also goes to the recipient's own inbox relays (#1570).
       const targetRelays = nip17TargetRelays(relays, pubkey);
       // The peer of a 1:1 is chosen: reach them at their own relays (#1749).
-      const peerRouting = {
-        lookupRelays: nip17LookupRelays(relays),
-        chosenRecipients: [normalizedRecipientPubkey],
-      };
+      const peerRouting =
+        hooks?.peerRouting === false
+          ? (false as const)
+          : {
+              lookupRelays: nip17LookupRelays(relays),
+              chosenRecipients: [normalizedRecipientPubkey],
+            };
       try {
         if (protocol === 'nip04') {
           const result = await sendNip04Message({

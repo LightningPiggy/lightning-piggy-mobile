@@ -12,7 +12,9 @@
 //       'friends' → follows + people the user has replied to;
 //       'fof'     → also the cached friends-of-friends set;
 //       'all'     → everyone.
-//     A tier that was never chosen counts as 'friends'.
+//     Only an explicit pick counts (#1765's `explicit` marker); a tier never
+//     chosen — the #627 'all' default, or one the Groups migration / chip
+//     stored — counts as 'friends'.
 // Everyone else gets the usual set only (write relays ∪ defaults).
 //
 // Readable outside React: follows come from the session's follow gate once
@@ -43,7 +45,7 @@ export interface PeerDeliveryTrust {
   fof: ReadonlySet<string> | null;
 }
 
-/** The stored tier; never chosen (or unreadable payload) → 'friends'. Throws on storage errors. */
+/** The explicitly chosen tier; anything else → 'friends'. Throws on storage errors. */
 async function readTier(owner: string): Promise<WotTier> {
   await ensureSafetySettingsMigrated(owner);
   const known = peekAccountSetting(WOT_STORAGE_KEY_BASE, owner);
@@ -54,19 +56,34 @@ async function readTier(owner: string): Promise<WotTier> {
   return parseChosenWotTier(raw) ?? 'friends';
 }
 
+// The last parsed contacts cache per account, keyed by its raw string, so a
+// send (prefetch + delivery) doesn't parse the same JSON twice. Bounded by the
+// accounts on the device; a changed cache is re-parsed.
+const parsedContacts = new Map<string, { raw: string; follows: ReadonlySet<string> }>();
+
 /** Follows from the live gate, else the contacts cache (none cached → empty). Throws on storage errors. */
 async function readFollows(owner: string): Promise<ReadonlySet<string>> {
   const live = peekFollowSet(owner);
   if (live) return live;
   const raw = await AsyncStorage.getItem(perAccountKey(CONTACTS_CACHE_KEY_BASE, owner));
   if (!raw) return new Set();
+  const memo = parsedContacts.get(owner);
+  if (memo?.raw === raw) return memo.follows;
   const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed)) return new Set();
-  return buildFollowSet(
-    parsed
-      .map((c) => (c as { pubkey?: unknown })?.pubkey)
-      .filter((pk): pk is string => typeof pk === 'string'),
-  );
+  const follows = Array.isArray(parsed)
+    ? buildFollowSet(
+        parsed
+          .map((c) => (c as { pubkey?: unknown })?.pubkey)
+          .filter((pk): pk is string => typeof pk === 'string'),
+      )
+    : new Set<string>();
+  parsedContacts.set(owner, { raw, follows });
+  return follows;
+}
+
+/** Test hook. */
+export function __resetPeerDeliveryTrustForTests(): void {
+  parsedContacts.clear();
 }
 
 /**

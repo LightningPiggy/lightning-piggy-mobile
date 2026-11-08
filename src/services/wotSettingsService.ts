@@ -65,15 +65,23 @@ const parseWotSettings = (raw: string | null): WotSettings => {
 };
 
 /**
- * The tier the user actually chose (a legacy boolean counts), or `null` when
- * nothing valid was ever stored. Unlike `parseWotSettings`, "never chosen"
- * doesn't become the wide 'all' default, so a privacy gate can pick its own
- * fallback.
+ * The tier the user explicitly picked, or `null` when they never did. Only a
+ * payload carrying #1765's marker (`{ wotTier, explicit: true }`) counts. The
+ * #627 'all' default, the tier the Groups migration / chip store, and the
+ * legacy boolean were never a pick of who may be reached, so a privacy gate
+ * must not widen on them. Mirrors #1765's `notificationTierFor`; switch to it
+ * once that lands.
  */
 export const parseChosenWotTier = (raw: string | null): WotTier | null => {
-  const parsed = parseWotSettings(raw);
-  // parseWotSettings hands back the DEFAULTS object itself only on fall-through.
-  return parsed === DEFAULTS ? null : parsed.wotTier;
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const { wotTier, explicit } = parsed as { wotTier?: unknown; explicit?: unknown };
+    return explicit === true && isWotTier(wotTier) ? wotTier : null;
+  } catch {
+    return null;
+  }
 };
 
 /**

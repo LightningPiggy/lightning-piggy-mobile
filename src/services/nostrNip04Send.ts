@@ -20,7 +20,7 @@ export async function sendNip04Message(input: {
   hooks?: SendHooks;
   /** Outbox routing (#1570): also deliver to the recipient's NIP-65 read relays
    * (when trusted or chosen, #1749 — callers list the 1:1 peer as chosen). */
-  peerRouting?: PeerRoutingOptions;
+  peerRouting?: PeerRoutingOptions | false;
 }): Promise<DmSendResult & { rumorCreatedAt: number }> {
   const { senderPubkey, recipientPubkey, plaintext, signerType, relays, hooks } = input;
   let signed: VerifiedEvent;
@@ -72,14 +72,17 @@ export async function sendNip04Message(input: {
   hooks?.onRumorReady?.({ eventId: signed.id, kind: 4, relays });
   trackRelays(relays);
   // Best-effort and alongside the usual publish; never changes the result.
-  void deliverToPeerRelays({
-    events: [signed],
-    senderPubkey,
-    baseRelays: [...lockRelays(relays, senderPubkey)],
-    role: 'read',
-    lookupRelays: input.peerRouting?.lookupRelays,
-    chosenRecipients: input.peerRouting?.chosenRecipients,
-  });
+  const routing = input.peerRouting;
+  if (routing !== false) {
+    void deliverToPeerRelays({
+      events: [signed],
+      senderPubkey,
+      baseRelays: [...lockRelays(relays, senderPubkey)],
+      role: 'read',
+      lookupRelays: routing?.lookupRelays,
+      chosenRecipients: routing?.chosenRecipients,
+    });
+  }
   const result = await publishWrapsTrackingRelays(
     [signed],
     relays,

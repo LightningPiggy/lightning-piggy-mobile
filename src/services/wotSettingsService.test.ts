@@ -150,15 +150,29 @@ describe('wotSettingsService', () => {
 });
 
 describe('parseChosenWotTier (#1749)', () => {
-  it('returns the tier the user chose, including a legacy boolean', () => {
-    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'fof' }))).toBe('fof');
-    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'all' }))).toBe('all');
-    expect(parseChosenWotTier(JSON.stringify({ filterEnabled: true }))).toBe('friends');
+  it('returns a tier only when it carries the explicit marker', () => {
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'all', explicit: true }))).toBe('all');
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'fof', explicit: true }))).toBe('fof');
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'friends', explicit: true }))).toBe(
+      'friends',
+    );
   });
 
-  it('returns null when nothing valid was ever chosen, not the wide default', () => {
+  it('treats the Groups migration / chip payload (no marker) as never chosen', () => {
+    // GroupsContext's migration and its chip save `{ wotTier }` with no user pick.
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'all' }))).toBeNull();
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'fof' }))).toBeNull();
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'all', explicit: false }))).toBeNull();
+  });
+
+  it('treats the legacy boolean as never chosen', () => {
+    expect(parseChosenWotTier(JSON.stringify({ filterEnabled: false }))).toBeNull();
+    expect(parseChosenWotTier(JSON.stringify({ filterEnabled: true }))).toBeNull();
+  });
+
+  it('returns null when nothing valid was stored', () => {
     expect(parseChosenWotTier(null)).toBeNull();
     expect(parseChosenWotTier('not json')).toBeNull();
-    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'everyone' }))).toBeNull();
+    expect(parseChosenWotTier(JSON.stringify({ wotTier: 'everyone', explicit: true }))).toBeNull();
   });
 });

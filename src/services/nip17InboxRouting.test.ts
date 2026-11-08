@@ -252,6 +252,24 @@ it('NIP-04: the kind 4 also goes to the recipient NIP-65 read relays', async () 
   expect(destinations().get(event.id)).toEqual([base, ['wss://peer-read.example.com/']]);
 });
 
+it('NIP-04 with peerRouting: false looks nothing up and adds no relays', async () => {
+  const myKey = generateSecretKey();
+  const peer = getPublicKey(generateSecretKey());
+  jest.mocked(getMemoisedSecretKey).mockResolvedValue(myKey);
+  published({ [peer]: { read: ['wss://peer-read.example.com'] } });
+  await sendNip04Message({
+    senderPubkey: getPublicKey(myKey),
+    recipientPubkey: peer,
+    plaintext: '-',
+    signerType: 'nsec',
+    relays: base,
+    peerRouting: false,
+  });
+  await settle();
+  expect(query).not.toHaveBeenCalled();
+  for (const [relays] of publish.mock.calls) expect(relays).toEqual(base);
+});
+
 it('a late lookup still publishes the SAME signed wrap to the inbox after the send resolved', async () => {
   const myKey = generateSecretKey();
   const peer = getPublicKey(generateSecretKey());

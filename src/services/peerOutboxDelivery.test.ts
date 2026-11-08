@@ -17,6 +17,7 @@ import { hasRepliedTo } from './dmRepliedPartners';
 import { clearFollowGateStores, publishFollowSet } from './followSetEvents';
 import { loadFofCache } from './friendsOfFriendsService';
 import { perAccountKey } from './perAccountStorage';
+import { __resetPeerDeliveryTrustForTests } from './peerDeliveryTrust';
 import { WOT_STORAGE_KEY_BASE, type WotTier } from './wotSettingsService';
 
 jest.mock('./nostrPool', () => ({
@@ -87,6 +88,7 @@ beforeEach(async () => {
   query.mockReset();
   clearFollowGateStores();
   __resetAccountSettingsCacheForTests();
+  __resetPeerDeliveryTrustForTests();
   await AsyncStorage.clear();
 });
 
@@ -321,8 +323,10 @@ describe('deliverToPeerRelays trust gate (#1749)', () => {
     jest.mocked(loadFofCache).mockResolvedValue(null);
   });
   const relayOf = (pk: string) => `wss://${pk.slice(0, 4)}.example.com/`;
-  const setTier = (tier: WotTier) =>
-    AsyncStorage.setItem(perAccountKey(WOT_STORAGE_KEY_BASE, sender), JSON.stringify({ wotTier: tier })); // prettier-ignore
+  const storeTier = (payload: object) =>
+    AsyncStorage.setItem(perAccountKey(WOT_STORAGE_KEY_BASE, sender), JSON.stringify(payload));
+  /** An explicit pick in the Web of Trust sheet (#1765's marker). */
+  const setTier = (tier: WotTier) => storeTier({ wotTier: tier, explicit: true });
   const follow = (...pks: string[]) =>
     publishFollowSet(
       sender,
@@ -363,6 +367,24 @@ describe('deliverToPeerRelays trust gate (#1749)', () => {
     expect(await groupRouted([alice, bob])).toEqual([bob]);
   });
 
+  it('re-reads the contacts cache when it changes, without re-parsing an unchanged one', async () => {
+    const key = perAccountKey(CONTACTS_CACHE_KEY_BASE, sender);
+    await AsyncStorage.setItem(key, JSON.stringify([{ pubkey: bob }]));
+    const parse = jest.spyOn(JSON, 'parse');
+    try {
+      expect(await groupRouted([alice, bob])).toEqual([bob]);
+      const parsedOnce = parse.mock.calls.filter(([raw]) => raw.includes(bob)).length;
+      publish.mockClear();
+      expect(await groupRouted([alice, bob])).toEqual([bob]);
+      expect(parse.mock.calls.filter(([raw]) => raw.includes(bob)).length).toBe(parsedOnce);
+      await AsyncStorage.setItem(key, JSON.stringify([{ pubkey: alice }]));
+      publish.mockClear();
+      expect(await groupRouted([alice, bob])).toEqual([alice]);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it('routes someone the user has replied to under Friends', async () => {
     jest.mocked(hasRepliedTo).mockImplementation((_owner, pk) => pk === alice);
     expect(await groupRouted([alice, bob])).toEqual([alice]);
@@ -373,6 +395,30 @@ describe('deliverToPeerRelays trust gate (#1749)', () => {
   });
 
   it('counts an unset tier as Friends, not All', async () => {
+    follow(alice);
+    expect(await groupRouted([alice, bob])).toEqual([alice]);
+  });
+
+  it('counts the All the Groups migration stored (no explicit pick) as Friends', async () => {
+    await storeTier({ wotTier: 'all' });
+    follow(alice);
+    expect(await groupRouted([alice, bob])).toEqual([alice]);
+  });
+
+  it('counts a tier the Groups chip stored (no explicit pick) as Friends', async () => {
+    await storeTier({ wotTier: 'fof' });
+    follow(alice);
+    jest.mocked(loadFofCache).mockResolvedValue({
+      set: new Set([bob]),
+      excludedFriends: 0,
+      computedAt: 0,
+      stale: false,
+    });
+    expect(await groupRouted([alice, bob])).toEqual([alice]);
+  });
+
+  it('counts the legacy boolean as Friends', async () => {
+    await storeTier({ filterEnabled: false });
     follow(alice);
     expect(await groupRouted([alice, bob])).toEqual([alice]);
   });
@@ -401,7 +447,7 @@ describe('deliverToPeerRelays trust gate (#1749)', () => {
     expect(await groupRouted([alice, bob])).toEqual([alice]);
   });
 
-  it('routes everyone under the All tier', async () => {
+  it('routes everyone under an explicitly chosen All tier', async () => {
     await setTier('all');
     expect(await groupRouted([alice, bob])).toEqual([alice, bob]);
   });
