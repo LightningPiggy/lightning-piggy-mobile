@@ -3,7 +3,9 @@ import { sanitizePeerRelayUrls } from '../utils/peerRelayUrls';
 import { normalizeRelayUrl } from '../utils/relayListKey';
 import { getCurrentUserPubkey } from './nostrActiveAccount';
 import { claimPendingRelease, pooledRelayUrls, releaseNewIdleRelays } from './nostrPool';
+import { addRelayFrameBudget, clearRelayFrameBudget } from './nostrRelayReceiveQueue';
 import { getPeerRelayLists, peekPeerRelayLists } from './peerRelayLists';
+import { recordRelayFailure } from './relayHealth';
 
 // Reading someone else's posts and profile from THEIR relays (#1390) — the
 // outbox model's read half. A person's kind-10002 write relays (looked up and
@@ -23,8 +25,10 @@ import { getPeerRelayLists, peekPeerRelayLists } from './peerRelayLists';
 // until its socket is actually closed. Browsing many profiles doesn't leave
 // a trail of open sockets.
 //
-// Hardening: a relay that floods an outbox feed is quarantined for a while
-// (never leased again) — see authorFeedService.
+// Hardening: an owned socket has a raw-frame budget (counted at the socket's
+// message hook, before any parsing — nostrRelayReceiveQueue); one that blows
+// it, or floods an outbox feed (authorFeedService), is closed, its leases are
+// revoked and it's quarantined for a while (never leased again).
 //
 // Privacy: a query for person X only ever goes to X's own relays (plus the
 // viewer's), with `authors: [X]`. Callers never batch several people onto one
@@ -152,9 +156,39 @@ interface Leased {
   count: number;
   /** Opened by a lease (or claimed back from a pending release): we close it. */
   owned: boolean;
+  /** Each open lease's revocation callback (set when it asked for one). */
+  holders: Set<() => void>;
 }
 
 const leased = new Map<string, Leased>();
+
+/**
+ * Raw frames (any message type, counted before any parsing) an owned socket
+ * may receive per lease before it's cut off — hardening, sized so honest use
+ * never trips it: a lease covers one person's live feed (at most
+ * 4 × 30 events, see authorFeedService) plus up to 10 older pages of 30, plus
+ * EOSE / CLOSED / NOTICE frames. Only owned sockets are counted.
+ */
+export const OUTBOX_FRAMES_PER_LEASE = 480;
+
+/** An owned socket blew its frame budget: quarantine it, report it, and have
+ * every holder drop its lease (the receive hook has closed the socket). */
+function revokeOutboxRelay(url: string): void {
+  quarantineOutboxRelay(url);
+  try {
+    recordRelayFailure(url);
+  } catch {
+    // Best-effort.
+  }
+  const held = leased.get(url);
+  if (!held) return;
+  for (const revoke of [...held.holders]) revoke();
+}
+
+function forget(url: string): void {
+  leased.delete(url);
+  clearRelayFrameBudget(url);
+}
 const quarantined = new Map<string, number>();
 
 /** Stop leasing `url` for OUTBOX_QUARANTINE_MS (it misbehaved). */
@@ -179,7 +213,7 @@ function forgetClosed(): void {
   for (const [url, held] of leased) {
     if (held.count > 0) continue;
     pooled ??= pooledRelayUrls();
-    if (!pooled.has(url)) leased.delete(url);
+    if (!pooled.has(url)) forget(url);
   }
 }
 
@@ -193,9 +227,13 @@ export function leasedOutboxRelayCount(): number {
  * Lease extra relays for one person's reads. A relay already leased is shared
  * (no new socket); a new one is granted only while fewer than
  * MAX_OUTBOX_EXTRA_RELAYS are leased or still closing. Quarantined relays are
- * never granted.
+ * never granted. Each lease on an owned socket adds OUTBOX_FRAMES_PER_LEASE to
+ * its frame budget; `onRevoked` runs if that budget is blown (drop the lease).
  */
-export function leaseOutboxRelays(urls: readonly string[]): OutboxRelayLease {
+export function leaseOutboxRelays(
+  urls: readonly string[],
+  onRevoked?: () => void,
+): OutboxRelayLease {
   forgetClosed();
   const granted: string[] = [];
   const now = Date.now();
@@ -203,7 +241,7 @@ export function leaseOutboxRelays(urls: readonly string[]): OutboxRelayLease {
   for (const raw of urls) {
     const url = normalizeRelayUrl(raw);
     if (granted.includes(url) || isQuarantined(url, now)) continue;
-    const held = leased.get(url);
+    let held = leased.get(url);
     if (held) {
       // Back in use before its socket closed: stop the pending release.
       if (held.count === 0 && held.owned) claimPendingRelease(url);
@@ -214,8 +252,11 @@ export function leaseOutboxRelays(urls: readonly string[]): OutboxRelayLease {
       // A pooled socket that's only waiting to be released is still a one-off:
       // claim it, or nobody would ever close it.
       const owned = !pooled.has(url) || claimPendingRelease(url);
-      leased.set(url, { count: 1, owned });
+      held = { count: 1, owned, holders: new Set() };
+      leased.set(url, held);
     }
+    if (held.owned) addRelayFrameBudget(url, OUTBOX_FRAMES_PER_LEASE, () => revokeOutboxRelay(url));
+    if (onRevoked) held.holders.add(onRevoked);
     granted.push(url);
   }
   let released = false;
@@ -227,11 +268,13 @@ export function leaseOutboxRelays(urls: readonly string[]): OutboxRelayLease {
       const toRelease: string[] = [];
       for (const url of granted) {
         const held = leased.get(url);
-        if (!held || --held.count > 0) continue;
+        if (!held) continue;
+        if (onRevoked) held.holders.delete(onRevoked);
+        if (--held.count > 0) continue;
         // Someone else's socket: just stop counting it. Ours: keep counting it
         // until the pool has closed it.
         if (held.owned) toRelease.push(url);
-        else leased.delete(url);
+        else forget(url);
       }
       if (toRelease.length === 0) return;
       try {
@@ -245,6 +288,7 @@ export function leaseOutboxRelays(urls: readonly string[]): OutboxRelayLease {
 
 /** Forget every lease (tests). */
 export function __resetOutboxLeasesForTests(): void {
+  for (const url of leased.keys()) clearRelayFrameBudget(url);
   leased.clear();
   quarantined.clear();
 }

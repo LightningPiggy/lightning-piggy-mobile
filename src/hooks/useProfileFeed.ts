@@ -5,12 +5,15 @@ import { useCoalescedMap } from '../utils/useCoalescedMap';
 import { sortFeed } from '../utils/profileFeedRows';
 import {
   applyFeedPage,
+  cursorOf,
   hasAnyCursor,
   isStuckPage,
   newFeedCursors,
   noteFeedEvent,
+  outboxSource,
   pageableSources,
   reopenFeedCursors,
+  VIEWER_SOURCE,
   type FeedSource,
 } from '../utils/feedCursors';
 import { COMMENT_KIND, isNoteComment } from '../utils/nip22';
@@ -127,9 +130,10 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         setUnavailable(false);
         setLoading(true);
       }
-      const onEventFrom = (source: FeedSource) => (event: AuthorFeedEvent) => {
+      // Sources: the viewer's relays together; each author relay on its own.
+      const onEvent = (source: FeedSource, event: AuthorFeedEvent) => {
         if (!live) return;
-        // A set's first event opens its paging, even after the other set ended.
+        // A source's first event opens its paging, even after the others ended.
         if (noteFeedEvent(cursorsRef.current, source, event.created_at) && reachedEndRef.current)
           setReachedEnd(false);
         // Once per attempt, not per event (CLAUDE.md: no setState per relay event).
@@ -152,7 +156,7 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         authorPubkey,
         relays: readRelays,
         limit: AUTHOR_FEED_PAGE_SIZE,
-        onEvent: onEventFrom('viewer'),
+        onEvent: (event) => onEvent(VIEWER_SOURCE, event),
         // Every relay is done, but that includes relays that failed or timed
         // out: only onEvent / onAnswered count as an answer.
         onEose: () => {
@@ -176,15 +180,14 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         authorPubkey,
         currentRelays: readRelays,
         limit: AUTHOR_FEED_PAGE_SIZE,
-        onEvent: onEventFrom('outbox'),
+        onEvent: (event, relay) => onEvent(outboxSource(relay), event),
         onAnswered,
         onRelays: (urls) => {
           if (!live) return;
           outboxRelaysRef.current = urls;
           // Late-found author relays re-open their paging.
-          const outbox = cursorsRef.current.outbox;
-          outbox.ended = false;
-          if (outbox.oldest !== null && reachedEndRef.current) setReachedEnd(false);
+          const reopened = reopenFeedCursors(cursorsRef.current, urls.map(outboxSource));
+          if (reopened && reachedEndRef.current) setReachedEnd(false);
         },
       });
       const grace = setTimeout(() => {
@@ -230,10 +233,12 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
       return;
     }
     const cursors = cursorsRef.current;
-    const relaysFor = (source: FeedSource) =>
-      source === 'viewer' ? readRelays : outboxRelaysRef.current;
-    const hasRelays = (source: FeedSource) => relaysFor(source).length > 0;
-    const sources = pageableSources(cursors, hasRelays);
+    // The viewer's relays page together; each author relay pages on its own.
+    const relaysBySource = new Map<FeedSource, string[]>();
+    if (readRelays.length > 0) relaysBySource.set(VIEWER_SOURCE, readRelays);
+    for (const url of outboxRelaysRef.current) relaysBySource.set(outboxSource(url), [url]);
+    const candidates = [...relaysBySource.keys()];
+    const sources = pageableSources(cursors, candidates);
     if (sources.length === 0) {
       if (hasAnyCursor(cursors)) setReachedEnd(true);
       return;
@@ -243,38 +248,48 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     const controller = new AbortController();
     moreAbortRef.current = controller;
     const { signal } = controller;
-    // Each set from its own cursor. `until` is inclusive: events sharing the
-    // oldest second come back too and the id-keyed map drops the repeats. If
-    // a whole page is stuck on that one second, step past it rather than
-    // stall — keeping that first page too, since it can hold unseen posts.
+    const known = (e: AuthorFeedEvent) => feed.map.has(e.id);
+    const merge = (events: readonly AuthorFeedEvent[]) => {
+      for (const e of events) if (!known(e)) enqueue(e.id, e);
+    };
+    // Each source from its own cursor. `until` is inclusive: events sharing
+    // the oldest second come back too and the id-keyed map drops the repeats.
+    // If a whole page is stuck on that one second, step past it rather than
+    // stall — merging that first page AS SOON AS it arrives, since it can hold
+    // unseen posts whatever happens to the step request.
     const pageSource = async (source: FeedSource) => {
-      const from = cursors[source].oldest!;
-      const relays = relaysFor(source);
+      const from = cursorOf(cursors, source).oldest!;
+      const relays = relaysBySource.get(source)!;
       const first = await fetchAuthorFeedPage({ authorPubkey, relays, until: from, signal });
       if (signal.aborted || !isStuckPage(first.events, from, AUTHOR_FEED_PAGE_SIZE)) {
         return { source, from, page: first };
       }
-      const next = await fetchAuthorFeedPage({ authorPubkey, relays, until: from - 1, signal });
-      const page = { events: [...first.events, ...next.events], complete: next.complete };
-      return { source, from, page };
+      merge(first.events);
+      try {
+        const next = await fetchAuthorFeedPage({ authorPubkey, relays, until: from - 1, signal });
+        const page = { events: [...first.events, ...next.events], complete: next.complete };
+        return { source, from, page };
+      } catch {
+        // Keep the boundary page; the step is retried on the next load.
+        return { source, from, page: { events: first.events, complete: false } };
+      }
     };
     try {
       const results = await Promise.allSettled(sources.map(pageSource));
       if (signal.aborted || !focusedRef.current) return;
-      // Every set's relays failed — leave "Load more" available to retry.
+      // Every source's relays failed — leave "Load more" available to retry.
       if (results.every((r) => r.status === 'rejected')) return;
       pagesRef.current += 1;
-      const known = (e: AuthorFeedEvent) => feed.map.has(e.id);
       for (const result of results) {
         if (result.status !== 'fulfilled') continue;
         const { source, from, page } = result.value;
-        // Only a complete answer with nothing older ends a set; a timeout
+        // Only a complete answer with nothing older ends a source; a timeout
         // leaves it available to retry.
-        applyFeedPage(cursors[source], from, page);
-        for (const e of page.events) if (!known(e)) enqueue(e.id, e);
+        applyFeedPage(cursorOf(cursors, source), from, page);
+        merge(page.events);
       }
       flush();
-      if (pageableSources(cursors, hasRelays).length === 0) setReachedEnd(true);
+      if (pageableSources(cursors, candidates).length === 0) setReachedEnd(true);
     } finally {
       loadingMoreRef.current = false;
       setLoadingMore(false);

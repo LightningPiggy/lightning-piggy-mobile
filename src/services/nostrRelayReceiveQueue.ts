@@ -50,6 +50,50 @@ export class RelayReceiveQueue {
 const sharedQueue = new RelayReceiveQueue();
 const installed = new WeakSet<AbstractRelay>();
 
+interface FrameBudget {
+  left: number;
+  exceeded: boolean;
+  onExceeded: () => void;
+}
+/** Raw-frame budgets, by normalised relay URL. Only sockets the app opened on
+ * someone else's behalf (outbox reads, #1390) ever have one: the viewer's own
+ * relays are never counted. */
+const frameBudgets = new Map<string, FrameBudget>();
+
+/**
+ * Give `url`'s socket `frames` more frames (any type, counted on arrival,
+ * before any parsing) before it's closed and `onExceeded` runs once. A second
+ * call tops up the same budget.
+ */
+export function addRelayFrameBudget(url: string, frames: number, onExceeded: () => void): void {
+  const budget = frameBudgets.get(url);
+  if (budget && !budget.exceeded) budget.left += frames;
+  else frameBudgets.set(url, { left: frames, exceeded: false, onExceeded });
+}
+
+/** Stop counting `url`'s frames. */
+export function clearRelayFrameBudget(url: string): void {
+  frameBudgets.delete(url);
+}
+
+/** False when this frame is over its socket's budget (drop it). */
+function withinFrameBudget(relay: AbstractRelay): boolean {
+  const budget = frameBudgets.get(relay.url);
+  if (!budget) return true;
+  if (budget.exceeded) return false;
+  if (--budget.left >= 0) return true;
+  budget.exceeded = true;
+  // Out of the socket's message handler before closing it.
+  void Promise.resolve().then(() => {
+    try {
+      relay.close();
+    } finally {
+      budget.onExceeded();
+    }
+  });
+  return false;
+}
+
 /** Snapshot deadlines share the receive queue's boundary: finish only after
  * events already received have been verified, delivered and persisted. Explicit
  * cancellation must bypass this barrier so tab-blur still closes immediately. */
@@ -88,6 +132,8 @@ export function paceRelayReceive(relay: AbstractRelay, queue = sharedQueue): voi
   };
   relay._onmessage = (message) => {
     if (closed) return;
+    // One Map lookup, only non-empty while outbox sockets are open.
+    if (frameBudgets.size > 0 && !withinFrameBudget(relay)) return;
     const data = message.data;
     // Only explicit crypto-free control types bypass pacing. Queue ambiguous
     // JSON too: an escaped "\\u0045VENT" also decodes to EVENT in the SDK.

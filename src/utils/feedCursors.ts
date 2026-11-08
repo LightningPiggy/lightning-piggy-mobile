@@ -1,11 +1,15 @@
-// Paging cursors for a profile feed read from two relay sets (#1390): the
-// viewer's read relays and the author's own write relays. Each set pages
-// from ITS OWN oldest event and ends on its own. One shared cursor would skip
-// posts: if the viewer's relays only have a post from t=100 while the
-// author's relays returned t=971–1000, paging both from `until: 100` would
-// never ask the author's relays for 101–970.
+// Paging cursors for a profile feed read from several sources (#1390): the
+// viewer's read relays (one source) and EACH of the author's own write relays
+// (one source per relay). Each source pages from ITS OWN oldest event and
+// ends on its own. A shared cursor would skip posts: if one source only has a
+// post from t=100 while another returned t=971–1000, paging both from
+// `until: 100` would never ask the second for 101–970.
 
-export type FeedSource = 'viewer' | 'outbox';
+/** A source: `VIEWER_SOURCE`, or `outboxSource(relay)` for one author relay. */
+export type FeedSource = string;
+
+export const VIEWER_SOURCE: FeedSource = 'viewer';
+export const outboxSource = (relay: string): FeedSource => `outbox:${relay}`;
 
 export interface SourceCursor {
   /** Oldest `created_at` seen from this source (live or paged); null before any. */
@@ -14,14 +18,19 @@ export interface SourceCursor {
   ended: boolean;
 }
 
-export type FeedCursors = Record<FeedSource, SourceCursor>;
+export type FeedCursors = Map<FeedSource, SourceCursor>;
 
-const SOURCES: readonly FeedSource[] = ['viewer', 'outbox'];
+export const newFeedCursors = (): FeedCursors => new Map();
 
-export const newFeedCursors = (): FeedCursors => ({
-  viewer: { oldest: null, ended: false },
-  outbox: { oldest: null, ended: false },
-});
+/** The cursor for `source`, created empty on first use. */
+export function cursorOf(cursors: FeedCursors, source: FeedSource): SourceCursor {
+  let cursor = cursors.get(source);
+  if (!cursor) {
+    cursor = { oldest: null, ended: false };
+    cursors.set(source, cursor);
+  }
+  return cursor;
+}
 
 /** Note an event from `source`. True when it gave that source its first cursor
  * (so paging it just became possible). */
@@ -30,28 +39,38 @@ export function noteFeedEvent(
   source: FeedSource,
   createdAt: number,
 ): boolean {
-  const cursor = cursors[source];
+  const cursor = cursorOf(cursors, source);
   const opened = cursor.oldest === null;
   if (cursor.oldest === null || createdAt < cursor.oldest) cursor.oldest = createdAt;
   return opened;
 }
 
-/** Re-open every source (pull-to-refresh): their ends may have been outages. */
-export function reopenFeedCursors(cursors: FeedCursors): void {
-  for (const source of SOURCES) cursors[source].ended = false;
+/** Re-open `sources` (all when omitted): their ends may have been outages, or
+ * they're relays found again. True when one of them can page now. */
+export function reopenFeedCursors(cursors: FeedCursors, sources?: readonly FeedSource[]): boolean {
+  let pageable = false;
+  for (const source of sources ?? [...cursors.keys()]) {
+    const cursor = cursorOf(cursors, source);
+    cursor.ended = false;
+    if (cursor.oldest !== null) pageable = true;
+  }
+  return pageable;
 }
 
-/** Sources that can page now: relays known, a cursor, not at their end. */
+/** Of `candidates` (the sources with relays now), those that can page: a cursor, not at their end. */
 export function pageableSources(
   cursors: FeedCursors,
-  hasRelays: (source: FeedSource) => boolean,
+  candidates: readonly FeedSource[],
 ): FeedSource[] {
-  return SOURCES.filter((s) => hasRelays(s) && cursors[s].oldest !== null && !cursors[s].ended);
+  return candidates.filter((s) => {
+    const cursor = cursors.get(s);
+    return cursor !== undefined && cursor.oldest !== null && !cursor.ended;
+  });
 }
 
 /** Whether any source has a cursor (anything was loaded at all). */
 export const hasAnyCursor = (cursors: FeedCursors): boolean =>
-  SOURCES.some((s) => cursors[s].oldest !== null);
+  [...cursors.values()].some((c) => c.oldest !== null);
 
 /** A full page entirely at the cursor's second (`until` is inclusive): step past it. */
 export function isStuckPage(
@@ -63,7 +82,7 @@ export function isStuckPage(
 }
 
 /**
- * Fold a page that `source` returned when paged from `pagedFrom` (its cursor
+ * Fold a page that a source returned when paged from `pagedFrom` (its cursor
  * then): moves the cursor; a complete page with nothing older than that ends
  * the source. An incomplete page (timeout, failed relay) never ends it.
  */

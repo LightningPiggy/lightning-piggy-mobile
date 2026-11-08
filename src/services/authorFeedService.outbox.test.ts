@@ -28,6 +28,12 @@ jest.mock('./peerRelayLists', () => ({
   getPeerRelayLists: jest.fn(),
   peekPeerRelayLists: jest.fn(),
 }));
+const mockFrameBudgets = new Map<string, () => void>();
+jest.mock('./nostrRelayReceiveQueue', () => ({
+  addRelayFrameBudget: (url: string, _frames: number, onExceeded: () => void) =>
+    mockFrameBudgets.set(url, onExceeded),
+  clearRelayFrameBudget: (url: string) => mockFrameBudgets.delete(url),
+}));
 
 const viewer = 'f'.repeat(64);
 const alice = 'a'.repeat(64);
@@ -189,4 +195,17 @@ it('never closes a subscription the relay already closed (L-A)', async () => {
   mockSubscribeMany.mock.calls[0][2].onclose(['closed by relay']);
   stop();
   expect(close).not.toHaveBeenCalled();
+});
+
+it('a socket that blows its raw-frame budget is dropped from the feed and from paging (round 3 #1)', async () => {
+  write(['wss://noisy.example/', 'wss://quiet.example/']);
+  const onRelays = jest.fn();
+  arm({ onRelays, limit: 10 });
+  await jest.runAllTimersAsync();
+  // The receive hook counted too many raw frames on this socket.
+  mockFrameBudgets.get('wss://noisy.example/')!();
+  expect(onRelays).toHaveBeenLastCalledWith(['wss://quiet.example/']);
+  expect(recordRelayFailure).toHaveBeenCalledWith('wss://noisy.example/');
+  expect(releaseNewIdleRelays).toHaveBeenCalledWith(['wss://noisy.example/'], new Set());
+  expect(leaseOutboxRelays(['wss://noisy.example/']).relays).toEqual([]);
 });

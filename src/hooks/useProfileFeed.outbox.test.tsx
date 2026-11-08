@@ -70,7 +70,7 @@ it("subscribes the viewer's read relays first, then the author's relays in the b
 it("shows the viewer's relay results at once, without waiting for the author's relays", () => {
   const { result } = renderHook(() => useProfileFeed(alice, 0));
   act(() => {
-    main.onEvent(note('mine', 2));
+    main.onEvent(note('mine', 2), 'wss://mine.example/');
     main.onEose?.();
   });
   // The author-relay lookup hasn't answered at all, yet the post is shown.
@@ -81,13 +81,13 @@ it("shows the viewer's relay results at once, without waiting for the author's r
 it("merges the author's relay results into the same feed, coalesced and deduped", () => {
   const { result } = renderHook(() => useProfileFeed(alice, 0));
   act(() => {
-    main.onEvent(note('mine', 2));
+    main.onEvent(note('mine', 2), 'wss://mine.example/');
     main.onEose?.();
   });
   act(() => {
     outbox.onRelays?.(['wss://alice.example/']);
-    outbox.onEvent(note('theirs', 3));
-    outbox.onEvent(note('mine', 2));
+    outbox.onEvent(note('theirs', 3), 'wss://alice.example/');
+    outbox.onEvent(note('mine', 2), 'wss://alice.example/');
   });
   // Not committed per event: one coalesced flush.
   expect(result.current.events.map((e) => e.id)).toEqual(['mine']);
@@ -107,11 +107,11 @@ it('pages each relay set from its own cursor, so no posts are skipped (#1)', asy
   const { result } = renderHook(() => useProfileFeed(alice, 0));
   act(() => {
     // The viewer's relays only have an old post; the author's have 971–1000.
-    main.onEvent(note('old', 100));
+    main.onEvent(note('old', 100), 'wss://mine.example/');
     main.onEose?.();
     outbox.onRelays?.(['wss://alice.example/']);
-    outbox.onEvent(note('n1000', 1000));
-    outbox.onEvent(note('n971', 971));
+    outbox.onEvent(note('n1000', 1000), 'wss://alice.example/');
+    outbox.onEvent(note('n971', 971), 'wss://alice.example/');
   });
   await act(async () => {
     await result.current.loadMore();
@@ -135,9 +135,9 @@ it('one set reaching its end leaves the other paging; the end is only when both 
   );
   const { result } = renderHook(() => useProfileFeed(alice, 0));
   act(() => {
-    main.onEvent(note('old', 100));
+    main.onEvent(note('old', 100), 'wss://mine.example/');
     outbox.onRelays?.(['wss://alice.example/']);
-    outbox.onEvent(note('n971', 971));
+    outbox.onEvent(note('n971', 971), 'wss://alice.example/');
   });
   await act(async () => {
     await result.current.loadMore();
@@ -158,7 +158,7 @@ it("late-found author relays re-open paging after the viewer's relays ended (#2)
   page.mockResolvedValue({ events: [], complete: true });
   const { result } = renderHook(() => useProfileFeed(alice, 0));
   act(() => {
-    main.onEvent(note('old', 100));
+    main.onEvent(note('old', 100), 'wss://mine.example/');
     main.onEose?.();
   });
   await act(async () => {
@@ -168,7 +168,7 @@ it("late-found author relays re-open paging after the viewer's relays ended (#2)
   // The author's relays turn up afterwards, with posts.
   act(() => {
     outbox.onRelays?.(['wss://alice.example/']);
-    outbox.onEvent(note('n500', 500));
+    outbox.onEvent(note('n500', 500), 'wss://alice.example/');
   });
   expect(result.current.reachedEnd).toBe(false);
   page.mockClear();
@@ -194,7 +194,7 @@ it('keeps a full page stuck on the cursor second when stepping past it (#3)', as
   page.mockResolvedValueOnce({ events: [note('older', 50)], complete: false });
   const { result } = renderHook(() => useProfileFeed(alice, 0));
   act(() => {
-    main.onEvent(note('seen', 100));
+    main.onEvent(note('seen', 100), 'wss://mine.example/');
     main.onEose?.();
   });
   await act(async () => {
@@ -207,5 +207,78 @@ it('keeps a full page stuck on the cursor second when stepping past it (#3)', as
   const ids = new Set(result.current.events.map((e) => e.id));
   for (let i = 0; i < 30; i++) expect(ids.has(`s${i}`)).toBe(true);
   expect(ids.has('older')).toBe(true);
+  expect(result.current.reachedEnd).toBe(false);
+});
+
+it('keeps the boundary page even when the step-past request fails (round 3 #3)', async () => {
+  const page = jest.mocked(fetchAuthorFeedPage);
+  const sameSecond = Array.from({ length: 30 }, (_, i) => note(`s${i}`, 100));
+  page.mockResolvedValueOnce({ events: sameSecond, complete: true });
+  page.mockRejectedValueOnce(new Error('every relay failed'));
+  const { result } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    main.onEvent(note('seen', 100), 'wss://mine.example/');
+    main.onEose?.();
+  });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  const ids = new Set(result.current.events.map((e) => e.id));
+  for (let i = 0; i < 30; i++) expect(ids.has(`s${i}`)).toBe(true);
+  // Not an end: the step is retried on the next load.
+  expect(result.current.reachedEnd).toBe(false);
+  page.mockResolvedValue({ events: [], complete: false });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(pageCalls()[2]).toEqual({ relays: ['wss://mine.example/'], until: 100 });
+});
+
+it("pages each of the author's relays from its own cursor (round 3 #2)", async () => {
+  jest.mocked(fetchAuthorFeedPage).mockResolvedValue({ events: [], complete: false });
+  const { result } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    main.onEvent(note('mine', 500), 'wss://mine.example/');
+    outbox.onRelays?.(['wss://a.example/', 'wss://b.example/']);
+    // Relay A only has an old post; relay B has 971–1000.
+    outbox.onEvent(note('a100', 100), 'wss://a.example/');
+    outbox.onEvent(note('b1000', 1000), 'wss://b.example/');
+    outbox.onEvent(note('b971', 971), 'wss://b.example/');
+  });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(pageCalls()).toEqual(
+    expect.arrayContaining([
+      { relays: ['wss://mine.example/'], until: 500 },
+      { relays: ['wss://a.example/'], until: 100 },
+      // Not `until: 100`, which would skip B's 101–970.
+      { relays: ['wss://b.example/'], until: 971 },
+    ]),
+  );
+  expect(pageCalls()).toHaveLength(3);
+});
+
+it('one author relay ending leaves the others paging', async () => {
+  const page = jest.mocked(fetchAuthorFeedPage);
+  page.mockImplementation(async ({ relays }) =>
+    relays[0] === 'wss://a.example/'
+      ? { events: [], complete: true }
+      : { events: [note('b900', 900)], complete: false },
+  );
+  const { result } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    outbox.onRelays?.(['wss://a.example/', 'wss://b.example/']);
+    outbox.onEvent(note('a100', 100), 'wss://a.example/');
+    outbox.onEvent(note('b971', 971), 'wss://b.example/');
+  });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  page.mockClear();
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(pageCalls()).toEqual([{ relays: ['wss://b.example/'], until: 900 }]);
   expect(result.current.reachedEnd).toBe(false);
 });

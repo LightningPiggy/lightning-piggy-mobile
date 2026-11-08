@@ -1,37 +1,52 @@
 import {
   applyFeedPage,
+  cursorOf,
   hasAnyCursor,
   isStuckPage,
   newFeedCursors,
   noteFeedEvent,
+  outboxSource,
   pageableSources,
   reopenFeedCursors,
+  VIEWER_SOURCE,
 } from './feedCursors';
 
 const at = (...times: number[]) => times.map((created_at) => ({ created_at }));
-const both = () => true;
+const A = outboxSource('wss://a.example/');
+const B = outboxSource('wss://b.example/');
 
-it('tracks the oldest event per source and reports a source opening once', () => {
+it('tracks the oldest event per source (each author relay its own) and reports opening once', () => {
   const cursors = newFeedCursors();
   expect(hasAnyCursor(cursors)).toBe(false);
-  expect(noteFeedEvent(cursors, 'outbox', 1000)).toBe(true);
-  expect(noteFeedEvent(cursors, 'outbox', 971)).toBe(false);
-  expect(noteFeedEvent(cursors, 'outbox', 990)).toBe(false);
-  expect(noteFeedEvent(cursors, 'viewer', 100)).toBe(true);
-  expect(cursors.outbox.oldest).toBe(971);
-  expect(cursors.viewer.oldest).toBe(100);
+  expect(noteFeedEvent(cursors, B, 1000)).toBe(true);
+  expect(noteFeedEvent(cursors, B, 971)).toBe(false);
+  expect(noteFeedEvent(cursors, A, 100)).toBe(true);
+  expect(noteFeedEvent(cursors, VIEWER_SOURCE, 500)).toBe(true);
+  expect(cursorOf(cursors, A).oldest).toBe(100);
+  expect(cursorOf(cursors, B).oldest).toBe(971);
+  expect(cursorOf(cursors, VIEWER_SOURCE).oldest).toBe(500);
 });
 
-it('only sources with relays, a cursor and not at their end can page', () => {
+it('only candidates with a cursor and not at their end can page', () => {
   const cursors = newFeedCursors();
-  noteFeedEvent(cursors, 'viewer', 100);
-  expect(pageableSources(cursors, both)).toEqual(['viewer']);
-  noteFeedEvent(cursors, 'outbox', 900);
-  expect(pageableSources(cursors, (s) => s === 'viewer')).toEqual(['viewer']);
-  cursors.viewer.ended = true;
-  expect(pageableSources(cursors, both)).toEqual(['outbox']);
+  noteFeedEvent(cursors, VIEWER_SOURCE, 100);
+  noteFeedEvent(cursors, A, 900);
+  expect(pageableSources(cursors, [VIEWER_SOURCE, A, B])).toEqual([VIEWER_SOURCE, A]);
+  // A source whose relays are gone isn't a candidate.
+  expect(pageableSources(cursors, [VIEWER_SOURCE])).toEqual([VIEWER_SOURCE]);
+  cursorOf(cursors, VIEWER_SOURCE).ended = true;
+  expect(pageableSources(cursors, [VIEWER_SOURCE, A])).toEqual([A]);
+});
+
+it('re-opens the given sources (or all), reporting whether one can page', () => {
+  const cursors = newFeedCursors();
+  noteFeedEvent(cursors, A, 900);
+  cursorOf(cursors, A).ended = true;
+  expect(reopenFeedCursors(cursors, [B])).toBe(false); // no cursor yet
+  expect(reopenFeedCursors(cursors, [A])).toBe(true);
+  cursorOf(cursors, A).ended = true;
   reopenFeedCursors(cursors);
-  expect(pageableSources(cursors, both)).toEqual(['viewer', 'outbox']);
+  expect(cursorOf(cursors, A).ended).toBe(false);
 });
 
 it('a complete page with nothing older ends the source; an incomplete one never does', () => {

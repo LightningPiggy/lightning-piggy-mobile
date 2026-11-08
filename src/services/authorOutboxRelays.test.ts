@@ -7,6 +7,7 @@ import {
   leaseOutboxRelays,
   MAX_AUTHOR_OUTBOX_RELAYS,
   MAX_OUTBOX_EXTRA_RELAYS,
+  OUTBOX_FRAMES_PER_LEASE,
   OUTBOX_QUARANTINE_MS,
   personOutboxRelays,
   quarantineOutboxRelay,
@@ -15,12 +16,19 @@ import {
 } from './authorOutboxRelays';
 import { claimPendingRelease, pooledRelayUrls, releaseNewIdleRelays } from './nostrPool';
 import { getPeerRelayLists, peekPeerRelayLists, type PeerRelayLists } from './peerRelayLists';
+import { addRelayFrameBudget, clearRelayFrameBudget } from './nostrRelayReceiveQueue';
+import { recordRelayFailure } from './relayHealth';
 
 jest.mock('./nostrPool', () => ({
   claimPendingRelease: jest.fn(() => false),
   pooledRelayUrls: jest.fn(() => new Set<string>()),
   releaseNewIdleRelays: jest.fn(),
 }));
+jest.mock('./nostrRelayReceiveQueue', () => ({
+  addRelayFrameBudget: jest.fn(),
+  clearRelayFrameBudget: jest.fn(),
+}));
+jest.mock('./relayHealth', () => ({ recordRelayFailure: jest.fn() }));
 jest.mock('./peerRelayLists', () => ({
   getPeerRelayLists: jest.fn(),
   peekPeerRelayLists: jest.fn(),
@@ -201,5 +209,45 @@ describe('leaseOutboxRelays (global ceiling)', () => {
     expect(leaseOutboxRelays([relay(9), relay(8)]).relays).toEqual([relay(8)]);
     jest.advanceTimersByTime(OUTBOX_QUARANTINE_MS);
     expect(leaseOutboxRelays([relay(9)]).relays).toEqual([relay(9)]);
+  });
+});
+
+describe('raw-frame budget for owned sockets (round 3 #1)', () => {
+  const budget = jest.mocked(addRelayFrameBudget);
+
+  it('each lease on an owned socket adds to its budget; sockets we did not open get none', () => {
+    leaseOutboxRelays([relay(1)]);
+    leaseOutboxRelays([relay(1)]);
+    expect(budget).toHaveBeenCalledTimes(2);
+    expect(budget.mock.calls[0].slice(0, 2)).toEqual([relay(1), OUTBOX_FRAMES_PER_LEASE]);
+    budget.mockClear();
+    pooled.mockReturnValue(new Set([relay(2)])); // someone else's socket
+    leaseOutboxRelays([relay(2)]);
+    expect(budget).not.toHaveBeenCalled();
+  });
+
+  it('a blown budget quarantines the relay, reports it, and revokes every holder', () => {
+    const revokedA = jest.fn();
+    const revokedB = jest.fn();
+    leaseOutboxRelays([relay(1)], revokedA);
+    leaseOutboxRelays([relay(1)], revokedB);
+    const onExceeded = budget.mock.calls[0][2];
+    onExceeded();
+    expect(revokedA).toHaveBeenCalledTimes(1);
+    expect(revokedB).toHaveBeenCalledTimes(1);
+    expect(recordRelayFailure).toHaveBeenCalledWith(relay(1));
+    expect(leaseOutboxRelays([relay(1)]).relays).toEqual([]);
+  });
+
+  it('a released lease is no longer revoked, and the budget goes once the socket has closed', () => {
+    const revoked = jest.fn();
+    const lease = leaseOutboxRelays([relay(1)], revoked);
+    const onExceeded = budget.mock.calls[0][2];
+    lease.release();
+    onExceeded();
+    expect(revoked).not.toHaveBeenCalled();
+    pooled.mockReturnValue(new Set()); // the socket is gone
+    expect(leasedOutboxRelayCount()).toBe(0);
+    expect(clearRelayFrameBudget).toHaveBeenCalledWith(relay(1));
   });
 });

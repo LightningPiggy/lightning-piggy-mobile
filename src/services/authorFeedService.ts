@@ -73,7 +73,8 @@ export function subscribeAuthorFeed(input: {
   authorPubkey: string;
   relays: string[];
   limit?: number;
-  onEvent: (event: AuthorFeedEvent) => void;
+  /** `relay`: the relay it came from. */
+  onEvent: (event: AuthorFeedEvent, relay: string) => void;
   /** Every relay has sent its stored events (or failed). */
   onEose?: () => void;
   /** The first relay really answered (a real EOSE, not a failure), even if
@@ -145,7 +146,7 @@ export function subscribeAuthorFeed(input: {
       onevent: (ev: Event) => {
         if (ev.pubkey !== input.authorPubkey || !AUTHOR_FEED_KINDS.includes(ev.kind)) return;
         gotEvent = true;
-        input.onEvent(toFeedEvent(ev));
+        input.onEvent(toFeedEvent(ev), relay);
       },
       oneose: () => {
         if (eose) return;
@@ -252,7 +253,8 @@ export function subscribeAuthorOutboxFeed(input: {
   currentRelays: string[];
   viewerPubkey?: string | null;
   limit?: number;
-  onEvent: (event: AuthorFeedEvent) => void;
+  /** `relay`: which of the author's relays it came from (each pages on its own). */
+  onEvent: (event: AuthorFeedEvent, relay: string) => void;
   onAnswered?: () => void;
   onRelays?: (relays: string[]) => void;
 }): () => void {
@@ -268,7 +270,14 @@ export function subscribeAuthorOutboxFeed(input: {
   }).then((write) => {
     if (closed) return;
     for (const url of withoutRelays(write, input.currentRelays)) {
-      const lease = leaseOutboxRelays([url]);
+      // Drop this relay: its sub, its lease, and from the relays older pages ask.
+      const drop = () => {
+        open.get(url)?.();
+        open.delete(url);
+        if (!closed) input.onRelays?.([...open.keys()]);
+      };
+      // Revoked when its socket blows the frame budget (authorOutboxRelays).
+      const lease = leaseOutboxRelays([url], drop);
       if (lease.relays.length === 0) {
         lease.release();
         continue;
@@ -277,15 +286,14 @@ export function subscribeAuthorOutboxFeed(input: {
         authorPubkey: input.authorPubkey,
         relays: lease.relays,
         limit,
-        onEvent: input.onEvent,
+        onEvent: (event) => input.onEvent(event, url),
         onAnswered: input.onAnswered,
+        // Fast path: counted per subscription before parse / verify.
         maxEventsPerRelay: OUTBOX_FEED_EVENT_BUDGET_FACTOR * limit,
         onFlood: () => {
           quarantineOutboxRelay(url);
           recordRelayFailure(url);
-          open.get(url)?.();
-          open.delete(url);
-          if (!closed) input.onRelays?.([...open.keys()]);
+          drop();
         },
       });
       open.set(url, () => {
