@@ -39,6 +39,15 @@ jest.mock('../services/swapRecoveryService', () => ({
   ensureSwapMetaLoaded: jest.fn(async () => {}),
   getSwapMeta: jest.fn(() => undefined),
 }));
+// Deferred startup tasks (swap recovery) run at once here; their slots and
+// ordering are covered by startupTasks.test.ts.
+jest.mock('../services/startupTasks', () => ({
+  ...jest.requireActual('../services/startupTasks'),
+  scheduleStartupTask: (task: { run: () => unknown }) => {
+    task.run();
+    return () => {};
+  },
+}));
 jest.mock('../services/onchainService', () => ({
   syncAndRefresh: jest.fn(async () => ({ balance: 100, transactions: [] })),
 }));

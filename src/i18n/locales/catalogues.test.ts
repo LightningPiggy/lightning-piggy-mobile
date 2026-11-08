@@ -1,5 +1,7 @@
-import { SUPPORTED_LOCALES, translations } from '..';
+import { SUPPORTED_LOCALES, loadAllCatalogues } from '..';
 import { CARDINAL_RULES, requiredPluralCategories } from '../plurals';
+
+const translations = loadAllCatalogues();
 
 type Tree = { [key: string]: string | Tree };
 

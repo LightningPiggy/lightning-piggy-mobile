@@ -417,11 +417,13 @@ describe('dmDb', () => {
       expect(sql).toContain(
         "GROUP BY conversation, COALESCE(protocol, CASE WHEN wire_kind = 4 THEN 'nip04' ELSE 'nip17' END)",
       );
-      expect(sql).toContain('WHERE m.owner = ?');
+      // Groups drive the join (CROSS JOIN), one owner-scoped lookup per thread.
+      expect(sql).toContain('CROSS JOIN dm_messages m');
+      expect(sql).toContain('ON m.owner = ? AND m.conversation = g.conversation');
       // Marmot invite gift wraps never become a thread's latest (#1269).
       // …and neither do wrapped reactions / retractions (#1321).
       expect(sql).toContain('WHERE owner = ? AND wire_kind NOT IN (444, 7, 5)');
-      expect(sql).toContain('WHERE m.owner = ? AND m.wire_kind NOT IN (444, 7, 5)');
+      expect(sql).toContain('WHERE m.wire_kind NOT IN (444, 7, 5)');
       expect(params).toEqual([OWNER, OWNER]);
     });
   });

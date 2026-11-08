@@ -19,8 +19,10 @@ import {
   validateEntry,
   type Catalogue,
 } from './i18nSync';
-import { SUPPORTED_LOCALES, translations } from '../i18n';
+import { SUPPORTED_LOCALES, loadAllCatalogues } from '../i18n';
 import { CARDINAL_RULES, requiredPluralCategories } from '../i18n/plurals';
+
+const translations = loadAllCatalogues();
 
 const en: Catalogue = {
   tabs: { home: 'Home', friends: 'Friends' },

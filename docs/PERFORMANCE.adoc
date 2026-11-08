@@ -532,6 +532,14 @@ long Doze is the #554 storm. Latency-insensitive work waits ~3 s (cancellable
 timer); only the DM re-arm is immediate.
 |`useCacheNotifications` stagger (#1031)
 
+|Deferred cold-start work takes a startup-queue slot
+|Independent "wait ~3 s" timers all fired in the same instant, stacking the
+Marmot session, NIP-171 session, watcher and push registration, swap recovery
+and the BTC Map cache parse onto one frame. The queue runs one task at a time,
+at its slot, after JS-thread idle, waiting at most 2 s for each to settle.
+`[Perf] startup task <name> fired` shows the real timeline.
+|`scheduleStartupTask` + `STARTUP_SLOTS` (`src/services/startupTasks.ts`)
+
 |Bounded relay filters
 |An unbounded REQ backfills the relay's whole index through the JS thread on
 every mount. Always `limit`, plus `since` where event semantics allow. NIP-59

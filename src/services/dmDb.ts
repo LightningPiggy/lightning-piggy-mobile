@@ -6,6 +6,7 @@ import type { MarmotEdit } from './marmotEdits';
 import { MARMOT_WELCOME_KIND, protocolForWireKind, type DmProtocol } from '../utils/dmProtocol';
 import { CHAT_DELETION_KIND, CHAT_REACTION_KIND } from '../utils/nip17Reactions';
 import { notifyDmDeletions, notifyDmStorage } from './dmStorageEvents';
+import { perfLog } from '../utils/perfLog';
 
 // Data-access layer for the `dm_messages` table in the encrypted local DB
 // (#695). One row per decrypted DM, keyed by (owner, event_id) — `owner` is
@@ -598,23 +599,33 @@ export async function getOrderRows(owner: string, limit = 500): Promise<DmMessag
  * chat shows on its own, and failed ones come from the Marmot session (#1269).
  * Wrapped reactions / retractions (kinds 7 / 5, #1321) never count either:
  * they aren't messages.
+ *
+ * Cost: the grouped subquery scans the covering `idx_dm_owner_inbox` (no
+ * content pages), and CROSS JOIN pins it as the outer loop so each thread's
+ * latest row is ONE lookup on `idx_dm_owner_conversation_created`. A plain
+ * JOIN let SQLite drive from `m` instead, reading every one of the owner's
+ * rows (content included) to probe the groups. Deliberately not LIMITed: the
+ * result is one row per thread, and a cap would silently drop old threads
+ * from the Messages list.
  */
 export async function getInboxLatest(owner: string): Promise<DmMessageRow[]> {
   const db = await getLocalDb();
+  const t0 = Date.now();
   const res = await db.execute(
-    `SELECT m.* FROM dm_messages m
-       JOIN (
+    `SELECT m.* FROM (
          SELECT conversation, ${PROTOCOL_SQL} AS proto, MAX(created_at) AS mx
          FROM dm_messages WHERE owner = ? AND wire_kind NOT IN (${MARMOT_WELCOME_KIND}, ${CHAT_REACTION_KIND}, ${CHAT_DELETION_KIND})
          GROUP BY conversation, ${PROTOCOL_SQL}
-       ) g ON m.conversation = g.conversation
+       ) g CROSS JOIN dm_messages m
+       ON m.owner = ? AND m.conversation = g.conversation AND m.created_at = g.mx
           AND COALESCE(m.protocol, CASE WHEN m.wire_kind = 4 THEN 'nip04' ELSE 'nip17' END) = g.proto
-          AND m.created_at = g.mx
-     WHERE m.owner = ? AND m.wire_kind NOT IN (${MARMOT_WELCOME_KIND}, ${CHAT_REACTION_KIND}, ${CHAT_DELETION_KIND})
+     WHERE m.wire_kind NOT IN (${MARMOT_WELCOME_KIND}, ${CHAT_REACTION_KIND}, ${CHAT_DELETION_KIND})
      ORDER BY m.created_at DESC;`,
     [owner, owner],
   );
-  return (res.rows ?? []).map(toRow);
+  const rows = res.rows ?? [];
+  perfLog(`getInboxLatest ${Date.now() - t0}ms rows=${rows.length}`);
+  return rows.map(toRow);
 }
 
 /**

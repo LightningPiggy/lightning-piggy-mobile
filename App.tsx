@@ -2,7 +2,7 @@
 import './src/polyfills';
 
 import React, { useEffect, useState } from 'react';
-import { AppState, InteractionManager, Linking, StyleSheet } from 'react-native';
+import { AppState, Linking, StyleSheet } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -51,6 +51,7 @@ import { getAppFormatLocale } from './src/utils/appFormatLocale';
 import { recoverSubmarineRefund } from './src/utils/submarineRefund';
 import { syncBackgroundDmWatchFromPreference } from './src/services/backgroundDmService';
 import { kickPlacesHydration } from './src/services/btcMapService';
+import { scheduleStartupTask, STARTUP_SLOTS } from './src/services/startupTasks';
 import PaymentNotifier from './src/components/PaymentNotifier';
 import * as nip19 from 'nostr-tools/nip19';
 import { wasRecentlyRead, initNfc } from './src/services/nfcService';
@@ -125,19 +126,21 @@ export default function App() {
     void initNfc();
   }, []);
 
-  // Hydrate the BTC-Map merchant cache AFTER first paint, not at
-  // btcMapService module-import time (audit HIGH 1). The hydration does a
-  // synchronous `JSON.parse` of a 100s-of-KB cache file; firing it at
-  // import dropped it onto the cold-start critical path before the first
-  // frame. `runAfterInteractions` defers it past the initial render +
-  // navigation animation so the Explore hub's first `peekCachedPlacesSync`
-  // still resolves quickly without blocking boot. Idempotent + memoised.
-  useEffect(() => {
-    const task = InteractionManager.runAfterInteractions(() => {
-      void kickPlacesHydration();
-    });
-    return () => task.cancel();
-  }, []);
+  // Hydrate the BTC-Map merchant cache well after first paint (audit HIGH
+  // 1). The hydration does a synchronous `JSON.parse` of a 100s-of-KB cache
+  // file; `runAfterInteractions` alone fired almost at once on boot, so it
+  // now takes the last slot of the startup queue. Explore (and Places, via
+  // getCachedPlaces) kick it on first mount if they get there sooner, so
+  // they still paint cached merchants. Idempotent + memoised.
+  useEffect(
+    () =>
+      scheduleStartupTask({
+        name: 'placesHydration',
+        slotMs: STARTUP_SLOTS.placesHydration,
+        run: kickPlacesHydration,
+      }),
+    [],
+  );
 
   // OS notifications (#279): create the Android channels up-front, track
   // foreground state for the suppress-when-viewing-this-thread gate, and

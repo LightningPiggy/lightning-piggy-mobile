@@ -7,13 +7,15 @@ import {
   subscribeNip171Groups,
 } from '../services/nip171Groups';
 import { startNip171Session } from '../services/nip171Session';
+import { scheduleStartupTask, STARTUP_SLOTS } from '../services/startupTasks';
 import { getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { repairMisfiledNip171Tickets } from './nip171TicketRepair';
 import type { Group } from '../types/groups';
 import { nip171GroupPubkey } from '../utils/nip171';
 
 /** Session start delay after sign-in: group delivery is not urgent, and cold
- * start is already relay-heavy (#1631). */
+ * start is already relay-heavy (#1631). At cold start it waits for its own
+ * slot of the serial startup queue (startupTasks.ts) instead. */
 const SESSION_DELAY_MS = 3000;
 /** The one-off ticket repair waits longer still, for relays to settle. */
 const REPAIR_DELAY_MS = 20_000;
@@ -49,8 +51,8 @@ export function useNip171Groups(pubkey: string | null): Nip171GroupsApi {
     const unsubscribe = subscribeNip171Groups((owner) => {
       if (owner === pubkey) refresh();
     });
-    const timer = setTimeout(() => {
-      void loadNip171Groups(pubkey)
+    const startSession = () =>
+      loadNip171Groups(pubkey)
         .then(async () => {
           refresh();
           const relays = await resolveReadRelays(pubkey);
@@ -74,10 +76,15 @@ export function useNip171Groups(pubkey: string | null): Nip171GroupsApi {
         .catch((e) => {
           if (__DEV__) console.warn('[NIP-171] groups load failed:', e);
         });
-    }, SESSION_DELAY_MS);
+    const cancelStart = scheduleStartupTask({
+      name: 'nip171Session',
+      slotMs: STARTUP_SLOTS.nip171Session,
+      minDelayMs: SESSION_DELAY_MS,
+      run: startSession,
+    });
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      cancelStart();
       if (repairTimer) clearTimeout(repairTimer);
       unsubscribe();
       stop?.();
