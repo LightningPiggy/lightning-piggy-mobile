@@ -29,14 +29,21 @@ import {
   markWalletProbed,
   recordRateLimited,
   recordRelayOutcome,
+  recordWalletReply,
   resetWalletReply,
   shouldProbeWallet,
   subscribeWalletHealth,
+  trackWalletReply,
 } from './nwcRelayHealth';
 
 // A connection error that recordRelayOutcome counts toward "dead". The message
 // matches isConnectionError's matcher in nwcErrors.
 const connErr = () => new Error('Failed to connect to wss://relay.example.com');
+// Shapes of the @getalby/sdk errors: Nip47WalletError carries a NIP-47 `code`;
+// Nip47ReplyTimeoutError has no custom `name`, code "INTERNAL".
+const sdkErr = (message: string, code: string) => Object.assign(new Error(message), { code });
+const walletErr = (code: string) => sdkErr(`wallet said ${code}`, code);
+const sdkReplyTimeout = () => sdkErr('reply timeout: event abc123', 'INTERNAL');
 
 let nextId = 0;
 const freshId = () => `wallet-${nextId++}`;
@@ -251,7 +258,7 @@ describe('checking state — green only after a real wallet reply (#1768)', () =
     expect(getWalletHealth(id, true, T0 + 1_000)).toBe('responsive');
 
     const id2 = freshId();
-    recordRelayOutcome(id2, new Error('NOT_IMPLEMENTED: get_balance')); // wallet answered
+    recordRelayOutcome(id2, walletErr('NOT_IMPLEMENTED')); // wallet answered with an error
     expect(getWalletHealth(id2, true)).toBe('responsive');
   });
 
@@ -338,5 +345,56 @@ describe('subscribeWalletHealth (#1768)', () => {
     expect(() => recordRelayOutcome(id)).not.toThrow();
     expect(getWalletHealth(id, true)).toBe('responsive');
     unsubscribe();
+  });
+});
+
+describe('only real wallet answers turn the card green (#1768 review)', () => {
+  it("counts the SDK's own reply timeout as unanswered, not as a reply (the outage bug)", () => {
+    const id = freshId();
+    recordRelayOutcome(id, sdkReplyTimeout());
+    expect(getWalletHealth(id, true)).toBe('degraded');
+    recordRelayOutcome(id, sdkErr('publish timeout: abc', 'INTERNAL'));
+    recordRelayOutcome(id, sdkErr('failed to publish: boom', 'INTERNAL'));
+    expect(isRelayDead(id)).toBe(true);
+  });
+
+  it('a local error (no NIP-47 code) clears failures as before but does not turn green', () => {
+    const id = freshId();
+    recordRelayOutcome(id, connErr());
+    recordRelayOutcome(id, new Error('Not connected'));
+    expect(isRelayDead(id)).toBe(false);
+    expect(getWalletHealth(id, true)).toBe('checking');
+  });
+
+  it('recordWalletReply credits results and wallet errors only', () => {
+    const ok = freshId();
+    recordWalletReply(ok);
+    expect(getWalletHealth(ok, true)).toBe('responsive');
+
+    const walletError = freshId();
+    recordWalletReply(walletError, walletErr('INSUFFICIENT_BALANCE'));
+    expect(getWalletHealth(walletError, true)).toBe('responsive');
+
+    for (const err of [sdkReplyTimeout(), connErr(), new Error('Not connected')]) {
+      const id = freshId();
+      recordWalletReply(id, err);
+      // Ignored entirely: no green, and no failure counted either.
+      expect(getWalletHealth(id, true)).toBe('checking');
+    }
+  });
+
+  it('trackWalletReply credits a resolved call and rethrows failures', async () => {
+    const id = freshId();
+    await expect(trackWalletReply(id, async () => 42)).resolves.toBe(42);
+    expect(getWalletHealth(id, true)).toBe('responsive');
+
+    const id2 = freshId();
+    const timeout = sdkReplyTimeout();
+    await expect(
+      trackWalletReply(id2, async () => {
+        throw timeout;
+      }),
+    ).rejects.toBe(timeout);
+    expect(getWalletHealth(id2, true)).toBe('checking');
   });
 });

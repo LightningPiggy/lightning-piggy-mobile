@@ -22,6 +22,7 @@ jest.mock('../services/nwcService', () => ({
   shouldProbeWallet: jest.fn(() => true),
   markWalletProbed: jest.fn(),
   subscribeWalletHealth: jest.fn(() => () => {}),
+  isBalanceInFlight: jest.fn(() => false),
 }));
 
 const wallets = [
@@ -53,6 +54,7 @@ beforeEach(() => {
   jest.mocked(nwcService.getBalance).mockResolvedValue(1234);
   jest.mocked(nwcService.shouldProbeWallet).mockReturnValue(true);
   jest.mocked(nwcService.subscribeWalletHealth).mockReturnValue(() => {});
+  jest.mocked(nwcService.isBalanceInFlight).mockReturnValue(false);
 });
 afterEach(() => {
   jest.useRealTimers();
@@ -120,6 +122,15 @@ describe('liveness probe (#1768)', () => {
     unmount();
   });
 
+  it('skips the probe while a get_balance for that wallet is already in flight', async () => {
+    jest.mocked(nwcService.isBalanceInFlight).mockReturnValue(true);
+    const { unmount } = mount(live);
+    await tick(WATCHDOG_INTERVAL_MS);
+    expect(nwcService.getBalance).not.toHaveBeenCalled();
+    expect(nwcService.markWalletProbed).not.toHaveBeenCalled();
+    unmount();
+  });
+
   it('never probes a handshake in flight or while the app is backgrounded', async () => {
     jest.mocked(nwcService.isConnectionInProgress).mockReturnValue(true);
     const first = mount(live);
@@ -159,6 +170,19 @@ describe('resume stagger (#1768, CLAUDE.md #554/#1031)', () => {
     await tick(WATCHDOG_RESUME_DELAY_MS - 1);
     expect(nwcService.getBalance).not.toHaveBeenCalled();
     await tick(1);
+    expect(nwcService.getBalance).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('skips an overdue interval tick that lands inside the resume stagger window', async () => {
+    const { unmount } = mount(live);
+    // Resume 1 s before the 30 s tick: the tick must not probe unstaggered.
+    await tick(WATCHDOG_INTERVAL_MS - 1_000);
+    act(() => appStateListener?.('active'));
+    await tick(1_000);
+    expect(nwcService.getBalance).not.toHaveBeenCalled();
+    // The staggered resume pass still runs once at +3 s.
+    await tick(WATCHDOG_RESUME_DELAY_MS - 1_000);
     expect(nwcService.getBalance).toHaveBeenCalledTimes(1);
     unmount();
   });

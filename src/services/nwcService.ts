@@ -26,8 +26,16 @@ import {
   isRelayDead,
   recordRateLimited,
   recordRelayOutcome,
+  recordWalletReply,
   resetWalletReply,
+  trackWalletReply,
 } from './nwcRelayHealth';
+import {
+  clearFailedLookupCache,
+  hasFailedLookup,
+  isTerminalLookupError,
+  recordFailedLookup,
+} from './nwcFailedLookupCache';
 import {
   beginConnectionAttempt,
   clearConnectionAttempt,
@@ -36,6 +44,8 @@ import {
   isLatestConnectionAttempt,
   waitForNewestConnectionAttempt,
 } from './nwcConnectionAttempts';
+
+export { clearFailedLookupCache } from './nwcFailedLookupCache';
 
 // Preserve the prior public API — these were defined + exported here before
 // moving to ./nwcErrors; consumers (e.g. SendSheet) still import them from here.
@@ -64,6 +74,15 @@ const reconnectsInFlight = new Map<string, Promise<NostrWebLNProvider>>();
 // 'no info event' relay error. Cleared on settle so a later refresh
 // gets a fresh response.
 const getBalancesInFlight = new Map<string, Promise<number | null>>();
+// Count of ALL get_balance reads in flight per wallet, including the
+// `replyTimeoutMs` ones that bypass the dedupe above — lets the watchdog's
+// liveness probe skip a wallet whose balance is already being read (#1768).
+const balanceReadsInFlight = new Map<string, number>();
+
+/** True while any get_balance for this wallet is awaiting its reply. */
+export function isBalanceInFlight(walletId: string): boolean {
+  return (balanceReadsInFlight.get(walletId) ?? 0) > 0;
+}
 
 export {
   getWalletHealth,
@@ -372,8 +391,16 @@ export async function getBalance(
       return null;
     }
   };
-  if (options.replyTimeoutMs !== undefined) return run();
-  const promise = run().finally(() => {
+  const tracked = (): Promise<number | null> => {
+    balanceReadsInFlight.set(walletId, (balanceReadsInFlight.get(walletId) ?? 0) + 1);
+    return run().finally(() => {
+      const left = (balanceReadsInFlight.get(walletId) ?? 1) - 1;
+      if (left > 0) balanceReadsInFlight.set(walletId, left);
+      else balanceReadsInFlight.delete(walletId);
+    });
+  };
+  if (options.replyTimeoutMs !== undefined) return tracked();
+  const promise = tracked().finally(() => {
     getBalancesInFlight.delete(walletId);
   });
   getBalancesInFlight.set(walletId, promise);
@@ -389,10 +416,11 @@ export async function makeInvoice(
   if (!provider) throw new Error('Not connected');
   try {
     // Retry on a slow/flaky relay so a single ~10s reply-timeout doesn't sink a
-    // prize/voucher claim. makeInvoice was the one NWC method left bare —
-    // getBalance/payInvoice/listTransactions already retry + record relay health
-    // — so the claim path failed on the first timeout while everything else
-    // recovered (see TROUBLESHOOTING → "NWC reply timeout"). The SDK's own ~10s
+    // prize/voucher claim. makeInvoice was left bare while getBalance and
+    // listTransactions retried (getBalance + makeInvoice own the dead/amber
+    // relay-health signal; pay / list / lookup / get_info only credit answers
+    // via recordWalletReply, #1768) — so the claim path failed on the first
+    // timeout while everything else recovered (see TROUBLESHOOTING → "NWC reply timeout"). The SDK's own ~10s
     // replyTimeout bounds each attempt; a retry may orphan an unpaid invoice on
     // the wallet, which simply expires — harmless.
     const invoice = await withRetry(
@@ -590,7 +618,9 @@ export async function payInvoice(
   bolt11: string,
   signalOrOptions?: AbortSignal | PayInvoiceOptions,
 ): Promise<{ preimage: string }> {
-  const { preimage, confirmed } = await payInvoiceOnce(walletId, bolt11, signalOrOptions);
+  const { preimage, confirmed } = await trackWalletReply(walletId, () =>
+    payInvoiceOnce(walletId, bolt11, signalOrOptions),
+  );
   // Proof of payment: lets the tx list show this send as settled even while
   // the wallet's own list_transactions still reports it pending. Only for a
   // confirmed result — a lookup can expose an UNPAID invoice's preimage (e.g.
@@ -766,6 +796,20 @@ async function payInvoiceOnce(
   }
 }
 
+// @getalby/sdk's WebLN getInfo returns this stub instead of throwing when
+// get_info fails, so it is not evidence of a wallet reply (#1768).
+function isWeblnGetInfoStub(info: unknown): boolean {
+  const i = info as { methods?: unknown; node?: object } | null;
+  const methods = i?.methods;
+  return (
+    Array.isArray(methods) &&
+    methods.length === 1 &&
+    methods[0] === 'sendPayment' &&
+    !!i?.node &&
+    Object.keys(i.node).length === 0
+  );
+}
+
 function extractPaymentHash(bolt11: string): string | null {
   try {
     // Simple bolt11 payment_hash extraction — it's tag 'p' (01 in bech32)
@@ -789,6 +833,9 @@ export async function getInfo(
   try {
     const info: Nip47GetInfoResponse = await provider.getInfo();
     if (__DEV__) console.log('NWC getInfo response:', JSON.stringify(info));
+    // The WebLN getInfo swallows a failed get_info into a minimal stub, so only
+    // a non-stub result proves the wallet answered (#1768).
+    if (!isWeblnGetInfoStub(info)) recordWalletReply(walletId);
     const alias = sanitizeDisplayText(info.alias, { maxLen: 64 });
     const lud16 = info.lud16;
     return { alias, lud16 };
@@ -809,7 +856,9 @@ export async function getWalletMethods(walletId: string): Promise<string[] | nul
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    const info = await withTimeout(provider.client.getInfo(), 10_000, `getInfo(${walletId})`);
+    const info = await trackWalletReply(walletId, () =>
+      withTimeout(provider.client.getInfo(), 10_000, `getInfo(${walletId})`),
+    );
     return Array.isArray(info?.methods) ? info.methods.map(String) : null;
   } catch (error) {
     if (__DEV__) console.warn(`NWC get_info (methods) failed for ${walletId}:`, error);
@@ -824,11 +873,13 @@ export async function listTransactions(
   const provider = await ensureConnected(walletId, isActive);
   if (!provider) throw new Error(`NWC wallet ${walletId} not connected — cannot list transactions`);
   await hydratePaymentProofs(); // proofs from earlier sessions, before the list is mapped
-  return listTransactionsWithRetry(
-    walletId,
-    provider,
-    () => reconnectOnce(walletId, isActive),
-    isActive,
+  return trackWalletReply(walletId, () =>
+    listTransactionsWithRetry(
+      walletId,
+      provider,
+      () => reconnectOnce(walletId, isActive),
+      isActive,
+    ),
   );
 }
 
@@ -837,77 +888,6 @@ const PAYMENT_HASH_RE = /^[0-9a-fA-F]{64}$/;
 
 export function isValidPaymentHash(hash: string | null | undefined): hash is string {
   return typeof hash === 'string' && PAYMENT_HASH_RE.test(hash);
-}
-
-// Per-session cache of payment hashes the NWC backend has *terminally*
-// refused (e.g. NIP-47 NOT_FOUND, or the SDK's "Missing/invalid
-// payment_hash" input rejection). Skipping these on subsequent calls
-// avoids flooding the Metro log every refresh and burning NWC request
-// budget (#98). Transient errors (relay disconnects, timeouts,
-// INTERNAL / RATE_LIMITED) are intentionally NOT cached so paid-status
-// polling (ConversationScreen) and expectPayment detection
-// (WalletContext) still settle when conditions recover.
-// Per-wallet bounded LRU. Without a cap the cache grows monotonically
-// for the JS-runtime lifetime — one user opening many tx-detail
-// sheets, or a noisy backend returning many distinct terminal misses,
-// could leak unbounded memory and permanently suppress lookups for
-// those hashes until app restart. Per-wallet cap keeps total worst-
-// case memory bounded by N_wallets × FAILED_LOOKUP_CAP entries.
-const FAILED_LOOKUP_CAP = 500;
-// Map iteration order is insertion order in JS, so we evict the
-// oldest entry by deleting + re-inserting on access (LRU touch).
-const failedLookupCache = new Map<string, Map<string, true>>();
-
-function hasFailedLookup(walletId: string, paymentHash: string): boolean {
-  const cache = failedLookupCache.get(walletId);
-  if (!cache) return false;
-  if (!cache.has(paymentHash)) return false;
-  // LRU touch: re-insert so this entry moves to the tail.
-  cache.delete(paymentHash);
-  cache.set(paymentHash, true);
-  return true;
-}
-
-function recordFailedLookup(walletId: string, paymentHash: string): void {
-  let cache = failedLookupCache.get(walletId);
-  if (!cache) {
-    cache = new Map();
-    failedLookupCache.set(walletId, cache);
-  }
-  // If already present, refresh its position (LRU touch).
-  if (cache.has(paymentHash)) cache.delete(paymentHash);
-  cache.set(paymentHash, true);
-  // Evict oldest while over cap. Map.keys() yields in insertion order
-  // so the first key is the oldest.
-  while (cache.size > FAILED_LOOKUP_CAP) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
-  }
-}
-
-/** Drop the cache entry for a wallet — call from disconnect / wallet
- * removal so cache memory follows wallet lifecycle. */
-export function clearFailedLookupCache(walletId: string): void {
-  failedLookupCache.delete(walletId);
-}
-
-// Errors that mean "this hash isn't coming back from this backend".
-// Anything else is treated as transient — caching transient failures
-// would permanently silence valid paid-status polling once a single
-// relay timeout slipped through.
-function isTerminalLookupError(error: unknown): boolean {
-  if (!error) return false;
-  const message = error instanceof Error ? error.message : String(error);
-  if (/missing payment_hash|invalid payment_hash|not[ _]?found/i.test(message)) {
-    return true;
-  }
-  // NIP-47 error responses surface a `code` on the thrown error object.
-  const code = (error as { code?: unknown })?.code;
-  if (typeof code === 'string' && code.toUpperCase() === 'NOT_FOUND') {
-    return true;
-  }
-  return false;
 }
 
 // Read raw NIP-47 fields so settlement evidence survives the SDK boundary.
@@ -935,10 +915,12 @@ export async function lookupInvoice(
   const provider = await ensureConnected(walletId);
   if (!provider) return null;
   try {
-    const call = provider.client.lookupInvoice({ payment_hash: paymentHash });
-    const result = await (options.replyTimeoutMs !== undefined
-      ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
-      : call);
+    const result = await trackWalletReply(walletId, () => {
+      const call = provider.client.lookupInvoice({ payment_hash: paymentHash });
+      return options.replyTimeoutMs !== undefined
+        ? withTimeout(call, options.replyTimeoutMs, `lookupInvoice(${walletId})`)
+        : call;
+    });
     if (!needsInvoiceHistoryConfirmation(result))
       return parseInvoiceSettlement(result, paymentHash);
     if (!Number.isSafeInteger(result.created_at) || result.created_at <= 0) return null;

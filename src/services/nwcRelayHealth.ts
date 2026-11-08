@@ -19,7 +19,7 @@
  *     timer lapses.
  */
 
-import { isConnectionError, isReplyTimeoutError } from './nwcErrors';
+import { isUnansweredError, isWalletAnswer } from './nwcErrors';
 
 // Per-wallet count of consecutive NIP-47 requests that got no answer from the
 // relay (reply-timeout / connection error). A WebSocket can stay `connected`
@@ -159,8 +159,9 @@ export function markWalletProbed(walletId: string, now: number = Date.now()): vo
 
 /**
  * Record the outcome of a NIP-47 request against its relay-health counter.
- * Only a reply-timeout / connection error (the relay never answered) counts
- * toward "dead". ANY answer resets it — including a wallet-level error such as
+ * Only a reply-timeout / connection error (the relay never answered —
+ * including the SDK's own reply/publish timeouts, `isUnansweredError`, #1768)
+ * counts toward "dead". ANY answer resets it — including a wallet-level error such as
  * "method not supported" (NWC wallets that don't implement `get_balance`) or
  * "insufficient funds". So this is capability-agnostic: it keys off whether the
  * relay *responded*, not which method succeeded, and never false-disconnects a
@@ -168,7 +169,7 @@ export function markWalletProbed(walletId: string, now: number = Date.now()): vo
  * relay with an escalating backoff (#656).
  */
 export function recordRelayOutcome(walletId: string, error?: unknown): void {
-  if (error !== undefined && (isReplyTimeoutError(error) || isConnectionError(error))) {
+  if (error !== undefined && isUnansweredError(error)) {
     const failures = (relayFailures.get(walletId) ?? 0) + 1;
     relayFailures.set(walletId, failures);
     if (failures >= RELAY_DEAD_AFTER_FAILURES) {
@@ -179,8 +180,40 @@ export function recordRelayOutcome(walletId: string, error?: unknown): void {
       relayCooldownUntil.set(walletId, Date.now() + backoff);
     }
     notifyHealthChanged(walletId);
-  } else {
+  } else if (error === undefined || isWalletAnswer(error)) {
     markRelayResponsive(walletId);
+  } else {
+    // A local error (no NIP-47 `code`, e.g. a decode/guard throw): as before it
+    // doesn't count toward "dead", but it isn't proof the wallet answered
+    // either, so it must not turn the card green (#1768).
+    relayFailures.set(walletId, 0);
+    relayCooldownUntil.delete(walletId);
+    notifyHealthChanged(walletId);
+  }
+}
+
+/**
+ * Credit a real wallet answer from a call that doesn't otherwise feed relay
+ * health (pay / list / lookup / get_info). Success-only on purpose: a result,
+ * or a NIP-47 wallet error, stamps the reply (→ green). Timeouts and local
+ * errors are ignored HERE — those callers have their own poll cadences and
+ * ceilings (e.g. the 2.5 s lookup race), and counting them toward "dead" would
+ * flap the card; the dead/amber signal stays owned by get_balance /
+ * make_invoice / the connect probe (#654, #1768).
+ */
+export function recordWalletReply(walletId: string, error?: unknown): void {
+  if (error === undefined || isWalletAnswer(error)) markRelayResponsive(walletId);
+}
+
+/** Run a NIP-47 call and credit its answer via `recordWalletReply`. */
+export async function trackWalletReply<T>(walletId: string, run: () => Promise<T>): Promise<T> {
+  try {
+    const result = await run();
+    recordWalletReply(walletId);
+    return result;
+  } catch (error) {
+    recordWalletReply(walletId, error);
+    throw error;
   }
 }
 

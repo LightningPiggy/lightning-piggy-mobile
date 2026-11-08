@@ -24,9 +24,13 @@ export const PROBE_REPLY_TIMEOUT_MS = 8_000;
  *     balance — when the wallet hasn't answered anything for ~4 min (#1768).
  *     Without it, a wallet backend that goes down while the app sits idle
  *     never fails a request and so stays green "Connected" indefinitely. The
- *     probe skips parked / rate-limited relays, handshakes in flight and a
- *     backgrounded app, and is throttled per wallet in `shouldProbeWallet`;
- *     balance surfaces' own refreshes count as replies, so they suppress it;
+ *     probe skips parked / rate-limited relays, handshakes in flight, a
+ *     get_balance already in flight and a backgrounded app, and is throttled
+ *     per wallet in `shouldProbeWallet`. Any real answer resets its clock —
+ *     get_balance / make_invoice and, via `recordWalletReply`, pay / list /
+ *     lookup / get_info — so normal use rarely needs it. Note the foreground
+ *     balance refresh is event-driven (once on focus / foreground, #657), NOT
+ *     a constant poll, so a balance screen left open still gets probed;
  *  3. sync `isConnected` + the four-state `connectionHealth` into wallet state
  *     (write only on change).
  *
@@ -51,6 +55,11 @@ export function useNwcConnectionWatchdog(
     let disposed = false;
     let resumeTimer: ReturnType<typeof setTimeout> | null = null;
     let syncTimer: ReturnType<typeof setTimeout> | null = null;
+    // When the app last came to the foreground. An overdue interval tick can
+    // fire the instant the app resumes (iOS delivers suspended timers on
+    // foreground); skipping ticks inside the stagger window keeps all resume
+    // work behind the 3 s timer (CLAUDE.md #554/#1031).
+    let lastResumeAt = Number.NEGATIVE_INFINITY;
 
     // Sync stored state to relay *responsiveness* (does it answer?), not
     // connect()'s socket-level success — so a dead relay stays Disconnected
@@ -69,7 +78,8 @@ export function useNwcConnectionWatchdog(
     const probe = async (w: WalletState, isCurrent: () => boolean) => {
       if (AppState.currentState !== 'active') return;
       if (!nwcService.isWalletConnected(w.id) || nwcService.isRelayInCooldown(w.id)) return;
-      if (nwcService.isConnectionInProgress(w.id) || !nwcService.shouldProbeWallet(w.id)) return;
+      if (nwcService.isConnectionInProgress(w.id) || nwcService.isBalanceInFlight(w.id)) return;
+      if (!nwcService.shouldProbeWallet(w.id)) return;
       nwcService.markWalletProbed(w.id);
       const balance = await nwcService.getBalance(w.id, { replyTimeoutMs: PROBE_REPLY_TIMEOUT_MS });
       if (balance !== null && isCurrent()) {
@@ -119,6 +129,7 @@ export function useNwcConnectionWatchdog(
     };
 
     const interval = setInterval(() => {
+      if (Date.now() - lastResumeAt < WATCHDOG_RESUME_DELAY_MS) return;
       void runCheck();
     }, WATCHDOG_INTERVAL_MS);
 
@@ -128,6 +139,7 @@ export function useNwcConnectionWatchdog(
         resumeTimer = null;
       }
       if (next !== 'active') return;
+      lastResumeAt = Date.now();
       resumeTimer = setTimeout(() => {
         resumeTimer = null;
         void runCheck();

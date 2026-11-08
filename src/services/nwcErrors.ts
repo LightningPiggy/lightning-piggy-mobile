@@ -56,6 +56,32 @@ export function isConnectionError(error: unknown): boolean {
   );
 }
 
+/**
+ * The request never got an answer from the wallet service: our typed
+ * reply-timeout, a relay connectivity error, OR the @getalby/sdk's own
+ * `Nip47ReplyTimeoutError` / `Nip47PublishTimeoutError` / `Nip47PublishError`.
+ * The SDK classes set no `name` and their messages ("reply timeout: event …",
+ * "publish timeout: …", "failed to publish: …") slip past both matchers above,
+ * so without this an SDK-level timeout read as "the wallet answered" and kept
+ * the card green while the NWC provider was offline (#1768).
+ */
+export function isUnansweredError(error: unknown): boolean {
+  if (isReplyTimeoutError(error) || isConnectionError(error)) return true;
+  const msg = (error as { message?: string } | undefined)?.message ?? String(error ?? '');
+  return /reply timeout|publish timeout|failed to publish/i.test(msg);
+}
+
+/**
+ * Did the wallet service actually respond, just with a NIP-47 error (e.g.
+ * `NOT_IMPLEMENTED`, `INSUFFICIENT_BALANCE`, `NOT_FOUND`)? The SDK raises those
+ * as `Nip47WalletError` with a string `code`. Errors raised locally before any
+ * request ("Not connected", AbortError, …) carry no `code`, so they don't count
+ * as a reply (#1768).
+ */
+export function isWalletAnswer(error: unknown): boolean {
+  return typeof (error as { code?: unknown })?.code === 'string' && !isUnansweredError(error);
+}
+
 export function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw createAbortError();
 }
