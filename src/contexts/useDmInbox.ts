@@ -500,6 +500,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       if (!isStillActive()) return;
       const accountSignal = accountSignalFor(refreshForPubkey);
       let refreshCompleted = false; // set after commit; gates the stamp (#788 — see helper)
+      let relaysCut = false; // a quorum read cut a relay off: recover with a full read (#1759)
       let disposeSignal: () => void = () => {};
 
       let resolveSetup!: () => void;
@@ -596,10 +597,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 : { since: kind4Failures?.committedCursor(lastSeen ?? 0) ?? lastSeen }),
               signal: effectiveSignal,
               isKnownEvent: knownInboxEvent(knownWrapIdsRef, refreshForPubkey),
+              quorum: !opts?.force && !opts?.backfill, // pull-to-refresh / backfill wait for all
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
           );
           if (effectiveSignal?.aborted) return;
+          relaysCut = !complete;
           kind4Pass?.configureFetch(readRelays, kind4.length);
           const entries: DmInboxEntry[] = [];
 
@@ -785,9 +788,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           );
           setInboxForRefresh(filteredFinal);
 
-          // Advance only after all targets were processed and rows persisted, and never
-          // past a relay the quorum read cut off (#1759: commit failures, keep the floor).
-          // Pending failures protect the floor too. Randomised wrap timestamps never contribute.
+          // Advance only once all targets are persisted, never past a relay a quorum read cut off
+          // (#1759: commit failures, keep the floor), nor past pending failures or wrap timestamps.
           const newest = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
           const kind4Complete = k4Result.processed === k4ToDecrypt.length;
           if (!effectiveSignal.aborted && kind4Complete && kind4Failures && kind4Pass)
@@ -847,10 +849,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           void refreshDmInboxRef.current?.({ includeNonFollows, signal: accountSignalFor(pubkey) });
         });
       }
-      // Cold-start backfill (#751) — recent slice painted fast above; top up to
-      // the full backlog in the background (deferred + abortable). See module.
+      // Cold-start backfill (#751), and the full read recovering relays a quorum read cut (#1759):
+      // top up in the background (deferred + abortable, from the unmoved floor). See module.
       scheduleColdStartBackfill({
-        isColdStart: isColdStart && refreshCompleted,
+        isColdStart: (isColdStart && refreshCompleted) || relaysCut,
         signal,
         includeNonFollows,
         refreshRef: refreshDmInboxRef,

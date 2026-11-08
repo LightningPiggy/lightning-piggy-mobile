@@ -7,25 +7,26 @@ import type { QuorumStats, RelayQuorum } from './relayQuorumQuery';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 
 // Bulk DM reads (inbox + per-conversation kind-4), extracted from
-// ./nostrService (#703 size cap). Both are quorum reads (#1759): ONE REQ per
-// relay carrying every filter, finished once DM_FETCH_QUORUM relays reached
-// EOSE plus a grace period, with the old deadline kept as the backstop.
+// ./nostrService (#703 size cap). Both send ONE REQ per relay carrying every
+// filter (#1759). By default they are full reads: they wait for every relay
+// (to EOSE, failure, or the per-relay timeout), exactly as before #1759.
 //
-// Why 2 relays + 1.2 s rather than a majority: the read set is the user's
-// relays plus ~5 app defaults, and waiting for the k-th of n answers is the
-// k-th order statistic of their latencies — a majority of 6-8 relays brings
-// the slow tail straight back. Two independent EOSEs guard against a single
-// relay that is empty or behind; the grace still lets a relay that is only a
-// little slower contribute. Anything later is reconciled elsewhere: the live
-// DM sub (wraps without `since`) streams what stragglers hold once they
-// answer, and cold-start backfill and explicit refreshes re-read without the
-// kind-4 floor.
+// The inbox fetch can opt into a QUORUM read (`quorum: true`): finished once
+// DM_FETCH_QUORUM relays reached EOSE plus a grace period, with the deadline
+// as the backstop. Why 2 relays + 1.2 s rather than a majority: the read set
+// is the user's relays plus ~5 app defaults, and waiting for the k-th of n
+// answers is the k-th order statistic of their latencies — a majority of 6-8
+// relays brings the slow tail straight back. Two independent EOSEs guard
+// against a single relay that is empty or behind.
 //
-// Cursors: a read that cut a relay off (still pending at the grace or the
-// deadline) reports `complete: false`, and callers must not advance their
-// kind-4 cursors past it — the live sub only covers `#p: viewer`, so a slow
-// relay's SENT kind-4 (from another device) would otherwise be skipped every
-// time. Failed relays don't make a read partial (pre-#1759 parity).
+// A quorum read that cut a relay off reports `complete: false`. Callers must
+// then (a) not advance a kind-4 cursor from it, and (b) follow up with a full
+// read off the critical path, or the cut relay's data is never fetched: the
+// live sub only covers `#p: viewer`, so a slow relay's SENT kind-4 (from
+// another device) would be hidden indefinitely, cut again on every quorum
+// read. useDmInbox does both (deferred backfill). Only the latency-critical
+// focus refresh uses the quorum; pull-to-refresh, backfill and conversation
+// reads are full reads. Failed relays never make a read partial.
 export const DM_FETCH_QUORUM: RelayQuorum = { quorum: 2, graceMs: 1200 };
 
 /** Logs the quorum outcome and records whether the read was complete. */
@@ -91,16 +92,14 @@ export async function fetchDirectMessageEvents(
     fromMeFilter.since = since;
     toMeFilter.since = since;
   }
-  const read = { complete: false };
   try {
-    // 15 s backstop: the deadline closes every REQ still open (proper teardown).
-    const events = await pool.querySyncFilters(allRelays, [fromMeFilter, toMeFilter], 15000, {
-      quorum: DM_FETCH_QUORUM,
-      onQuorumSettled: settledInto('conversation', read),
-    });
+    // Full read: a conversation open must see every relay's history (the
+    // thread paints from the store meanwhile). maxWait closes each relay's
+    // REQ at 15 s if EOSE never arrives (proper teardown).
+    const events = await pool.querySyncFilters(allRelays, [fromMeFilter, toMeFilter], 15000);
     const byId = new Map<string, RawDmEvent>();
     for (const ev of events) if (ev.kind === 4) byId.set(ev.id, ev as RawDmEvent);
-    return { events: Array.from(byId.values()), complete: read.complete };
+    return { events: Array.from(byId.values()), complete: true };
   } catch (error) {
     if (__DEV__) console.warn('[Nostr] fetchDirectMessageEvents failed:', error);
     return { events: [], complete: false };
@@ -147,6 +146,9 @@ export async function fetchInboxDmEvents(
     /** Ids already stored: skipped before parse/verify. They are absent from
      * the result, so a cursor computed from it advances no further for them. */
     isKnownEvent?: (id: string) => boolean;
+    /** Quorum read (see the module comment): only for the latency-critical
+     * focus refresh, which must follow a partial result with a full read. */
+    quorum?: boolean;
   } = {},
 ): Promise<FetchedInboxEvents> {
   const allRelays = [...new Set([...relays, ...enabledAppRelays('default', DEFAULT_RELAYS)])];
@@ -183,21 +185,23 @@ export async function fetchInboxDmEvents(
     recvK4Filter.since = since;
   }
   const __t0 = performance.now();
-  const read = { complete: false };
+  // A full read is complete by definition (pre-#1759 semantics).
+  const read = { complete: !options.quorum };
   try {
-    // 8 s backstop (was 15 s): it now only bounds a read where fewer than
-    // DM_FETCH_QUORUM relays answer. The deadline closes every REQ still
-    // open, so the cold-start fetch genuinely terminates. The live sub keeps
-    // delivering after this resolves, and pull-to-refresh re-runs the query.
+    // 8 s (was 15 s): a quorum read's backstop, a full read's per-relay
+    // timeout. Either way every REQ is closed, so the cold-start fetch
+    // genuinely terminates.
     const events = await pool.querySyncFilters(
       allRelays,
       [sentK4Filter, recvK4Filter, wrapsFilter],
       8000,
       {
         abort: options.signal,
-        quorum: DM_FETCH_QUORUM,
         alreadyHaveEvent: options.isKnownEvent,
-        onQuorumSettled: settledInto('inbox', read),
+        ...(options.quorum && {
+          quorum: DM_FETCH_QUORUM,
+          onQuorumSettled: settledInto('inbox', read),
+        }),
       },
     );
     const k4 = new Map<string, RawDmEvent>();

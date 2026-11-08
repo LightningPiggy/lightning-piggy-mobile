@@ -402,8 +402,8 @@ export async function fetchConversationFor(
   // the encrypted store now (#850; the plaintext conv-blob write is gone).
   // kind-1059 deliberately excluded — wrap timestamps are randomized per
   // NIP-59 and would poison the kind-4 since cursor (same reasoning as the
-  // inbox path; see fetchInboxDmEvents + refreshDmInbox). A quorum read that
-  // cut a slow relay off (#1759) must not move the cursor past what it holds.
+  // inbox path; see fetchInboxDmEvents + refreshDmInbox). An incomplete read
+  // must not move the cursor past what it missed (#1759).
   const newConvLastSeen = Math.max(convLastSeen ?? 0, ...kind4Events.map((e) => e.created_at));
   if (kind4ReadComplete && newConvLastSeen > (convLastSeen ?? 0)) {
     AsyncStorage.setItem(convLastSeenKey(pubkey, normalized), String(newConvLastSeen)).catch(

@@ -458,7 +458,8 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
        * relay each came from. */
       /** `quorum`: finish once that many relays reached EOSE, plus a grace
        * period for the rest (see `queryRelaysQuorum`). Such a read never
-       * rejects; `requireEose` / `requireAnswer` / `onClose` don't apply. */
+       * rejects; `requireEose` / `requireAnswer` / `onClose` don't apply.
+       * `alreadyHaveEvent`: skip known ids before parse/verify (both modes). */
       options: {
         abort?: AbortSignal;
         requireEose?: boolean;
@@ -507,6 +508,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
                 ? timeoutMs + RELAY_CONNECT_TIMEOUT_MS
                 : maxWait,
             abort: options.abort,
+            alreadyHaveEvent: options.alreadyHaveEvent,
             reqOptions: {
               mode: 'oneshot',
               label: reqLabel(filters, 'oneshot'),

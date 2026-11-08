@@ -35,7 +35,7 @@ Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as t
 
 The Messages tab fetches both protocols on focus and on conversation open:
 
-* `fetchInboxDmEvents` sends three filters in one REQ per relay, and finishes once two relays reached EOSE plus a 1.2 s grace for the rest (8 s backstop; the live sub picks up stragglers, #1759):
+* `fetchInboxDmEvents` sends three filters in one REQ per relay (#1759). The focus refresh finishes once two relays reached EOSE plus a 1.2 s grace (8 s backstop); a read that cut a relay off doesn't advance the kind-4 cursor and is followed by a background full read. Pull-to-refresh, backfill and conversation reads wait for every relay:
 +
 [source]
 ----

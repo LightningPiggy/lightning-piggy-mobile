@@ -638,18 +638,44 @@ it.each([false, true])(
   },
 );
 
-it('keeps the kind-4 cursor when the quorum read cut a relay off, and advances once complete', async () => {
+it('recovers a slow relay’s SENT kind-4 after a quorum cut, and only then advances the cursor', async () => {
+  // Two fast relays answer; the user's own relay holding a kind-4 we sent from
+  // another device is always slower than the grace, so every quorum read cuts it.
+  const sent = { ...event(2, BASE + 300, OWNER), tags: [['p', FRIEND]] };
+  fetchMock.mockImplementation(async (_owner, _relays, opts) =>
+    opts?.quorum
+      ? { kind4: [event(1)], kind1059: [], complete: false }
+      : { kind4: [event(1), sent], kind1059: [], complete: true },
+  );
+  const backfill = jest.mocked(scheduleColdStartBackfill);
   const { result, unmount } = renderInbox();
-  relayEvents = [event(1), event(2, BASE + 300)];
-  fetchMock.mockImplementation(async () => ({ kind4: relayEvents, kind1059: [], complete: false }));
-  await act(() => result.current.refreshDmInbox({ force: true }));
-  // The pre-parse skip is wired in: a function over the live sub's known ids.
+  await act(() => result.current.refreshDmInbox());
+  expect(fetchMock.mock.calls[0][2]).toMatchObject({ quorum: true });
   expect(typeof fetchMock.mock.calls[0][2]?.isKnownEvent).toBe('function');
-  // Decrypts persisted, but the floor didn't move past the cut relay.
-  expect(rows.map((r) => r.eventId)).toEqual([event(1).id, event(2).id]);
+  // Partial: the sent message isn't there yet and the floor didn't move...
+  expect(rows.map((r) => r.eventId)).toEqual([event(1).id]);
   expect(await savedCursor()).toBe('0');
-  fetchMock.mockImplementation(async () => ({ kind4: relayEvents, kind1059: [], complete: true }));
-  await act(() => result.current.refreshDmInbox({ force: true }));
+  // ...and a background full read is scheduled to let the cut relay finish.
+  expect(backfill).toHaveBeenCalledWith(expect.objectContaining({ isColdStart: true }));
+  const recovery = backfill.mock.calls[0][0];
+  await act(() =>
+    recovery.refreshRef.current!({
+      backfill: true,
+      includeNonFollows: recovery.includeNonFollows,
+      signal: recovery.signal,
+    }),
+  );
+  // Backfill waits for every relay: the sent kind-4 is stored and shown, and
+  // only now does the cursor advance.
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1][2]).toMatchObject({ quorum: false });
+  expect(rows.find((r) => r.eventId === sent.id)).toMatchObject({ fromMe: true });
+  expect(result.current.dmInbox.some((e) => e.id === sent.id && e.fromMe)).toBe(true);
   expect(await savedCursor()).toBe(String(BASE + 300));
+  // A complete read schedules no further recovery (warm: not a cold start).
+  expect(backfill.mock.calls.at(-1)?.[0].isColdStart).toBe(false);
+  // Pull-to-refresh is a full read too.
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  expect(fetchMock.mock.calls[2][2]).toMatchObject({ quorum: false });
   unmount();
 });

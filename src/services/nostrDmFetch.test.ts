@@ -72,10 +72,12 @@ const event = (id: string, kind: number, pubkey: string, p: string, created_at: 
 
 test('inbox: one REQ per relay with three filters, no since on 1059, quorum beats a stuck relay', async () => {
   let done = false;
-  const read = fetchInboxDmEvents(ME, URLS, { since: 10_000, limit: 50 }).then((r) => {
-    done = true;
-    return r;
-  });
+  const read = fetchInboxDmEvents(ME, URLS, { since: 10_000, limit: 50, quorum: true }).then(
+    (r) => {
+      done = true;
+      return r;
+    },
+  );
   await jest.advanceTimersByTimeAsync(0);
   for (const url of URLS)
     expect(subOf(url).filters).toEqual([
@@ -105,15 +107,19 @@ test('inbox: one REQ per relay with three filters, no since on 1059, quorum beat
 
 test('inbox: abort resolves at once and closes every REQ', async () => {
   const controller = new AbortController();
-  const read = fetchInboxDmEvents(ME, URLS, { signal: controller.signal });
+  const read = fetchInboxDmEvents(ME, URLS, { signal: controller.signal, quorum: true });
   await jest.advanceTimersByTimeAsync(0);
   controller.abort();
   await expect(read).resolves.toEqual({ kind4: [], kind1059: [], complete: false });
   for (const relay of relays.values()) expect(relay.openSubs.size).toBe(0);
 });
 
-test('conversation: both kind-4 directions share one REQ per relay', async () => {
-  const read = fetchDirectMessageEvents(ME, PEER, URLS);
+test('conversation: both kind-4 directions share one REQ per relay, and wait for every relay', async () => {
+  let done = false;
+  const read = fetchDirectMessageEvents(ME, PEER, URLS).then((r) => {
+    done = true;
+    return r;
+  });
   await jest.advanceTimersByTimeAsync(0);
   for (const url of URLS)
     expect(subOf(url).filters).toEqual([
@@ -123,17 +129,24 @@ test('conversation: both kind-4 directions share one REQ per relay', async () =>
   frame(URLS[0], ['EVENT', subOf(URLS[0]).id, event('4', 4, PEER, ME, 1)]);
   frame(URLS[0], ['EOSE', subOf(URLS[0]).id]);
   frame(URLS[1], ['EOSE', subOf(URLS[1]).id]);
-  // Under the 15 s backstop, the grace after the second EOSE ends the read.
-  await jest.advanceTimersByTimeAsync(1200);
+  // A full read (#1759 review): no quorum cut — the slow relay's history
+  // (e.g. a kind-4 we SENT from another device) is waited for.
+  await jest.advanceTimersByTimeAsync(5000);
+  expect(done).toBe(false);
+  frame(URLS[2], ['EVENT', subOf(URLS[2]).id, event('7', 4, ME, PEER, 2)]);
+  frame(URLS[2], ['EOSE', subOf(URLS[2]).id]);
   const { events, complete } = await read;
-  expect(events.map((e) => e.id[0])).toEqual(['4']);
-  expect(complete).toBe(false);
+  expect(events.map((e) => e.id[0]).sort()).toEqual(['4', '7']);
+  expect(complete).toBe(true);
 });
 
 test('inbox: complete when every relay answered or failed; known ids skipped before parse', async () => {
   const parse = jest.spyOn(JSON, 'parse');
   const known = event('5', 4, PEER, ME, 2);
-  const read = fetchInboxDmEvents(ME, URLS, { isKnownEvent: (id) => id === known.id });
+  const read = fetchInboxDmEvents(ME, URLS, {
+    isKnownEvent: (id) => id === known.id,
+    quorum: true,
+  });
   await jest.advanceTimersByTimeAsync(0);
   parse.mockClear();
   frame(URLS[0], ['EVENT', subOf(URLS[0]).id, known]);
@@ -149,5 +162,24 @@ test('inbox: complete when every relay answered or failed; known ids skipped bef
   frame(URLS[2], ['CLOSED', subOf(URLS[2]).id, 'restricted: no']);
   const result = await read;
   expect(result.kind4.map((e) => e.id[0])).toEqual(['6']);
+  expect(result.complete).toBe(true);
+});
+
+test('inbox: a full read (pull-to-refresh / backfill) waits for the slow relay', async () => {
+  let done = false;
+  const read = fetchInboxDmEvents(ME, URLS).then((r) => {
+    done = true;
+    return r;
+  });
+  await jest.advanceTimersByTimeAsync(0);
+  frame(URLS[0], ['EOSE', subOf(URLS[0]).id]);
+  frame(URLS[1], ['EOSE', subOf(URLS[1]).id]);
+  await jest.advanceTimersByTimeAsync(3000);
+  expect(done).toBe(false);
+  // The user's own relay answers late with a kind-4 sent from another device.
+  frame(URLS[2], ['EVENT', subOf(URLS[2]).id, event('8', 4, ME, PEER, 5)]);
+  frame(URLS[2], ['EOSE', subOf(URLS[2]).id]);
+  const result = await read;
+  expect(result.kind4.map((e) => e.id[0])).toEqual(['8']);
   expect(result.complete).toBe(true);
 });
