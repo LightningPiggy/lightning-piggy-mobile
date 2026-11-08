@@ -5,8 +5,8 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * in every catalogue. Copied here rather than read from the catalogues
  * because only the active locale's catalogue is loaded at runtime (see
  * src/i18n/index.ts), while a stored row may be in any language.
- * attachmentPlaceholder.test.ts fails if this drifts from the catalogues:
- * when it does, copy the new strings in.
+ * attachmentPlaceholder.test.ts fails if a catalogue label is missing here.
+ * Append; never remove: rows stored under an older wording must still match.
  */
 export const ATTACHMENT_PLACEHOLDER_TEMPLATES: readonly string[] = [
   "Couldn't open attachment: {{name}}",

@@ -63,6 +63,7 @@ import * as invitationKeys from '../services/marmotInvitationKeySignOut';
 import { wipeLocalDmStore } from '../services/localDb';
 import { scheduleStartupTask, STARTUP_SLOTS } from '../services/startupTasks';
 import { useDmInbox } from './useDmInbox';
+import { useAccountScopedTask } from './useAccountScopedTask';
 import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging, type UseGroupMessagingResult } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
@@ -425,6 +426,8 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAmberNip44Permission,
     knownWrapIdsRef,
   } = useDmInbox({ pubkey, isLoggedIn, signerType, followPubkeys, followHydrated, getReadRelays });
+  // Cancels the deferred cold-start refresh if the account changes first.
+  const trackColdRefresh = useAccountScopedTask(pubkey);
   // Identity-transition teardown (switch + add-account logins); see helper.
   const { resetIdentityMemory, activateLoginPubkey } = useIdentityMemoryReset(pubkey, setPubkey, {
     setProfile,
@@ -711,21 +714,13 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           hydrateDmInboxFromCache(pk),
         ]);
 
-        // Defer relay fetches past a 1500 ms grace window (then JS-thread
-        // idle) so the user can tap Send / Receive / Transfer in the first
-        // ~1.5 s of cold-start without the JS thread being yanked away by
-        // parallel kind-3 + kind-0 + kind-10002 fetches — the "Send sheet
-        // feels frozen for the first few seconds" symptom lined up exactly
-        // with this batch running back-to-back with the inbox drain. It is
-        // the first slot of the serial startup queue (startupTasks.ts), so
-        // the later deferred jobs don't pile onto the same frames.
-        //
-        // Seed the working relay set from the cached NIP-65 relay list so
-        // `loadProfile` / `loadContacts` hit the relays the user actually
-        // publishes to — not `DEFAULT_RELAYS`, which might miss their
-        // kind-0/kind-3 entirely. Only falls back to DEFAULT_RELAYS on
-        // the very first login (before any relay cache exists).
-        scheduleStartupTask({
+        // Defer the kind-0/3/10002 refresh past a 1.5 s grace window (then
+        // JS idle) so early Send / Receive taps don't freeze behind it and
+        // the inbox drain. First slot of the serial startup queue; dropped
+        // if the account changes before it fires. The working relay set is
+        // seeded from the cached NIP-65 list (DEFAULT_RELAYS may miss the
+        // user's kind-0/kind-3), falling back only on the very first login.
+        const cancelRefresh = scheduleStartupTask({
           name: 'nostrRefresh',
           slotMs: STARTUP_SLOTS.nostrRefresh,
           minDelayMs: STARTUP_SLOTS.nostrRefresh,
@@ -769,6 +764,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             });
           },
         });
+        trackColdRefresh(pk!, cancelRefresh);
       } catch (error) {
         console.warn('Nostr auto-login failed:', error);
       }
@@ -782,6 +778,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadRelaysFromCache,
     loadContactsFromCache,
     hydrateDmInboxFromCache,
+    trackColdRefresh,
   ]);
 
   const loginWithNsec = useCallback(

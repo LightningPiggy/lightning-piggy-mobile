@@ -21,10 +21,10 @@ export const STARTUP_SLOTS = {
   nostrRefresh: 1_500,
   /** Marmot (MLS) groups: new group messages land once this is up. */
   marmotSession: 3_000,
-  /** NIP-171 groups: same, for the (rarer) NIP-171 groups. */
-  nip171Session: 5_000,
-  /** Boltz swap recovery: claims / refunds have hours of slack. */
-  swapRecovery: 6_500,
+  /** Boltz swap recovery: money, so ahead of the remaining group / push work. */
+  swapRecovery: 5_000,
+  /** NIP-171 groups: like Marmot, for the (rarer) NIP-171 groups. */
+  nip171Session: 6_500,
   /** Server-side notification watcher registration: invisible on device. */
   watcherPush: 8_000,
   /** Marmot push token registration (MIP-05): invisible on device. */

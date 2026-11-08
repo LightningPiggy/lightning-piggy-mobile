@@ -116,20 +116,41 @@ const POST_COLUMN_SCHEMA: string[] = [
 ];
 
 /**
- * `PRAGMA user_version` of a fully migrated DB: a 32-bit FNV-1a hash of every
- * migration statement, so ANY schema edit changes it and the next open
- * re-runs the (idempotent) migration once — nobody has to remember to bump a
- * number. Never 0, which is what a DB that predates this check reads.
+ * Bump when adding a migration step not expressed as DDL in the arrays above
+ * (an UPDATE backfill, a DROP INDEX, a new imperative check next to
+ * rebuildDmMessagesIfPreOwner / addMissingDmMessagesColumns). Edits to
+ * SCHEMA / ADDED_COLUMNS / POST_COLUMN_SCHEMA change the fingerprint on
+ * their own; anything else is invisible to it, and a stamped DB would
+ * silently skip the new step.
  */
-export const SCHEMA_FINGERPRINT = ((): number => {
-  const source = [...SCHEMA, ...ADDED_COLUMNS.map((c) => c.ddl), ...POST_COLUMN_SCHEMA].join('\n');
+export const SCHEMA_REVISION = 1;
+
+/**
+ * 32-bit FNV-1a hash of the DDL arrays plus `revision`. Never 0, which is
+ * what a DB that predates this check reads.
+ */
+export function schemaFingerprint(revision: number): number {
+  const source = [
+    `revision ${revision}`,
+    ...SCHEMA,
+    ...ADDED_COLUMNS.map((c) => c.ddl),
+    ...POST_COLUMN_SCHEMA,
+  ].join('\n');
   let hash = 0x811c9dc5;
   for (let i = 0; i < source.length; i++) {
     hash ^= source.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
   return hash | 0 || 1;
-})();
+}
+
+/**
+ * `PRAGMA user_version` of a fully migrated DB. Any edit to the DDL arrays
+ * changes it automatically; a migration step that is NOT DDL in those arrays
+ * only changes it if SCHEMA_REVISION is bumped. On a change the next open
+ * re-runs the whole (idempotent) migration once.
+ */
+export const SCHEMA_FINGERPRINT = schemaFingerprint(SCHEMA_REVISION);
 
 let dbPromise: Promise<DB> | null = null;
 
@@ -189,6 +210,9 @@ async function openLocalDbAttempt(): Promise<DB> {
   // Reading user_version is also the first real page read, so a wrong key
   // still fails here with the signature openLocalDb heals.
   const version = await db.execute('PRAGMA user_version;');
+  // WARNING: everything below this return is skipped on a stamped DB. A new
+  // migration step that isn't DDL in the arrays must bump SCHEMA_REVISION,
+  // or devices already on this fingerprint will never run it.
   if (Number(version.rows?.[0]?.user_version ?? 0) === SCHEMA_FINGERPRINT) {
     perfLog(`localDb open ${Date.now() - t0}ms (fast path)`);
     return db;

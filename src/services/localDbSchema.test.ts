@@ -110,6 +110,21 @@ describe('local DB migrations (user_version fast path)', () => {
     expect(userVersion()).toBe(localDb.SCHEMA_FINGERPRINT);
   });
 
+  it('bumping SCHEMA_REVISION (a non-DDL migration step) re-runs the migration on a stamped DB', async () => {
+    const { localDb: previous } = launch();
+    // A DB stamped by a build one revision behind, with identical DDL.
+    const older = previous.schemaFingerprint(previous.SCHEMA_REVISION - 1);
+    expect(older).not.toBe(previous.SCHEMA_FINGERPRINT);
+    expect(previous.schemaFingerprint(previous.SCHEMA_REVISION)).toBe(previous.SCHEMA_FINGERPRINT);
+    await previous.getLocalDb();
+    mockFile.exec(`PRAGMA user_version = ${older};`);
+    const { localDb } = launch();
+    await localDb.getLocalDb();
+    expect(mockLog.some((s) => s.includes('PRAGMA table_info(dm_messages)'))).toBe(true);
+    expect(mockLog.some((s) => s.includes('CREATE TABLE IF NOT EXISTS'))).toBe(true);
+    expect(userVersion()).toBe(localDb.SCHEMA_FINGERPRINT);
+  });
+
   it('a migration that fails part-way is not stamped, so the next open retries it', async () => {
     mockFailOn = /idx_dm_owner_inbox/;
     const first = launch();

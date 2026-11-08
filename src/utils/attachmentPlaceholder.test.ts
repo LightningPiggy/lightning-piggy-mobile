@@ -7,16 +7,15 @@ import {
 const catalogues = Object.values(loadAllCatalogues());
 
 describe('isAttachmentPlaceholderText', () => {
-  it('carries exactly the fallback labels of every catalogue', () => {
+  it('carries every catalogue fallback label (older wordings may stay)', () => {
     const fromCatalogues = catalogues.flatMap((cat) => [
       cat.messageBubble.attachmentUnavailable,
       cat.messageBubble.unsupportedAttachment,
     ]);
-    // If this fails, a catalogue's label changed: copy it into
-    // ATTACHMENT_PLACEHOLDER_TEMPLATES (attachmentPlaceholder.ts).
-    expect([...ATTACHMENT_PLACEHOLDER_TEMPLATES].sort()).toEqual(
-      [...new Set(fromCatalogues)].sort(),
-    );
+    // If this fails, a catalogue's label changed: APPEND the new wording to
+    // ATTACHMENT_PLACEHOLDER_TEMPLATES (attachmentPlaceholder.ts); keep the old.
+    const missing = fromCatalogues.filter((s) => !ATTACHMENT_PLACEHOLDER_TEMPLATES.includes(s));
+    expect(missing).toEqual([]);
   });
 
   it('matches blank text and the fallback labels in every locale', () => {
