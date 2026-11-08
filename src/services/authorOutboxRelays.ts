@@ -277,12 +277,17 @@ export function leasedOutboxRelayCount(): number {
 export function leaseOutboxRelays(
   urls: readonly string[],
   onRevoked?: () => void,
+  /** Frames this lease adds to an owned socket's budget (sized by the caller's `limit`). */
+  frames: number = OUTBOX_FRAMES_PER_LEASE,
 ): OutboxRelayLease {
   if (!areCurrentUserOwnRelaysHydrated()) return { relays: [], release: () => {} };
   forgetClosed();
   const granted: string[] = [];
   const now = Date.now();
   const own = new Set(getCurrentUserOwnRelays().map(normalizeRelayUrl));
+  // This lease's own registration: two leases passing the same callback still
+  // each get notified, and releasing one never unregisters the other.
+  const revoke = onRevoked && (() => onRevoked());
   let pooled: ReadonlySet<string> | undefined;
   for (const raw of urls) {
     const url = normalizeRelayUrl(raw);
@@ -291,6 +296,11 @@ export function leaseOutboxRelays(
     if (held) {
       // Back in use before its socket closed: stop the pending release.
       if (held.count === 0 && held.owned) claimPendingRelease(url);
+      // A borrowed socket that has since closed: the next one is ours to close.
+      if (!held.owned) {
+        pooled ??= pooledRelayUrls();
+        if (!pooled.has(url)) held.owned = true;
+      }
       held.count++;
     } else {
       if (leased.size >= MAX_OUTBOX_EXTRA_RELAYS) continue;
@@ -301,8 +311,8 @@ export function leaseOutboxRelays(
       held = { count: 1, owned, holders: new Set() };
       leased.set(url, held);
     }
-    if (held.owned) addRelayFrameBudget(url, OUTBOX_FRAMES_PER_LEASE, () => revokeOutboxRelay(url));
-    if (onRevoked) held.holders.add(onRevoked);
+    if (held.owned) addRelayFrameBudget(url, frames, () => revokeOutboxRelay(url));
+    if (revoke) held.holders.add(revoke);
     granted.push(url);
   }
   let released = false;
@@ -315,7 +325,7 @@ export function leaseOutboxRelays(
       for (const url of granted) {
         const held = leased.get(url);
         if (!held) continue;
-        if (onRevoked) held.holders.delete(onRevoked);
+        if (revoke) held.holders.delete(revoke);
         if (--held.count > 0) continue;
         // Someone else's socket: just stop counting it. Ours: keep counting it
         // until the pool has closed it.

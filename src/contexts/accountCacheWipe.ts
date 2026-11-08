@@ -85,10 +85,14 @@ import {
   RELAY_LIST_CREATED_AT_KEY_BASE,
   DM_INBOX_RELAYS_CACHE_KEY_BASE,
   DM_INBOX_CREATED_AT_KEY_BASE,
+  retireProfilePersists,
 } from './nostrCacheKeys';
 
 export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise<void> {
   if (!loggedOutPubkey) return;
+  // No queued profile-cache write (e.g. a late outbox find, #1390) may land
+  // after the wipe and recreate the profile cache.
+  await retireProfilePersists(loggedOutPubkey);
   retireBuyerOrderTitles(loggedOutPubkey);
   // Never let a SecureStore failure abort the rest of the per-account wipe.
   await wipeCheckoutAddress(loggedOutPubkey).catch(() => undefined);

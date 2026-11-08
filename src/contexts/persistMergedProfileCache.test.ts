@@ -11,7 +11,11 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { persistMergedProfileCache, PROFILES_CACHE_KEY_BASE } from './nostrCacheKeys';
+import {
+  persistMergedProfileCache,
+  PROFILES_CACHE_KEY_BASE,
+  retireProfilePersists,
+} from './nostrCacheKeys';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
 
@@ -111,6 +115,21 @@ describe('persistMergedProfileCache (#852)', () => {
     const result = await readCache();
     expect(result.a.name).toBe('a-new');
     expect(Object.keys(result).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('a persist queued before the account is wiped never writes after it (#1390)', async () => {
+    // A late outbox find's persist is queued behind a running one...
+    const first = persistMergedProfileCache(PK, {}, new Map([['a', profile('a')]]));
+    const late = persistMergedProfileCache(PK, {}, new Map([['b', profile('b')]]));
+    // ...then sign-out wipes the account: in-flight writes finish first...
+    await retireProfilePersists(PK);
+    await AsyncStorage.removeItem(key); // ...the wipe's own removal
+    await Promise.all([first, late]);
+    // ...and nothing queued before the wipe recreates the cache.
+    expect(await AsyncStorage.getItem(key)).toBeNull();
+    // A persist after the wipe (signed back in) writes as usual.
+    await persistMergedProfileCache(PK, {}, new Map([['c', profile('c')]]));
+    expect(Object.keys(await readCache())).toEqual(['c']);
   });
 
   it('falls back to the caller snapshot when the on-disk cache is corrupt', async () => {

@@ -11,6 +11,8 @@ import {
 import { pool } from './nostrPool';
 import { getManyPeerRelayLists } from './peerRelayLists';
 import { querySyncAbortable } from './relayQuery';
+import { verifyEventCached } from './nostrVerifyCache';
+import { normalizeRelayUrl } from '../utils/relayListKey';
 
 // The missing-profile fallback (#1390): someone whose kind-0 the viewer's
 // relays and the profile indexers don't have may still publish it on their
@@ -20,9 +22,10 @@ import { querySyncAbortable } from './relayQuery';
 //     relays per person, inside the app-wide outbox lease ceiling;
 //   - one person per query (`authors: [X]` to X's relays only — never one
 //     person's pubkey on someone else's personal relay);
-//   - a short in-memory retry throttle per person (nothing persisted), kept
-//     separately for display-only and verified callers, so a display-only
-//     miss never suppresses the verified fetch that feeds a Lightning address.
+//   - a short in-memory retry throttle per person (nothing persisted) for
+//     background display lookups only: a verified, user-driven lookup (the
+//     fetch that feeds a Lightning address) is never suppressed;
+//   - every candidate is signature-checked before the newest is chosen.
 // Relay-list lookups go to the indexers / the viewer's relays (./peerRelayLists).
 // Test accounts in lockdown skip it: they only ever read the LAN test relay.
 
@@ -105,14 +108,17 @@ function recordMiss(key: string, now: number): void {
     recentMisses.delete(recentMisses.keys().next().value!);
 }
 
-/** The newest structurally plausible kind-0 BY `pubkey` (relays can ignore `authors`). */
+/**
+ * The newest kind-0 BY `pubkey` (relays can ignore `authors`) that passes a
+ * full signature check: a forged newer copy from one relay never displaces a
+ * genuine one from another, and every result can be trusted for its
+ * `created_at` (newest-wins merging). At most one per asked relay (`limit: 1`).
+ */
 function newestProfile(events: readonly Event[], pubkey: string): Event | undefined {
-  let best: Event | undefined;
-  for (const ev of events) {
-    if (ev.pubkey !== pubkey || ev.kind !== 0) continue;
-    if (!best || ev.created_at > best.created_at) best = ev;
-  }
-  return best;
+  return events
+    .filter((ev) => ev.pubkey === pubkey && ev.kind === 0)
+    .sort((a, b) => b.created_at - a.created_at)
+    .find((ev) => verifyEventCached(ev));
 }
 
 /** `skipped`: over the app-wide relay ceiling, or cancelled — not a miss, just not now. */
@@ -123,14 +129,18 @@ async function lookupOne(
   pubkey: string,
   relays: readonly string[],
   signal: AbortSignal | undefined,
+  /** The viewer's own relays this person also names, not asked yet: asked on
+   * the viewer's own sockets, never leased. */
+  ownRelays: readonly string[] = [],
 ): Promise<LookupOutcome> {
   if (signal?.aborted) return 'skipped'; // before any socket opens
   const lease = leaseOutboxRelays(relays);
-  if (lease.relays.length === 0) return 'skipped';
+  const targets = [...lease.relays, ...ownRelays];
+  if (targets.length === 0) return 'skipped';
   try {
     const events = await querySyncAbortable(
       pool,
-      lease.relays,
+      targets,
       { kinds: [0], authors: [pubkey], limit: 1 },
       { maxWait: FALLBACK_QUERY_MAX_WAIT_MS, signal },
     );
@@ -145,9 +155,9 @@ async function lookupOne(
 
 /**
  * Kind-0 events for people still missing after the normal fetch, from each
- * person's own write relays and hints. Never rejects. The events are NOT
- * signature-verified (the pool fast-paths kind 0): display callers slim them,
- * verified callers verify them.
+ * person's own write relays and hints. Never rejects. Every event passed a
+ * full signature check (its `created_at` can be trusted); display callers
+ * still slim them, as for every batch profile.
  */
 export async function fetchMissingProfileEvents(
   pubkeys: readonly string[],
@@ -161,12 +171,19 @@ export async function fetchMissingProfileEvents(
   // leased): a cold-start call waits for them, bounded and abortable.
   if (!(await ownRelaysKnown(signal)) || signal?.aborted) return found;
   const now = Date.now();
+  // Only background display lookups are throttled. A verified lookup is one
+  // person, on a miss, user-driven (opening a contact): it always asks, so a
+  // relay back up — or a new hint — is tried at once.
+  const throttles = options.purpose === 'display';
+  const noteMiss = (pk: string, at: number) => {
+    if (throttles) recordMiss(throttleKey(options.purpose, viewer, pk), at);
+  };
   const people: string[] = [];
   for (const raw of pubkeys) {
     if (people.length >= MAX_FALLBACK_PEOPLE) break;
     const pk = raw.trim().toLowerCase();
     if (!HEX_PUBKEY.test(pk) || people.includes(pk)) continue;
-    if (throttled(throttleKey(options.purpose, viewer, pk), now)) continue;
+    if (throttles && throttled(throttleKey(options.purpose, viewer, pk), now)) continue;
     people.push(pk);
   }
   if (people.length === 0) return found;
@@ -177,30 +194,40 @@ export async function fetchMissingProfileEvents(
     signal,
   });
   if (signal?.aborted) return found;
-  const plans: { pubkey: string; relays: string[] }[] = [];
-  // The viewer's own relays (read + DM inbox) count as asked whoever calls:
-  // they're never leased as someone else's outbox relay.
-  const asked = [...options.alreadyAsked, ...getCurrentUserOwnRelays()];
+  const plans: { pubkey: string; relays: string[]; own: string[] }[] = [];
+  // The viewer's own relays (read + DM inbox) are never leased as someone
+  // else's outbox relay, whoever calls. One the caller didn't ask (e.g. the
+  // contact screen passes read relays only) is still asked — on the viewer's
+  // own socket, which is fine for privacy: it's the viewer's relay.
+  const own = getCurrentUserOwnRelays();
+  const asked = [...options.alreadyAsked, ...own];
+  const ownSet = new Set(own.map(normalizeRelayUrl));
   for (const pubkey of people) {
     const result = lists.get(pubkey);
     const write = result?.status === 'ok' ? (result.lists.write ?? []) : [];
+    const hints = options.hints?.get(pubkey) ?? [];
     // Capped after dropping the relays already asked (personOutboxRelays).
-    const relays = personOutboxRelays(write, options.hints?.get(pubkey) ?? [], asked);
+    const relays = personOutboxRelays(write, hints, asked);
+    const ownUnasked = personOutboxRelays(write, hints, options.alreadyAsked).filter((url) =>
+      ownSet.has(url),
+    );
     // Nothing new to ask (no list, or only relays already asked): a miss —
     // unless the lookup itself failed, which a later call may get past.
-    if (relays.length === 0) {
-      if (result?.status === 'ok') recordMiss(throttleKey(options.purpose, viewer, pubkey), now);
+    if (relays.length === 0 && ownUnasked.length === 0) {
+      if (result?.status === 'ok') noteMiss(pubkey, now);
       continue;
     }
-    plans.push({ pubkey, relays });
+    plans.push({ pubkey, relays, own: ownUnasked });
   }
   for (let i = 0; i < plans.length; i += FALLBACK_CONCURRENCY) {
     if (signal?.aborted) break;
     const round = plans.slice(i, i + FALLBACK_CONCURRENCY);
-    const outcomes = await Promise.all(round.map((p) => lookupOne(p.pubkey, p.relays, signal)));
+    const outcomes = await Promise.all(
+      round.map((p) => lookupOne(p.pubkey, p.relays, signal, p.own)),
+    );
     round.forEach(({ pubkey }, j) => {
       const outcome = outcomes[j];
-      if (outcome === 'miss') recordMiss(throttleKey(options.purpose, viewer, pubkey), Date.now());
+      if (outcome === 'miss') noteMiss(pubkey, Date.now());
       else if (outcome !== 'skipped') found.set(pubkey, outcome);
     });
   }

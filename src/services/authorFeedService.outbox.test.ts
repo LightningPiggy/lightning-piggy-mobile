@@ -4,10 +4,11 @@ import {
   __resetOutboxLeasesForTests,
   leasedOutboxRelayCount,
   leaseOutboxRelays,
+  quarantineOutboxRelay,
 } from './authorOutboxRelays';
 import { setCurrentUserOwnRelays } from './nostrActiveAccount';
 import { releaseNewIdleRelays } from './nostrPool';
-import { recordRelayFailure } from './relayHealth';
+import { isRelayParked, recordRelayFailure } from './relayHealth';
 import { getPeerRelayLists } from './peerRelayLists';
 
 // The author-relay half of a profile feed (#1390): background, bounded,
@@ -21,6 +22,7 @@ jest.mock('./nostrPool', () => ({
   releaseNewIdleRelays: jest.fn(),
 }));
 jest.mock('./relayHealth', () => ({
+  isRelayParked: jest.fn(() => false),
   recordRelayFailure: jest.fn(),
   selectHealthyRelays: (urls: string[]) => urls,
   relayKey: (url: string) => url,
@@ -246,4 +248,36 @@ it('a feed closed before hydration never subscribes afterwards', async () => {
   setCurrentUserOwnRelays([], true);
   expect(mockSubscribeMany).not.toHaveBeenCalled();
   expect(leasedOutboxRelayCount()).toBe(0);
+});
+
+it('quarantined or parked relays never use up the 3 slots: healthy later ones fill them', async () => {
+  write([1, 2, 3, 4].map((n) => `wss://a${n}.example/`));
+  quarantineOutboxRelay('wss://a1.example/');
+  jest.mocked(isRelayParked).mockImplementation((url) => url === 'wss://a2.example/');
+  const onRelays = jest.fn();
+  arm({ onRelays });
+  await jest.runAllTimersAsync();
+  // a1 (quarantined) and a2 (parked) are skipped; a3 and a4 are subscribed.
+  expect(mockSubscribeMany.mock.calls.map(([[r]]) => r)).toEqual([
+    'wss://a3.example/',
+    'wss://a4.example/',
+  ]);
+  expect(onRelays).toHaveBeenLastCalledWith(['wss://a3.example/', 'wss://a4.example/']);
+  jest.mocked(isRelayParked).mockReturnValue(false);
+});
+
+it('sizes the lease frame budget for the feed limit', async () => {
+  write(['wss://alice1.example/']);
+  const budgets: number[] = [];
+  const real = jest.requireMock('./nostrRelayReceiveQueue') as {
+    addRelayFrameBudget: (url: string, frames: number, cb: () => void) => void;
+  };
+  const spy = jest.spyOn(real, 'addRelayFrameBudget').mockImplementation((url, frames, cb) => {
+    budgets.push(frames);
+    mockFrameBudgets.set(url, cb);
+  });
+  arm({ limit: 1000 });
+  await jest.runAllTimersAsync();
+  expect(budgets[0]).toBeGreaterThan(OUTBOX_FEED_EVENT_BUDGET_FACTOR * 1000);
+  spy.mockRestore();
 });

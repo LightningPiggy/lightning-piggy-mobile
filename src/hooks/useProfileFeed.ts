@@ -115,6 +115,14 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
     setReachedEnd(false);
   }, [reloadNonce, setReachedEnd]);
 
+  // A different set of read relays is a new viewer source: its cursor starts
+  // again from the new subscription's events (declared before the focus
+  // effect, so it runs first), and paging re-opens.
+  useEffect(() => {
+    cursorsRef.current.delete(VIEWER_SOURCE);
+    if (reachedEndRef.current) setReachedEnd(false);
+  }, [readRelays, setReachedEnd]);
+
   useFocusEffect(
     useCallback(() => {
       focusedRef.current = true;
@@ -128,6 +136,9 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
       // this (reused) screen.
       let live = true;
       let answered = false;
+      // The author's own relays answered: the viewer's relays all failing then
+      // doesn't make the feed "couldn't load".
+      let outboxAnswered = false;
       // After a failure, a new attempt (refocus, pull-to-refresh) shows the
       // spinner, never "No posts yet" while it's still unanswered. After a
       // real answer for this author, keep showing it while re-subscribing:
@@ -173,6 +184,10 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         onAnswered,
         onUnavailable: () => {
           if (!live) return;
+          if (outboxAnswered) {
+            setLoading(false);
+            return;
+          }
           // A late event or answer after this must clear the error again.
           answered = false;
           answeredAuthorRef.current = null;
@@ -187,8 +202,14 @@ export function useProfileFeed(authorPubkey: string | null, reloadNonce: number)
         currentRelays: readRelays,
         excludeRelays: [...dmInboxRef.current],
         limit: AUTHOR_FEED_PAGE_SIZE,
-        onEvent: (event, relay) => onEvent(outboxSource(relay), event),
-        onAnswered,
+        onEvent: (event, relay) => {
+          if (live) outboxAnswered = true;
+          onEvent(outboxSource(relay), event);
+        },
+        onAnswered: () => {
+          if (live) outboxAnswered = true;
+          onAnswered();
+        },
         onRelays: (urls) => {
           if (!live) return;
           const before = new Set(outboxRelaysRef.current);

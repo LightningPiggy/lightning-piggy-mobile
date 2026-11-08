@@ -69,10 +69,31 @@ describe('fetchProfile', () => {
     expect(await fetchProfile(pubkey, [], { outboxFallback: false })).toBeNull();
     expect(fallback).not.toHaveBeenCalled();
   });
+
+  it('a main-path kind-0 that fails verification is a miss: the real one is still found', async () => {
+    get.mockResolvedValue({ ...kind0('Mallory'), sig: 'f'.repeat(128) });
+    fallback.mockResolvedValue(new Map([[pubkey, kind0('Eden')]]));
+    const profile = await fetchProfile(pubkey, []);
+    expect(fallback).toHaveBeenCalled();
+    expect(profile?.name).toBe('Eden');
+    // A verified result is dated: its created_at can be trusted.
+    expect(profile?.createdAt).toBe(100);
+  });
 });
 
 describe('fetchProfiles', () => {
   const found = 'b'.repeat(64);
+
+  it('never dates an UNVERIFIED batch profile, so a forged timestamp gets no freshness authority', async () => {
+    batch.mockImplementation(async (pubkeys, _r, _t, onEvent) => {
+      for (const pk of pubkeys) {
+        onEvent({ pubkey: pk, content: '{"name":"Faked"}', created_at: 9_999_999_999 } as never);
+      }
+    });
+    const profiles = await fetchProfiles([found], [], jest.fn());
+    expect(profiles.get(found)?.name).toBe('Faked');
+    expect(profiles.get(found)?.createdAt).toBeUndefined();
+  });
   const missing = 'c'.repeat(64);
   const resolveFoundOnly = () =>
     batch.mockImplementation(async (pubkeys, _relays, _timeout, onEvent) => {
@@ -142,6 +163,17 @@ describe('fetchProfiles', () => {
     });
     await fetchProfiles([found, missing], [], jest.fn());
     expect(schedule.mock.calls[0][1].viewerPubkey).toBe(owner);
+    setCurrentUserPubkey(null);
+  });
+
+  it("a caller's explicit owner wins (a stale load for another account), so the scheduler refuses it", async () => {
+    setCurrentUserPubkey('e'.repeat(64)); // B is active...
+    batch.mockImplementation(async (pubkeys, _r, _t, onEvent) => {
+      if (pubkeys.includes(found)) onEvent(batchEvent(found, '{}'));
+    });
+    // ...while A's contacts load finishes late.
+    await fetchProfiles([found, missing], [], jest.fn(), { owner: 'd'.repeat(64) });
+    expect(schedule.mock.calls[0][1].viewerPubkey).toBe('d'.repeat(64));
     setCurrentUserPubkey(null);
   });
 

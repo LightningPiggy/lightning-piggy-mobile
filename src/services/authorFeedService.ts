@@ -4,16 +4,21 @@
 // subscription fetches the newest page; older pages come from a bounded,
 // abortable `until` query. Every filter carries a `limit`.
 import type { Event, Filter } from 'nostr-tools';
-import { AUTHOR_FEED_PAGE_SIZE, OUTBOX_FEED_EVENT_BUDGET_FACTOR } from './authorFeedLimits';
+import {
+  AUTHOR_FEED_PAGE_SIZE,
+  OUTBOX_FEED_EVENT_BUDGET_FACTOR,
+  outboxFramesForLimit,
+} from './authorFeedLimits';
 import {
   authorWriteRelays,
   leaseOutboxRelays,
+  MAX_AUTHOR_OUTBOX_RELAYS,
   quarantineOutboxRelay,
   whenOwnRelaysHydrated,
   withoutRelays,
 } from './authorOutboxRelays';
 import { pool, trackRelays } from './nostrPool';
-import { recordRelayFailure, relayKey, selectHealthyRelays } from './relayHealth';
+import { isRelayParked, recordRelayFailure, relayKey, selectHealthyRelays } from './relayHealth';
 import { querySyncAbortable } from './relayQuery';
 import { PROFILE_FEED_KINDS } from '../utils/noteMedia';
 import { COMMENT_KIND } from '../utils/nip22';
@@ -109,6 +114,8 @@ export function subscribeAuthorFeed(input: {
   let eoseCount = 0;
   let closedCount = 0;
   let closedByUs = false;
+  // A relay we cut off for flooding closed by intent, not by failing.
+  let floodClosed = false;
   const filter = feedFilter(input.authorPubkey, input.limit ?? AUTHOR_FEED_PAGE_SIZE);
   // Monotonic, like the SDK's own timer: a wall-clock change can't skew it.
   const startedAt = performance.now();
@@ -137,6 +144,7 @@ export function subscribeAuthorFeed(input: {
       if (flooded) return true;
       if (++received <= budget!) return false;
       flooded = true;
+      floodClosed = true;
       // Out of the SDK's message handler before closing.
       void Promise.resolve().then(() => {
         closeSub(i);
@@ -175,7 +183,7 @@ export function subscribeAuthorFeed(input: {
         if (closed) return;
         closed = true;
         if (++closedCount < relays.length) return;
-        if (!closedByUs && !gotEvent && !answered) input.onUnavailable?.();
+        if (!closedByUs && !floodClosed && !gotEvent && !answered) input.onUnavailable?.();
       },
       // Only a relay's real EOSE counts as an answer: without this the SDK
       // fakes one after 4.4 s for a connected relay that never replies.
@@ -278,10 +286,18 @@ export function subscribeAuthorOutboxFeed(input: {
   });
   let stopWaiting: (() => void) | undefined;
   const armAuthorRelays = (write: readonly string[]) => {
-    for (const url of withoutRelays(write, [
-      ...input.currentRelays,
-      ...(input.excludeRelays ?? []),
-    ])) {
+    // Every candidate (deduped, minus the viewer's relays) until the cap is
+    // GRANTED — a quarantined, over-ceiling or parked relay doesn't use up a
+    // slot that a healthy later one could fill. A parked relay is skipped
+    // outright: it's in backoff, and the viewer didn't choose it.
+    const candidates = withoutRelays(
+      write,
+      [...input.currentRelays, ...(input.excludeRelays ?? [])],
+      Infinity,
+    );
+    for (const url of candidates) {
+      if (open.size >= MAX_AUTHOR_OUTBOX_RELAYS) break;
+      if (isRelayParked(url)) continue;
       // Drop this relay: its sub, its lease, and from the relays older pages ask.
       const drop = () => {
         open.get(url)?.();
@@ -289,7 +305,7 @@ export function subscribeAuthorOutboxFeed(input: {
         if (!closed) input.onRelays?.([...open.keys()]);
       };
       // Revoked when its socket blows the frame budget (authorOutboxRelays).
-      const lease = leaseOutboxRelays([url], drop);
+      const lease = leaseOutboxRelays([url], drop, outboxFramesForLimit(limit));
       if (lease.relays.length === 0) {
         lease.release();
         continue;

@@ -301,4 +301,39 @@ describe('revocation (b)', () => {
     expect(clearRelayFrameBudget).toHaveBeenCalledWith(relay(1));
     expect(leasedOutboxRelayCount()).toBe(0);
   });
+
+  it('two leases sharing one callback are each notified; releasing one keeps the other', () => {
+    const shared = jest.fn();
+    const a = leaseOutboxRelays([relay(1)], shared);
+    leaseOutboxRelays([relay(1)], shared);
+    a.release();
+    jest.mocked(addRelayFrameBudget).mock.calls[0][2]();
+    expect(shared).toHaveBeenCalledTimes(1); // the remaining lease still heard it
+  });
+});
+
+describe('a borrowed socket replaced while leased (CodeRabbit)', () => {
+  it('becomes ours when its replacement opens, so it is still released', () => {
+    pooled.mockReturnValue(new Set([relay(1)])); // someone else's socket
+    const feed = leaseOutboxRelays([relay(1)]);
+    expect(addRelayFrameBudget).not.toHaveBeenCalled();
+    // That socket closes; a later lookup's lease will open a replacement.
+    pooled.mockReturnValue(new Set());
+    const lookup = leaseOutboxRelays([relay(1)]);
+    expect(addRelayFrameBudget).toHaveBeenCalledWith(
+      relay(1),
+      expect.any(Number),
+      expect.any(Function),
+    );
+    lookup.release();
+    pooled.mockReturnValue(new Set([relay(1)])); // the replacement, still open
+    feed.release();
+    expect(release).toHaveBeenCalledWith([relay(1)], new Set());
+    expect(leasedOutboxRelayCount()).toBe(1); // counted until it's closed
+  });
+
+  it('takes the per-lease frame budget the caller sized', () => {
+    leaseOutboxRelays([relay(1)], undefined, 5_000);
+    expect(jest.mocked(addRelayFrameBudget).mock.calls[0][1]).toBe(5_000);
+  });
 });

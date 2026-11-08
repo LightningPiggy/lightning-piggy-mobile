@@ -25,6 +25,10 @@ jest.mock('./peerRelayLists', () => ({
   peekPeerRelayLists: jest.fn(),
 }));
 jest.mock('./relayQuery', () => ({ querySyncAbortable: jest.fn() }));
+// The test events carry no signatures: "forged" ones are named so.
+jest.mock('./nostrVerifyCache', () => ({
+  verifyEventCached: jest.fn((ev: { id: string }) => !ev.id.startsWith('forged')),
+}));
 
 const viewer = 'f'.repeat(64);
 const alice = 'a'.repeat(64);
@@ -108,18 +112,43 @@ beforeEach(() => {
   query.mockResolvedValue([]);
 });
 
-it("never asks (or leases) the viewer's own DM inbox relays, whatever the caller passes", async () => {
+it("never LEASES the viewer's own relays, but asks one the caller didn't (on the viewer's socket)", async () => {
   // e.g. the contact screen's fetchProfile, whose already-asked list is read relays only.
   setCurrentUserOwnRelays(['wss://mine.example/', 'wss://DM-inbox.example'], true);
   writeLists({ [alice]: ok([relay('dm-inbox'), relay('alice1')]) });
   await fetchMissingProfileEvents([alice], { ...opts, alreadyAsked: [relay('mine')] });
   expect(query).toHaveBeenCalledTimes(1);
-  expect(query.mock.calls[0][1]).toEqual([relay('alice1')]);
-  // A person whose only relay is the viewer's DM inbox gets no query at all.
+  // alice1 is leased; the viewer's own DM inbox relay is asked too, unleased.
+  expect(query.mock.calls[0][1]).toEqual([relay('alice1'), relay('dm-inbox')]);
+  expect(leaseOutboxRelays([relay('dm-inbox')]).relays).toEqual([]);
+  // A person whose only relay is the viewer's (unasked) DM inbox is still found.
   query.mockClear();
+  query.mockResolvedValue([kind0(bob)]);
   writeLists({ [bob]: ok([relay('dm-inbox')]) });
-  await fetchMissingProfileEvents([bob], { ...opts, alreadyAsked: [] });
+  const found = await fetchMissingProfileEvents([bob], { ...opts, alreadyAsked: [] });
+  expect(query.mock.calls[0][1]).toEqual([relay('dm-inbox')]);
+  expect(found.has(bob)).toBe(true);
+  // Already asked by the caller: not asked again.
+  query.mockClear();
+  await fetchMissingProfileEvents([bob], {
+    ...opts,
+    purpose: 'verified',
+    alreadyAsked: [relay('dm-inbox')],
+  });
   expect(query).not.toHaveBeenCalled();
+});
+
+it('a forged newer copy never displaces a genuine one from another relay (CodeRabbit)', async () => {
+  writeLists({ [alice]: ok([relay('alice1'), relay('alice2')]) });
+  query.mockResolvedValue([
+    { ...(kind0(alice, 9) as object), id: 'forged-new' } as never,
+    kind0(alice, 5),
+  ]);
+  const found = await fetchMissingProfileEvents([alice], opts);
+  expect(found.get(alice)?.created_at).toBe(5);
+  // Only forged copies: nothing.
+  query.mockResolvedValue([{ ...(kind0(alice, 9) as object), id: 'forged-only' } as never]);
+  expect((await fetchMissingProfileEvents([alice], { ...opts, purpose: 'verified' })).size).toBe(0);
 });
 
 it("asks each person's own relays, one person per query (never batched)", async () => {
@@ -180,6 +209,20 @@ it('throttles a miss for a while, per purpose, and never persists it', async () 
   jest.advanceTimersByTime(FALLBACK_RETRY_THROTTLE_MS);
   await fetchMissingProfileEvents([alice], opts);
   expect(query).toHaveBeenCalledTimes(3);
+});
+
+it('never throttles a verified (user-driven) lookup: a relay back up or a new hint is tried at once', async () => {
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const verified = { ...opts, purpose: 'verified' as const };
+  await fetchMissingProfileEvents([alice], verified);
+  await fetchMissingProfileEvents([alice], verified);
+  expect(query).toHaveBeenCalledTimes(2);
+  // A new kind-3 hint is asked on the very next open.
+  await fetchMissingProfileEvents([alice], {
+    ...verified,
+    hints: new Map([[alice, [relay('hint')]]]),
+  });
+  expect(query.mock.calls[2][1]).toEqual([relay('alice1'), relay('hint')]);
 });
 
 it('a failed relay-list lookup is not throttled', async () => {

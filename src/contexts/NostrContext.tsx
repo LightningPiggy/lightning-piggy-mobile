@@ -591,29 +591,28 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         return;
       }
 
-      // Cache stale — refresh all contacts' profiles. (When cacheFresh is
-      // true we've already returned via one of the two fast paths above, so
-      // the dropped "X served from cache" suffix would always be 0.)
+      // Cache stale (a fresh cache returned via a fast path above): refresh all.
       const pubkeysToFetch = fetchedContacts.map((c) => c.pubkey);
 
-      // The kind-0 profile batch is the slow part (~90s cold for a 571-contact
-      // list). The contact LIST — everything the follow-gate and DM-inbox
-      // refresh depend on — is already resolved and in state by this point.
-      // Callers that own a pull-to-refresh spinner (see `refreshContacts`,
-      // `awaitProfiles: false`) let this batch run fire-and-forget: its
-      // `onBatch` hook streams avatars in progressively, so the spinner can
-      // clear the moment contacts are in rather than after every profile
-      // lands. All other callers keep the original awaited behaviour. (#852)
+      // The kind-0 profile batch is the slow part (~90s cold for a 571-contact list). The
+      // contact LIST — everything the follow-gate and DM-inbox refresh depend on — is already
+      // resolved and in state by this point. Callers that own a pull-to-refresh spinner (see
+      // `refreshContacts`, `awaitProfiles: false`) let this batch run fire-and-forget: its
+      // `onBatch` hook streams avatars in progressively, so the spinner can clear the moment
+      // contacts are in. All other callers keep the original awaited behaviour. (#852)
       const runProfileFetch = async (): Promise<void> => {
         const t1 = Date.now();
+        // Batches stream into contacts (newest kind-0 winning); `owner` keeps a
+        // stale load's background fallback (#1390) from running for another account.
         const profileMap = await nostrService.fetchProfiles(
           pubkeysToFetch,
           relayUrls,
-          // Update UI incrementally as each batch arrives, newest kind-0 winning.
           (partial) =>
             startTransition(() => setContacts((prev) => mergeContactProfiles(prev, partial))),
-          // Found later, in the background, on people's own relays (#1390).
-          { onLateProfiles: (late) => void persistMergedProfileCache(pk, cachedProfileMap, late) },
+          {
+            owner: pk,
+            onLateProfiles: (late) => void persistMergedProfileCache(pk, cachedProfileMap, late),
+          },
         );
         if (__DEV__)
           console.log(

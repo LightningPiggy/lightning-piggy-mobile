@@ -82,8 +82,9 @@ export function persistMergedProfileCache(
   existing: Record<string, NostrProfile>,
   fetched: Map<string, NostrProfile>,
 ): Promise<void> {
+  const epoch = persistEpochs.get(pk) ?? 0;
   const run = (persistChains.get(pk) ?? Promise.resolve()).then(() =>
-    persistMergedProfileCacheNow(pk, existing, fetched),
+    persistMergedProfileCacheNow(pk, existing, fetched, epoch),
   );
   const tail = run.catch(() => {});
   persistChains.set(pk, tail);
@@ -95,12 +96,27 @@ export function persistMergedProfileCache(
 
 /** The tail of each account's queue of persists. */
 const persistChains = new Map<string, Promise<void>>();
+/** Bumped when an account's caches are wiped: persists queued before it never write. */
+const persistEpochs = new Map<string, number>();
+
+/**
+ * Before wiping `pk`'s caches (sign-out / account deletion): every profile
+ * persist already queued or running for it is retired — none writes after
+ * this — and one mid-write finishes first, so the wipe removes what it wrote.
+ */
+export async function retireProfilePersists(pk: string): Promise<void> {
+  persistEpochs.set(pk, (persistEpochs.get(pk) ?? 0) + 1);
+  await persistChains.get(pk);
+}
 
 async function persistMergedProfileCacheNow(
   pk: string,
   existing: Record<string, NostrProfile>,
   fetched: Map<string, NostrProfile>,
+  epoch: number,
 ): Promise<void> {
+  const retired = () => (persistEpochs.get(pk) ?? 0) !== epoch;
+  if (retired()) return;
   await new Promise<void>((resolve) => InteractionManager.runAfterInteractions(() => resolve()));
   let base: Record<string, NostrProfile> = existing;
   try {
@@ -123,6 +139,8 @@ async function persistMergedProfileCacheNow(
   // loadContacts with awaitProfiles) then get the durability the name implies,
   // and the on-disk state can't lag a resolved promise; fire-and-forget callers
   // (#852) are unaffected since they don't await the returned promise.
+  // The account's caches were wiped meanwhile: write nothing back (#1390).
+  if (retired()) return;
   await Promise.all([
     AsyncStorage.setItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk), JSON.stringify(merged)),
     AsyncStorage.setItem(perAccountKey(CACHE_TIMESTAMP_KEY_BASE, pk), Date.now().toString()),

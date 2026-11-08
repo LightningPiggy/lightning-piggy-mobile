@@ -32,17 +32,24 @@ export function cursorOf(cursors: FeedCursors, source: FeedSource): SourceCursor
   return cursor;
 }
 
-/** Note an event from `source`. True when it gave that source its first cursor
- * (so paging it just became possible). */
+/** Note an event from `source`. True when paging that source just became
+ * possible: its first cursor, or an event OLDER than an ended source's cursor
+ * (a late backfill — there is more to page after all). */
 export function noteFeedEvent(
   cursors: FeedCursors,
   source: FeedSource,
   createdAt: number,
 ): boolean {
   const cursor = cursorOf(cursors, source);
-  const opened = cursor.oldest === null;
-  if (cursor.oldest === null || createdAt < cursor.oldest) cursor.oldest = createdAt;
-  return opened;
+  if (cursor.oldest === null) {
+    cursor.oldest = createdAt;
+    return true;
+  }
+  if (createdAt >= cursor.oldest) return false;
+  cursor.oldest = createdAt;
+  if (!cursor.ended) return false;
+  cursor.ended = false;
+  return true;
 }
 
 /** Re-open `sources` (all when omitted): their ends may have been outages, or

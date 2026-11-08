@@ -10,14 +10,13 @@ import {
 // The profile feed is the union of the viewer's relays and the author's own
 // write relays (#1390); the author relays never hold up the first posts.
 const mockDmInbox = ['wss://dm-inbox.example/'];
+const mockDefaultRelays = [
+  { url: 'wss://mine.example/', read: true, write: true },
+  { url: 'wss://write-only.example/', read: false, write: true },
+];
+let mockRelays = mockDefaultRelays;
 jest.mock('../contexts/NostrContext', () => ({
-  useNostr: () => ({
-    relays: [
-      { url: 'wss://mine.example/', read: true, write: true },
-      { url: 'wss://write-only.example/', read: false, write: true },
-    ],
-    dmInboxRelays: mockDmInbox,
-  }),
+  useNostr: () => ({ relays: mockRelays, dmInboxRelays: mockDmInbox }),
 }));
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (effect: () => void | (() => void)) =>
@@ -50,6 +49,7 @@ const closeOutbox = jest.fn();
 beforeEach(() => {
   jest.clearAllMocks();
   jest.useFakeTimers();
+  mockRelays = mockDefaultRelays;
   jest.mocked(subscribeAuthorFeed).mockImplementation((input) => {
     main = input;
     return closeMain;
@@ -328,4 +328,47 @@ it('a relay dropped mid-page is never asked again, and a shrink re-opens nothing
     await result.current.loadMore();
   });
   expect(page).not.toHaveBeenCalled();
+});
+
+it("keeps an author relay's answer when every viewer relay then fails", () => {
+  const { result } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    outbox.onAnswered?.(); // the author's own relay answered: no posts
+    main.onUnavailable?.(); // ...then all the viewer's relays failed
+  });
+  expect(result.current.unavailable).toBe(false);
+  expect(result.current.loading).toBe(false);
+  act(() => {
+    jest.advanceTimersByTime(6000); // the grace period
+  });
+  expect(result.current.unavailable).toBe(false);
+});
+
+it('a new set of read relays starts the viewer cursor afresh and re-opens paging', async () => {
+  const page = jest.mocked(fetchAuthorFeedPage);
+  page.mockResolvedValue({ events: [], complete: true });
+  const { result, rerender } = renderHook(() => useProfileFeed(alice, 0));
+  act(() => {
+    main.onEvent(note('old', 100), 'wss://mine.example/');
+  });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  expect(result.current.reachedEnd).toBe(true);
+  // The viewer adds a relay: a new viewer source.
+  mockRelays = [...mockDefaultRelays, { url: 'wss://new.example/', read: true, write: false }];
+  rerender({});
+  expect(result.current.reachedEnd).toBe(false);
+  act(() => {
+    main.onEvent(note('fresh', 500), 'wss://new.example/');
+  });
+  page.mockClear();
+  page.mockResolvedValue({ events: [], complete: false });
+  await act(async () => {
+    await result.current.loadMore();
+  });
+  // Paged from the NEW subscription's oldest event, not the old end at 100.
+  expect(pageCalls()).toEqual([
+    { relays: ['wss://mine.example/', 'wss://new.example/'], until: 500 },
+  ]);
 });

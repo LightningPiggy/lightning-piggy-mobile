@@ -18,9 +18,12 @@ export const OUTBOX_FEED_EVENT_BUDGET_FACTOR = 4;
  * relay-health failure (two park a relay for the viewer too): the live feed's
  * own budget, plus every older page twice (a page stuck on one second is
  * re-asked from the second before) with an EOSE each, plus room for
- * NOTICE / CLOSED / AUTH frames and a profile lookup. 4×30 + 10×2×31 + 200 = 940.
+ * NOTICE / CLOSED / AUTH frames and a profile lookup. For a feed `limit`
+ * (pages are the same size): 4×30 + 10×2×31 + 200 = 940 at the default 30.
  */
-export const OUTBOX_FRAMES_PER_LEASE =
-  OUTBOX_FEED_EVENT_BUDGET_FACTOR * AUTHOR_FEED_PAGE_SIZE +
-  AUTHOR_FEED_MAX_PAGES * 2 * (AUTHOR_FEED_PAGE_SIZE + 1) +
-  200;
+export function outboxFramesForLimit(limit: number): number {
+  return OUTBOX_FEED_EVENT_BUDGET_FACTOR * limit + AUTHOR_FEED_MAX_PAGES * 2 * (limit + 1) + 200;
+}
+
+/** The per-lease frame budget at the default feed size. */
+export const OUTBOX_FRAMES_PER_LEASE = outboxFramesForLimit(AUTHOR_FEED_PAGE_SIZE);

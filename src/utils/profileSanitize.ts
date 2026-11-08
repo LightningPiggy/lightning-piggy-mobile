@@ -31,19 +31,21 @@ export function slimDisplayProfile(profile: NostrProfile): NostrProfile {
 }
 
 /**
- * A display profile from an UNVERIFIED batch-fetched kind-0 (see above):
- * slimmed, and dated with the event's `created_at` so copies merge
- * newest-wins (utils/profileFreshness).
+ * A display profile from a batch-fetched kind-0 (see above), slimmed.
+ * `verified`: the event passed a full signature check, so its `created_at`
+ * may be trusted for newest-wins merging (utils/profileFreshness). An
+ * UNVERIFIED event is never dated — a relay could otherwise forge a
+ * far-future timestamp and pin a fake name or avatar past every legitimate
+ * refresh — so it merges as the latest fetch, as before.
  */
-export function displayProfile(event: {
-  pubkey: string;
-  content: string;
-  created_at: number;
-}): NostrProfile {
+export function displayProfile(
+  event: { pubkey: string; content: string; created_at: number },
+  verified = false,
+): NostrProfile {
   return slimDisplayProfile({
     pubkey: event.pubkey,
     npub: npubEncode(event.pubkey),
     ...parseProfileContent(event.content),
-    createdAt: event.created_at,
+    ...(verified ? { createdAt: event.created_at } : {}),
   });
 }

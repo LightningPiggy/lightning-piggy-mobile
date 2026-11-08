@@ -64,3 +64,16 @@ it('a full page stuck on the cursor second is stepped past', () => {
   expect(isStuckPage(at(100, 100), 100, 3)).toBe(false);
   expect(isStuckPage(at(100, 99, 100), 100, 3)).toBe(false);
 });
+
+it('a live event older than an ended source re-opens it', () => {
+  const cursors = newFeedCursors();
+  noteFeedEvent(cursors, A, 500);
+  cursorOf(cursors, A).ended = true;
+  // A newer event changes nothing; a late backfill older than the end re-opens.
+  expect(noteFeedEvent(cursors, A, 600)).toBe(false);
+  expect(cursorOf(cursors, A).ended).toBe(true);
+  expect(noteFeedEvent(cursors, A, 400)).toBe(true);
+  expect(cursorOf(cursors, A)).toEqual({ oldest: 400, ended: false });
+  // An open source moving older isn't "newly" pageable.
+  expect(noteFeedEvent(cursors, A, 300)).toBe(false);
+});

@@ -143,25 +143,28 @@ export async function fetchProfile(
   const allRelays = [...new Set([...relays, ...PROFILE_RELAYS])];
   trackRelays(allRelays);
   const lud16Generation = verifiedLud16Generation(); // a wipe mid-fetch skips the cache
+  // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
+  // fetch feeds payment destinations (`lud16`), so verify it for real. One
+  // that fails is a miss: the person's own relays may hold the real one.
+  const genuine = (e: NostrEvent | null): e is NostrEvent => {
+    if (!e || (e.pubkey === pubkey && verifyEventCached(e))) return !!e;
+    console.warn('Nostr profile failed verification, ignoring:', pubkey);
+    return false;
+  };
   try {
     let event = await pool.get(allRelays, { kinds: [0], authors: [pubkey] });
+    if (!genuine(event)) event = null;
     if (!event && opts.outboxFallback !== false) {
       const key = pubkey.toLowerCase();
       const found = await fetchMissingProfileEvents([key], {
-        purpose: 'verified', // verified below, like the main path
+        purpose: 'verified',
         alreadyAsked: allRelays,
         lookupRelays: relays,
         hints: opts.hints && new Map([[key, opts.hints]]),
       });
       event = found.get(key) ?? null;
     }
-    if (!event) return null;
-    // `pool.verifyEvent` fast-paths kind-0 (skips schnorr) — but this single
-    // fetch feeds payment destinations (`lud16`), so verify it for real here.
-    if (event.pubkey !== pubkey || !verifyEventCached(event)) {
-      console.warn('Nostr profile failed verification, ignoring:', pubkey);
-      return null;
-    }
+    if (!genuine(event)) return null;
 
     const parsed = parseProfileContent(event.content);
     // Cache the verified address so the next open shows it at once. Newest
@@ -257,11 +260,13 @@ export async function fetchProfiles(
   pubkeys: string[],
   relays: string[],
   onBatch?: (profiles: Map<string, NostrProfile>) => void,
-  opts?: { onLateProfiles?: (profiles: Map<string, NostrProfile>) => void },
+  /** `owner`: whose refresh this is (default: the active account) — a stale
+   * one (the account changed meanwhile) never runs the background fallback. */
+  opts?: { owner?: string | null; onLateProfiles?: (profiles: Map<string, NostrProfile>) => void },
 ): Promise<Map<string, NostrProfile>> {
   const profiles = new Map<string, NostrProfile>();
   if (pubkeys.length === 0) return profiles;
-  const owner = getCurrentUserPubkey();
+  const owner = opts?.owner === undefined ? getCurrentUserPubkey() : opts.owner;
   const lateSignal = onBatch ? newFallbackGeneration(owner) : undefined;
 
   // Include profile aggregator relays for better coverage
@@ -362,8 +367,10 @@ export async function fetchProfiles(
       } as const;
       const options = { ...fallback, viewerPubkey: owner, signal: lateSignal };
       scheduleMissingProfileFallback(unresolved, options, (found) => {
+        // Verified (the fallback checks every candidate), so dated: these
+        // merge newest-wins and can't replace a newer copy.
         const late = new Map<string, NostrProfile>();
-        found.forEach((event) => late.set(event.pubkey, displayProfile(event)));
+        found.forEach((event) => late.set(event.pubkey, displayProfile(event, true)));
         onBatch(late); // only the new ones: never replay a snapshot over newer data
         opts?.onLateProfiles?.(late);
       });
