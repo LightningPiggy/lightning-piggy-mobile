@@ -3771,5 +3771,22 @@
       "marmot": "Gruppenschlüssel werden möglicherweise nicht gefunden",
       "market": "Marktangebote werden nicht geladen"
     }
+  },
+  "dmInboxSuggestion": {
+    "title": "Lass dir aus anderen Nostr-Apps Nachrichten senden",
+    "body": "Du hast deine Relays für den Nachrichteneingang noch nicht veröffentlicht. Manche Nostr-Apps können dir erst danach private Nachrichten senden.",
+    "signerHint": "Deine Signier-App wird dich um Zustimmung bitten.",
+    "otherAppHint": "Hast du in einer anderen Nostr-App schon Relays für deinen Nachrichteneingang eingerichtet? Tippe auf „Nicht jetzt“.",
+    "relays": "Vorgeschlagene Relays: {{relays}}",
+    "publish": "Posteingangs-Relays veröffentlichen",
+    "notNow": "Nicht jetzt",
+    "publishedTitle": "Posteingangs-Relays veröffentlicht",
+    "publishedBody": "Andere Nostr-Apps können dir jetzt private Nachrichten senden.",
+    "existsTitle": "Du hast bereits Posteingangs-Relays",
+    "existsBody": "Eine andere App hat sie veröffentlicht, daher wurde nichts geändert.",
+    "checkFailed": "Es konnte nicht geprüft werden, ob du bereits Posteingangs-Relays hast. Versuch es gleich noch einmal.",
+    "noRelays": "Zurzeit sind keine geeigneten Relays erreichbar. Versuch es gleich noch einmal.",
+    "confirmChangedTitle": "Stattdessen diese Relays veröffentlichen?",
+    "confirmChangedBody": "Deine Relays haben sich geändert, seit dieser Vorschlag angezeigt wurde. Beim Veröffentlichen werden diese aufgelistet: {{relays}}"
   }
 }

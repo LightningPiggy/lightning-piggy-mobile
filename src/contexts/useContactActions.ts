@@ -1,5 +1,6 @@
 import { enabledAppRelays } from '../services/appRelayPrefs';
 import { PROFILE_RELAYS } from '../services/nostrRelayDefaults';
+import { ownEventPublishTargets } from '../services/ownEventPublishTargets';
 import { getEventHash } from 'nostr-tools/pure';
 import { captureFollowSession } from '../services/followSetEvents';
 import { adoptFollowSnapshot } from '../services/contactFollowFreshness';
@@ -106,11 +107,10 @@ export function useContactActions({
     ): Promise<boolean> => {
       if (!pubkey || !isLoggedIn || !isCurrentSession()) return false;
       try {
-        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-        const targetRelays =
-          writeRelays.length > 0
-            ? writeRelays
-            : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
+        // Write relays plus the indexers other clients read follow lists from.
+        const targetRelays = await ownEventPublishTargets(pubkey, relays, 3);
+        // That lookup awaited: never ask a signer for an old session's follow change.
+        if (!isCurrentSession()) return false;
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);

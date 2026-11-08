@@ -35,6 +35,8 @@ import { wipeAccountCaches } from './accountCacheWipe';
 import { perAccountKey } from '../services/perAccountStorage';
 import {
   DM_INBOX_CREATED_AT_KEY_BASE,
+  DM_INBOX_DEFAULT_BACKOFF_KEY_BASE,
+  DM_INBOX_DEFAULT_STATE_KEY_BASE,
   DM_INBOX_RELAYS_CACHE_KEY_BASE,
   RELAY_LIST_CREATED_AT_KEY_BASE,
 } from './nostrCacheKeys';
@@ -85,11 +87,14 @@ it("removes the signed-out account's relay-list caches and baselines", async () 
     DM_INBOX_CREATED_AT_KEY_BASE,
     RELAY_LIST_CREATED_AT_KEY_BASE,
     NOTIFICATION_HISTORY_KEY_BASE,
+    // Default DM inbox list (#1628): state and backoff.
+    DM_INBOX_DEFAULT_STATE_KEY_BASE,
+    DM_INBOX_DEFAULT_BACKOFF_KEY_BASE,
   ].map((base) => perAccountKey(base, PK));
   await AsyncStorage.multiSet(keys.map((k) => [k, '1']));
   await wipeAccountCaches(PK);
   const left = await AsyncStorage.multiGet(keys);
-  expect(left.map(([, v]) => v)).toEqual([null, null, null, null]);
+  expect(left.map(([, v]) => v)).toEqual(keys.map(() => null));
 });
 
 it("drops the signed-out account's key-backup flag but keeps other accounts' (#1223)", async () => {

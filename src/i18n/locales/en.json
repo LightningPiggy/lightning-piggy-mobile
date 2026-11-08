@@ -3771,5 +3771,22 @@
       "marmot": "Group key discovery may not work",
       "market": "Market listings won’t load"
     }
+  },
+  "dmInboxSuggestion": {
+    "title": "Let other Nostr apps message you",
+    "body": "You haven't published your message inbox relays yet. Some Nostr apps can only send you private messages once you do.",
+    "signerHint": "Your signer will ask you to approve.",
+    "otherAppHint": "Already set up message inbox relays in another Nostr app? Tap Not now.",
+    "relays": "Suggested relays: {{relays}}",
+    "publish": "Publish inbox relays",
+    "notNow": "Not now",
+    "publishedTitle": "Message inbox relays published",
+    "publishedBody": "Other Nostr apps can now send you private messages.",
+    "existsTitle": "You already have message inbox relays",
+    "existsBody": "Another app published them, so nothing was changed.",
+    "checkFailed": "Couldn't check whether you already have message inbox relays. Try again in a moment.",
+    "noRelays": "No suitable relays are reachable right now. Try again in a moment.",
+    "confirmChangedTitle": "Publish these relays instead?",
+    "confirmChangedBody": "Your relays have changed since this suggestion was shown. Publishing will list: {{relays}}"
   }
 }

@@ -230,16 +230,19 @@ export async function fetchRelayList(
 }
 
 /** Like fetchRelayList, but also returns the event's created_at so callers
- * can refuse a copy older than the list they already hold. */
+ * can refuse a copy older than the list they already hold. Resolves with the
+ * first reply; `onLatest` later gets a NEWER copy another relay held. */
 export async function fetchRelayListEvent(
   pubkey: string,
   relays: string[],
+  opts?: { onLatest?: (latest: { list: RelayConfig[]; createdAt: number }) => void },
 ): Promise<{ list: RelayConfig[]; createdAt: number } | null> {
   try {
     return await fetchSingleLatest(
       { kinds: [10002], authors: [pubkey] } as Filter,
       relays,
       (tags, createdAt) => ({ list: tagsToRelayList(tags), createdAt }),
+      { onLatest: opts?.onLatest },
     );
   } catch (error) {
     console.warn('Failed to fetch NIP-65 relay list:', error);

@@ -120,13 +120,18 @@ it('rediscovers personal read/write relays after failed preference hydration rec
     await act(async () => {
       await result.current.loadRelays(owner);
     });
-    expect(fetchList).toHaveBeenLastCalledWith(owner, []);
+    expect(fetchList).toHaveBeenLastCalledWith(owner, [], expect.anything());
     expect(result.current.nip65Relays).toEqual([]);
 
     await act(async () => jest.advanceTimersByTimeAsync(3000));
 
     expect(fetchList).toHaveBeenCalledTimes(2);
-    expect(fetchList).toHaveBeenLastCalledWith(owner, ['wss://ok.example']);
+    // The user's own list is also looked up on the indexers (#1628).
+    expect(fetchList).toHaveBeenLastCalledWith(
+      owner,
+      ['wss://ok.example', 'wss://purplepag.es', 'wss://user.kindpag.es'],
+      expect.anything(),
+    );
     expect(result.current.nip65Relays).toEqual(personal);
     expect(jest.mocked(fetchLatestReplaceable).mock.calls.at(-1)?.[2]).toContain(
       'wss://personal-write.example',

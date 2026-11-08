@@ -15,7 +15,7 @@ LIMIT=1000
 # when the rule landed, 2026-05-26). Shrink these over time and lower the number
 # here; never raise it. Delete the entry once a file drops under the cap.
 declare -A BASELINE=(
-  ["src/contexts/NostrContext.tsx"]=1476
+  ["src/contexts/NostrContext.tsx"]=1406
   ["src/screens/HuntCreateScreen.tsx"]=2386
   ["src/contexts/WalletContext.tsx"]=1579
   ["src/screens/HuntPiggyDetailScreen.tsx"]=1256

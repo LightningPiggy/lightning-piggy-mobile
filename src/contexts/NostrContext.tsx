@@ -21,7 +21,6 @@ import React, {
 import { InteractionManager } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
 import {
   rearmBackgroundDmWatchForActiveIdentity,
@@ -57,7 +56,6 @@ import { useContactActions } from './useContactActions';
 import { useNip46Login } from './useNip46Login';
 import { readStartupLogin, registerRestoredSession } from './readStoredLogin';
 import { resolveStartupWalletOwner } from '../services/walletStorageService';
-import { nip46Sign } from './nip46DmDecrypt';
 import { dropIdentityKeyMaterial, useIdentityMemoryReset } from './resetIdentityMemoryState';
 import { AMBER_NIP17_ENABLED_KEY_LEGACY } from './nostrDmCache';
 import { wipeAccountCaches } from './accountCacheWipe';
@@ -68,12 +66,12 @@ import { DmInboxContext } from './DmInboxContext';
 import { useGroupMessaging, type UseGroupMessagingResult } from './useGroupMessaging';
 import { useCacheNotifications } from './useCacheNotifications';
 import { useNip65Relays, type AdoptResult } from './useNip65Relays';
+import { usePublishProfile } from './usePublishProfile';
+import { useDefaultDmInbox } from './useDefaultDmInbox';
 import {
   CONTACTS_CACHE_KEY_BASE,
   PROFILES_CACHE_KEY_BASE,
   CONTACTS_TIMESTAMP_KEY_BASE,
-  OWN_PROFILE_CACHE_KEY_BASE,
-  OWN_PROFILE_TIMESTAMP_KEY_BASE,
   RELAY_LIST_CACHE_KEY_BASE,
   RELAY_LIST_TIMESTAMP_KEY_BASE,
   CACHE_MAX_AGE_MS,
@@ -124,6 +122,7 @@ interface NostrContextType extends UseReactionActionsResult {
   dmInboxRelays: string[];
   /** Adopt (and cache) DM inbox relays the user just published in-app. */
   applyPublishedDmInbox: (pk: string, list: string[], createdAt?: number) => Promise<AdoptResult>;
+  dmInboxLive: ReturnType<typeof useNip65Relays>['dmInboxLive']; // inbox as held now (no render lag)
   /**
    * Add or update a user-managed relay. Replaces any existing entry
    * with the same URL (so toggling read/write on an existing user
@@ -322,6 +321,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadRelaysFromCache,
     loadRelays,
     applyPublishedRelayList,
+    dmInboxLive,
   } = useNip65Relays();
   const [userRelays, setUserRelaysState] = useState<RelayConfig[]>([]);
   const [pubkey, setPubkey] = useActiveNostrAccount(loadRelays);
@@ -1193,89 +1193,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     loadContacts,
   });
 
-  const publishProfile = useCallback(
-    async (profileData: {
-      name?: string;
-      display_name?: string;
-      picture?: string;
-      banner?: string;
-      about?: string;
-      lud16?: string;
-      nip05?: string;
-    }): Promise<boolean> => {
-      if (!pubkey || !isLoggedIn) return false;
-      try {
-        const event = nostrService.createProfileEvent(profileData);
-        const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-        const targetRelays =
-          writeRelays.length > 0
-            ? writeRelays
-            : enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
-
-        if (signerType === 'nsec') {
-          const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec) return false;
-          const { secretKey } = nostrService.decodeNsec(nsec);
-          await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
-        } else if (signerType === 'amber') {
-          const eventJson = JSON.stringify(event);
-          const { event: signedEventJson } = await amberService.requestEventSignature(
-            eventJson,
-            '',
-            pubkey,
-          );
-          if (!signedEventJson) return false;
-          const signed = JSON.parse(signedEventJson);
-          await nostrService.publishSignedEvent(signed, targetRelays);
-        } else if (signerType === 'nip46') {
-          const signedEventJson = await nip46Sign(event, pubkey);
-          if (!signedEventJson) return false;
-          await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
-        }
-
-        // We just signed and published this kind-0, so the client already
-        // has the authoritative new profile. Shortcut the relay round-trip
-        // by updating local state + the 24h own-profile cache in-place,
-        // otherwise the top-right profile icon keeps the pre-publish
-        // avatar/name until the next force-refresh (up to 24h — see #148).
-        //
-        // Apply the same "drop falsy values" rule createProfileEvent uses
-        // (service.ts:520-524) so local state matches exactly what was
-        // published — a caller passing `name: ""` otherwise leaves the
-        // cache with an empty string while the kind-0 on the wire omits
-        // the field entirely.
-        const nullIfEmpty = (v: string | undefined): string | null => (v ? v : null);
-        const updatedProfile: NostrProfile = {
-          pubkey,
-          npub: nip19.npubEncode(pubkey),
-          name: nullIfEmpty(profileData.name),
-          displayName: nullIfEmpty(profileData.display_name),
-          picture: nullIfEmpty(profileData.picture),
-          banner: nullIfEmpty(profileData.banner),
-          about: nullIfEmpty(profileData.about),
-          lud16: nullIfEmpty(profileData.lud16),
-          nip05: nullIfEmpty(profileData.nip05),
-        };
-        setProfile(updatedProfile);
-        InteractionManager.runAfterInteractions(() => {
-          AsyncStorage.setItem(
-            perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pubkey),
-            JSON.stringify(updatedProfile),
-          ).catch(() => {});
-          AsyncStorage.setItem(
-            perAccountKey(OWN_PROFILE_TIMESTAMP_KEY_BASE, pubkey),
-            Date.now().toString(),
-          ).catch(() => {});
-        });
-
-        return true;
-      } catch (error) {
-        console.warn('Failed to publish profile:', error);
-        return false;
-      }
-    },
-    [setProfile, pubkey, isLoggedIn, signerType, relays],
-  );
+  const publishProfile = usePublishProfile({ pubkey, isLoggedIn, signerType, relays, setProfile });
 
   /**
    * Send a 1:1 direct message via NIP-17 (kind-14 rumor → kind-13 seal →
@@ -1303,6 +1221,16 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   });
 
   const signEvent = useRelayAuthSigner(pubkey, isLoggedIn, signerType, nip65Relays, dmInboxRelays);
+  useDefaultDmInbox({
+    pubkey,
+    isLoggedIn,
+    signerType,
+    nip65Relays,
+    dmInboxLive,
+    getReadRelays,
+    applyPublishedDmInbox,
+    applyPublishedRelayList,
+  });
 
   const signZapRequest = useCallback(
     async (
@@ -1353,6 +1281,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       applyPublishedRelayList,
       dmInboxRelays,
       applyPublishedDmInbox,
+      dmInboxLive,
       addUserRelay,
       removeUserRelay,
       signerType,
@@ -1394,6 +1323,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       applyPublishedRelayList,
       dmInboxRelays,
       applyPublishedDmInbox,
+      dmInboxLive,
       addUserRelay,
       removeUserRelay,
       signerType,
