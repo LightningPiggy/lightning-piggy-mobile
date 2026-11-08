@@ -440,13 +440,39 @@ safely establish signature trust because they lack the signed envelope.
 sockets, dispatching each wire message through the original SDK verifier,
 filter, dedup and delivery path. It yields before the next unit when the
 budget is spent. Wire EOSE and EOSE timeouts wait behind already received
-events; `querySyncAbortable` also queues its independent deadline at that
-receive boundary, so pre-deadline events drain even beyond `maxWait`.
-Explicit abort still closes immediately. Verification trust is flushed
-before EOSE or deadline completion. AUTH, OK
+events of their subscription; `querySyncAbortable` also queues its
+independent deadline at that receive boundary, so pre-deadline events
+drain even beyond `maxWait`. That deadline marker is a barrier: it runs only
+after every frame queued before it, in both lanes, and while any barrier is
+queued only inbox frames OLDER than it may run, so post-deadline inbox
+traffic can neither extend the snapshot nor delay its completion (the inbox
+lane briefly falls back to FIFO behind the normal backlog ahead of it). Explicit abort still closes immediately. AUTH, OK
 and COUNT replies bypass the backlog. Closing a subscription drops its
 queued delivery. The queue is bounded at 20,000 jobs / 8 MiB of estimated
-UTF-16 payload; overflow closes the affected relay for a later refetch.
+UTF-16 payload, shared by both lanes; overflow closes the affected relay for
+a later refetch.
+
+The queue has two FIFO lanes (#1758). Frames of inbox subscriptions (kind 4
+or 1059 in any filter, the same rule as REQ priority 0) and their EOSE /
+CLOSED go to the inbox lane; everything else (group backfill, zap receipts,
+reactions, profiles…) to the normal lane. The lane is read from the raw
+frame's subscription id with one anchored regex and an `openSubs` lookup,
+never a JSON parse; each subscription has exactly one lane, so its EVENTs
+always precede its EOSE. The inbox drains first, but after `INBOX_BURST` (4)
+consecutive inbox jobs while normal work waits, one normal job runs, so a
+kind-4 backlog cannot starve the rest. A frame the regex can't attribute
+(escaped JSON, binary) is a barrier and demotes its relay to the normal
+lane, keeping its wire order; the demotion lifts only once every demoted
+frame has run, not on reconnect. NWC replies don't use this pool.
+
+Verification trust persists in the background, never on the EOSE or
+deadline path: after 1 s without a new record, at most 5 s after the first
+unwritten one, at 256 pending records, or when the app leaves the
+foreground. `[Perf] relay receive window=…` reports, at most once per 5 s
+window, queue wait p50/max per lane, inbox EOSE→handler latency and the
+time the first cold-start drain held every lane awaiting verify-cache
+hydration (`hydration gate=`). Frames queued during that gate wait at least
+that long in either lane, so read lane waits against it.
 
 Count-based Jest fixture (native crypto off): 1,300 cold Schnorr checks
 before persistence, *zero* after restarting RAM and hydrating trust. A
@@ -457,8 +483,8 @@ large event parse/hash can exceed 50 ms on slower hardware; cooperative
 pacing cannot interrupt it. Native crypto remains the eventual solution
 for that single-unit cost.
 
-Persistence failure, cache eviction, or process death before a live-event
-debounce finishes can require another paced verification. Verification
+Persistence failure, cache eviction, or process death before a background
+write finishes can require another paced verification. Verification
 records contain public ids/signatures, not DM plaintext. They rely on the
 same app-private storage trust boundary as local message history. A first
 uncached backlog still takes significant total time, but taps can run

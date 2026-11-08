@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState } from 'react-native';
 import { verifiedSymbol, type Event as NostrEvent } from 'nostr-tools/pure';
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { nostrGetEventHash, nostrVerifyEvent } from './nostrCrypto';
@@ -15,6 +16,10 @@ const buckets = new Map<string, Map<string, string>>();
 const dirty = new Set<string>();
 let hydration: Promise<void> | undefined;
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
+let pendingRecords = 0;
+let firstDirtyAt = 0;
+let lastDirtyAt = 0;
+let watchingAppState = false;
 let writing: Promise<void> | undefined;
 let generation = 0;
 const bucketKey = (id: string) => id.slice(0, 2);
@@ -43,12 +48,52 @@ function remember(id: string, sig: string, persist: boolean): void {
   }
 }
 
+// Persistence is a cache write: it never runs on the relay receive/EOSE path
+// (#1758). It waits until verification goes quiet, so a big ingest rewrites
+// each bucket once rather than every few events. Process death before a
+// write only costs a re-verification of those events next time.
+/** Write once no new record has arrived for this long… */
+export const PERSIST_IDLE_MS = 1_000;
+/** …but never hold the first unwritten record longer than this… */
+export const PERSIST_MAX_WAIT_MS = 5_000;
+/** …or let more than this many unwritten records pile up. */
+export const PERSIST_PENDING_RECORDS = 256;
+
+function armPersist(delay: number): void {
+  if (persistTimer !== undefined) clearTimeout(persistTimer);
+  persistTimer = setTimeout(persistWhenDue, Math.max(0, delay));
+}
+
+/** One timer per quiet period, not one per record: re-arm on fire if not yet due. */
+function persistWhenDue(): void {
+  persistTimer = undefined;
+  const now = Date.now();
+  const idleAt = lastDirtyAt + PERSIST_IDLE_MS;
+  const maxAt = firstDirtyAt + PERSIST_MAX_WAIT_MS;
+  if (pendingRecords < PERSIST_PENDING_RECORDS && now < idleAt && now < maxAt)
+    armPersist(Math.min(idleAt, maxAt) - now);
+  else void flushVerifiedEventCache();
+}
+
 function schedulePersist(): void {
-  if (persistTimer !== undefined) return;
-  persistTimer = setTimeout(() => {
-    persistTimer = undefined;
-    void flushVerifiedEventCache();
-  }, 250);
+  lastDirtyAt = Date.now();
+  if (!pendingRecords++) firstDirtyAt = lastDirtyAt;
+  watchAppState();
+  if (pendingRecords === PERSIST_PENDING_RECORDS) armPersist(0);
+  else if (persistTimer === undefined) armPersist(PERSIST_IDLE_MS);
+}
+
+/** Leaving the foreground writes now: the OS may suspend or kill the app next. */
+function watchAppState(): void {
+  if (watchingAppState) return;
+  watchingAppState = true;
+  try {
+    AppState.addEventListener('change', (state) => {
+      if (state !== 'active' && dirty.size) void flushVerifiedEventCache();
+    });
+  } catch {
+    // No AppState (non-RN host): the timers alone still persist the cache.
+  }
 }
 
 /** Bounded shards keep JSON parsing/serialization out of large sync blocks. */
@@ -56,8 +101,8 @@ export async function flushVerifiedEventCache(): Promise<void> {
   const epoch = generation;
   if (writing) {
     await writing;
-    // A previous debounce may have snapshotted a bucket before the latest
-    // events arrived. EOSE must flush those newer dirty records as well.
+    // A previous write may have snapshotted a bucket before the latest
+    // events arrived. A caller awaiting a flush gets those newer records too.
     if (epoch === generation && dirty.size) await flushVerifiedEventCache();
     return;
   }
@@ -65,6 +110,8 @@ export async function flushVerifiedEventCache(): Promise<void> {
   await hydrateVerifiedEventCache();
   if (epoch !== generation) return;
   if (writing) return flushVerifiedEventCache();
+  // Whatever triggered this write, it covers every record pending so far.
+  pendingRecords = 0;
   if (!dirty.size) return;
   if (persistTimer !== undefined) clearTimeout(persistTimer);
   persistTimer = undefined;
@@ -78,7 +125,7 @@ export async function flushVerifiedEventCache(): Promise<void> {
         try {
           await AsyncStorage.setItem(storageKey(key), snapshot);
         } catch {
-          dirty.add(key); // Offline/full storage: keep RAM trust, retry later.
+          dirty.add(key); // Offline/full storage: keep RAM trust, retry with the next write.
           return;
         }
         await pacing.maybeYield();
@@ -179,6 +226,7 @@ export const __resetVerifiedEventCache = (): void => {
   generation++;
   if (persistTimer !== undefined) clearTimeout(persistTimer);
   persistTimer = undefined;
+  pendingRecords = 0;
   hydration = undefined;
   verified.clear();
   buckets.clear();
