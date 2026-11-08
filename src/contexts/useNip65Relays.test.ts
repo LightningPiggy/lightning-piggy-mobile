@@ -494,6 +494,57 @@ describe('relayListsHydrated (#1390: outbox leasing waits for it)', () => {
 });
 
 describe('default DM inbox support (#1628)', () => {
+  it("a reset during a late relay-list adoption's cache write never marks the new account's inbox known", async () => {
+    const OTHER = 'b'.repeat(64);
+    const newer = [{ url: 'wss://newer.example', read: true, write: true }];
+    let deliver!: () => void;
+    (nostrService.fetchRelayListEvent as jest.Mock).mockImplementationOnce(
+      async (_pk: string, _relays: string[], opts?: { onLatest?: (v: unknown) => void }) => {
+        deliver = () => opts?.onLatest?.({ list: newer, createdAt: 200 });
+        return { list: [{ url: 'wss://first.example', read: true, write: true }], createdAt: 100 };
+      },
+    );
+    fetchLatest.mockResolvedValue(null); // every inbox read completes (and would mark it known)
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    await waitFor(() => expect(result.current.relayListsHydrated).toBe(true));
+    // Hold the late adoption at its cache write.
+    const realSet = AsyncStorage.setItem;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    AsyncStorage.setItem = jest.fn(async (key: string, value: string) => {
+      if (key === perAccountKey(RELAY_LIST_CACHE_KEY_BASE, PK) && value.includes('newer.example'))
+        await gate;
+      return realSet(key, value);
+    });
+    try {
+      await act(async () => {
+        deliver();
+      });
+      // Account switch while that write is pending; the new account's NIP-65
+      // list is known, so hydration now hinges on its inbox alone.
+      act(() => result.current.resetRelayLists());
+      await act(async () => {
+        await result.current.applyPublishedRelayList(OTHER, [
+          { url: 'wss://other.example', read: true, write: true },
+        ]);
+      });
+      const inboxReads = fetchLatest.mock.calls.length;
+      await act(async () => {
+        release();
+      });
+      await act(async () => {});
+      // No inbox load was started for the old account...
+      expect(fetchLatest.mock.calls.length).toBe(inboxReads);
+      // ...so nothing marked the new account's inbox known.
+      expect(result.current.relayListsHydrated).toBe(false);
+    } finally {
+      AsyncStorage.setItem = realSet;
+    }
+  });
+
   it('of two racing inbox loads, an older list resolving last never replaces the newer one', async () => {
     let older!: (v: unknown) => void;
     let newer!: (v: unknown) => void;

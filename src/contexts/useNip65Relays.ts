@@ -134,9 +134,11 @@ export function useNip65Relays() {
   );
 
   const loadDmInboxRelays = useCallback(
-    async (pk: string, nip65WriteRelays: string[] = [], generation = generationRef.current) => {
+    /** `generation` and `identity` are the CALLER's, captured when its work
+     * started: a caller left over from a previous account can then neither
+     * adopt its inbox nor mark the new account's inbox as known. */
+    async (pk: string, nip65WriteRelays: string[], generation: number, identity: number) => {
       const current = () => generation === generationRef.current;
-      const identity = identityRef.current;
       let cached: string[] = [];
       let cacheKnown = false;
       try {
@@ -298,7 +300,7 @@ export function useNip65Relays() {
       const identity = identityRef.current;
       const hydrateInbox = (list: RelayConfig[]) => {
         if (identity === identityRef.current)
-          void loadDmInboxRelays(pk, writeRelaysOf(list), inboxGeneration);
+          void loadDmInboxRelays(pk, writeRelaysOf(list), inboxGeneration, identity);
       };
       const writeRelaysOf = (list: RelayConfig[]) => list.filter((r) => r.write).map((r) => r.url);
       // Cache-fresh fast path — NIP-65 relay lists rarely change, so serve
@@ -331,8 +333,10 @@ export function useNip65Relays() {
         onLatest: (newer) => {
           if (!current()) return;
           void applyPublishedRelayList(pk, newer.list, newer.createdAt).then((result) => {
-            if (result.adopted)
-              void loadDmInboxRelays(pk, writeRelaysOf(newer.list), inboxGeneration);
+            // Its cache writes awaited: a reset (account switch) meanwhile
+            // still reports `adopted`, so re-check this load's identity.
+            if (result.adopted && identity === identityRef.current)
+              void loadDmInboxRelays(pk, writeRelaysOf(newer.list), inboxGeneration, identity);
           });
         },
       });
