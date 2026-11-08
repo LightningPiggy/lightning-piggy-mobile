@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { X } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
-import { useTranslation } from '../contexts/LocaleContext';
+import { useLocale } from '../contexts/LocaleContext';
 import { createMarketScopePillStyles } from '../styles/MarketScopePill.styles';
 import type { MarketMode } from '../utils/marketMode';
 import type { FofProgress } from '../hooks/useMarketFofAuthors';
@@ -38,7 +38,7 @@ const MarketScopePill: React.FC<Props> = ({
   fofFailed,
 }) => {
   const colors = useThemeColors();
-  const t = useTranslation();
+  const { t, formatLocale } = useLocale();
   const styles = useMemo(() => createMarketScopePillStyles(colors), [colors]);
 
   let note: { text: string; testID: string } | null = null;
@@ -48,7 +48,10 @@ const MarketScopePill: React.FC<Props> = ({
     note = {
       text:
         fofProgress.total > 0
-          ? t('market.screen.fofBuilding', { done: fofProgress.done, total: fofProgress.total })
+          ? t('market.screen.fofBuilding', {
+              done: fofProgress.done.toLocaleString(formatLocale),
+              total: fofProgress.total.toLocaleString(formatLocale),
+            })
           : t('market.screen.fofBuildingStart'),
       testID: 'market-scope-fof-progress',
     };

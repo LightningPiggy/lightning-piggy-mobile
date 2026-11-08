@@ -40,8 +40,14 @@ export const createWebOfTrustBottomSheetStyles = (colors: Palette) =>
       fontWeight: '800',
       color: colors.textHeader,
     },
+    // Shrink to fit the sheet's maxHeight (RN defaults flexShrink to 0, which
+    // let the content overflow under the fixed Done button on short phones).
     scroll: {
       flexGrow: 0,
+      flexShrink: 1,
+    },
+    scrollContent: {
+      paddingBottom: 8,
     },
     explainer: {
       fontSize: 13,
@@ -50,21 +56,32 @@ export const createWebOfTrustBottomSheetStyles = (colors: Palette) =>
       marginTop: 10,
       marginBottom: 18,
     },
+    tierCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      marginBottom: 8,
+      backgroundColor: colors.surface,
+      overflow: 'hidden',
+    },
+    tierCardActive: {
+      borderColor: colors.zapYellow,
+      backgroundColor: 'rgba(255, 193, 7, 0.10)',
+    },
     tierRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
       paddingVertical: 12,
       paddingHorizontal: 12,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.divider,
-      marginBottom: 8,
-      backgroundColor: colors.surface,
     },
-    tierRowActive: {
-      borderColor: colors.zapYellow,
-      backgroundColor: 'rgba(255, 193, 7, 0.10)',
+    // Status attached under a tier's row, inside the same card. Indented to
+    // line up with the title (icon 28 + gap 12 + row padding 12).
+    tierExtras: {
+      paddingLeft: 52,
+      paddingRight: 12,
+      paddingBottom: 12,
+      marginTop: -4,
     },
     tierIcon: {
       width: 28,
@@ -110,13 +127,6 @@ export const createWebOfTrustBottomSheetStyles = (colors: Palette) =>
       lineHeight: 17,
     },
     fofPanel: {
-      marginTop: 6,
-      marginBottom: 8,
-      padding: 12,
-      borderRadius: 10,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.zapYellow,
       gap: 10,
     },
     fofPanelRow: {
@@ -155,14 +165,10 @@ export const createWebOfTrustBottomSheetStyles = (colors: Palette) =>
       color: colors.textHeader,
     },
     metaText: {
-      marginTop: 4,
-      marginBottom: 4,
       fontSize: 12,
       color: colors.textSupplementary,
     },
     errorText: {
-      marginTop: 4,
-      marginBottom: 4,
       fontSize: 12,
       lineHeight: 17,
       color: colors.brandPink,

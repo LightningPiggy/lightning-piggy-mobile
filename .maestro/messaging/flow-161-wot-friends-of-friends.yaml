@@ -4,8 +4,9 @@ name: Web of Trust — build Friends of friends on demand, cancel, then select (
 # Verifies the re-enabled "Friends of friends" tier in the Web of Trust sheet
 # opened from the Messages chip (#565):
 #   - the row is selectable (no longer greyed out);
-#   - picking it shows the "Finding friends of friends… X of Y" panel with
-#     Cancel, and Cancel leaves the tier on Friends;
+#   - picking it shows "Checking who your friends follow… X of Y" (friends
+#     checked) with a bar and Cancel inside the Friends of friends card, and
+#     Cancel leaves the tier on Friends;
 #   - picking it again completes and the Friends of friends row becomes the
 #     selected tier;
 #   - switching back to Friends restores the original state.

@@ -103,7 +103,10 @@ export interface ComputeFofOptions {
   // contact list published. Honour the `signal` passed in, not the caller's
   // own: a build shared by two consumers outlives either one's cancel.
   fetchKind3: (pubkeys: string[], signal: AbortSignal) => Promise<Record<string, string[]>>;
-  // Optional progress callback so the bottom sheet can render "Fetching N / M".
+  // Optional progress callback so the bottom sheet can render "N of M".
+  // Counted in friends, not batches: `done` is how many friends' follow lists
+  // have been checked, `total` the number of friends. Fires once with `done`
+  // 0 as the build starts, then once per fetched batch.
   onProgress?: (done: number, total: number) => void;
   // Withdraws this caller; a shared build stops once no caller is left.
   signal?: AbortSignal;
@@ -277,6 +280,7 @@ export const computeFofSet = async (
   if (opts.signal?.aborted) throw abortError();
   if (!userPubkey) {
     const signal = opts.signal ?? new AbortController().signal;
+    opts.onProgress?.(0, friendsLower.length); // the shared path replays this on join
     return runFofBuild(null, friendsLower, { ...opts, signal }, epoch);
   }
   // The epoch is part of the key: a build retired by a sign-out is never
@@ -314,7 +318,8 @@ const startSharedBuild = (
       fetchKind3: opts.fetchKind3,
       maxSize: opts.maxSize,
       signal: controller.signal,
-      // Once per batch, fanned out to every caller still waiting.
+      // Once per batch (friends checked so far), fanned out to every caller
+      // still waiting.
       onProgress: (done, total) => {
         build.progress = { done, total };
         for (const listener of listeners) listener(done, total);
@@ -326,7 +331,10 @@ const startSharedBuild = (
   });
   // Every caller may have left; each observes the rejection on its own promise.
   promise.catch(() => {});
-  const build: SharedBuild = { promise, controller, callers: 0, listeners, progress: null };
+  // Seeded with the (0, total) start, which each caller's join replays, so the
+  // UI shows "0 of N friends" before the first batch lands.
+  const progress = friendsLower.length > 0 ? { done: 0, total: friendsLower.length } : null;
+  const build: SharedBuild = { promise, controller, callers: 0, listeners, progress };
   inflightBuilds.set(key, build);
   return build;
 };
@@ -388,6 +396,9 @@ const runFofBuild = async (
     batches.push(friendsLower.slice(i, i + BATCH_SIZE));
   }
   const followLists: Record<string, string[]> = {};
+  // Progress is reported in friends checked (the last batch may be short), so
+  // the UI reads "600 of 680 friends" rather than a count of batches.
+  const total = friendsLower.length;
   let done = 0;
   for (const batch of batches) {
     if (opts.signal.aborted) throw abortError();
@@ -406,8 +417,8 @@ const runFofBuild = async (
     for (const [k, v] of Object.entries(partial)) {
       followLists[k.toLowerCase()] = v.length > FANOUT_CAP ? v.slice(0, FANOUT_CAP + 1) : v;
     }
-    done += 1;
-    opts.onProgress?.(done, batches.length);
+    done += batch.length;
+    opts.onProgress?.(done, total);
   }
   const { set, excludedFriends } = await buildFofSetYielding(
     userPubkey,

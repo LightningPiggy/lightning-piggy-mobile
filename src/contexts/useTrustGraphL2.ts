@@ -50,15 +50,16 @@ export const L2_BACKGROUND_REFRESH_DELAY_MS = 8_000;
 export const L2_RESUME_CHECK_DELAY_MS = 3_000;
 
 export interface FofBuildProgress {
-  /** Follow-list batches (50 friends each) fetched so far. */
+  /** Friends whose follow lists have been checked so far. */
   done: number;
+  /** Number of friends being checked. */
   total: number;
 }
 
 export interface TrustGraphL2Status {
   /** True while a build is running (foreground or background). */
   building: boolean;
-  /** Per-batch progress of the running build; `total` is 0 until the first batch. */
+  /** Progress of the running build, in friends checked; `total` is 0 until it starts. */
   progress: FofBuildProgress | null;
   /** The last build failed (relays unreachable, …). Cleared by the next build. */
   failed: boolean;
