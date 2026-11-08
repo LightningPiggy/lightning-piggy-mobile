@@ -18,6 +18,7 @@ import { EditLedger, isNewerEdit, parseMarmotEdit, type MarmotEdit } from '../se
 import { MARMOT_NON_MESSAGE_KINDS, marmotRumorToDmRow } from '../services/marmotInbox';
 import { subscribeMarmotSession, type MarmotMessageEvent } from '../services/marmotSession';
 import { fireMessageNotification } from '../services/notificationService';
+import { hasRepliedTo, loadRepliedPartners } from '../services/dmRepliedPartners';
 import {
   audienceAdmits,
   liveNotificationAudience,
@@ -30,16 +31,17 @@ import { notifyDmMessage } from './nostrEventBus';
 
 const FLUSH_MS = 150;
 
-/** Pure: may a Marmot DM from `peer` alert? A followed peer, or one the Web
- * of Trust tier admits (friends of friends / All) — unless the follow list
- * isn't known yet (empty / absent), which fails open. */
+/** Pure: may a Marmot DM from `peer` alert? The same rule as the NIP-17 path:
+ * a followed peer, one we've replied to, or one the CHOSEN Web of Trust tier
+ * admits (an unchosen tier is Friends). No follows known yet admits nobody
+ * extra: an unknown follow list must not let strangers notify (#1764). */
 export function mayNotifyFrom(
   peer: string,
   follows: ReadonlySet<string> | undefined,
+  replied: boolean,
   audience?: NotificationAudience | null,
 ): boolean {
-  if (!follows || follows.size === 0) return true;
-  return follows.has(peer.toLowerCase()) || audienceAdmits(audience, peer);
+  return !!follows?.has(peer.toLowerCase()) || replied || audienceAdmits(audience, peer);
 }
 const NOTIFY_SKEW_SEC = 120;
 
@@ -285,12 +287,15 @@ export function useMarmotDmInbound(
     };
 
     const notifyMessage = (row: DmMessageRow, groupId: string) => {
-      if (!row.fromMe && row.createdAt >= openedAtSec - NOTIFY_SKEW_SEC) {
-        // Same follow + tier gate as the NIP-17 live path: the Messages list
-        // hides a thread outside the tier, so an alert would be a phantom.
-        // Follows not loaded yet (empty) → fail open rather than lose alerts.
-        if (!mayNotifyFrom(row.conversation, followsRef.current, liveNotificationAudience(pubkey)))
-          return;
+      if (row.fromMe || row.createdAt < openedAtSec - NOTIFY_SKEW_SEC) return;
+      // Same follow + replied + tier gate as the NIP-17 live path. Wait for
+      // who we've replied to (once per account) so a cold start can't take a
+      // partner for a stranger.
+      void loadRepliedPartners(pubkey).then(() => {
+        if (disposed) return;
+        const replied = hasRepliedTo(pubkey, row.conversation);
+        const audience = liveNotificationAudience(pubkey);
+        if (!mayNotifyFrom(row.conversation, followsRef.current, replied, audience)) return;
         void fireMessageNotification({
           kind: 'dm',
           threadId: dmThreadId(row.conversation, 'marmot'),
@@ -309,7 +314,7 @@ export function useMarmotDmInbound(
           // Which push placeholders this message stands for (marmotPushWake).
           sentAt: row.createdAt * 1000,
         });
-      }
+      });
     };
 
     const unsubscribeSession = subscribeMarmotSession((session) => {

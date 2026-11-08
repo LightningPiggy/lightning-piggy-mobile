@@ -248,7 +248,8 @@ async function handleWrap(input: {
   decryptWrap: ((wrap: nostrService.RawGiftWrapEvent) => DecodedRumor | null) | null;
   /** True once the subscription's initial backlog replay has settled (EOSE). */
   backlogSettled: () => boolean;
-  /** Followed pubkeys for the follow gate; null = cache absent → fail open. */
+  /** Followed pubkeys for the follow gate; null = cache absent → fail closed
+   * (replied partners and an explicit All only, #1764). */
   followedPubkeys: Set<string> | null;
   /** Who else the Web of Trust tier lets notify (null = follows only). */
   notificationAudience?: () => NotificationAudience | null;
@@ -338,16 +339,15 @@ async function handleWrap(input: {
   // A NIP-171 ticket or group rumor isn't a 1:1 message (the app ingests it).
   if (isNip171InboxRumor(rumor)) return;
   // Follow gate (mirrors the live sub's): a stranger must not be able to
-  // spam OS notifications by gift-wrapping to our pubkey — unless the Web of
-  // Trust tier admits them (friends of friends, or All). Deliberately does
-  // NOT claim the wrap id — the live sub's follow-gate defer buffer may
+  // spam OS notifications by gift-wrapping to our pubkey — unless the CHOSEN
+  // Web of Trust tier admits them (friends of friends, or All). With no
+  // contacts cache (fresh install, unreadable) nobody counts as followed: it
+  // fails CLOSED to replied partners and an explicit All (#1764). Deliberately
+  // does NOT claim the wrap id — the live sub's follow-gate defer buffer may
   // legitimately replay and notify for this wrap once follows hydrate.
   // `storable`: passes the follow gate, so Messages shows it (see below).
   let storable = true;
-  if (
-    input.followedPubkeys &&
-    !input.followedPubkeys.has(partnership.partnerPubkey.toLowerCase())
-  ) {
+  if (!input.followedPubkeys?.has(partnership.partnerPubkey.toLowerCase())) {
     // …unless we've replied to them (#1623), like the live sub. Wait for that
     // set to load so a cold start can't mistake them for a stranger.
     await loadRepliedPartners(viewerPubkey);
@@ -487,7 +487,7 @@ async function armBackgroundDmWatchOnce(isCurrent: () => boolean): Promise<boole
   // once per arm (a headless start has no React tree); the app's own live
   // audience wins when it runs in this context, so a tier change applies at
   // once. Built once — a Set lookup per wrap.
-  const storedAudience = followedPubkeys
+  const storedAudience = decryptWrap
     ? await loadNotificationAudience(activePubkey, followedPubkeys)
     : null;
   // A headless start has no React tree to load who we've replied to (#1623).

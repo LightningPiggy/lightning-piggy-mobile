@@ -20,6 +20,7 @@ const mockSubscribe = jest.fn();
 const mockLoadIdentities = jest.fn();
 const mockFireMessageNotification = jest.fn().mockResolvedValue('id');
 let mockSender = '';
+let mockReplied = new Set<string>();
 jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 jest.mock('nostr-tools/nip44', () => ({}));
 jest.mock('./identitiesStore', () => ({ loadIdentities: () => mockLoadIdentities() }));
@@ -66,7 +67,7 @@ jest.mock('./backgroundDmIngest', () => ({
 }));
 jest.mock('./dmRepliedPartners', () => ({
   loadRepliedPartners: () => Promise.resolve(),
-  hasRepliedTo: () => false,
+  hasRepliedTo: (_owner: string, partner: string) => mockReplied.has(partner),
 }));
 jest.mock('./backgroundPaymentService', () => ({
   canWatchBackgroundPayments: () => Promise.resolve(false),
@@ -89,11 +90,13 @@ async function seedAccount(
   tier: WotTier | null,
   fof: string[] | null,
   explicit = true,
+  contactsCache = true,
 ) {
-  await AsyncStorage.setItem(
-    perAccountKey(CONTACTS_CACHE_KEY_BASE, owner),
-    JSON.stringify([{ pubkey: FRIEND }]),
-  );
+  if (contactsCache)
+    await AsyncStorage.setItem(
+      perAccountKey(CONTACTS_CACHE_KEY_BASE, owner),
+      JSON.stringify([{ pubkey: FRIEND }]),
+    );
   if (tier)
     await AsyncStorage.setItem(
       perAccountKey(WOT_STORAGE_KEY_BASE, owner),
@@ -137,6 +140,7 @@ beforeEach(async () => {
   __resetDedupeForTests();
   __resetNotificationAudiences();
   __resetFofMemory();
+  mockReplied = new Set();
   await AsyncStorage.clear();
   mockSubscribe.mockReturnValue(() => {});
 });
@@ -223,4 +227,30 @@ it("the app's live tier wins in the same context, so a change applies without re
   publishNotificationAudience(ME, { tier: 'fof', fof: new Set([FOF]) });
   expect(await notifies(STRANGER)).toBe(false);
   expect(await notifies(FOF)).toBe(true);
+});
+
+describe('no contacts cache (fresh install / unreadable): fails closed (#1764)', () => {
+  const REPLIED = 'f'.repeat(64);
+  it('unchosen tier: a stranger stays silent, a replied partner alerts, nothing is stored', async () => {
+    mockReplied = new Set([REPLIED]);
+    await seedAccount(ME, null, null, true, false);
+    await arm(ME);
+    expect(await notifies(STRANGER)).toBe(false);
+    expect(await notifies(FRIEND)).toBe(false); // not known as followed without the cache
+    expect(await notifies(REPLIED)).toBe(true);
+    expect(storeDecryptedWrap).not.toHaveBeenCalled();
+  });
+
+  it('an unmarked All stays closed too', async () => {
+    await seedAccount(ME, 'all', null, false, false);
+    await arm(ME);
+    expect(await notifies(STRANGER)).toBe(false);
+  });
+
+  it('an explicitly chosen All lets anyone alert', async () => {
+    await seedAccount(ME, 'all', null, true, false);
+    await arm(ME);
+    expect(await notifies(STRANGER)).toBe(true);
+    expect(storeDecryptedWrap).not.toHaveBeenCalled();
+  });
 });
