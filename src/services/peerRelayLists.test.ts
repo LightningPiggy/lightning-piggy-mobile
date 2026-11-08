@@ -42,6 +42,15 @@ const listEvent = (
   id = `${kind}-${createdAt}`,
 ): Event => ({ id, pubkey, kind, created_at: createdAt, tags, content: '', sig: '' });
 
+type QueryOptions = { onClose?: (reasons: string[]) => void } | undefined;
+/** A lookup a relay completed (EOSE), returning `events`. */
+const answered =
+  (events: Event[]) =>
+  async (_relays: string[], _filters: unknown, _maxWait: number, options?: QueryOptions) => {
+    options?.onClose?.(['closed automatically on eose', 'relay connection closed']);
+    return events;
+  };
+
 afterEach(() => setCurrentUserPubkey(null));
 
 beforeEach(() => {
@@ -51,14 +60,16 @@ beforeEach(() => {
 });
 
 it('looks up both kinds with one bounded REQ per relay (limit 1 per kind for one pubkey)', async () => {
-  query.mockResolvedValue([
-    listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']]),
-    listEvent(alice, 10002, [
-      ['r', 'wss://both.example.com'],
-      ['r', 'wss://read.example.com', 'read'],
-      ['r', 'wss://write.example.com', 'write'],
+  query.mockImplementation(
+    answered([
+      listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']]),
+      listEvent(alice, 10002, [
+        ['r', 'wss://both.example.com'],
+        ['r', 'wss://read.example.com', 'read'],
+        ['r', 'wss://write.example.com', 'write'],
+      ]),
     ]),
-  ]);
+  );
   const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
   expect(result).toEqual({
     status: 'ok',
@@ -75,31 +86,35 @@ it('looks up both kinds with one bounded REQ per relay (limit 1 per kind for one
     { kinds: [10002], authors: [alice], limit: 1 },
   ]);
   expect(maxWait).toBeGreaterThan(0);
-  expect(options).toEqual({ requireAnswer: true });
+  expect(options).toEqual(expect.objectContaining({ requireAnswer: true }));
   expect(relays).toEqual(expect.arrayContaining(RELAY_LIST_INDEXERS));
   expect(releaseNewIdleRelays).toHaveBeenCalledWith(relays, expect.any(Set));
 });
 
 it('keeps the newest list across relays and ignores other authors', async () => {
-  query.mockResolvedValue([
-    listEvent(alice, 10050, [['relay', 'wss://old.example.com']], 100),
-    listEvent(alice, 10050, [['relay', 'wss://new.example.com']], 200),
-    listEvent(bob, 10050, [['relay', 'wss://bob.example.com']], 300),
-  ]);
+  query.mockImplementation(
+    answered([
+      listEvent(alice, 10050, [['relay', 'wss://old.example.com']], 100),
+      listEvent(alice, 10050, [['relay', 'wss://new.example.com']], 200),
+      listEvent(bob, 10050, [['relay', 'wss://bob.example.com']], 300),
+    ]),
+  );
   const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
   expect(result.status === 'ok' && result.lists.inbox).toEqual(['wss://new.example.com/']);
 });
 
 it('sanitises and caps hostile peer-supplied relay URLs before caching them', async () => {
-  query.mockResolvedValue([
-    listEvent(alice, 10050, [
-      ['relay', 'wss://127.0.0.1'],
-      ['relay', 'ws://plain.example.com'],
-      ['relay', 'wss://192.168.1.1'],
-      ['relay', 'wss://printer.local'],
-      ...Array.from({ length: 20 }, (_, i) => ['relay', `wss://r${i}.example.com`]),
+  query.mockImplementation(
+    answered([
+      listEvent(alice, 10050, [
+        ['relay', 'wss://127.0.0.1'],
+        ['relay', 'ws://plain.example.com'],
+        ['relay', 'wss://192.168.1.1'],
+        ['relay', 'wss://printer.local'],
+        ...Array.from({ length: 20 }, (_, i) => ['relay', `wss://r${i}.example.com`]),
+      ]),
     ]),
-  ]);
+  );
   const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
   expect(result.status === 'ok' && result.lists.inbox).toEqual([
     'wss://r0.example.com/',
@@ -110,7 +125,7 @@ it('sanitises and caps hostile peer-supplied relay URLs before caching them', as
 });
 
 it('tells "nothing published" apart from "lookup failed"', async () => {
-  query.mockResolvedValueOnce([]);
+  query.mockImplementationOnce(answered([]));
   expect(await getPeerRelayLists(alice, { viewerPubkey: viewer })).toEqual({
     status: 'ok',
     lists: { inbox: null, read: null, write: null },
@@ -125,9 +140,10 @@ it('tells "nothing published" apart from "lookup failed"', async () => {
 it('caches found lists for 10 min, absent for 2 min, failures for 30 s', async () => {
   jest.useFakeTimers({ now: 1_000_000 });
   const carol = 'c'.repeat(64);
-  query.mockImplementation(async (_relays, filters) => {
+  query.mockImplementation(async (_relays, filters, _maxWait, options) => {
     const authors = filters[0].authors ?? [];
     if (authors.includes(carol)) throw new Error('No relay answered');
+    options?.onClose?.(['closed automatically on eose']);
     return authors.includes(alice)
       ? [listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]
       : [];
@@ -172,13 +188,15 @@ it('shares one in-flight lookup per pubkey (single-flight)', async () => {
 
 it('serves a fresh entry synchronously via peek, and nothing before a lookup', async () => {
   expect(peekPeerRelayLists(alice, viewer)).toBeUndefined();
-  query.mockResolvedValue([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]);
+  query.mockImplementation(
+    answered([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]),
+  );
   await getPeerRelayLists(alice, { viewerPubkey: viewer });
   expect(peekPeerRelayLists(alice, viewer)?.status).toBe('ok');
 });
 
 it(`evicts the least recently used entry beyond ${MAX_CACHED_PEERS} peers`, async () => {
-  query.mockResolvedValue([]);
+  query.mockImplementation(answered([]));
   const peers = Array.from({ length: MAX_CACHED_PEERS + 1 }, (_, i) =>
     i.toString(16).padStart(64, '0'),
   );
@@ -192,7 +210,7 @@ it(`evicts the least recently used entry beyond ${MAX_CACHED_PEERS} peers`, asyn
 });
 
 it(`splits big batches into REQs of at most ${MAX_AUTHORS_PER_LOOKUP} authors`, async () => {
-  query.mockResolvedValue([]);
+  query.mockImplementation(answered([]));
   const peers = Array.from({ length: MAX_AUTHORS_PER_LOOKUP + 5 }, (_, i) =>
     (i + 1).toString(16).padStart(64, '0'),
   );
@@ -228,7 +246,9 @@ it('asks indexers, the viewer read relays and defaults — bounded and deduped',
 });
 
 it('keeps a test account lookup on the test relay, cached apart from public lookups', async () => {
-  query.mockResolvedValue([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]);
+  query.mockImplementation(
+    answered([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]),
+  );
   await getPeerRelayLists(alice, {
     viewerPubkey: TEST_ACCOUNT_KEYS.little,
     lookupRelays: ['wss://mine.example.com'],
@@ -240,7 +260,7 @@ it('keeps a test account lookup on the test relay, cached apart from public look
 });
 
 it('fetches a pubkey repeated in one call only once', async () => {
-  query.mockResolvedValue([]);
+  query.mockImplementation(answered([]));
   const results = await getManyPeerRelayLists([alice, alice, alice.toUpperCase(), ` ${alice} `], {
     viewerPubkey: viewer,
   });
@@ -251,9 +271,10 @@ it('fetches a pubkey repeated in one call only once', async () => {
 
 it("doesn't cache a lookup redirected because a test account became active mid-lookup", async () => {
   setCurrentUserPubkey(viewer);
-  query.mockImplementationOnce(async () => {
+  query.mockImplementationOnce(async (_relays, _filters, _maxWait, options) => {
     // The pool routes reads by the active account: this answer came from the test relay.
     setCurrentUserPubkey(TEST_ACCOUNT_KEYS.little);
+    options?.onClose?.(['closed automatically on eose']);
     return [];
   });
   const result = await getPeerRelayLists(alice, { viewerPubkey: viewer });
@@ -261,13 +282,62 @@ it("doesn't cache a lookup redirected because a test account became active mid-l
   expect(peekPeerRelayLists(alice, viewer)).toBeUndefined();
 
   // Also when a test account was already active as the lookup started.
-  query.mockResolvedValueOnce([]);
+  query.mockImplementationOnce(answered([]));
   await getPeerRelayLists(alice, { viewerPubkey: viewer });
   expect(peekPeerRelayLists(alice, viewer)).toBeUndefined();
 
   // Back on the viewer's own account, the answer is cached again.
   setCurrentUserPubkey(viewer);
-  query.mockResolvedValueOnce([]);
+  query.mockImplementationOnce(answered([]));
   await getPeerRelayLists(alice, { viewerPubkey: viewer });
   expect(peekPeerRelayLists(alice, viewer)).toBeDefined();
+});
+
+/** A lookup that returned `events` but where no relay reached EOSE (connections dropped). */
+const incomplete =
+  (events: Event[]) =>
+  async (_relays: string[], _filters: unknown, _maxWait: number, options?: QueryOptions) => {
+    options?.onClose?.(['relay connection closed', 'relay connection timed out']);
+    return events;
+  };
+
+it('does not cache peers missing from an incomplete lookup as absent', async () => {
+  query.mockImplementationOnce(
+    incomplete([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]),
+  );
+  const results = await getManyPeerRelayLists([alice, bob], { viewerPubkey: viewer });
+  // Bob's answer may simply not have arrived: unknown, not "nothing published".
+  expect(results.get(bob)).toEqual({ status: 'failed', error: 'no relay completed the lookup' });
+  expect(peekPeerRelayLists(bob, viewer)?.status).toBe('failed');
+
+  // So he's asked again after the short unknown TTL, not after the absent one.
+  jest.useFakeTimers({ now: Date.now() + PEER_LIST_FAILED_TTL_MS });
+  query.mockImplementationOnce(answered([listEvent(bob, 10050, [['relay', 'wss://bob.example.com']])])); // prettier-ignore
+  const again = await getPeerRelayLists(bob, { viewerPubkey: viewer });
+  expect(again.status === 'ok' && again.lists.inbox).toEqual(['wss://bob.example.com/']);
+});
+
+it("marks a found pubkey's missing kind unknown (not absent) when the lookup was incomplete", async () => {
+  jest.useFakeTimers({ now: 5_000_000 });
+  query.mockImplementationOnce(
+    incomplete([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])]),
+  );
+  const first = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  expect(first).toEqual({
+    status: 'ok',
+    lists: { inbox: ['wss://inbox.example.com/'], read: undefined, write: undefined },
+  });
+
+  // The unknown kind is re-checked soon; the found inbox stays cached as found.
+  jest.setSystemTime(5_000_000 + PEER_LIST_FAILED_TTL_MS);
+  query.mockImplementationOnce(incomplete([]));
+  const second = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  expect(query).toHaveBeenCalledTimes(2);
+  expect(second).toEqual(first);
+
+  // A completed lookup can then confirm the 10002 is absent.
+  jest.setSystemTime(5_000_000 + 2 * PEER_LIST_FAILED_TTL_MS);
+  query.mockImplementationOnce(answered([listEvent(alice, 10050, [['relay', 'wss://inbox.example.com']])])); // prettier-ignore
+  const third = await getPeerRelayLists(alice, { viewerPubkey: viewer });
+  expect(third.status === 'ok' && third.lists.read).toBeNull();
 });

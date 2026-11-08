@@ -20,28 +20,35 @@ import { pickLatestReplaceable } from './nostrRelayLists';
 //   - lookups go to the indexers, the viewer's read relays and the defaults —
 //     locked to the LAN test relay for test accounts, like every other read;
 //   - newest-wins across relays (`pickLatestReplaceable`);
-//   - in-memory LRU with TTLs: found lists 10 min, "nothing published" 2 min,
-//     a failed lookup 30 s (so a flaky network retries soon, a dead one
-//     doesn't get hammered); one lookup in flight per pubkey;
+//   - in-memory LRU with TTLs PER KIND: found 10 min, absent 2 min, unknown
+//     30 s (so a flaky network retries soon, a dead one doesn't get
+//     hammered); one lookup in flight per pubkey. "Absent" needs a COMPLETED
+//     lookup (a relay reached EOSE): a kind missing from a read no relay
+//     completed is unknown, never absent, so a dropped connection can't hide a
+//     peer's list for minutes;
 //   - every relay URL is untrusted peer input: sanitised and capped
 //     (utils/peerRelayUrls) before it is stored.
 //
 // Nothing here runs at cold start: lookups only happen when a send (or a later
 // caller — Marmot welcomes #1402, profile views) asks for them.
 
-/** A peer's lists. `null` means the peer hasn't published that kind. */
+/**
+ * A peer's lists, each one: the sanitised relays when found, `null` when a
+ * completed lookup (a relay reached EOSE) found none, `undefined` when the
+ * lookup couldn't tell.
+ */
 export interface PeerRelayLists {
   /** NIP-17 kind-10050 DM inbox relays. */
-  inbox: string[] | null;
+  inbox: string[] | null | undefined;
   /** NIP-65 kind-10002 read ("inbox") relays. */
-  read: string[] | null;
+  read: string[] | null | undefined;
   /** NIP-65 kind-10002 write ("outbox") relays. */
-  write: string[] | null;
+  write: string[] | null | undefined;
 }
 
 /**
- * `ok`: at least one relay answered (lists may all be `null` — "nothing
- * published"). `failed`: no relay answered, so absence is unknown.
+ * `ok`: at least one kind is known (found, or absent per a completed lookup).
+ * `failed`: nothing is known, e.g. no relay answered.
  */
 export type PeerRelayListResult =
   | { status: 'ok'; lists: PeerRelayLists }
@@ -68,10 +75,31 @@ export const PEER_LOOKUP_MAX_WAIT_MS = 4_000;
 
 const HEX_PUBKEY = /^[0-9a-f]{64}$/;
 
-interface CacheEntry {
-  result: PeerRelayListResult;
-  at: number;
+/** One kind's cached state. */
+type KindState<T> =
+  | { state: 'found'; value: T; at: number }
+  | { state: 'absent' | 'unknown'; at: number };
+
+interface Nip65Lists {
+  read: string[];
+  write: string[];
 }
+
+interface CacheEntry {
+  inbox: KindState<string[]>;
+  nip65: KindState<Nip65Lists>;
+  /** Why the kinds are unknown, for a `failed` result. */
+  error?: string;
+}
+
+const KIND_TTL_MS = {
+  found: PEER_LIST_TTL_MS,
+  absent: PEER_LIST_ABSENT_TTL_MS,
+  unknown: PEER_LIST_FAILED_TTL_MS,
+} as const;
+
+/** The SDK's close reason for a relay that sent a real EOSE. */
+const EOSE_REASON = 'closed automatically on eose';
 
 const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<PeerRelayListResult>>();
@@ -81,29 +109,78 @@ function cacheKey(pubkey: string, viewer: string | null | undefined): string {
   return `${isTestRelayLockdown(viewer) ? 'locked' : 'open'}:${pubkey}`;
 }
 
-function ttlFor(result: PeerRelayListResult): number {
-  if (result.status === 'failed') return PEER_LIST_FAILED_TTL_MS;
-  const { inbox, read, write } = result.lists;
-  return inbox || read || write ? PEER_LIST_TTL_MS : PEER_LIST_ABSENT_TTL_MS;
+/** A kind's TTL. An absence confirmed by the same completed lookup that FOUND
+ * the other kind lives as long as that find, so a peer with just one list
+ * isn't re-queried every couple of minutes. */
+function isFresh(
+  kind: KindState<unknown>,
+  sibling?: KindState<unknown>,
+  now = Date.now(),
+): boolean {
+  const ttl =
+    kind.state === 'absent' && sibling?.state === 'found' && sibling.at === kind.at
+      ? PEER_LIST_TTL_MS
+      : KIND_TTL_MS[kind.state];
+  return now - kind.at < ttl;
 }
 
+function kindValue<T>(kind: KindState<T>): T | null | undefined {
+  return kind.state === 'found' ? kind.value : kind.state === 'absent' ? null : undefined;
+}
+
+function toResult(entry: CacheEntry): PeerRelayListResult {
+  if (entry.inbox.state === 'unknown' && entry.nip65.state === 'unknown') {
+    return { status: 'failed', error: entry.error ?? 'lookup incomplete' };
+  }
+  const nip65 = kindValue(entry.nip65);
+  return {
+    status: 'ok',
+    lists: {
+      inbox: kindValue(entry.inbox),
+      read: nip65 === undefined ? undefined : (nip65?.read ?? null),
+      write: nip65 === undefined ? undefined : (nip65?.write ?? null),
+    },
+  };
+}
+
+/** The cached result when BOTH kinds are fresh; a half-fresh entry is kept for merging. */
 function freshEntry(key: string): PeerRelayListResult | undefined {
   const entry = cache.get(key);
   if (!entry) return undefined;
-  if (Date.now() - entry.at >= ttlFor(entry.result)) {
+  const now = Date.now();
+  const inboxFresh = isFresh(entry.inbox, entry.nip65, now);
+  const nip65Fresh = isFresh(entry.nip65, entry.inbox, now);
+  if (!inboxFresh && !nip65Fresh) {
     cache.delete(key);
     return undefined;
   }
+  if (!inboxFresh || !nip65Fresh) return undefined;
   // Refresh recency: Map iteration order is the LRU order.
   cache.delete(key);
   cache.set(key, entry);
-  return entry.result;
+  return toResult(entry);
 }
 
-function store(key: string, result: PeerRelayListResult): void {
+/** Store a lookup's states; a kind it couldn't tell keeps a still-fresh known state. */
+function store(key: string, next: CacheEntry): CacheEntry {
+  const prev = cache.get(key);
+  const keep = <T>(
+    old: KindState<T> | undefined,
+    oldSibling: KindState<unknown> | undefined,
+    fresh: KindState<T>,
+  ): KindState<T> =>
+    fresh.state === 'unknown' && old && old.state !== 'unknown' && isFresh(old, oldSibling)
+      ? old
+      : fresh;
+  const merged: CacheEntry = {
+    inbox: keep(prev?.inbox, prev?.nip65, next.inbox),
+    nip65: keep(prev?.nip65, prev?.inbox, next.nip65),
+    error: next.error,
+  };
   cache.delete(key);
-  cache.set(key, { result, at: Date.now() });
+  cache.set(key, merged);
   while (cache.size > MAX_CACHED_PEERS) cache.delete(cache.keys().next().value!);
+  return merged;
 }
 
 /** Indexers first (that's where relay lists live), then the viewer's read relays, then defaults. */
@@ -140,19 +217,45 @@ function tagValues(event: Event, name: string, marker?: 'read' | 'write'): strin
   return out;
 }
 
-/** Sanitised lists for `pubkey` from the events one lookup returned. */
-export function peerListsFromEvents(events: readonly Event[], pubkey: string): PeerRelayLists {
+/**
+ * Cache states for `pubkey` from one lookup's events. A kind without an event
+ * is `absent` only if the lookup `complete`d (a relay reached EOSE).
+ */
+function peerEntryFromEvents(
+  events: readonly Event[],
+  pubkey: string,
+  complete: boolean,
+  at = Date.now(),
+): CacheEntry {
+  const missing = { state: complete ? 'absent' : 'unknown', at } as const;
   const inbox = pickLatestReplaceable(events, pubkey, 10050);
   const nip65 = pickLatestReplaceable(events, pubkey, 10002);
   return {
-    inbox: inbox ? sanitizePeerRelayUrls(tagValues(inbox, 'relay')) : null,
-    read: nip65 ? sanitizePeerRelayUrls(tagValues(nip65, 'r', 'read')) : null,
-    write: nip65 ? sanitizePeerRelayUrls(tagValues(nip65, 'r', 'write')) : null,
+    inbox: inbox
+      ? { state: 'found', value: sanitizePeerRelayUrls(tagValues(inbox, 'relay')), at }
+      : missing,
+    nip65: nip65
+      ? {
+          state: 'found',
+          value: {
+            read: sanitizePeerRelayUrls(tagValues(nip65, 'r', 'read')),
+            write: sanitizePeerRelayUrls(tagValues(nip65, 'r', 'write')),
+          },
+          at,
+        }
+      : missing,
+    ...(complete ? {} : { error: 'no relay completed the lookup' }),
   };
 }
 
+const unknownEntry = (error: string, at = Date.now()): CacheEntry => ({
+  inbox: { state: 'unknown', at },
+  nip65: { state: 'unknown', at },
+  error,
+});
+
 interface LookupBatch {
-  results: Map<string, PeerRelayListResult>;
+  entries: Map<string, CacheEntry>;
   /** False when the reads were redirected for another account (don't cache). */
   cacheable: boolean;
 }
@@ -164,7 +267,8 @@ async function lookupBatch(
 ): Promise<LookupBatch> {
   const relays = peerLookupRelays(viewer, lookupRelays);
   const started = Date.now();
-  const out = new Map<string, PeerRelayListResult>();
+  const out = new Map<string, CacheEntry>();
+  let complete = false;
   let before: ReadonlySet<string> | undefined;
   // The pool routes reads by the ACTIVE account: if a test account is (or
   // becomes) active while an ordinary viewer's lookup runs, its reads go to the
@@ -185,13 +289,16 @@ async function lookupBatch(
     ];
     const events = await pool.querySyncFilters(relays, filters, PEER_LOOKUP_MAX_WAIT_MS, {
       requireAnswer: true,
+      onClose: (reasons) => {
+        complete = reasons.includes(EOSE_REASON);
+      },
     });
-    for (const pubkey of pubkeys) {
-      out.set(pubkey, { status: 'ok', lists: peerListsFromEvents(events, pubkey) });
-    }
+    const at = Date.now();
+    for (const pubkey of pubkeys)
+      out.set(pubkey, peerEntryFromEvents(events, pubkey, complete, at));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    for (const pubkey of pubkeys) out.set(pubkey, { status: 'failed', error: message });
+    for (const pubkey of pubkeys) out.set(pubkey, unknownEntry(message));
   } finally {
     stopWatching?.();
     // Indexers are usually one-off sockets: release the ones this lookup opened
@@ -202,12 +309,12 @@ async function lookupBatch(
       // Releasing is best-effort.
     }
   }
-  const found = [...out.values()].filter((r) => r.status === 'ok').length;
+  const found = [...out.values()].filter((e) => toResult(e).status === 'ok').length;
   perfLog(
     `peerRelayLists lookup owner=${perfOwnerTag(viewer ?? null)} n=${pubkeys.length} ` +
-      `ok=${found} relays=${relays.length} ${Date.now() - started}ms`,
+      `ok=${found} complete=${complete} relays=${relays.length} ${Date.now() - started}ms`,
   );
-  return { results: out, cacheable: !redirected };
+  return { entries: out, cacheable: !redirected };
 }
 
 /** A fresh cached result, without any network. */
@@ -259,10 +366,9 @@ export async function getManyPeerRelayLists(
     for (const pubkey of chunk) {
       const key = cacheKey(pubkey, viewer);
       const run = batch
-        .then(({ results, cacheable }) => {
-          const result = results.get(pubkey) ?? { status: 'failed', error: 'missing result' };
-          if (cacheable) store(key, result);
-          return result;
+        .then(({ entries, cacheable }) => {
+          const entry = entries.get(pubkey) ?? unknownEntry('missing result');
+          return toResult(cacheable ? store(key, entry) : entry);
         })
         .finally(() => {
           if (inFlight.get(key) === run) inFlight.delete(key);
