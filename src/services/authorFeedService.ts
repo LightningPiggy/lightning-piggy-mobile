@@ -17,7 +17,9 @@ import {
   whenOwnRelaysHydrated,
   withoutRelays,
 } from './authorOutboxRelays';
+import { getCurrentUserOwnRelays } from './nostrActiveAccount';
 import { pool, trackRelays } from './nostrPool';
+import { normalizeRelayUrl } from '../utils/relayListKey';
 import { isRelayParked, recordRelayFailure, relayKey, selectHealthyRelays } from './relayHealth';
 import { querySyncAbortable } from './relayQuery';
 import { PROFILE_FEED_KINDS } from '../utils/noteMedia';
@@ -286,14 +288,15 @@ export function subscribeAuthorOutboxFeed(input: {
   });
   let stopWaiting: (() => void) | undefined;
   const armAuthorRelays = (write: readonly string[]) => {
-    // Every candidate (deduped, minus the viewer's relays) until the cap is
-    // GRANTED — a quarantined, over-ceiling or parked relay doesn't use up a
-    // slot that a healthy later one could fill. A parked relay is skipped
+    // Every candidate (deduped, minus the relays already subscribed) until the
+    // cap is GRANTED — a quarantined, over-ceiling or parked relay doesn't use
+    // up a slot that a healthy later one could fill. A parked relay is skipped
     // outright: it's in backoff, and the viewer didn't choose it.
-    const candidates = withoutRelays(
-      write,
-      [...input.currentRelays, ...(input.excludeRelays ?? [])],
-      Infinity,
+    const candidates = withoutRelays(write, input.currentRelays, Infinity);
+    // The viewer's other relays (e.g. a DM-only inbox relay) the author also
+    // writes to: read on the viewer's own socket, never leased or budgeted.
+    const own = new Set(
+      [...(input.excludeRelays ?? []), ...getCurrentUserOwnRelays()].map(normalizeRelayUrl),
     );
     for (const url of candidates) {
       if (open.size >= MAX_AUTHOR_OUTBOX_RELAYS) break;
@@ -304,6 +307,21 @@ export function subscribeAuthorOutboxFeed(input: {
         open.delete(url);
         if (!closed) input.onRelays?.([...open.keys()]);
       };
+      if (own.has(url)) {
+        const unsubscribe = subscribeAuthorFeed({
+          authorPubkey: input.authorPubkey,
+          relays: [url],
+          limit,
+          onEvent: (event) => input.onEvent(event, url),
+          onAnswered: input.onAnswered,
+          maxEventsPerRelay: OUTBOX_FEED_EVENT_BUDGET_FACTOR * limit,
+          // The viewer's own relay: just stop reading it for this feed — no
+          // quarantine or health failure that would hurt the viewer's own use.
+          onFlood: drop,
+        });
+        open.set(url, unsubscribe);
+        continue;
+      }
       // Revoked when its socket blows the frame budget (authorOutboxRelays).
       const lease = leaseOutboxRelays([url], drop, outboxFramesForLimit(limit));
       if (lease.relays.length === 0) {

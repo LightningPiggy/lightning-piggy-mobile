@@ -1,7 +1,12 @@
 import type { Event } from 'nostr-tools';
 import { isTestRelayLockdown } from '../config/testRelayLockdown';
 import { perfLog } from '../utils/perfLog';
-import { leaseOutboxRelays, personOutboxRelays, whenOwnRelaysHydrated } from './authorOutboxRelays';
+import {
+  leaseOutboxRelays,
+  MAX_AUTHOR_OUTBOX_RELAYS,
+  personOutboxRelays,
+  whenOwnRelaysHydrated,
+} from './authorOutboxRelays';
 import {
   areCurrentUserOwnRelaysHydrated,
   getCurrentUserOwnRelays,
@@ -188,11 +193,16 @@ export async function fetchMissingProfileEvents(
 ): Promise<Map<string, Event>> {
   const found = new Map<string, Event>();
   const { signal } = options;
-  const viewer = options.viewerPubkey === undefined ? getCurrentUserPubkey() : options.viewerPubkey;
+  const activeAtStart = getCurrentUserPubkey();
+  const viewer = options.viewerPubkey === undefined ? activeAtStart : options.viewerPubkey;
   if (isTestRelayLockdown(viewer) || signal?.aborted) return found;
   // Not before the viewer's own relays are known (one of them could be
   // leased): a cold-start call waits for them, bounded and abortable.
   if (!(await ownRelaysKnown(signal)) || signal?.aborted) return found;
+  // The account changed while waiting: never resume one account's lookup with
+  // the next account's relay state.
+  const stillViewer = () => getCurrentUserPubkey() === activeAtStart;
+  if (!stillViewer()) return found;
   const now = Date.now();
   // Only background display lookups are throttled. A verified lookup is one
   // person, on a miss, user-driven (opening a contact): it always asks, so a
@@ -216,7 +226,7 @@ export async function fetchMissingProfileEvents(
     lookupRelays: options.lookupRelays,
     signal,
   });
-  if (signal?.aborted) return found;
+  if (signal?.aborted || !stillViewer()) return found;
   const plans: { pubkey: string; relays: string[]; own: string[] }[] = [];
   // The viewer's own relays (read + DM inbox) are never leased as someone
   // else's outbox relay, whoever calls. One the caller didn't ask (e.g. the
@@ -229,12 +239,16 @@ export async function fetchMissingProfileEvents(
     const result = lists.get(pubkey);
     const write = result?.status === 'ok' ? (result.lists.write ?? []) : [];
     const hints = options.hints?.get(pubkey) ?? [];
-    // Capped after dropping the relays already asked (personOutboxRelays).
-    const relays = personOutboxRelays(write, hints, asked);
-    // Filtered to the viewer's own relays BEFORE the cap (inside), so an
-    // unasked own relay is never crowded out by the person's other relays.
+    // One cap across BOTH sets (MAX_AUTHOR_OUTBOX_RELAYS per person). Unasked
+    // own relays come first — filtered before the cap, so the person's other
+    // relays never crowd them out (they're the viewer's open sockets) — and
+    // leased relays fill what's left.
     const ownUnasked = personOutboxRelays(write, hints, options.alreadyAsked, (url) =>
       ownSet.has(url),
+    );
+    const relays = personOutboxRelays(write, hints, asked).slice(
+      0,
+      MAX_AUTHOR_OUTBOX_RELAYS - ownUnasked.length,
     );
     // Nothing new to ask (no list, or only relays already asked): a miss —
     // unless the lookup itself failed, which a later call may get past.
@@ -245,7 +259,7 @@ export async function fetchMissingProfileEvents(
     plans.push({ pubkey, relays, own: ownUnasked });
   }
   for (let i = 0; i < plans.length; i += FALLBACK_CONCURRENCY) {
-    if (signal?.aborted) break;
+    if (signal?.aborted || !stillViewer()) break;
     const round = plans.slice(i, i + FALLBACK_CONCURRENCY);
     const outcomes = await Promise.all(
       round.map((p) => lookupOne(p.pubkey, p.relays, signal, p.own)),

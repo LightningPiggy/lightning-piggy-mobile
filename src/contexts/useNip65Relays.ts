@@ -248,6 +248,10 @@ export function useNip65Relays() {
         // Network couldn't produce a kind-10002 — fall back to defaults
         // and DON'T persist (so we don't poison the cache with a blip).
         if (__DEV__) console.log(`[Nostr] fetchRelayList: timed out, using defaults`);
+        // The (expired) cached list is still this identity's best-known list:
+        // restore it before the list counts as known, so its relays are in the
+        // viewer's own set (#1390) — unless an adoption meanwhile superseded it.
+        if (cached && current()) setNip65Relays(keepIfSameConfigs(cached));
         hydrateInbox(cached ?? []);
         return enabledAppRelays('default', nostrService.DEFAULT_RELAYS);
       }

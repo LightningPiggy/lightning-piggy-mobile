@@ -214,15 +214,35 @@ it('a socket that blows its raw-frame budget is dropped from the feed and from p
   expect(leaseOutboxRelays(['wss://noisy.example/']).relays).toEqual([]);
 });
 
-it("never leases the viewer's DM inbox relays, even when they're the author's write relays", async () => {
+it("reads an author relay that is the viewer's DM inbox relay on the viewer's socket, never leasing it", async () => {
   write(['wss://dm-inbox.example/', 'wss://alice1.example/']);
-  arm({ excludeRelays: ['wss://DM-inbox.example'] });
+  const onRelays = jest.fn();
+  arm({ excludeRelays: ['wss://DM-inbox.example'], onRelays });
   await jest.runAllTimersAsync();
+  // Both are read (posts only on the inbox relay aren't missed), and paged...
   const subscribed = mockSubscribeMany.mock.calls.map(([[r]]) => r);
-  expect(subscribed).toEqual(['wss://alice1.example/']);
-  // Not leased (so never frame-budgeted) either.
+  expect(subscribed).toEqual(['wss://dm-inbox.example/', 'wss://alice1.example/']);
+  expect(onRelays).toHaveBeenLastCalledWith(['wss://dm-inbox.example/', 'wss://alice1.example/']);
+  // ...but only alice1 is leased; the viewer's own relay is never budgeted.
   expect(mockFrameBudgets.has('wss://dm-inbox.example/')).toBe(false);
   expect(leasedOutboxRelayCount()).toBe(1);
+});
+
+it("a flood on the viewer's own relay only stops this feed reading it: no quarantine or health failure", async () => {
+  write(['wss://dm-inbox.example/']);
+  const onRelays = jest.fn();
+  arm({ excludeRelays: ['wss://dm-inbox.example/'], onRelays, limit: 10 });
+  await jest.runAllTimersAsync();
+  const handlers = mockSubscribeMany.mock.calls[0][2];
+  for (let i = 0; i <= OUTBOX_FEED_EVENT_BUDGET_FACTOR * 10; i++)
+    handlers.alreadyHaveEvent(`e${i}`);
+  await jest.runAllTimersAsync();
+  expect(onRelays).toHaveBeenLastCalledWith([]);
+  expect(recordRelayFailure).not.toHaveBeenCalled();
+  setCurrentUserOwnRelays([], true); // no longer the viewer's: it isn't quarantined either
+  expect(leaseOutboxRelays(['wss://dm-inbox.example/']).relays).toEqual([
+    'wss://dm-inbox.example/',
+  ]);
 });
 
 it('a feed opened before hydration subscribes its author relays once the own relays are known', async () => {
@@ -233,10 +253,15 @@ it('a feed opened before hydration subscribes its author relays once the own rel
   await jest.runAllTimersAsync();
   expect(mockSubscribeMany).not.toHaveBeenCalled();
   expect(leasedOutboxRelayCount()).toBe(0);
-  // The lists load: one of the author's relays turns out to be the viewer's.
+  // The lists load: one of the author's relays turns out to be the viewer's —
+  // read on the viewer's socket, not leased.
   setCurrentUserOwnRelays(['wss://mine-later.example/'], true);
-  expect(mockSubscribeMany.mock.calls.map(([[r]]) => r)).toEqual(['wss://alice1.example/']);
-  expect(onRelays).toHaveBeenLastCalledWith(['wss://alice1.example/']);
+  expect(mockSubscribeMany.mock.calls.map(([[r]]) => r)).toEqual([
+    'wss://alice1.example/',
+    'wss://mine-later.example/',
+  ]);
+  expect(leasedOutboxRelayCount()).toBe(1);
+  expect(onRelays).toHaveBeenLastCalledWith(['wss://alice1.example/', 'wss://mine-later.example/']);
 });
 
 it('a feed closed before hydration never subscribes afterwards', async () => {

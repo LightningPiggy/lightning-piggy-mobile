@@ -405,6 +405,25 @@ describe('relayListsHydrated (#1390: outbox leasing waits for it)', () => {
     await waitFor(() => expect(result.current.relayListsHydrated).toBe(true));
   });
 
+  it('a failed discovery restores the expired cached list before it counts as known', async () => {
+    const cachedList = [{ url: 'wss://cached-only.example', read: true, write: true }];
+    await AsyncStorage.setItem(
+      perAccountKey(RELAY_LIST_CACHE_KEY_BASE, PK),
+      JSON.stringify(cachedList),
+    );
+    // Expired: the network is asked, and fails.
+    await AsyncStorage.setItem(perAccountKey(RELAY_LIST_TIMESTAMP_KEY_BASE, PK), '1');
+    fetchList.mockResolvedValueOnce(null);
+    fetchLatest.mockResolvedValue(null);
+    const { result } = renderHook(() => useNip65Relays());
+    await act(async () => {
+      await result.current.loadRelays(PK);
+    });
+    // The cached relays are in the viewer's lists (so never leased as someone else's).
+    expect(result.current.nip65Relays).toEqual(cachedList);
+    await waitFor(() => expect(result.current.relayListsHydrated).toBe(true));
+  });
+
   it('adopting just one list does not hydrate; both known does', async () => {
     fetchLatest.mockResolvedValue(null);
     const { result } = renderHook(() => useNip65Relays());

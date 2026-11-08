@@ -289,17 +289,42 @@ describe("the viewer's own relays", () => {
 });
 
 describe('revocation (b)', () => {
-  it('drops the grant once no holder is left, instead of lingering', () => {
+  it('drops the grant once no holder is left, but keeps it COUNTED until the socket closes', () => {
     const revoked = jest.fn();
     let lease!: ReturnType<typeof leaseOutboxRelays>;
     // The holder releases its lease when revoked (as the feed does).
     revoked.mockImplementation(() => lease.release());
     lease = leaseOutboxRelays([relay(1)], revoked);
+    // A profile lookup also holds it, without a revoke callback.
+    const lookup = leaseOutboxRelays([relay(1)]);
     pooled.mockReturnValue(new Set([relay(1)])); // the socket hasn't gone yet
     jest.mocked(addRelayFrameBudget).mock.calls[0][2]();
     expect(revoked).toHaveBeenCalled();
     expect(clearRelayFrameBudget).toHaveBeenCalledWith(relay(1));
+    // Still counted against the ceiling while it's closing.
+    expect(leasedOutboxRelayCount()).toBe(1);
+    lookup.release();
+    pooled.mockReturnValue(new Set()); // closed now
     expect(leasedOutboxRelayCount()).toBe(0);
+  });
+
+  it("an old lease's release never decrements a newer record for the same URL", () => {
+    const old = leaseOutboxRelays([relay(1)]);
+    pooled.mockReturnValue(new Set([relay(1)]));
+    // The relay becomes one of the viewer's own (record forgotten), then stops being one...
+    setCurrentUserOwnRelays([relay(1)], true);
+    setCurrentUserOwnRelays([], true);
+    // ...and a new lease takes it again.
+    pooled.mockReturnValue(new Set());
+    const fresh = leaseOutboxRelays([relay(1)]);
+    expect(fresh.relays).toEqual([relay(1)]);
+    release.mockClear();
+    old.release(); // must not touch the newcomer
+    expect(release).not.toHaveBeenCalled();
+    pooled.mockReturnValue(new Set([relay(1)]));
+    expect(leasedOutboxRelayCount()).toBe(1);
+    fresh.release();
+    expect(release).toHaveBeenCalledWith([relay(1)], new Set());
   });
 
   it('two leases sharing one callback are each notified; releasing one keeps the other', () => {

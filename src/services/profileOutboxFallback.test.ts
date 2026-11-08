@@ -176,16 +176,26 @@ it('a relay that ignores `limit` costs at most a few Schnorr checks per person',
   expect(verify).toHaveBeenCalledTimes(1);
 });
 
-it("an unasked own relay is never crowded out by the person's other relays (cap after filter)", async () => {
+it('an unasked own relay is never crowded out, and one cap covers both sets (3 per person)', async () => {
   setCurrentUserOwnRelays([relay('dm-inbox')], true);
   writeLists({ [alice]: ok([relay('w1'), relay('w2'), relay('w3'), relay('dm-inbox')]) });
   await fetchMissingProfileEvents([alice], { ...opts, alreadyAsked: [] });
-  expect(query.mock.calls[0][1]).toEqual([
-    relay('w1'),
-    relay('w2'),
-    relay('w3'),
-    relay('dm-inbox'),
-  ]);
+  // The own relay is kept (filtered before the cap); leased ones fill the rest.
+  expect(query.mock.calls[0][1]).toEqual([relay('w1'), relay('w2'), relay('dm-inbox')]);
+});
+
+it('an account switch while waiting for hydration never resumes the lookup for the next account', async () => {
+  setCurrentUserPubkey('d'.repeat(64)); // account A, lists not loaded yet
+  setCurrentUserOwnRelays([], false);
+  writeLists({ [alice]: ok([relay('alice1')]) });
+  const run = fetchMissingProfileEvents([alice], { ...opts, viewerPubkey: undefined });
+  // The user switches to B, whose lists load.
+  setCurrentUserPubkey('e'.repeat(64));
+  setCurrentUserOwnRelays([relay('b-only')], true);
+  expect((await run).size).toBe(0);
+  expect(lists).not.toHaveBeenCalled();
+  expect(query).not.toHaveBeenCalled();
+  setCurrentUserPubkey(null);
 });
 
 it('a forged newer copy never displaces a genuine one from another relay (CodeRabbit)', async () => {

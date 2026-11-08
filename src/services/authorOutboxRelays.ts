@@ -216,9 +216,11 @@ function revokeOutboxRelay(url: string): void {
   const held = leased.get(url);
   if (!held) return;
   for (const revoke of [...held.holders]) revoke();
-  // Nobody holds it any more: drop the grant now rather than linger until
-  // the pool notices the closed socket.
-  if (leased.get(url)?.holders.size === 0) forget(url);
+  // No holder left: drop the grant now rather than let it linger. The entry
+  // itself stays COUNTED against the ceiling (a lease without a revoke
+  // callback may still hold it) until its socket has actually closed, when
+  // forgetClosed drops it — so a replacement can't push past the ceiling.
+  if (leased.get(url)?.holders.size === 0) clearRelayFrameBudget(url);
 }
 
 function forget(url: string): void {
@@ -296,6 +298,7 @@ export function leaseOutboxRelays(
   // This lease's own registration: two leases passing the same callback still
   // each get notified, and releasing one never unregisters the other.
   const revoke = onRevoked && (() => onRevoked());
+  const records = new Map<string, Leased>();
   let pooled: ReadonlySet<string> | undefined;
   for (const raw of urls) {
     const url = normalizeRelayUrl(raw);
@@ -321,6 +324,7 @@ export function leaseOutboxRelays(
     }
     if (held.owned) addRelayFrameBudget(url, frames, () => revokeOutboxRelay(url));
     if (revoke) held.holders.add(revoke);
+    records.set(url, held);
     granted.push(url);
   }
   let released = false;
@@ -331,8 +335,11 @@ export function leaseOutboxRelays(
       released = true;
       const toRelease: string[] = [];
       for (const url of granted) {
+        // Only the record this lease joined: if it was forgotten (e.g. the
+        // relay became one of the viewer's own) and a NEW lease took the URL,
+        // releasing this one must never decrement the newcomer.
         const held = leased.get(url);
-        if (!held) continue;
+        if (!held || held !== records.get(url)) continue;
         if (revoke) held.holders.delete(revoke);
         if (--held.count > 0) continue;
         // Someone else's socket: just stop counting it. Ours: keep counting it
