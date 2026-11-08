@@ -108,6 +108,8 @@ export class MarmotWelcomePayloads {
   private readonly running = new Map<string, ReturnType<NostrWelcomeDelivery['deliver']>>();
   /** Payloads that had nowhere to go: when to try them again (in memory). */
   private readonly backoff = new Map<string, { at: number; delayMs: number }>();
+  /** Payload ids cancelled because their recipient was removed from the chat. */
+  private readonly cancelled = new Set<string>();
   /** Welcome signatures run one at a time (the signer queue is serial anyway). */
   private signing: Promise<unknown> = Promise.resolve();
   /** Per chat: the signer declined / timed out at `at` (seconds); its Welcomes
@@ -123,7 +125,7 @@ export class MarmotWelcomePayloads {
     private readonly devices: MarmotDmDeviceSync,
     private readonly stopped: () => boolean,
     /** An invitee's NIP-65 read relays — a hint when they publish no 10050. */
-    private readonly readRelays: (pubkey: string) => Promise<string[]> = async () => [],
+    private readonly readRelays: (pubkey: string) => Promise<string[] | undefined> = async () => [],
   ) {}
 
   attach(group: Pick<MarmotGroup, 'idStr' | 'runtime'>): void {
@@ -160,8 +162,7 @@ export class MarmotWelcomePayloads {
         queuedAt = undefined;
       }
       if (typeof queuedAt !== 'number' || now - queuedAt > WELCOME_OUTBOX_TTL_SECS) {
-        await this.backend.remove(NS, id);
-        this.backoff.delete(id);
+        await this.forget(id);
       } else {
         live.push({ id, queuedAt });
       }
@@ -171,9 +172,36 @@ export class MarmotWelcomePayloads {
       0,
       Math.max(0, live.length - MAX_PENDING_WELCOME_PAYLOADS + 1),
     )) {
-      await this.backend.remove(NS, entry.id);
-      this.backoff.delete(entry.id);
+      await this.forget(entry.id);
     }
+  }
+
+  /** Remove one queued payload and tell its chat's members sheet. */
+  private async forget(id: string): Promise<void> {
+    await this.backend.remove(NS, id);
+    this.backoff.delete(id);
+    const sep = id.indexOf(':'); // `<group>:<key package>`
+    if (sep > 0) this.outbox.changes.notify(id.slice(0, sep));
+  }
+
+  /**
+   * `recipient` was removed from the chat: cancel their queued Welcomes —
+   * unsigned (including one being signed / queued right now) and signed — so
+   * a later retry can't hand them the old epoch (#1402).
+   */
+  async dropRecipient(groupId: string, recipient: string): Promise<void> {
+    for (const id of await this.backend.keys(NS)) {
+      if (!id.startsWith(`${groupId}:`)) continue;
+      try {
+        const item = JSON.parse((await this.backend.get(NS, id)) ?? 'null') as PendingPayload;
+        if (item?.keyPackage.pubkey.toLowerCase() !== recipient) continue;
+      } catch {
+        continue;
+      }
+      this.cancelled.add(id);
+      await this.forget(id);
+    }
+    await this.outbox.dropRecipient(groupId, recipient);
   }
 
   private id(item: PendingPayload): string {
@@ -238,7 +266,10 @@ export class MarmotWelcomePayloads {
    * destroyed) stops here — before the signer is asked, before anything is
    * queued, before publishing (#1402). */
   private async deliver(item: PendingPayload, delivery: NostrWelcomeDelivery, generation: number) {
-    const current = () => this.ensureCurrent(item.groupId, generation);
+    const current = () => {
+      this.ensureCurrent(item.groupId, generation);
+      if (this.cancelled.has(this.id(item))) throw new Error('Marmot invitation cancelled');
+    };
     current();
     // Decided before the signer is asked: with nowhere to send it, the payload
     // stays queued for a later retry and nobody is prompted for nothing (#1402).
@@ -257,8 +288,8 @@ export class MarmotWelcomePayloads {
       generation,
     );
     await this.backend.remove(NS, this.id(item));
-    if (this.generation(item.groupId) !== generation) {
-      // Dropped while queueing: don't leave the wrap behind for retries.
+    if (this.generation(item.groupId) !== generation || this.cancelled.has(this.id(item))) {
+      // Dropped / cancelled while queueing: don't leave the wrap behind for retries.
       await this.outbox.remove(event.id);
       throw new Error('Marmot invitation dropped');
     }
@@ -360,15 +391,29 @@ export class MarmotWelcomePayloads {
       } catch {
         continue; // unreadable: prune() drops it
       }
-      const delivery = item && this.deliveries.get(item.groupId);
-      // Waiting on our signer: only a user's send asks it again.
-      if (!delivery || signerReason(item.reason)) continue;
+      if (!item) continue;
+      if (Math.floor(Date.now() / 1000) - item.queuedAt > WELCOME_OUTBOX_TTL_SECS) {
+        await this.forget(id); // expired: no longer pending anywhere
+        continue;
+      }
+      const delivery = this.deliveries.get(item.groupId);
+      // Waiting on our signer: only a user's send asks it again. Being
+      // delivered right now: that delivery owns the payload.
+      if (!delivery || signerReason(item.reason) || this.running.has(id)) continue;
+      const generation = this.generation(item.groupId);
+      let next: WelcomeWaitReason | undefined;
       try {
         await welcomeRelays(delivery.network, item.keyPackage, this.readRelays);
+      } catch (e) {
+        if (!(e instanceof MarmotNoWelcomeRelaysError)) continue;
+        next = e.reason;
+      }
+      // Delivered, dropped or cancelled during the lookup: nothing to record.
+      if (this.running.has(id) || this.generation(item.groupId) !== generation) continue;
+      if (next) await this.noteWaiting(id, item, next);
+      else {
         this.backoff.delete(id);
         await this.recordReason(id, item, undefined);
-      } catch (e) {
-        if (e instanceof MarmotNoWelcomeRelaysError) await this.noteWaiting(id, item, e.reason);
       }
     }
   }
@@ -437,13 +482,11 @@ export class MarmotWelcomePayloads {
           try {
             item = JSON.parse(raw) as PendingPayload;
           } catch {
-            await this.backend.remove(NS, id);
-            this.backoff.delete(id);
+            await this.forget(id);
             return;
           }
           if (Math.floor(Date.now() / 1000) - item.queuedAt > WELCOME_OUTBOX_TTL_SECS) {
-            await this.backend.remove(NS, id);
-            this.backoff.delete(id);
+            await this.forget(id);
             return;
           }
           if (groupId && item.groupId !== groupId) return;

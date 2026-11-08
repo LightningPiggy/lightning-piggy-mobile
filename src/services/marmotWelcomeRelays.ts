@@ -74,7 +74,7 @@ export function keyPackageRelayHints(keyPackage: NostrEvent, max?: number): stri
 export async function welcomeRelays(
   network: Pick<NostrNetworkInterface, 'getUserInboxRelays'>,
   keyPackage: NostrEvent,
-  readRelays: (pubkey: string) => Promise<string[]> = async () => [],
+  readRelays: (pubkey: string) => Promise<string[] | undefined> = async () => [],
 ): Promise<string[]> {
   const pubkey = keyPackage.pubkey;
   let inbox: string[];
@@ -84,14 +84,15 @@ export async function welcomeRelays(
     throw new MarmotNoWelcomeRelaysError(pubkey, 'unknown');
   }
   if (inbox.length > 0) return inbox;
-  const read = await readRelays(pubkey).catch(() => [] as string[]);
+  const read = await readRelays(pubkey).catch(() => undefined);
   // One cap over the combined list, read relays first.
   const hints = sanitizePeerRelayUrls(
-    [...read, ...keyPackageRelayHints(keyPackage, MAX_WELCOME_HINT_RELAYS)],
+    [...(read ?? []), ...keyPackageRelayHints(keyPackage, MAX_WELCOME_HINT_RELAYS)],
     MAX_WELCOME_HINT_RELAYS,
   );
   if (hints.length > 0) return hints;
-  throw new MarmotNoWelcomeRelaysError(pubkey, 'noRelays');
+  // No hint, and their read relays couldn't be looked up: not proven "none".
+  throw new MarmotNoWelcomeRelaysError(pubkey, read === undefined ? 'unknown' : 'noRelays');
 }
 
 /**
@@ -108,7 +109,7 @@ export async function welcomeRelays(
 export async function requireWelcomeDestination(
   network: Pick<NostrNetworkInterface, 'getUserInboxRelays'>,
   devices: ReadonlyMap<string, readonly NostrEvent[]>,
-  readRelays: (pubkey: string) => Promise<string[]>,
+  readRelays: (pubkey: string) => Promise<string[] | undefined>,
 ): Promise<void> {
   if (devices.size === 0) return;
   /** True once one of the person's devices is reachable or might be. */

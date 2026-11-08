@@ -355,7 +355,7 @@ export interface InviteResult {
  */
 export async function inviteDevices(
   groups: Pick<MarmotClient['groups'], 'get' | 'send'>,
-  outbox: Pick<MarmotWelcomeOutbox, 'capture' | 'resend' | 'enqueue' | 'generation'>,
+  outbox: Pick<MarmotWelcomeOutbox, 'capture' | 'resend' | 'enqueue' | 'generation' | 'remove'>,
   mlsId: string,
   actorPubkey: string,
   devices: Map<string, NostrEvent[]>,
@@ -383,7 +383,12 @@ export async function inviteDevices(
   markDmSetup(`invite sent failedWelcomes=${failed.length}`);
   const delivered = deliveredAccounts(result);
   const stillFailed = failed.length > 0 ? await outbox.resend(failed, guard) : [];
-  for (const w of failed) if (!stillFailed.includes(w)) delivered.add(w.recipient);
+  for (const w of failed) {
+    if (stillFailed.includes(w)) continue;
+    delivered.add(w.recipient);
+    // Its first publish was refused but the resend got through: not pending.
+    await outbox.remove(w.event.id);
+  }
   if (stillFailed.length > 0) await outbox.enqueue(mlsId, stillFailed, guard.generation);
   if (failed.length > 0) markDmSetup(`welcome resend stillFailed=${stillFailed.length}`);
   const undelivered = [...batch.devices.keys()].filter((p) => !delivered.has(p));

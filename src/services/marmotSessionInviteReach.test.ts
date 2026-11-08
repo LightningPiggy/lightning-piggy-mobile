@@ -253,3 +253,29 @@ test("an Add refused while another member's commit lands is a real failure, not 
   expect(await alice.session.pendingInvites(group.id)).toEqual(new Map());
   for (const s of [alice, bob, carol]) s.session.stop();
 });
+
+test('a Welcome the immediate resend got accepted is not left pending', async () => {
+  const relay = makeRelay();
+  const publish = relay.network.publish;
+  let refusals = 1;
+  relay.network.publish = async (relays, event) => {
+    if (event.kind === 1059 && refusals > 0) {
+      refusals--;
+      return Object.fromEntries(relays.map((r) => [r, { from: r, ok: false, message: 'busy' }]));
+    }
+    return publish(relays, event);
+  };
+  const alice = makeSession(relay);
+  const bob = makeSession(relay);
+  await alice.session.start();
+  await bob.session.start();
+  await bob.session.ensureKeyPackage();
+  const group = await alice.session.createGroup('group', [bob.pubkey]);
+  expect(group.undelivered).toEqual([]);
+  expect(unwrapWelcomes(relay, bob)).toHaveLength(1);
+  const outbox = (alice.session as unknown as { outbox: { pending(): Promise<unknown[]> } }).outbox;
+  expect(await outbox.pending()).toEqual([]); // nothing left for a later flush to republish
+  expect(await alice.session.pendingInvites(group.id)).toEqual(new Map());
+  alice.session.stop();
+  bob.session.stop();
+});

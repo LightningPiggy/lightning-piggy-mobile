@@ -1,5 +1,6 @@
 import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
 import { withRelayHealth } from './healthAwarePool';
+import { withResumableSubscriptions } from './resumablePool';
 import { subscribeRelayWithBudget } from './relayReqSubscription';
 import { createGroupSubscriptionMux } from './marmotGroupSubscriptions';
 
@@ -259,4 +260,31 @@ test('raw Market/contact/reaction reads share the cap and retry without turning 
   pool.destroy();
   await tick();
   expect(pool.active.size).toBe(0);
+});
+
+test('the production composition (resumable over health) passes each close reason its relay (#1402)', async () => {
+  // Same layering as nostrPool's pool: withResumableSubscriptions(withRelayHealth(...)).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mixin over the fake transport
+  const Composed = withResumableSubscriptions(withRelayHealth(FakePool as any));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mixin is an abstract constructor
+  const pool = new (Composed as any)() as FakePool &
+    AbstractSimplePool & {
+      querySyncFilters: (
+        urls: string[],
+        filters: { kinds: number[]; limit: number }[],
+        maxWait: number,
+        options: { abort: AbortSignal; onClose: (reasons: string[], urls?: string[]) => void },
+      ) => Promise<unknown>;
+    };
+  const abort = new AbortController();
+  const onClose = jest.fn();
+  const read = pool.querySyncFilters([urls[0]], [{ kinds: [10050], limit: 1 }], 1_000, {
+    abort: abort.signal,
+    onClose,
+  });
+  await tick();
+  abort.abort();
+  await read.catch(() => undefined);
+  expect(onClose).toHaveBeenCalledWith(['aborted'], [urls[0]]);
+  pool.destroy();
 });

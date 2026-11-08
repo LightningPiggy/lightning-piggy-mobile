@@ -85,8 +85,16 @@ describe('welcomeRelays', () => {
     expect(await reasonOf(welcomeRelays(inboxOf([]), keyPackage(), async () => []))).toBe(
       'noRelays',
     );
+    // Their read relays couldn't be looked up: not proof of "none" (#1402).
     const failedRead = async () => Promise.reject(new Error('offline'));
-    expect(await reasonOf(welcomeRelays(inboxOf([]), keyPackage(), failedRead))).toBe('noRelays');
+    expect(await reasonOf(welcomeRelays(inboxOf([]), keyPackage(), failedRead))).toBe('unknown');
+    expect(await reasonOf(welcomeRelays(inboxOf([]), keyPackage(), async () => undefined))).toBe(
+      'unknown',
+    );
+    // ...but a KeyPackage hint still goes out.
+    expect(await welcomeRelays(inboxOf([]), hinted, failedRead)).toEqual([
+      'wss://hint.example.com/',
+    ]);
   });
 
   it('treats malformed KeyPackage tags as no hints', () => {
@@ -283,6 +291,61 @@ describe('MarmotWelcomePayloads routing and retries', () => {
     await t.payloads.retry(GROUP);
     expect(t.signEvent).toHaveBeenCalledTimes(3);
     expect(t.publish).toHaveBeenCalledWith([INBOX], wrap);
+  });
+
+  it("a removed recipient's queued and in-flight Welcomes are cancelled, signed ones too", async () => {
+    const t = setup([INBOX]);
+    let approve!: () => void;
+    t.signEvent.mockImplementationOnce(
+      () => new Promise<NostrEvent>((resolve) => (approve = () => resolve(wrap))),
+    );
+    const pending = t.deliver(hinted);
+    while (!approve) await new Promise((resolve) => setTimeout(resolve, 0));
+    // A signed Welcome of theirs from an earlier attempt is still queued too.
+    await t.outbox.enqueue(GROUP, [
+      { event: { ...wrap, id: 'older' } as NostrEvent, relays: [INBOX], recipient: INVITEE },
+    ]);
+    await t.payloads.dropRecipient(GROUP, INVITEE);
+    approve();
+    await expect(pending).rejects.toThrow('cancelled');
+    expect(t.publish).not.toHaveBeenCalled();
+    expect(await t.outbox.pending()).toEqual([]);
+    expect(await t.backend.keys('welcomePayloads')).toEqual([]);
+  });
+
+  it('a background recheck leaves a Welcome being delivered alone, and expires old ones', async () => {
+    jest.useFakeTimers({ doNotFake: ['Date'] });
+    const t = setup([INBOX]);
+    let approve!: () => void;
+    t.signEvent.mockImplementationOnce(
+      () => new Promise<NostrEvent>((resolve) => (approve = () => resolve(wrap))),
+    );
+    // An expired Welcome is also still stored for this chat.
+    await t.backend.set(
+      'welcomePayloads',
+      `${GROUP}:stale`,
+      JSON.stringify({
+        groupId: GROUP,
+        keyPackage: { id: 'stale', pubkey: OTHER },
+        rumor: {},
+        relays: [],
+        queuedAt: 0,
+      }),
+    );
+    const seen: string[] = [];
+    t.outbox.changes.subscribe((id) => seen.push(id));
+    const pending = t.deliver(hinted);
+    while (!approve) await jest.advanceTimersByTimeAsync(0);
+    const lookups = t.network.getUserInboxRelays.mock.calls.length;
+    const stop = t.payloads.scheduleRetries(false); // a remote signer's background pass
+    await jest.advanceTimersByTimeAsync(WELCOME_RETRY_DELAY_MS + INVITE_CHANGE_COALESCE_MS);
+    expect(t.network.getUserInboxRelays.mock.calls.length).toBe(lookups); // in flight: skipped
+    expect(await t.backend.get('welcomePayloads', `${GROUP}:stale`)).toBeNull(); // expired
+    expect(seen).toContain(GROUP);
+    approve();
+    await pending;
+    expect(await t.backend.keys('welcomePayloads')).toEqual([]); // not recreated
+    stop();
   });
 
   it('publishes to the invitee inbox', async () => {

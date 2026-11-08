@@ -284,3 +284,47 @@ describe('MarmotWelcomeOutbox drop generation (#1402)', () => {
     expect(publish).not.toHaveBeenCalled();
   });
 });
+
+describe('MarmotWelcomeOutbox queue edges (#1402)', () => {
+  const item = (id: string) => ({
+    event: wrap(id),
+    relays: ['wss://a'],
+    recipient: 'c'.repeat(64),
+  });
+
+  it('an enqueue racing a drop of its chat leaves nothing behind', async () => {
+    const backend = createMemoryMarmotBackend();
+    let release!: () => void;
+    const set = backend.set.bind(backend);
+    let first = true;
+    backend.set = async (ns, key, value) => {
+      await set(ns, key, value);
+      if (first) {
+        first = false;
+        await new Promise<void>((resolve) => (release = resolve));
+      }
+    };
+    const outbox = new MarmotWelcomeOutbox(backend);
+    const queued = outbox.enqueue('group-a', [item('a'.repeat(64)), item('b'.repeat(64))]);
+    while (!release) await new Promise((resolve) => setTimeout(resolve, 0));
+    await outbox.drop('group-a'); // runs between the two writes
+    release();
+    await queued;
+    expect(await outbox.pending()).toEqual([]);
+  });
+
+  it("evicting the oldest wraps tells the evicted chat's members sheet", async () => {
+    jest.useFakeTimers({ doNotFake: ['Date'] });
+    const outbox = new MarmotWelcomeOutbox(createMemoryMarmotBackend());
+    await outbox.enqueue('group-old', [item('0'.repeat(64))]);
+    for (let i = 1; i <= 100; i++) {
+      await outbox.enqueue('group-new', [item(i.toString(16).padStart(64, '0'))]);
+    }
+    const seen: string[] = [];
+    outbox.changes.subscribe((id) => seen.push(id));
+    await outbox.enqueue('group-new', [item('f'.repeat(64))]);
+    await jest.advanceTimersByTimeAsync(INVITE_CHANGE_COALESCE_MS);
+    expect(seen).toContain('group-old');
+    expect((await outbox.pending()).map((p) => p.groupIdHex)).not.toContain('group-old');
+  });
+});

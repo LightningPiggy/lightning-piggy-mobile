@@ -695,11 +695,11 @@ export class MarmotSession {
   async removeMember(appGroupId: string, member: string): Promise<void> {
     const mlsId = toMlsGroupId(appGroupId);
     const pk = member.toLowerCase();
-    // One Remove per device leaf the member holds. (Removing an admin also
-    // drops them from `admins`: marmot-ts splices that update in itself.)
+    // One Remove per device leaf (marmot-ts also drops a removed admin from `admins`).
     const leaves = getPubkeyLeafNodeIndexes((await this.client.groups.get(mlsId)).state, pk);
     if (leaves.length === 0) return;
     await this.commit(mlsId, spreadProposals(Proposals.proposeRemoveUser(pk), leaves.length));
+    await this.welcomePayloads.dropRecipient(mlsId, pk).catch(() => undefined); // #1402
     this.emitGroupsChanged();
   }
 

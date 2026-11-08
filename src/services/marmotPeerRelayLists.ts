@@ -30,8 +30,9 @@ export type KeyPackageListLookup = (peer: string) => Promise<KeyPackageRelayList
 export interface MarmotPeerLists {
   /** Their 10051 + 10002 write relays (key-package discovery). */
   keyPackage: KeyPackageListLookup;
-  /** Their NIP-65 read relays (a Welcome's hint when they publish no 10050). */
-  read: (peer: string) => Promise<string[]>;
+  /** Their NIP-65 read relays (a Welcome's hint when they publish no 10050);
+   * `undefined` when the lookup couldn't tell. */
+  read: (peer: string) => Promise<string[] | undefined>;
 }
 
 export const NO_KEY_PACKAGE_LISTS: KeyPackageListLookup = async () => ({
@@ -76,7 +77,10 @@ export function marmotPeerLists(
       const lists = await lookup(peer, viewer, getLookupRelays(), true);
       return { keyPackage: lists?.keyPackage ?? [], write: lists?.write ?? [] };
     },
-    read: async (peer) => [...((await lookup(peer, viewer, getLookupRelays()))?.read ?? [])],
+    read: async (peer) => {
+      const read = (await lookup(peer, viewer, getLookupRelays()))?.read;
+      return read === undefined ? undefined : [...(read ?? [])];
+    },
   };
 }
 

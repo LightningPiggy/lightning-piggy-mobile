@@ -186,16 +186,34 @@ export class MarmotWelcomeOutbox {
     // A chat dropped since the caller's `generation`: nothing to keep.
     if (generation !== undefined && this.isDropped({ groupIdHex, generation })) return;
     const queuedAt = Math.floor(Date.now() / 1000);
+    const started = this.generation(groupIdHex);
+    const written: PendingWelcome[] = [];
     for (const w of wraps) {
+      // Dropped part-way (left / destroyed): stop, and take back what we wrote.
+      if (this.generation(groupIdHex) !== started) break;
       const item: PendingWelcome = { ...w, groupIdHex, queuedAt };
       await this.backend.set(OUTBOX_NS, w.event.id, JSON.stringify(item));
       this.backoff.set(w.event.id, nextRetryBackoff(this.backoff.get(w.event.id)));
+      written.push(item);
+    }
+    if (this.generation(groupIdHex) !== started) {
+      for (const item of written) await this.forget(item);
+      return;
     }
     if (wraps.length > 0) this.changes.notify(groupIdHex);
     if ((await this.backend.keys(OUTBOX_NS)).length <= OUTBOX_MAX) return;
     const oldestFirst = (await this.pending()).sort((a, b) => a.queuedAt - b.queuedAt);
     for (const item of oldestFirst.slice(0, oldestFirst.length - OUTBOX_MAX)) {
-      await this.backend.remove(OUTBOX_NS, item.event.id);
+      await this.forget(item); // its chat's members sheet updates too
+    }
+  }
+
+  /** Forget `recipient`'s queued wraps into a chat (they were removed from it). */
+  async dropRecipient(groupIdHex: string, recipient: string): Promise<void> {
+    for (const item of await this.pending()) {
+      if (item.groupIdHex === groupIdHex && item.recipient.toLowerCase() === recipient) {
+        await this.forget(item);
+      }
     }
   }
 

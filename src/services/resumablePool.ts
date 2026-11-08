@@ -114,6 +114,8 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
       params: Parameters<AbstractSimplePool['subscribeMap']>[1],
     ): SubCloser {
       requests = activeAccountRelayRequests(requests);
+      /** `onclose`, which the health layer below calls with each reason's relay too. */
+      const onclose = params.onclose as ((reasons: string[], urls?: string[]) => void) | undefined;
       let activeRequests = requests;
       let generation = 0;
       let stopped = false;
@@ -134,7 +136,10 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
           this.subscriptions.delete(entry);
           this.pendingOpens.delete(entry.open);
           void sub?.close('relay connection closed by us');
-          params.onclose?.(entry.urls.map(() => 'relay connection closed by us'));
+          onclose?.(
+            entry.urls.map(() => 'relay connection closed by us'),
+            entry.urls,
+          );
         },
         pause: async () => {
           generation++;
@@ -156,11 +161,12 @@ export function withResumableSubscriptions<TBase extends PoolClass>(Base: TBase)
             oneose: () => {
               if (current()) params.oneose?.();
             },
-            onclose: (reasons) => {
+            // The health layer also passes each reason's relay: keep it.
+            onclose: (reasons: string[], urls?: string[]) => {
               if (!current()) return;
               stopped = true;
               this.subscriptions.delete(entry);
-              params.onclose?.(reasons);
+              onclose?.(reasons, urls);
             },
           });
         },
