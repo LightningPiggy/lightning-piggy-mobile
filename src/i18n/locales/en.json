@@ -2275,7 +2275,7 @@
     "friendsTitle": "Friends",
     "friendsSubtitle": "Only people you follow.",
     "fofTitle": "Friends of friends",
-    "fofSubtitle": "People you follow, plus the people they follow most. Built when you choose it — this takes a moment the first time.",
+    "fofSubtitle": "People you follow, plus the people they follow most, whose messages can notify you too. Built when you choose it — this takes a moment the first time.",
     "fofProgressStarting": "Checking who your friends follow…",
     "fofProgress": "Checking who your friends follow… {{done}} of {{total}}",
     "fofCancel": "Cancel",
@@ -2286,7 +2286,7 @@
       "other": "{{count}} friends of friends in your trust graph"
     },
     "allTitle": "All",
-    "allSubtitle": "Everything from every relay. Default until your trust graph is ready — switch to Friends to tighten.",
+    "allSubtitle": "Everything from every relay. Choosing it also lets anyone's messages notify you. Default until your trust graph is ready — switch to Friends to tighten.",
     "gateHint": "Friends of friends keeps the {{max}} people your friends follow most, and refreshes the list once a day. Friends is the safest feed; All is the broadest.",
     "done": "Done"
   },

@@ -347,7 +347,9 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // false → 'all'. The hard-lock guard in the predicate above means
       // a non-secret-mode user who flips this to false still sees the
       // 'friends' behaviour at the visibility layer.
-      setWotTier(next ? 'friends' : 'all');
+      // Not an explicit tier pick (#1764): the chip widens the list, but
+      // says nothing about alerts, so notifications stay Friends.
+      setWotTier(next ? 'friends' : 'all', { explicit: false });
     },
     [setWotTier],
   );

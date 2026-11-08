@@ -244,8 +244,14 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
         // Already on FoF: only rebuild a set that never arrived or whose last
         // build failed (the tap is the retry) — never re-fetch on an
         // accidental re-tap of a healthy set.
-        if (current.wotTier !== 'fof') enableFof();
-        else if (current.l2Empty || current.l2Failed) void refreshL2();
+        if (current.wotTier !== 'fof') {
+          enableFof();
+          return;
+        }
+        // Re-picking it still records the choice (no build): a tier saved
+        // before the explicit marker existed must be confirmable (#1764).
+        persistTier('fof', opts?.explicit ?? true);
+        if (current.l2Empty || current.l2Failed) void refreshL2();
         return;
       }
       cancelL2();

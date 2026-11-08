@@ -4,6 +4,8 @@
 import React from 'react';
 import { act, renderHook } from '@testing-library/react-native';
 import { TrustGraphProvider, useTrustGraph } from './TrustGraphContext';
+import { liveNotificationAudience } from '../services/notificationAudience';
+import { saveWotSettings } from '../services/wotSettingsService';
 
 let mockTier = 'fof';
 const mockL2 = {
@@ -64,4 +66,22 @@ it('re-picking Friends of friends while its first build runs does not restart it
   act(() => result.current.setWotTier('fof'));
   expect(mockL2.enableFof).not.toHaveBeenCalled();
   expect(mockL2.refreshL2).not.toHaveBeenCalled();
+});
+
+it('re-picking Friends of friends records the explicit choice without a build (#1764)', () => {
+  // Saved before the explicit marker existed: notifies like Friends.
+  const { result } = renderHook(() => useTrustGraph(), { wrapper });
+  expect(liveNotificationAudience('big')?.tier).toBe('friends');
+  act(() => result.current.setWotTier('fof'));
+  expect(saveWotSettings).toHaveBeenCalledWith({ wotTier: 'fof', explicit: true }, 'big');
+  expect(liveNotificationAudience('big')).toEqual({ tier: 'fof', fof: mockL2.l2Follows });
+  expect(mockL2.enableFof).not.toHaveBeenCalled();
+  expect(mockL2.refreshL2).not.toHaveBeenCalled();
+});
+
+it('re-picking Friends of friends during a build saves nothing', () => {
+  mockL2.status = { building: true, progress: null, failed: false };
+  const { result } = renderHook(() => useTrustGraph(), { wrapper });
+  act(() => result.current.setWotTier('fof'));
+  expect(saveWotSettings).not.toHaveBeenCalled();
 });
