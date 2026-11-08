@@ -4,7 +4,11 @@ import type { WalletMetadata, WalletState, WalletTransaction } from '../types/wa
 import { readCachedWalletBalance } from '../services/walletBalanceCache';
 import { perfLog, perfOwnerTag } from '../utils/perfLog';
 
-export type WalletHydrationSource = 'startup' | 'startup-prefetch' | 'account-change';
+export type WalletHydrationSource =
+  | 'startup'
+  | 'startup-prefetch'
+  | 'startup-retry'
+  | 'account-change';
 let hydrationCount = 0;
 /** [Perf] marker per committed wallet-list hydration; cold start should log #1 only. */
 export function logWalletHydration(
@@ -18,7 +22,12 @@ export function logWalletHydration(
   );
 }
 
-/** Hydrate cached wallet data without initialising BDK or connecting to relays. */
+/**
+ * Hydrate cached wallet data without initialising BDK or connecting to relays.
+ * `readOnly` (the unconfirmed-owner prefetch) rejects on a corrupt tx cache
+ * instead of deleting it: only a load for the confirmed owner may delete that
+ * owner's data, and the rejection makes that load run instead of the prefetch.
+ */
 export async function hydrateWalletStates(
   walletList: WalletMetadata[],
   lastTxsJsonRef: MutableRefObject<Map<string, string>>,
@@ -28,6 +37,7 @@ export async function hydrateWalletStates(
     isCurrent: () => boolean,
   ) => Promise<void>,
   isCurrent: () => boolean,
+  { readOnly = false }: { readOnly?: boolean } = {},
 ): Promise<WalletState[]> {
   return Promise.all(
     walletList.map(async (w) => {
@@ -51,6 +61,7 @@ export async function hydrateWalletStates(
           );
         }
       } catch (err) {
+        if (readOnly) throw err;
         console.warn(`Corrupted cached txs for ${w.id}, clearing:`, err);
         await AsyncStorage.removeItem(`txs_${w.id}`);
       }

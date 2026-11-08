@@ -3,7 +3,13 @@ import * as SecureStore from 'expo-secure-store';
 import { loadIdentities, upsertIdentity } from '../services/identitiesStore';
 import * as walletStorage from '../services/walletStorageService';
 import { restoreNip46Session } from './useNip46Login';
-import { readStartupLogin, readStoredLogin, registerRestoredSession } from './readStoredLogin';
+import { bumpSessionGeneration, captureSessionGeneration } from '../services/sessionGeneration';
+import {
+  publishRestoredSession,
+  readStartupLogin,
+  readStoredLogin,
+  registerRestoredSession,
+} from './readStoredLogin';
 
 const store = new Map<string, string>();
 jest.mock('expo-secure-store', () => ({
@@ -84,7 +90,7 @@ it('restores NIP-46 from the connection slot it read, never the nsec slot', asyn
   await expect(readStoredLogin()).resolves.toMatchObject({
     session: { pubkey: 'pk-from-bunker', signerType: 'nip46' },
   });
-  expect(restoreNip46Session).toHaveBeenCalledWith('{"conn":1}');
+  expect(restoreNip46Session).toHaveBeenCalledWith('{"conn":1}', expect.any(Function));
   expect(readKeys()).toEqual(['nostr_signer_type', 'nostr_nip46_connection']);
 });
 
@@ -92,7 +98,7 @@ it('passes a missing NIP-46 connection on as null so the restore self-heals', as
   jest.mocked(restoreNip46Session).mockResolvedValueOnce(null);
   store.set('nostr_signer_type', 'nip46');
   await expect(readStoredLogin()).resolves.toMatchObject({ session: null });
-  expect(restoreNip46Session).toHaveBeenCalledWith(null);
+  expect(restoreNip46Session).toHaveBeenCalledWith(null, expect.any(Function));
 });
 
 it('reports logged out when the signer slot is empty or its value is missing', async () => {
@@ -137,6 +143,24 @@ describe('readStartupLogin and the wallet gate', () => {
     expect(await gateReleasedWithoutTimeout()).toBe(false);
     expect(walletStorage.isWalletOwnerGateOpen()).toBe(false);
   });
+
+  it('reports nothing to the gate when a newer login superseded the read (#1746)', async () => {
+    // Superseded NIP-46 restore: no session, because it skipped its bunker.
+    store.set('nostr_signer_type', 'nip46');
+    store.set('nostr_nip46_connection', '{"conn":1}');
+    jest.mocked(restoreNip46Session).mockResolvedValueOnce(null);
+    await readStartupLogin(() => false);
+    expect(walletStorage.isWalletOwnerGateOpen()).toBe(false);
+    // The newer session decides the owner. Its signed-in publish opens the gate.
+    walletStorage.setActivePubkeyForWalletStorage('pk-manual');
+    expect(walletStorage.isWalletOwnerGateOpen()).toBe(true);
+  });
+
+  it('reports nothing to the gate when a superseded read fails', async () => {
+    jest.mocked(loadIdentities).mockRejectedValueOnce(new Error('keystore unavailable'));
+    await expect(readStartupLogin(() => false)).rejects.toThrow('keystore unavailable');
+    expect(await gateReleasedWithoutTimeout()).toBe(false);
+  });
 });
 
 describe('registerRestoredSession', () => {
@@ -169,5 +193,34 @@ describe('registerRestoredSession', () => {
     ).resolves.toBeNull();
     await expect(registerRestoredSession({ identities: [], session: null })).resolves.toBeNull();
     expect(upsertIdentity).not.toHaveBeenCalled();
+  });
+});
+
+describe('publishRestoredSession (#1746)', () => {
+  beforeEach(() => {
+    walletStorage.setActivePubkeyForWalletStorage(null);
+    walletStorage.__resetWalletOwnerGateForTests();
+  });
+  afterEach(() => walletStorage.setActivePubkeyForWalletStorage(null));
+
+  it('publishes the restored account and opens the wallet gate for it', async () => {
+    const publish = jest.fn((pk: string) => walletStorage.setActivePubkeyForWalletStorage(pk));
+    await expect(
+      publishRestoredSession('pk-restored', captureSessionGeneration(), publish),
+    ).resolves.toBe(true);
+    expect(publish).toHaveBeenCalledWith('pk-restored');
+    expect(walletStorage.isWalletOwnerGateOpen()).toBe(true);
+  });
+
+  it('drops a restore superseded by a newer login, logout or switch', async () => {
+    const isCurrent = captureSessionGeneration();
+    // The user picked an account by hand while auto-login was still reading.
+    bumpSessionGeneration();
+    const publish = jest.fn();
+    await expect(publishRestoredSession('pk-restored', isCurrent, publish)).resolves.toBe(false);
+    expect(publish).not.toHaveBeenCalled();
+    // The stale owner never reached the wallet gate.
+    expect(walletStorage.isWalletOwnerGateOpen()).toBe(false);
+    expect(walletStorage.getActivePubkey()).toBeNull();
   });
 });

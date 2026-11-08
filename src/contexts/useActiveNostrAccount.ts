@@ -2,12 +2,16 @@ import { loadAppRelayPrefs } from '../services/appRelayPrefs';
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { reviveBuyerOrderTitles } from '../services/buyerOrderTitles';
 import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
+import { bumpSessionGeneration } from '../services/sessionGeneration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 
 /** Own active identity and its synchronous DEV relay-routing mirror. */
 export function useActiveNostrAccount(onRelayPrefsRecovered?: (pk: string) => Promise<unknown>) {
   const [pubkey, setPubkeyState] = useState<string | null>(null);
   const setPubkey = useCallback((pk: string | null) => {
+    // Every login, logout and switch lands here: supersede any restore still
+    // in flight (see sessionGeneration).
+    bumpSessionGeneration();
     if (pk) {
       reviveBuyerOrderTitles(pk);
       void loadAppRelayPrefs(pk).catch(() => {

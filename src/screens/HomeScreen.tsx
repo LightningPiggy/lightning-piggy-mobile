@@ -62,6 +62,7 @@ const HomeScreen: React.FC = () => {
     setActiveWallet,
     currency,
     requestBalancePoll,
+    retryWalletLoad,
   } = useWallet();
   const {
     activeWallet,
@@ -237,6 +238,9 @@ const HomeScreen: React.FC = () => {
       swapRecoveryService.recoverPendingSwaps().catch((e) => {
         console.warn('[Home] pull-to-refresh swap recovery failed:', e);
       });
+      // A cold-start wallet load that failed is retried here too (#1746);
+      // a no-op once the wallets loaded.
+      await retryWalletLoad();
       // Explicit pull-to-refresh: force a fetch, ignoring the 30 s freshness.
       const walletId = activeWalletIdRef.current;
       if (walletId) await refreshNow(walletId);
@@ -244,7 +248,7 @@ const HomeScreen: React.FC = () => {
       // A rejected refresh must never strand the pull-to-refresh spinner.
       setRefreshing(false);
     }
-  }, [refreshNow]);
+  }, [refreshNow, retryWalletLoad]);
 
   // Stable RefreshControl ELEMENT. Passing a fresh element on every render
   // made the (Pure) FlatList inside TransactionList re-render on every Home

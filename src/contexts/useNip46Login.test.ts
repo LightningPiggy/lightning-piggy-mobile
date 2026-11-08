@@ -50,6 +50,13 @@ it('restores the connection and returns conn.userPubkey (the source of truth)', 
   expect(mockSetActiveConnection).toHaveBeenCalledWith(connection);
 });
 
+it('never installs the bunker of a restore a newer login superseded (#1746)', async () => {
+  await expect(restoreNip46Session(JSON.stringify(connection), () => false)).resolves.toBeNull();
+  expect(mockSetActiveConnection).not.toHaveBeenCalled();
+  // The stored session itself is kept: it is still valid, just not chosen now.
+  expect(mockDeleteItemAsync).not.toHaveBeenCalled();
+});
+
 it('self-heals when the blob parses but has an invalid shape (non-hex secret)', async () => {
   // JSON-parsable but wrong-shape (e.g. a partial / corrupted write) must be
   // rejected up front rather than installing an all-undefined connection.

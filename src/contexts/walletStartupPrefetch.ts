@@ -19,16 +19,19 @@ const skipReceiptSeeding = async () => {};
 /**
  * Read the hinted account's wallet list and per-wallet caches (the costly
  * part of hydration: tx cache read + JSON.parse, #606) while NostrContext is
- * still reading SecureStore. Writes nothing to wallet state (beyond dropping
- * a corrupt tx cache, as every hydration does): the tx fingerprints and the
- * announced-receipt seeding are applied only if `takeWalletPrefetch` accepts
- * the result for the confirmed owner.
+ * still reading SecureStore. Strictly read-only, because the hint may name
+ * another account: a corrupt tx cache fails the prefetch rather than being
+ * deleted here (the confirmed owner's hydration then runs and clears it), and
+ * the tx fingerprints and announced-receipt seeding are applied only if
+ * `takeWalletPrefetch` accepts the result for the confirmed owner.
  */
 export function prefetchWalletStates(owner: string): WalletPrefetch {
   const result = (async () => {
     const list = await walletStorage.getWalletList(owner);
     const fingerprints = { current: new Map<string, string>() };
-    const states = await hydrateWalletStates(list, fingerprints, skipReceiptSeeding, () => true);
+    const states = await hydrateWalletStates(list, fingerprints, skipReceiptSeeding, () => true, {
+      readOnly: true,
+    });
     return { listJson: JSON.stringify(list), states, fingerprints: fingerprints.current };
   })().catch(() => null);
   return { owner, result };
