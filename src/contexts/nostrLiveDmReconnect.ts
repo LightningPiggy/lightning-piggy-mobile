@@ -62,6 +62,9 @@ export interface LiveDmReconnectDeps {
    * relay engine owns it — Stage 2 M2, #1036). Read at every (re)arm so a
    * `rearm()` after a native-engine start failure restores the wrap filter. */
   skipWraps?: () => boolean;
+  /** Optional: ids already stored / in flight, skipped before parse and
+   * verify (see `subscribeInboxDmsForViewer`'s `isKnownEvent`, #1759). */
+  isKnownEvent?: (id: string) => boolean;
 }
 
 export interface LiveDmReconnectController {
@@ -92,7 +95,8 @@ export interface LiveDmReconnectController {
 export function createLiveDmReconnectController(
   deps: LiveDmReconnectDeps,
 ): LiveDmReconnectController {
-  const { viewerPubkey, readRelays, onEvent, onReconnect, isCancelled, skipWraps } = deps;
+  const { viewerPubkey, readRelays, onEvent, onReconnect, isCancelled, skipWraps, isKnownEvent } =
+    deps;
 
   let unsubscribe: (() => void) | null = null;
   // The kind-4 `since` cursor loaded once by the caller before the first
@@ -193,6 +197,7 @@ export function createLiveDmReconnectController(
       // is covered by refreshDmInbox's deferred backfill; new wraps stream live.
       wrapsLimit: COLD_INITIAL_WRAP_LIMIT,
       onEvent,
+      isKnownEvent,
       // The wrap sub closed on every relay — the socket dropped and we've gone
       // deaf to new DMs (#934). Re-arm with backoff, unless this close belongs
       // to a superseded / torn-down sub (stale generation) or we were cancelled.

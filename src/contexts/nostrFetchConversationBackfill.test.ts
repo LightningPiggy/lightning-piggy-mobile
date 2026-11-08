@@ -5,7 +5,7 @@ import { backfillThreadRumorIds } from './dmRumorIdBackfill';
 // there are relays to ask: with none, the rows must stay retryable.
 
 jest.mock('../services/nostrService', () => ({
-  fetchDirectMessageEvents: jest.fn(async () => []),
+  fetchDirectMessageEvents: jest.fn(async () => ({ events: [], complete: true })),
   fetchInboxDmEvents: jest.fn(async () => ({ kind1059: [] })),
 }));
 jest.mock('../services/amberService', () => ({ requestNip44Decrypt: jest.fn(async () => null) }));

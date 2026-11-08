@@ -65,6 +65,7 @@ import {
   type ScopedDmInbox,
 } from './dmInboxScope';
 import { useDmRefreshCoordinator, canJoinDmRefresh } from './dmRefreshCoordinator';
+import { knownInboxEvent, type KnownWrapIdsState } from './knownInboxEvent';
 
 type DmInboxSetter = React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
 
@@ -119,7 +120,7 @@ export interface UseDmInboxResult {
   hydrateDmInboxFromCache: (pk: string) => Promise<void>;
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
   setAmberNip44Permission: React.Dispatch<React.SetStateAction<'unknown' | 'granted' | 'denied'>>;
-  knownWrapIdsRef: React.MutableRefObject<{ pubkey: string | null; set: Set<string> }>;
+  knownWrapIdsRef: React.MutableRefObject<KnownWrapIdsState>;
 }
 
 export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
@@ -499,6 +500,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       if (!isStillActive()) return;
       const accountSignal = accountSignalFor(refreshForPubkey);
       let refreshCompleted = false; // set after commit; gates the stamp (#788 — see helper)
+      let relaysCut = false; // a quorum read cut a relay off: recover with a full read (#1759)
       let disposeSignal: () => void = () => {};
 
       let resolveSetup!: () => void;
@@ -584,9 +586,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
             setInboxForRefresh(filteredCache);
           }
 
-          // Widening and explicit warm user refreshes backfill kind-4.
-          // Wraps remain bounded without since (randomised NIP-59 timestamps).
-          const { kind4, kind1059 } = await nostrService.fetchInboxDmEvents(
+          // Widening / explicit warm refreshes backfill kind-4; wraps never take `since` (NIP-59).
+          const { kind4, kind1059, complete } = await nostrService.fetchInboxDmEvents(
             refreshForPubkey,
             readRelays,
             {
@@ -595,10 +596,13 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                 ? {}
                 : { since: kind4Failures?.committedCursor(lastSeen ?? 0) ?? lastSeen }),
               signal: effectiveSignal,
+              isKnownEvent: knownInboxEvent(knownWrapIdsRef, refreshForPubkey),
+              quorum: !opts?.force && !opts?.backfill, // pull-to-refresh / backfill wait for all
               ...(isColdStart ? { limit: COLD_INITIAL_WRAP_LIMIT } : {}),
             },
           );
           if (effectiveSignal?.aborted) return;
+          relaysCut = !complete;
           kind4Pass?.configureFetch(readRelays, kind4.length);
           const entries: DmInboxEntry[] = [];
 
@@ -784,14 +788,12 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           );
           setInboxForRefresh(filteredFinal);
 
-          // Advance only after all targets were processed and rows persisted.
-          // Pending failures protect the floor independently of refresh completion.
-          // Randomised wrap timestamps never contribute.
+          // Advance only once all targets are persisted, never past a relay a quorum read cut off
+          // (#1759: commit failures, keep the floor), nor past pending failures or wrap timestamps.
           const newest = Math.max(lastSeen ?? 0, ...kind4.map((e) => e.created_at));
           const kind4Complete = k4Result.processed === k4ToDecrypt.length;
-          if (!effectiveSignal.aborted && kind4Complete) {
-            if (kind4Failures && kind4Pass) await kind4Failures.commitPass(kind4Pass, newest);
-          }
+          if (!effectiveSignal.aborted && kind4Complete && kind4Failures && kind4Pass)
+            await kind4Failures.commitPass(kind4Pass, complete ? newest : 0);
           // Completion drives TTL and full wrap backfill independently of the
           // history floor. A productive abort still needs another pass.
           refreshCompleted = !effectiveSignal.aborted && kind4Complete;
@@ -847,10 +849,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
           void refreshDmInboxRef.current?.({ includeNonFollows, signal: accountSignalFor(pubkey) });
         });
       }
-      // Cold-start backfill (#751) — recent slice painted fast above; top up to
-      // the full backlog in the background (deferred + abortable). See module.
+      // Cold-start backfill (#751), and the full read recovering relays a quorum read cut (#1759):
+      // top up in the background (deferred + abortable, from the unmoved floor). See module.
       scheduleColdStartBackfill({
-        isColdStart: isColdStart && refreshCompleted,
+        isColdStart: (isColdStart && refreshCompleted) || relaysCut,
         signal,
         includeNonFollows,
         refreshRef: refreshDmInboxRef,
@@ -895,7 +897,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
   // start). Without it a re-opened sub re-seeds from the wrap cache, which is
   // stale by the deferred-write window, so wraps the prior sub decrypted
   // re-stream and get re-decrypted. Reset only when the viewer changes.
-  const knownWrapIdsRef = useRef<{ pubkey: string | null; set: Set<string> }>({
+  const knownWrapIdsRef = useRef<KnownWrapIdsState>({
     pubkey: null,
     set: new Set(),
   });

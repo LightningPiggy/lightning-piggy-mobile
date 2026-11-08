@@ -55,7 +55,7 @@ beforeEach(() => {
   jest.mocked(loadInboxEntries).mockResolvedValue([]);
   jest
     .mocked(fetchInboxDmEvents)
-    .mockResolvedValue({ kind4: [], kind1059: [] } as unknown as Awaited<
+    .mockResolvedValue({ kind4: [], kind1059: [], complete: true } as unknown as Awaited<
       ReturnType<typeof fetchInboxDmEvents>
     >);
 });

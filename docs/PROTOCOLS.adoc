@@ -35,7 +35,7 @@ Lightning Piggy ships **NIP-17 gift-wrapped DMs** (kind-1059 → 13 → 14) as t
 
 The Messages tab fetches both protocols on focus and on conversation open:
 
-* `fetchInboxDmEvents` queries three filters in parallel:
+* `fetchInboxDmEvents` sends three filters in one REQ per relay (#1759). The focus refresh finishes once two relays reached EOSE plus a 1.2 s grace (8 s backstop); a read that cut a relay off doesn't advance the kind-4 cursor and is followed by a background full read. Pull-to-refresh, backfill and conversation reads wait for every relay:
 +
 [source]
 ----
@@ -105,7 +105,7 @@ The repair uses the yield scheduler and persists completion per account.
 | `src/services/nostrService.ts` :: `createGroupChatRumor` | Builds the unsigned kind-14 rumor for a group message. `subject` tag + one `p` tag per member.
 | `src/services/nostrService.ts` :: `sendNip17ToManyWithNsec` | nsec NIP-17 send. Seals + wraps via `nip59.wrapManyEvents`, publishes in parallel.
 | `src/services/nostrService.ts` :: `sendNip17ToManyWithSigner` | Amber NIP-17 send. Sequential signer loop (BUSY guard), parallel publish.
-| `src/services/nostrService.ts` :: `fetchInboxDmEvents` | Fetches kind-4 (in/out) + kind-1059 (in) in three parallel filters.
+| `src/services/nostrDmFetch.ts` :: `fetchInboxDmEvents` | Fetches kind-4 (in/out) + kind-1059 (in): three filters in one quorum REQ per relay.
 | `src/services/nostrService.ts` :: `unwrapGiftWrap` | nsec unwrap via `nip59.unwrapEvent`. Used in single-event paths.
 | `src/utils/nip17Unwrap.ts` :: `unwrapWrapNsec` / `unwrapWrapViaNip44` | Two-layer NIP-17 unwrap with full verification + skip-and-log on failure.
 | `src/utils/nip17Unwrap.ts` :: `classifyRumor` | Routes a decoded rumor to a 1:1 DM thread or a group room based on the participant set.

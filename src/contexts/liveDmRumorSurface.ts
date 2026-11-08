@@ -14,6 +14,7 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
+import { notePersistedInboxIds } from './knownInboxEvent';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
@@ -62,6 +63,8 @@ export interface LiveRumorSurfaceDeps {
   includeNonFollowOrders?: () => boolean;
   queueInboxEntry: (entry: DmInboxEntry) => void;
   knownWrapIds: Set<string>;
+  /** Ids actually written to the DM store (the inbox fetch's skip, #1759). */
+  persistedIds?: Set<string>;
   releaseWrapClaim?: (wrapId: string) => void;
   seen?: Set<string>;
   /** Append a task to the sub's serialised writeChain (with its load-bearing
@@ -84,6 +87,7 @@ export function createLiveRumorSurfacer(
     includeNonFollowOrders = () => false,
     queueInboxEntry,
     knownWrapIds,
+    persistedIds,
     seen,
     releaseWrapClaim = (id) => {
       knownWrapIds.delete(id);
@@ -381,6 +385,7 @@ export function createLiveRumorSurfacer(
         }
         knownWrapIds.add(wrapId);
         noteWrapStored(wrapId);
+        if (persistedIds) notePersistedInboxIds(persistedIds, [wrapId]);
       });
       nothingToSee();
       if (__DEV__) console.log(`[Nostr] live wrap ${wrapId.slice(0, 8)} stored as a reaction`);
@@ -473,6 +478,7 @@ export function createLiveRumorSurfacer(
       if (order && !partnership.fromMe) await completeOrderRumors(viewerPubkey, [rumor]);
       knownWrapIds.add(wrapId);
       noteWrapStored(wrapId);
+      if (persistedIds) notePersistedInboxIds(persistedIds, [wrapId]);
       if (order) surface();
     });
     // Surface to the UI without awaiting the persist chain (#934 item 2) —

@@ -46,6 +46,11 @@ import { ensureNip17GroupHistoryRepaired } from './nip17GroupHistoryRepairRunner
 import { createCoalescedFlushQueue } from '../utils/coalescedFlushQueue';
 import type { RefreshDmInboxOptions } from './nostrContextTypes';
 import { createLiveDmReconnectController } from './nostrLiveDmReconnect';
+import {
+  notePersistedInboxIds,
+  persistedInboxIds,
+  type KnownWrapIdsState,
+} from './knownInboxEvent';
 import { noteLiveDmSubArm } from './liveDmSubArmPerf';
 
 // Self-re-arm on relay drop / app resume (#934) — the connection lifecycle
@@ -78,7 +83,7 @@ export interface LiveDmSubscriptionParams {
   pubkey: string | null;
   signerType: SignerType | null;
   readRelays: string[];
-  knownWrapIdsRef: React.MutableRefObject<{ pubkey: string | null; set: Set<string> }>;
+  knownWrapIdsRef: React.MutableRefObject<KnownWrapIdsState>;
   followPubkeysRef: React.MutableRefObject<Set<string>>;
   followHydratedRef?: React.MutableRefObject<boolean>;
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>;
@@ -145,6 +150,8 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     knownWrapIdsRef.current = { pubkey: viewerPubkey, set: new Set() };
   }
   const knownWrapIds: Set<string> = knownWrapIdsRef.current.set;
+  // Ids actually written to a store — the inbox fetch's pre-parse skip (#1759).
+  const persistedIds = persistedInboxIds(knownWrapIdsRef);
   let cancelled = false;
   // Budget-gated yield scheduler for the live-sub receive path (#1035).
   // Created once per subscription lifetime — shared across re-arms so the
@@ -274,6 +281,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         ]);
         pendingReplays.delete(item);
         noteWrapStored(item.entry.id);
+        notePersistedInboxIds(persistedIds, [item.entry.id]);
         if (cancelled || !isCurrentOwner()) return;
         knownWrapIds.add(item.entry.id);
         capKnownWrapIds(knownWrapIds);
@@ -339,6 +347,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     queueInboxEntry,
     includeNonFollowOrders: params.includeNonFollowOrders,
     knownWrapIds,
+    persistedIds,
     releaseWrapClaim: releaseWrap,
     seen,
     chainWrite,
@@ -524,6 +533,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
           // refresh's `since` floor then re-fetches the event instead of
           // silently skipping past an unpersisted message.
           await upsertDmMessages([k4Row]);
+          notePersistedInboxIds(persistedIds, [ev.id]);
           if (cancelled || !isCurrentOwner()) return;
           knownWrapIds.add(ev.id);
           capKnownWrapIds(knownWrapIds);
@@ -707,6 +717,15 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
     // sub — see subscribeInboxDmsForViewer). Read per-arm so the fallback
     // re-arm restores the wrap filter if the engine fails to start.
     skipWraps: () => engineActive,
+    // Pre-parse twin of handleInboxEvent's known-id early return (#1759): the
+    // sub carries only kinds 4 + 1059, so the kind check there always holds.
+    // Kind-4 ids also get the "already stored" mark; the watch only consults
+    // it for wraps, so that is harmless.
+    isKnownEvent: (id) => {
+      if (!knownWrapIds.has(id)) return false;
+      if (!isWrapInFlight(id)) markWrapAlreadyStored(id);
+      return true;
+    },
     onEvent: (ev) => {
       // Fire-and-forget: handleInboxEvent awaits its own state, and any throw is caught + logged here so the sub keeps running. Whether a notification fires is gated inside on the message's own timestamp (isFreshArrival), not on EOSE.
       handleInboxEvent(ev).catch((e) => {
@@ -736,6 +755,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       await loadRepliedPartners(viewerPubkey);
       const storedWrapIds = await selectDmWrapIds(viewerPubkey);
       for (const id of storedWrapIds) knownWrapIds.add(id);
+      notePersistedInboxIds(persistedIds, storedWrapIds);
       // Also seed from persisted group messages — group-routed wraps
       // never land in the DM store (the tryRouteGroupRumor branch
       // returns before the row is built). Without this union every
@@ -744,6 +764,7 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
       const dmCount = knownWrapIds.size;
       const groupWrapIds = await listPersistedGroupWrapIds(viewerPubkey);
       for (const id of groupWrapIds) knownWrapIds.add(id);
+      notePersistedInboxIds(persistedIds, groupWrapIds);
       if (__DEV__) {
         console.log(
           `[Nostr] live DM sub: seeded knownWrapIds with ${dmCount} dm + ${knownWrapIds.size - dmCount} group wraps`,

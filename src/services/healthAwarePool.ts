@@ -16,6 +16,7 @@ import {
 import { openRelayReq } from './relayReqTransport';
 import { discoverRelayReqLimit } from './relayReqLimit';
 import { finishAfterRelayReceive } from './nostrRelayReceiveQueue';
+import { queryRelaysQuorum, type QuorumStats, type RelayQuorum } from './relayQuorumQuery';
 import { PERF_LOGS_ENABLED } from '../utils/perfLog';
 import { normalizeURL } from 'nostr-tools/utils';
 import {
@@ -455,13 +456,46 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
       /** `onClose`: every relay's close reason, before the read settles — a
        * real EOSE reads `closed automatically on eose` — and (same order) the
        * relay each came from. */
+      /** `quorum`: finish once that many relays reached EOSE, plus a grace
+       * period for the rest (see `queryRelaysQuorum`). Such a read never
+       * rejects; `requireEose` / `requireAnswer` / `onClose` don't apply.
+       * `alreadyHaveEvent`: skip known ids before parse/verify (both modes). */
       options: {
         abort?: AbortSignal;
         requireEose?: boolean;
         requireAnswer?: boolean;
         onClose?: (reasons: string[], urls?: string[]) => void;
+        quorum?: RelayQuorum;
+        alreadyHaveEvent?: (id: string) => boolean;
+        onQuorumSettled?: (stats: QuorumStats) => void;
       } = {},
     ): Promise<NostrEvent[]> {
+      if (options.quorum) {
+        const label = reqLabel(filters, 'oneshot');
+        return queryRelaysQuorum({
+          // As subscribeEose: pick healthy relays once, then one REQ each,
+          // so every relay's EOSE (or failure) is observable on its own.
+          relays: [...new Set(selectHealthyRelays(activeAccountRelays(urls)).map(normalizeURL))],
+          maxWait,
+          quorum: options.quorum,
+          signal: options.abort,
+          alreadyHaveEvent: options.alreadyHaveEvent,
+          onSettled: options.onQuorumSettled,
+          open: (url, relay) =>
+            this.subscribeMap(
+              filters.map((filter) => ({ url, filter })),
+              {
+                // The SDK's synthetic EOSE must not land before our deadline
+                // and pass for a real answer.
+                maxWait: maxWait + 1000,
+                reqOptions: { mode: 'oneshot', label, timeoutMs: maxWait + 1000 },
+                alreadyHaveEvent: relay.alreadyHaveEvent,
+                onevent: relay.onevent,
+                onclose: (reasons: string[]) => relay.onclose(reasons.join('; ')),
+              },
+            ),
+        });
+      }
       return new Promise((resolve, reject) => {
         const events: NostrEvent[] = [];
         const timeoutMs = options.requireEose ? maxWait : maxWait + RELAY_CONNECT_TIMEOUT_MS;
@@ -474,6 +508,7 @@ export function withRelayHealth<TBase extends PoolClass>(Base: TBase) {
                 ? timeoutMs + RELAY_CONNECT_TIMEOUT_MS
                 : maxWait,
             abort: options.abort,
+            alreadyHaveEvent: options.alreadyHaveEvent,
             reqOptions: {
               mode: 'oneshot',
               label: reqLabel(filters, 'oneshot'),

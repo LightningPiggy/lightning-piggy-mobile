@@ -9,7 +9,7 @@ import { ensureDmStoreMigrated } from './dmStoreMigrationRunner';
 // the AbortSignal without any real crypto / network / SQLite.
 
 jest.mock('../services/nostrService', () => ({
-  fetchDirectMessageEvents: jest.fn(async () => []),
+  fetchDirectMessageEvents: jest.fn(async () => ({ events: [], complete: true })),
   fetchInboxDmEvents: jest.fn(async () => ({ kind1059: [] })),
 }));
 
@@ -92,10 +92,13 @@ describe('fetchConversationFor abort (#868)', () => {
     // read. Persisting convLastSeen from these events would skip them on the
     // next open (they were never decrypted). An aborted run must write nothing.
     const setItem = AsyncStorage.setItem as jest.Mock;
-    (nostrService.fetchDirectMessageEvents as jest.Mock).mockResolvedValue([
-      { id: 'e1', pubkey: PEER, content: 'ct', created_at: 1000 },
-      { id: 'e2', pubkey: PEER, content: 'ct', created_at: 2000 },
-    ]);
+    (nostrService.fetchDirectMessageEvents as jest.Mock).mockResolvedValue({
+      events: [
+        { id: 'e1', pubkey: PEER, content: 'ct', created_at: 1000 },
+        { id: 'e2', pubkey: PEER, content: 'ct', created_at: 2000 },
+      ],
+      complete: true,
+    });
     const controller = new AbortController();
     (getConversationMessages as jest.Mock).mockImplementation(async () => {
       controller.abort();
@@ -112,10 +115,13 @@ describe('fetchConversationFor abort (#868)', () => {
   it('persists the convLastSeen cursor on a normal (non-aborted) run', async () => {
     // Control: the same kind-4 events, no abort → the cursor IS written.
     const setItem = AsyncStorage.setItem as jest.Mock;
-    (nostrService.fetchDirectMessageEvents as jest.Mock).mockResolvedValue([
-      { id: 'e1', pubkey: PEER, content: 'ct', created_at: 1000 },
-      { id: 'e2', pubkey: PEER, content: 'ct', created_at: 2000 },
-    ]);
+    (nostrService.fetchDirectMessageEvents as jest.Mock).mockResolvedValue({
+      events: [
+        { id: 'e1', pubkey: PEER, content: 'ct', created_at: 1000 },
+        { id: 'e2', pubkey: PEER, content: 'ct', created_at: 2000 },
+      ],
+      complete: true,
+    });
     (getConversationMessages as jest.Mock).mockResolvedValue([]);
     (hasStoredWraps as jest.Mock).mockResolvedValue(true);
 
@@ -127,15 +133,33 @@ describe('fetchConversationFor abort (#868)', () => {
     expect(wroteCursor).toBe(true);
   });
 
+  it('does not advance the per-peer cursor from a read that cut a relay off (#1759)', async () => {
+    const setItem = AsyncStorage.setItem as jest.Mock;
+    (nostrService.fetchDirectMessageEvents as jest.Mock).mockResolvedValue({
+      events: [{ id: 'e1', pubkey: PEER, content: 'ct', created_at: 2000 }],
+      complete: false,
+    });
+    (getConversationMessages as jest.Mock).mockResolvedValue([]);
+    (hasStoredWraps as jest.Mock).mockResolvedValue(true);
+
+    await fetchConversationFor(baseParams());
+
+    const wroteCursor = setItem.mock.calls.some(([key]: [string]) =>
+      key.includes('conv_last_seen'),
+    );
+    expect(wroteCursor).toBe(false);
+  });
+
   it('never writes decrypted plaintext to AsyncStorage (#850 at-rest invariant)', async () => {
     // A full, successful run that decrypts fresh kind-4 events. The ONLY
     // AsyncStorage write allowed is the bare-timestamp last-seen cursor —
     // the plaintext conversation/inbox blobs are retired; decrypted content
     // persists exclusively in the encrypted store (upsertDmMessages).
     const setItem = AsyncStorage.setItem as jest.Mock;
-    (nostrService.fetchDirectMessageEvents as jest.Mock).mockResolvedValue([
-      { id: 'e1', pubkey: PEER, content: 'ct', created_at: 1000 },
-    ]);
+    (nostrService.fetchDirectMessageEvents as jest.Mock).mockResolvedValue({
+      events: [{ id: 'e1', pubkey: PEER, content: 'ct', created_at: 1000 }],
+      complete: true,
+    });
     (getConversationMessages as jest.Mock).mockResolvedValue([]);
     (hasStoredWraps as jest.Mock).mockResolvedValue(true);
 

@@ -130,6 +130,7 @@ beforeEach(async () => {
   fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
     kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
     kind1059: [wrap],
+    complete: true,
   }));
   ingestMock.mockResolvedValue(null);
 });
@@ -147,6 +148,7 @@ it('reconciles a suppressed reconnect at expiry with cursor and negative cache i
   fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
     kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
     kind1059: [wrap, missedWrap],
+    complete: true,
   }));
   ingestMock.mockImplementation(async ({ wraps, bypassSkipSet }) => ({
     entries: wraps
@@ -236,7 +238,7 @@ it('waits for an automatic pass then performs the stronger pull-to-refresh', asy
     forced = result.current.refreshDmInbox({ force: true });
   });
   await act(async () => {
-    release.resolve({ kind4: [event(1)], kind1059: [wrap] });
+    release.resolve({ kind4: [event(1)], kind1059: [wrap], complete: true });
     await Promise.all([automatic, forced]);
   });
   expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -338,6 +340,7 @@ it('retains one TTL-governed reconnect after fetch resolves while wrap ingestion
         (e) => opts?.since === undefined || e.created_at >= opts.since - 120,
       ),
       kind1059: [...liveSlice, missedWrap],
+      complete: true,
     }));
     ingestMock.mockImplementation(async ({ wraps, bypassSkipSet }) => ({
       entries: wraps
@@ -400,6 +403,7 @@ it('completes cold and warm refreshes despite a persistent null kind-4 decrypt a
   fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
     kind4: relayEvents.filter((e) => opts?.since === undefined || e.created_at >= opts.since - 120),
     kind1059: wraps.slice(0, opts?.limit ?? wraps.length),
+    complete: true,
   }));
   ingestMock.mockImplementation(async ({ wraps: fetched }) => {
     const fresh = fetched.filter((w) => !rows.some((r) => r.eventId === w.id));
@@ -633,3 +637,92 @@ it.each([false, true])(
     expect(result.current.dmInbox).toEqual(includeNonFollows ? [invoice] : []);
   },
 );
+
+it('recovers a slow relay’s SENT kind-4 after a quorum cut, and only then advances the cursor', async () => {
+  // Two fast relays answer; the user's own relay holding a kind-4 we sent from
+  // another device is always slower than the grace, so every quorum read cuts it.
+  const sent = { ...event(2, BASE + 300, OWNER), tags: [['p', FRIEND]] };
+  fetchMock.mockImplementation(async (_owner, _relays, opts) =>
+    opts?.quorum
+      ? { kind4: [event(1)], kind1059: [], complete: false }
+      : { kind4: [event(1), sent], kind1059: [], complete: true },
+  );
+  const backfill = jest.mocked(scheduleColdStartBackfill);
+  const { result, unmount } = renderInbox();
+  await act(() => result.current.refreshDmInbox());
+  expect(fetchMock.mock.calls[0][2]).toMatchObject({ quorum: true });
+  expect(typeof fetchMock.mock.calls[0][2]?.isKnownEvent).toBe('function');
+  // Partial: the sent message isn't there yet and the floor didn't move...
+  expect(rows.map((r) => r.eventId)).toEqual([event(1).id]);
+  expect(await savedCursor()).toBe('0');
+  // ...and a background full read is scheduled to let the cut relay finish.
+  expect(backfill).toHaveBeenCalledWith(expect.objectContaining({ isColdStart: true }));
+  const recovery = backfill.mock.calls[0][0];
+  await act(() =>
+    recovery.refreshRef.current!({
+      backfill: true,
+      includeNonFollows: recovery.includeNonFollows,
+      signal: recovery.signal,
+    }),
+  );
+  // Backfill waits for every relay: the sent kind-4 is stored and shown, and
+  // only now does the cursor advance.
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1][2]).toMatchObject({ quorum: false });
+  expect(rows.find((r) => r.eventId === sent.id)).toMatchObject({ fromMe: true });
+  expect(result.current.dmInbox.some((e) => e.id === sent.id && e.fromMe)).toBe(true);
+  expect(await savedCursor()).toBe(String(BASE + 300));
+  // A complete read schedules no further recovery (warm: not a cold start).
+  expect(backfill.mock.calls.at(-1)?.[0].isColdStart).toBe(false);
+  // Pull-to-refresh is a full read too.
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  expect(fetchMock.mock.calls[2][2]).toMatchObject({ quorum: false });
+  unmount();
+});
+
+it('a wrap the live follow gate dropped is still fetched and shown once the user follows the sender', async () => {
+  const strangerWrap: RawGiftWrapEvent = { ...wrap, id: '5'.repeat(64) };
+  fetchMock.mockImplementation(async (_owner, _relays, opts) => ({
+    kind4: [],
+    // The SDK path: ids the predicate reports known never reach the result.
+    kind1059: [wrap, strangerWrap].filter((w) => !opts?.isKnownEvent?.(w.id)),
+    complete: true,
+  }));
+  ingestMock.mockImplementation(async ({ wraps, passesFollowGate }) => ({
+    entries: wraps
+      .filter((w) => w.id === strangerWrap.id && passesFollowGate(STRANGER))
+      .map(() => ({
+        id: strangerWrap.id,
+        partnerPubkey: STRANGER,
+        fromMe: false,
+        createdAt: BASE + 50,
+        text: 'Hi, it is Grandma with a new number',
+        wireKind: 14,
+      })),
+    alreadyKnown: 0,
+    skipHits: 0,
+    misses: 1,
+    stored: 1,
+    yields: 0,
+  }));
+  const { result, rerender, unmount } = renderInbox();
+  // The live sub claimed and dropped the stranger's wrap (follow gate): it is
+  // in knownWrapIds but was never stored. `wrap` was stored.
+  result.current.knownWrapIdsRef.current = {
+    pubkey: OWNER,
+    set: new Set([wrap.id, strangerWrap.id]),
+    persisted: new Set([wrap.id]),
+  };
+  // The user follows the sender, then the inbox refreshes.
+  rerender({
+    pubkey: OWNER,
+    isLoggedIn: true,
+    signerType: 'nip46',
+    followPubkeys: new Set([FRIEND, STRANGER]),
+    getReadRelays: () => ['wss://relay.example'],
+  });
+  await act(() => result.current.refreshDmInbox({ force: true }));
+  expect(ingestMock.mock.calls.at(-1)?.[0].wraps.map((w) => w.id)).toEqual([strangerWrap.id]);
+  expect(result.current.dmInbox.some((e) => e.id === strangerWrap.id)).toBe(true);
+  unmount();
+});
