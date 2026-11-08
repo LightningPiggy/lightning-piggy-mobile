@@ -73,5 +73,9 @@ export async function confirmNwcPayment(options: {
         : undefined,
   });
   if (__DEV__) console.log(`[NWC] payment confirmed via ${result.source} in ${result.elapsedMs}ms`);
-  return { preimage: result.preimage, confirmed: true };
+  // `answered`: did the WALLET confirm it over NIP-47 (pay reply, lookup, or
+  // payment_sent notification)? A recipient's LUD-21 HTTP verify proves the
+  // payment settled but says nothing about the wallet service being reachable,
+  // so it must not refresh wallet health (#1768 review).
+  return { preimage: result.preimage, confirmed: true, answered: result.source !== 'verify' };
 }

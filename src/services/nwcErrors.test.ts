@@ -22,6 +22,18 @@ describe('isUnansweredError (#1768)', () => {
     }
   });
 
+  it('SDK-local coded errors are not answers (raised before anything is published)', () => {
+    // Nip47UnsupportedEncryptionError is thrown locally while picking an
+    // encryption; an offline wallet must not turn green on it.
+    const encryption = withCode(
+      'no compatible encryption or version found between wallet and client',
+      'UNSUPPORTED_ENCRYPTION',
+    );
+    expect(isWalletAnswer(encryption)).toBe(false);
+    expect(isWalletAnswer(withCode('slow down', 'RATE_LIMITED'))).toBe(false);
+    expect(isWalletAnswer(withCode('made up', 'SOMETHING_ELSE'))).toBe(false);
+  });
+
   it('a local error without a NIP-47 code is neither', () => {
     const error = new Error('Not connected');
     expect(isUnansweredError(error)).toBe(false);

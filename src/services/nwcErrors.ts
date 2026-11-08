@@ -72,14 +72,38 @@ export function isUnansweredError(error: unknown): boolean {
 }
 
 /**
+ * NIP-47 error codes a wallet service sends back in a response. Deliberately an
+ * allow-list: the SDK also attaches codes to errors it raises LOCALLY, before
+ * anything is published — e.g. `Nip47UnsupportedEncryptionError`
+ * (`UNSUPPORTED_ENCRYPTION`) — and those must not read as "the wallet answered"
+ * (#1768 review). `RATE_LIMITED` is left out on purpose: it's handled as relay
+ * back-off (`isConnectionError` / `isRateLimitError`), not as a healthy reply.
+ */
+const NIP47_RESPONSE_CODES = new Set([
+  'NOT_IMPLEMENTED',
+  'INSUFFICIENT_BALANCE',
+  'QUOTA_EXCEEDED',
+  'RESTRICTED',
+  'UNAUTHORIZED',
+  'INTERNAL',
+  'OTHER',
+  'PAYMENT_FAILED',
+  'NOT_FOUND',
+]);
+
+/**
  * Did the wallet service actually respond, just with a NIP-47 error (e.g.
  * `NOT_IMPLEMENTED`, `INSUFFICIENT_BALANCE`, `NOT_FOUND`)? The SDK raises those
- * as `Nip47WalletError` with a string `code`. Errors raised locally before any
- * request ("Not connected", AbortError, …) carry no `code`, so they don't count
- * as a reply (#1768).
+ * as `Nip47WalletError` carrying the response's `code`. Only allow-listed
+ * response codes count. Errors raised locally carry no code ("Not connected",
+ * AbortError, …) or a code outside the list (`UNSUPPORTED_ENCRYPTION`), and the
+ * SDK's own timeouts / publish / network errors, which reuse `INTERNAL` /
+ * `OTHER`, are excluded by `isUnansweredError`. None of those count as a reply
+ * (#1768).
  */
 export function isWalletAnswer(error: unknown): boolean {
-  return typeof (error as { code?: unknown })?.code === 'string' && !isUnansweredError(error);
+  const code = (error as { code?: unknown })?.code;
+  return typeof code === 'string' && NIP47_RESPONSE_CODES.has(code) && !isUnansweredError(error);
 }
 
 export function throwIfAborted(signal: AbortSignal | undefined): void {

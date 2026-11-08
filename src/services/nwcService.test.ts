@@ -29,6 +29,7 @@ import {
   listTransactions,
 } from './nwcService';
 import { resetWalletReply } from './nwcRelayHealth';
+import * as paymentCompletion from './nwcPaymentCompletion';
 import { clearPaymentProofsForTests, getPaymentProof } from './paymentProofs';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
@@ -563,6 +564,36 @@ describe('wallet health is credited only by real wallet answers (#1768)', () => 
   it('credits a successful pay_invoice', async () => {
     mockSendPaymentImpl = async () => ({ preimage: 'c'.repeat(64) });
     await payInvoice(WALLET_ID, BOLT11);
+    expect(health()).toBe('responsive');
+  });
+
+  it('does not credit a payment confirmed only by the LUD-21 HTTP verify', async () => {
+    const spy = jest
+      .spyOn(paymentCompletion, 'confirmNwcPayment')
+      .mockResolvedValueOnce({ preimage: 'c'.repeat(64), confirmed: true, answered: false });
+    await payInvoice(WALLET_ID, BOLT11);
+    expect(health()).toBe('checking');
+    spy.mockRestore();
+  });
+
+  it('credits a NIP-47 wallet error from pay_invoice (the wallet answered)', async () => {
+    mockSendPaymentImpl = async () => {
+      throw Object.assign(new Error('no funds'), { code: 'INSUFFICIENT_BALANCE' });
+    };
+    await expect(payInvoice(WALLET_ID, BOLT11)).rejects.toThrow('no funds');
+    expect(health()).toBe('responsive');
+  });
+
+  it('credits a NOT_IMPLEMENTED list_transactions answer without retry/reconnect churn', async () => {
+    mockRawListTransactions.mockReset();
+    mockRawListTransactions.mockRejectedValueOnce(
+      Object.assign(new Error('list not supported'), { code: 'NOT_IMPLEMENTED' }),
+    );
+    const listing = listTransactions(WALLET_ID);
+    const assertion = expect(listing).rejects.toThrow('list not supported');
+    await jest.runAllTimersAsync();
+    await assertion;
+    expect(mockRawListTransactions).toHaveBeenCalledTimes(1);
     expect(health()).toBe('responsive');
   });
 

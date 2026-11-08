@@ -618,9 +618,17 @@ export async function payInvoice(
   bolt11: string,
   signalOrOptions?: AbortSignal | PayInvoiceOptions,
 ): Promise<{ preimage: string }> {
-  const { preimage, confirmed } = await trackWalletReply(walletId, () =>
-    payInvoiceOnce(walletId, bolt11, signalOrOptions),
-  );
+  let outcome: Awaited<ReturnType<typeof payInvoiceOnce>>;
+  try {
+    outcome = await payInvoiceOnce(walletId, bolt11, signalOrOptions);
+  } catch (error) {
+    recordWalletReply(walletId, error); // a NIP-47 wallet error is still an answer
+    throw error;
+  }
+  const { preimage, confirmed, answered } = outcome;
+  // Credit wallet health only when the wallet itself answered over NIP-47 —
+  // not when only the recipient's LUD-21 HTTP verify confirmed it (#1768).
+  if (answered) recordWalletReply(walletId);
   // Proof of payment: lets the tx list show this send as settled even while
   // the wallet's own list_transactions still reports it pending. Only for a
   // confirmed result — a lookup can expose an UNPAID invoice's preimage (e.g.
@@ -633,7 +641,7 @@ async function payInvoiceOnce(
   walletId: string,
   bolt11: string,
   signalOrOptions?: AbortSignal | PayInvoiceOptions,
-): Promise<{ preimage: string; confirmed: boolean }> {
+): Promise<{ preimage: string; confirmed: boolean; answered: boolean }> {
   const options: PayInvoiceOptions =
     signalOrOptions && 'aborted' in signalOrOptions
       ? { signal: signalOrOptions as AbortSignal }
@@ -704,7 +712,7 @@ async function payInvoiceOnce(
             console.log('[NWC] Invoice already paid — returning existing preimage');
             if (__DEV__)
               console.log(`[NWC] payment confirmed via lookup in ${Date.now() - sentAt}ms`);
-            return { preimage: lookup.preimage, confirmed: true };
+            return { preimage: lookup.preimage, confirmed: true, answered: true };
           }
         } catch {
           // lookup failed — fall through to retry. The wallet would refuse
@@ -749,7 +757,7 @@ async function payInvoiceOnce(
             );
             if (__DEV__)
               console.log(`[NWC] payment confirmed via lookup in ${Date.now() - sentAt}ms`);
-            return { preimage: lookup.preimage, confirmed: true };
+            return { preimage: lookup.preimage, confirmed: true, answered: true };
           }
           // No usable preimage — BUT the lookup's paid=false is NOT a
           // reliable "definitely failed" signal here. LNbits has been seen
