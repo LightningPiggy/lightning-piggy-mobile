@@ -47,6 +47,12 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   default: { getItem: (...a: unknown[]) => mockAsyncGetItem(...a) },
 }));
 jest.mock('./identitiesStore', () => ({ loadIdentities: () => mockLoadIdentities() }));
+// The per-account settings migration reads the identity registry too; these
+// tests script loadIdentities call by call, so keep it out of the way.
+jest.mock('./safetySettingsMigration', () => ({
+  ...jest.requireActual('./safetySettingsMigration'),
+  ensureSafetySettingsMigrated: () => Promise.resolve(),
+}));
 // mergeRelays is the real one — the relay-resolution fix under test IS the
 // defaults + nip65-cache + overrides merge, so don't stub it out.
 jest.mock('./nostrRelayStorage', () => ({
@@ -119,7 +125,12 @@ beforeEach(() => {
   __resetDedupeForTests();
   mockSubscribe.mockReturnValue(() => {});
   mockGetUserRelays.mockResolvedValue(READ_RELAYS);
-  mockAsyncGetItem.mockResolvedValue(null);
+  // A contacts cache following PARTNER: with none the watch fails closed (#1764).
+  mockAsyncGetItem.mockImplementation((key: string) =>
+    Promise.resolve(
+      key.startsWith('nostr_contacts_cache') ? JSON.stringify([{ pubkey: PARTNER }]) : null,
+    ),
+  );
   mockHasPermission.mockResolvedValue(true);
   mockShowForeground.mockResolvedValue('fg');
   mockDecodeNsec.mockReturnValue({ pubkey: ME, secretKey: SECRET });
@@ -263,76 +274,8 @@ describe('nsec path: content notifications', () => {
     expect(mockFireMessageNotification).not.toHaveBeenCalled();
   });
 
-  it('follow gate: skips non-followed senders when the contacts cache exists', async () => {
-    mockUnwrapWrapNsec.mockReturnValue({
-      pubkey: PARTNER,
-      created_at: nowSec(),
-      kind: 14,
-      tags: [],
-      content: 'stranger danger',
-    });
-    mockPartnerFromRumor.mockReturnValue({ partnerPubkey: PARTNER, fromMe: false });
-    mockTextForRumor.mockReturnValue('stranger danger');
-    // Contacts cache exists but PARTNER is not in it.
-    mockAsyncGetItem.mockImplementation((key: string) =>
-      Promise.resolve(
-        key.startsWith('nostr_contacts_cache')
-          ? JSON.stringify([{ pubkey: 'f'.repeat(64) }])
-          : null,
-      ),
-    );
-
-    await runBackgroundDmWatch();
-    await capturedOnEvent()({ id: 'w-stranger', kind: 1059 });
-    await Promise.resolve();
-    expect(mockFireMessageNotification).not.toHaveBeenCalled();
-  });
-
-  it('follow gate: notifies for followed senders, and fails open with no cache', async () => {
-    mockUnwrapWrapNsec.mockReturnValue({
-      pubkey: PARTNER,
-      created_at: nowSec(),
-      kind: 14,
-      tags: [],
-      content: 'hi',
-    });
-    mockPartnerFromRumor.mockReturnValue({ partnerPubkey: PARTNER, fromMe: false });
-    mockTextForRumor.mockReturnValue('hi');
-    // Followed sender → notify.
-    mockAsyncGetItem.mockImplementation((key: string) =>
-      Promise.resolve(
-        key.startsWith('nostr_contacts_cache') ? JSON.stringify([{ pubkey: PARTNER }]) : null,
-      ),
-    );
-    await runBackgroundDmWatch();
-    await capturedOnEvent()({ id: 'w-followed', kind: 1059 });
-    await Promise.resolve();
-    expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
-
-    // No contacts cache at all (fresh install) → fail open and notify.
-    jest.clearAllMocks();
-    __resetForTests();
-    __resetDedupeForTests();
-    mockSubscribe.mockReturnValue(() => {});
-    mockGetUserRelays.mockResolvedValue(READ_RELAYS);
-    mockAsyncGetItem.mockResolvedValue(null);
-    mockHasPermission.mockResolvedValue(true);
-    mockDecodeNsec.mockReturnValue({ pubkey: ME, secretKey: SECRET });
-    mockLoadIdentities.mockResolvedValue(nsecIdentity());
-    mockUnwrapWrapNsec.mockReturnValue({
-      pubkey: PARTNER,
-      created_at: nowSec(),
-      kind: 14,
-      tags: [],
-      content: 'hi again',
-    });
-    mockPartnerFromRumor.mockReturnValue({ partnerPubkey: PARTNER, fromMe: false });
-    mockTextForRumor.mockReturnValue('hi again');
-    await runBackgroundDmWatch();
-    await capturedOnEvent()({ id: 'w-uncached', kind: 1059 });
-    await Promise.resolve();
-    expect(mockFireMessageNotification).toHaveBeenCalledTimes(1);
-  });
+  // Follow / replied / Web of Trust gating (including no contacts cache)
+  // lives in backgroundDmTier.test.ts, per tier.
 
   it('stays silent when the foreground live sub already claimed the wrap', async () => {
     mockUnwrapWrapNsec.mockReturnValue({

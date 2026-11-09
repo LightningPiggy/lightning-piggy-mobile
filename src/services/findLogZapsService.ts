@@ -1,7 +1,9 @@
 import { enabledAppRelays } from './appRelayPrefs';
 import type { Event as NostrEvent, Filter } from 'nostr-tools';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
-import { DEFAULT_RELAYS, pool } from './nostrService';
+import { DEFAULT_RELAYS, fetchProfile, pool } from './nostrService';
+import { resolveLightningAddress } from './lnurlService';
+import { validateZapReceipt } from './zapReceiptValidation';
 
 /**
  * Pull the satoshi amount out of a bolt11 invoice. Returns null when
@@ -31,13 +33,49 @@ export interface FindLogZap {
   sats: number;
 }
 
+// A finder's LNURL server key: the only key their zap receipts may be signed
+// with (NIP-57). Resolved once per finder; a miss (no lightning address, no
+// zap support, offline) is retried after a while, and never trusted.
+const PROVIDER_MISS_TTL_MS = 5 * 60 * 1000;
+const providerKeys = new Map<string, { key: Promise<string | null>; at: number }>();
+
+export function resolveZapProviderPubkey(pubkey: string): Promise<string | null> {
+  const hit = providerKeys.get(pubkey);
+  if (hit && Date.now() - hit.at < PROVIDER_MISS_TTL_MS) return hit.key;
+  const key = (async () => {
+    try {
+      // fetchProfile fully verifies the kind-0 before trusting its lud16.
+      const profile = await fetchProfile(pubkey, enabledAppRelays('default', DEFAULT_RELAYS));
+      if (!profile?.lud16) return null;
+      const params = await resolveLightningAddress(profile.lud16.trim().toLowerCase());
+      return params.allowsNostr && params.nostrPubkey ? params.nostrPubkey : null;
+    } catch {
+      return null;
+    }
+  })();
+  const entry = { key, at: Date.now() };
+  providerKeys.set(pubkey, entry);
+  // Keep a found key for the session; let a miss age out and be retried.
+  void key.then((k) => {
+    if (k) entry.at = Infinity;
+  });
+  return key;
+}
+
+/** Test seam: forget resolved finder keys. */
+export const __resetZapProviderKeys = (): void => providerKeys.clear();
+
 /**
  * Subscribe to NIP-57 zap receipts (kind 9735) referencing any of the
- * given kind-7516 find-log ids via their `#e` tag. The callback fires
- * once per matched receipt; the caller is expected to dedupe by
- * `receiptId` because the same receipt can arrive from multiple
- * relays. Empty `logIds` short-circuits — relays choke on empty
- * filter arrays.
+ * given kind-7516 find-logs (log id -> finder pubkey) via their `#e` tag.
+ * The callback fires once per matched, VALID receipt; the caller is
+ * expected to dedupe by `receiptId` because the same receipt can arrive
+ * from multiple relays. An empty map short-circuits — relays choke on
+ * empty filter arrays.
+ *
+ * A receipt only counts when it is issued to the log's finder, signed by
+ * the finder's LNURL server and carries a valid signed zap request
+ * (#1780) — otherwise anyone could publish receipts to inflate totals.
  *
  * `#e` is one of the NIP-01 base-indexed tags so this works on damus,
  * primal, relay.snort, and the rest of the mainstream set; unlike the
@@ -45,12 +83,14 @@ export interface FindLogZap {
  * need a fallback path.
  */
 export const subscribeFindLogZaps = (
-  logIds: string[],
+  logAuthors: ReadonlyMap<string, string>,
   onZap: (zap: FindLogZap) => void,
   relays: string[] = enabledAppRelays('default', DEFAULT_RELAYS),
+  resolveProvider: (pubkey: string) => Promise<string | null> = resolveZapProviderPubkey,
 ): (() => void) => {
-  if (logIds.length === 0) return () => {};
-  const filter: Filter = { kinds: [9735], '#e': logIds };
+  if (logAuthors.size === 0) return () => {};
+  let closed = false;
+  const filter: Filter = { kinds: [9735], '#e': [...logAuthors.keys()] };
   const sub = pool.subscribeMany(relays, filter, {
     onevent: (event: NostrEvent) => {
       const bolt11 = event.tags.find((t) => t[0] === 'bolt11')?.[1];
@@ -62,9 +102,18 @@ export const subscribeFindLogZaps = (
       // of the ids the caller asked about — otherwise a stray receipt
       // referencing an unrelated event could leak into the totals.
       const eTag = event.tags.find((t) => t[0] === 'e')?.[1];
-      if (!eTag || !logIds.includes(eTag)) return;
-      onZap({ receiptId: event.id, logId: eTag, sats });
+      const finder = eTag ? logAuthors.get(eTag) : undefined;
+      if (!eTag || !finder) return;
+      // Cheap check first: the receipt must be issued to the log's finder.
+      if (event.tags.find((t) => t[0] === 'p')?.[1] !== finder) return;
+      void resolveProvider(finder).then((provider) => {
+        if (closed || !provider || !validateZapReceipt(event, [provider])) return;
+        onZap({ receiptId: event.id, logId: eTag, sats });
+      });
     },
   });
-  return () => sub.close();
+  return () => {
+    closed = true;
+    sub.close();
+  };
 };

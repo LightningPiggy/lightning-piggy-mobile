@@ -1,4 +1,5 @@
 import { gateLiveDm, startFollowGateFallback } from './liveDmFollowGateDecision';
+import { fireAudienceNotification, mayAudienceNotify } from './liveDmAudienceNotify';
 import { loadRepliedPartners, hasRepliedTo } from '../services/dmRepliedPartners';
 import { loadKind4ReplayCursor } from './kind4RetryStore';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
@@ -493,21 +494,31 @@ export function startLiveDmSubscription(params: LiveDmSubscriptionParams): () =>
         text: plaintext,
         wireKind: 4,
       };
-      if (
-        gateLiveDm({
-          entry: k4InboxEntry,
-          kind: 4,
-          follows: followPubkeysRef.current,
-          hydrated: followHydratedRef.current,
-          cacheReady: followGate.ready(),
-          buffer: followGateBuffer,
-          fresh: isFreshArrival(ev.created_at),
-          bypassOwn: true,
-          replied: hasRepliedTo(viewerPubkey, k4InboxEntry.partnerPubkey),
-          onEvict: () => seen.delete(ev.id),
-        }) !== 'pass'
-      )
+      const k4Decision = gateLiveDm({
+        entry: k4InboxEntry,
+        kind: 4,
+        follows: followPubkeysRef.current,
+        hydrated: followHydratedRef.current,
+        cacheReady: followGate.ready(),
+        buffer: followGateBuffer,
+        fresh: isFreshArrival(ev.created_at),
+        bypassOwn: true,
+        replied: hasRepliedTo(viewerPubkey, k4InboxEntry.partnerPubkey),
+        onEvict: () => seen.delete(ev.id),
+      });
+      if (k4Decision !== 'pass') {
+        // Kept out of Messages, but the Web of Trust tier may still let it notify.
+        if (
+          k4Decision === 'drop' &&
+          mayAudienceNotify(viewerPubkey, k4InboxEntry, isFreshArrival(ev.created_at))
+        )
+          fireAudienceNotification(
+            viewerPubkey,
+            k4InboxEntry,
+            dmRowPreview(plaintext, 4, getAppFormatLocale()),
+          );
         return;
+      }
       // Persist the decrypted kind-4 to the encrypted store (#848 — the RAM
       // LRU dies with the session). The store is the ONLY at-rest home now
       // (#850; the plaintext inbox-preview blob is retired). Same writeChain

@@ -1,6 +1,6 @@
 import { logUnsupportedMarmotKind } from '../utils/unsupportedMarmotKind';
 import { getAppFormatLocale } from '../utils/appFormatLocale';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type React from 'react';
 
 import {
@@ -18,6 +18,12 @@ import { EditLedger, isNewerEdit, parseMarmotEdit, type MarmotEdit } from '../se
 import { MARMOT_NON_MESSAGE_KINDS, marmotRumorToDmRow } from '../services/marmotInbox';
 import { subscribeMarmotSession, type MarmotMessageEvent } from '../services/marmotSession';
 import { fireMessageNotification } from '../services/notificationService';
+import { hasRepliedTo, loadRepliedPartners } from '../services/dmRepliedPartners';
+import {
+  audienceAdmits,
+  liveNotificationAudience,
+  type NotificationAudience,
+} from '../services/notificationAudience';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
 import { dmThreadId } from '../utils/dmProtocol';
 import { dmRowPreview } from '../utils/dmRowPreview';
@@ -25,13 +31,21 @@ import { notifyDmMessage } from './nostrEventBus';
 
 const FLUSH_MS = 150;
 
-/** Pure: may a Marmot DM from `peer` alert? Only a followed peer — unless the
- * follow list isn't known yet (empty / absent), which fails open. */
-export function mayNotifyFrom(peer: string, follows: ReadonlySet<string> | undefined): boolean {
-  if (!follows || follows.size === 0) return true;
-  return follows.has(peer.toLowerCase());
+/** Pure: may a Marmot DM from `peer` alert? The same rule as the NIP-17 path:
+ * a followed peer, one we've replied to, or one the CHOSEN Web of Trust tier
+ * admits (an unchosen tier is Friends). No follows known yet admits nobody
+ * extra: an unknown follow list must not let strangers notify (#1764). */
+export function mayNotifyFrom(
+  peer: string,
+  follows: ReadonlySet<string> | undefined,
+  replied: boolean,
+  audience?: NotificationAudience | null,
+): boolean {
+  return !!follows?.has(peer.toLowerCase()) || replied || audienceAdmits(audience, peer);
 }
 const NOTIFY_SKEW_SEC = 120;
+const FOLLOW_WAIT_MS = 10_000;
+const MAX_HELD_ALERTS = 50;
 
 /**
  * Route decrypted Marmot DM-group messages into the encrypted DM store and the
@@ -45,16 +59,36 @@ export function useMarmotDmInbound(
   setDmInbox: React.Dispatch<React.SetStateAction<DmInboxEntry[]>>,
   /** The follow list: alerts only for peers the Messages list will show. */
   followPubkeys?: ReadonlySet<string>,
+  /** False while the follow list is still loading: alerts wait for it. */
+  followHydrated = true,
 ): void {
   // Read per message via a ref, so a contacts update doesn't re-arm the sub.
   const followsRef = useRef(followPubkeys);
   followsRef.current = followPubkeys;
+  // Alert decisions held until the follow list is known, so a friend's message
+  // at cold start isn't taken for a stranger's. Bounded, and released after
+  // FOLLOW_WAIT_MS regardless (offline: decide with what we have).
+  const hydratedRef = useRef(followHydrated);
+  hydratedRef.current = followHydrated;
+  const heldRef = useRef<{ decisions: (() => void)[]; timer?: ReturnType<typeof setTimeout> }>({
+    decisions: [],
+  });
+  const releaseHeld = useCallback(() => {
+    const held = heldRef.current;
+    if (held.timer) clearTimeout(held.timer);
+    held.timer = undefined;
+    for (const decide of held.decisions.splice(0)) decide();
+  }, []);
+  useEffect(() => {
+    if (followHydrated) releaseHeld();
+  }, [followHydrated, releaseHeld]);
   useEffect(() => {
     if (!pubkey) return;
     // Builds before the filter stored push-token / reaction events as rows.
     void deleteMarmotRowsOfKinds(pubkey, MARMOT_NON_MESSAGE_KINDS).catch(() => undefined);
     const openedAtSec = Math.floor(Date.now() / 1000);
     let disposed = false;
+    const held = heldRef.current;
     let rows: DmMessageRow[] = [];
     const groupsByMessage = new WeakMap<DmMessageRow, string>();
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -275,11 +309,21 @@ export function useMarmotDmInbound(
     };
 
     const notifyMessage = (row: DmMessageRow, groupId: string) => {
-      if (!row.fromMe && row.createdAt >= openedAtSec - NOTIFY_SKEW_SEC) {
-        // Same follow gate as the NIP-17 live path: the Messages list hides a
-        // stranger's thread, so an alert for it would show nothing (a phantom).
-        // Follows not loaded yet (empty) → fail open rather than lose alerts.
-        if (!mayNotifyFrom(row.conversation, followsRef.current)) return;
+      if (row.fromMe || row.createdAt < openedAtSec - NOTIFY_SKEW_SEC) return;
+      // Same follow + replied + tier gate as the NIP-17 live path. Wait for
+      // who we've replied to (once per account) so a cold start can't take a
+      // partner for a stranger.
+      const whenFollowsKnown = (decide: () => void) => {
+        if (hydratedRef.current) return decide();
+        if (held.decisions.length >= MAX_HELD_ALERTS) held.decisions.shift();
+        held.decisions.push(decide);
+        held.timer ??= setTimeout(releaseHeld, FOLLOW_WAIT_MS);
+      };
+      const decide = () => {
+        if (disposed) return;
+        const replied = hasRepliedTo(pubkey, row.conversation);
+        const audience = liveNotificationAudience(pubkey);
+        if (!mayNotifyFrom(row.conversation, followsRef.current, replied, audience)) return;
         void fireMessageNotification({
           kind: 'dm',
           threadId: dmThreadId(row.conversation, 'marmot'),
@@ -298,7 +342,8 @@ export function useMarmotDmInbound(
           // Which push placeholders this message stands for (marmotPushWake).
           sentAt: row.createdAt * 1000,
         });
-      }
+      };
+      void loadRepliedPartners(pubkey).then(() => whenFollowsKnown(decide));
     };
 
     const unsubscribeSession = subscribeMarmotSession((session) => {
@@ -308,11 +353,14 @@ export function useMarmotDmInbound(
     });
     return () => {
       disposed = true;
+      // Held alert decisions belong to this account's session: drop them.
+      held.decisions.length = 0;
+      releaseHeld();
       unsubscribeSession();
       unsubscribeMessages?.();
       if (timer) clearTimeout(timer);
       flush();
       deletions.dispose();
     };
-  }, [pubkey, setDmInbox]);
+  }, [pubkey, setDmInbox, releaseHeld]);
 }

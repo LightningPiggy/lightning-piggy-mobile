@@ -42,9 +42,10 @@ export function buildNsecDecryptor(
  * The viewer's followed pubkeys from the per-account contacts cache, for the
  * background follow gate (strangers must not be able to spam OS notifications
  * by gift-wrapping to a pubkey). `null` means the cache has never been written
- * (fresh install / pre-first-sync): callers then FAIL OPEN, because "no cache
- * yet" is indistinguishable from "follows not hydrated" and silently eating
- * real messages is worse. An empty cached array gates strictly.
+ * (fresh install / pre-first-sync) or can't be read: the watch then FAILS
+ * CLOSED — only people we've replied to, or anyone under an explicitly chosen
+ * All, may alert (#1764); nothing is stored. An empty cached array gates
+ * strictly too.
  */
 export async function loadFollowedPubkeys(pubkey: string): Promise<Set<string> | null> {
   try {
