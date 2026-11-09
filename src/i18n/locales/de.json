@@ -787,6 +787,7 @@
     "couldNotResolveLnurl": "LNURL konnte nicht aufgelöst werden: {{message}}",
     "notAWithdrawLink": "Das ist kein Auszahlungslink",
     "couldNotSavePiggy": "Piggy konnte nicht gespeichert werden",
+    "closedOnAccountSwitch": "„Ein Piglet verstecken“ wurde geschlossen, weil du das Konto gewechselt hast. Es wurde nichts gespeichert.",
     "piggyUpdated": "Piggy aktualisiert 🐷",
     "piggyHidden": "Piggy versteckt 🐷",
     "savedLocallyDropPin": "Lokal gespeichert – setze einen Pin zum Veröffentlichen",
@@ -3049,6 +3050,10 @@
     "relaysUnreachable": "Kein Relay erreichbar, daher wurde nichts gesendet. Prüfe deine Verbindung (mobile Daten, WLAN oder VPN) und versuche es erneut.",
     "groupStateError": "Fehler im sicheren Chat, daher wurde nichts gesendet. Wenn das wieder passiert, nutze „Sicheren Chat reparieren“ in den Chat-Infos.",
     "sendFailed": "Die Nachricht konnte nicht gesendet werden. Bitte versuche es erneut."
+  },
+  "piggyStorage": {
+    "signedOutNotSaved": "Dieses Konto wurde abgemeldet, daher wurde das Piglet nicht auf diesem Handy gespeichert.",
+    "signInToSave": "Melde dich an, um Piglets auf diesem Handy zu speichern."
   },
   "signOutPrompt": {
     "walletsRemoved": "Alle mit diesem Konto verbundenen Wallets, einschließlich hier gespeicherter Wiederherstellungsphrasen, werden ebenfalls von diesem Handy entfernt. Sichere ihre Wiederherstellungsphrasen und Verbindungsdaten separat, bevor du dich abmeldest.",

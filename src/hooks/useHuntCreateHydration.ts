@@ -81,7 +81,7 @@ export function useHuntCreateHydration({
 }: HydrationOptions) {
   // A wizard holds one account's pasted LNURL bearer. If the account switches
   // while it's open, saving would store it under (and publish as) the next
-  // account, so close it (#1781). Edit mode closes itself on the reload below,
+  // account, so close it and say why (#1781). Edit mode closes itself on the reload below,
   // which can't find the record under the new account.
   const wizardOwner = useRef(pubkey);
   const closedOnSwitch = useRef(false);
@@ -90,6 +90,7 @@ export function useHuntCreateHydration({
     if (!wizardOwner.current) wizardOwner.current = pubkey;
     else if (wizardOwner.current !== pubkey) {
       closedOnSwitch.current = true;
+      Toast.show({ type: 'info', text1: t('huntCreateScreen.closedOnAccountSwitch') });
       navigation.goBack();
     }
   }, [pubkey, editingId, navigation]);

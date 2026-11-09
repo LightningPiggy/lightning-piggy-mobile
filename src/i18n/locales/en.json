@@ -787,6 +787,7 @@
     "couldNotResolveLnurl": "Could not resolve LNURL: {{message}}",
     "notAWithdrawLink": "That's not a withdraw link",
     "couldNotSavePiggy": "Could not save Piggy",
+    "closedOnAccountSwitch": "Hide a Piglet closed because you switched accounts. Nothing was saved.",
     "piggyUpdated": "Piggy updated 🐷",
     "piggyHidden": "Piggy hidden 🐷",
     "savedLocallyDropPin": "Saved locally — drop a pin to publish",
@@ -3049,6 +3050,10 @@
     "relaysUnreachable": "Couldn't reach any relay, so nothing was sent. Check your connection (mobile data, Wi-Fi or VPN) and try again.",
     "groupStateError": "Secure chat error, so nothing was sent. If this keeps happening, use Repair secure chat in the chat info.",
     "sendFailed": "Could not send the message. Please try again."
+  },
+  "piggyStorage": {
+    "signedOutNotSaved": "This account was signed out, so the Piglet wasn't saved on this phone.",
+    "signInToSave": "Sign in to save Piglets on this phone."
   },
   "signOutPrompt": {
     "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",

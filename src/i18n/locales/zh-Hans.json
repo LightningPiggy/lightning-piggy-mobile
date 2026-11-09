@@ -787,6 +787,7 @@
     "couldNotResolveLnurl": "无法解析LNURL：{{message}}",
     "notAWithdrawLink": "这不是提款链接",
     "couldNotSavePiggy": "无法保存Piggy",
+    "closedOnAccountSwitch": "由于你切换了账户，「藏一个Piglet」已关闭。未保存任何内容。",
     "piggyUpdated": "Piggy已更新 🐷",
     "piggyHidden": "Piggy已隐藏 🐷",
     "savedLocallyDropPin": "已保存到本地——放置定位针即可发布",
@@ -3049,6 +3050,10 @@
     "relaysUnreachable": "无法连接任何中继，因此没有发送任何内容。请检查你的网络连接（移动数据、Wi-Fi 或 VPN）后重试。",
     "groupStateError": "安全聊天出错，因此没有发送任何内容。如果反复出现，请在聊天信息中使用“修复安全聊天”。",
     "sendFailed": "无法发送消息。请重试。"
+  },
+  "piggyStorage": {
+    "signedOutNotSaved": "此账户已退出登录，因此该 Piglet 未保存到这部手机上。",
+    "signInToSave": "登录后即可在这部手机上保存 Piglet。"
   },
   "signOutPrompt": {
     "walletsRemoved": "与此账户相连的所有钱包，包括保存在这里的助记词，也会从这部手机上移除。退出登录前，请另外保存好它们的助记词和连接信息。",

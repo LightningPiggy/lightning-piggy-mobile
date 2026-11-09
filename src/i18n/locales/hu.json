@@ -787,6 +787,7 @@
     "couldNotResolveLnurl": "Az LNURL-t nem sikerült feloldani: {{message}}",
     "notAWithdrawLink": "Ez nem kifizetési link",
     "couldNotSavePiggy": "A Piggyt nem sikerült menteni",
+    "closedOnAccountSwitch": "A Piglet elrejtése bezárult, mert fiókot váltottál. Semmi sem lett mentve.",
     "piggyUpdated": "Piggy frissítve 🐷",
     "piggyHidden": "Piggy elrejtve 🐷",
     "savedLocallyDropPin": "Helyben mentve – tűzz ki egy jelölőt a közzétételhez",
@@ -3049,6 +3050,10 @@
     "relaysUnreachable": "Egyik relay sem érhető el, ezért semmi sem ment el. Ellenőrizd a kapcsolatot (mobiladat, Wi-Fi vagy VPN), és próbáld újra.",
     "groupStateError": "Hiba a biztonságos csevegésben, ezért semmi sem ment el. Ha ismétlődik, használd a „Biztonságos csevegés javítása” lehetőséget a csevegés adatainál.",
     "sendFailed": "Nem sikerült elküldeni az üzenetet. Próbáld újra."
+  },
+  "piggyStorage": {
+    "signedOutNotSaved": "Ez a fiók kijelentkezett, ezért a Piglet nem lett mentve ezen a telefonon.",
+    "signInToSave": "Jelentkezz be, hogy Pigleteket ments ezen a telefonon."
   },
   "signOutPrompt": {
     "walletsRemoved": "A fiókhoz csatlakoztatott pénztárcák, az itt tárolt helyreállító kifejezésekkel együtt, szintén el lesznek távolítva erről a telefonról. Kijelentkezés előtt külön mentsd el a helyreállító kifejezéseiket és a kapcsolati adataikat.",

@@ -1,11 +1,13 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { loadIdentities } from './identitiesStore';
 import {
   __resetLegacyPiggyClaimForTests,
   claimLegacyPiggies,
   deletePiggiesForOwner,
   findPiggy,
   hasStoredPiggies,
+  PiggyOwnerError,
   loadPiggies,
   piggyStorageKey,
   removePiggy,
@@ -25,6 +27,14 @@ jest.mock('expo-secure-store', () => ({
     mockStore.delete(key);
   }),
 }));
+
+jest.mock('./identitiesStore', () => ({ loadIdentities: jest.fn() }));
+const registry = jest.mocked(loadIdentities);
+const registryOf = (...pubkeys: string[]) =>
+  registry.mockResolvedValue({
+    identities: pubkeys.map((pubkey) => ({ pubkey, signerType: 'amber', lastUsedAt: 1 })),
+    activePubkey: pubkeys[0] ?? null,
+  });
 
 const A = 'a'.repeat(64);
 const B = 'b'.repeat(64);
@@ -47,6 +57,7 @@ beforeEach(() => {
   __resetLegacyPiggyClaimForTests();
   jest.mocked(SecureStore.getItemAsync).mockClear();
   Platform.OS = 'android';
+  registryOf(A, B);
 });
 afterAll(() => {
   Platform.OS = originalOS;
@@ -70,7 +81,9 @@ describe('per-account Piglet storage (#1781)', () => {
   it('reads and writes nothing without a signed-in account', async () => {
     await savePiggy(A, piggy('a1'));
     expect(await loadPiggies(null)).toEqual([]);
-    await expect(savePiggy(null, piggy('x'))).rejects.toThrow();
+    const noAccount = savePiggy(null, piggy('x'));
+    await expect(noAccount).rejects.toBeInstanceOf(PiggyOwnerError);
+    await expect(noAccount).rejects.toThrow('Sign in to save Piglets on this phone.');
     expect(await removePiggy(undefined, 'a1')).toEqual([]);
     expect(ids(await loadPiggies(A))).toEqual(['a1']);
   });
@@ -86,7 +99,11 @@ describe('per-account Piglet storage (#1781)', () => {
   it('a save that resolves after the sign-out wipe does not recreate the record', async () => {
     const save = savePiggy(A, piggy('late'));
     const wipe = deletePiggiesForOwner(A);
-    await expect(save).rejects.toThrow();
+    // A translated message, shown as is by the save / republish toasts.
+    await expect(save).rejects.toThrow(
+      "This account was signed out, so the Piglet wasn't saved on this phone.",
+    );
+    await expect(save).rejects.toMatchObject({ reason: 'signed-out' });
     await wipe;
     expect(mockStore.has(piggyStorageKey(A))).toBe(false);
     // Signing back in makes saves work again.
@@ -223,6 +240,57 @@ describe('legacy device-wide blob migration (#1781)', () => {
     expect(ids(await loadPiggies(A))).toEqual(['old1']);
     expect(mockStore.has(LEGACY)).toBe(false);
     expect(await loadPiggies(B)).toEqual([]);
+  });
+
+  const failOwnCopy = (owner: string) => {
+    const set = jest.mocked(SecureStore.setItemAsync);
+    const realSet = set.getMockImplementation()!;
+    set.mockImplementation(async (key, value) => {
+      if (key === piggyStorageKey(owner)) throw new Error('write failed');
+      return realSet(key, value);
+    });
+    return () => set.mockImplementation(realSet);
+  };
+
+  it('warns at sign-out about legacy Piglets the account had started claiming', async () => {
+    mockStore.set(LEGACY, JSON.stringify([piggy('old1')]));
+    const restore = failOwnCopy(A);
+    await claimLegacyPiggies(A);
+    restore();
+    expect(mockStore.get(LEGACY_MARKER)).toBe(`pending:${A}`);
+    expect(await hasStoredPiggies(A)).toBe(true);
+    expect(await hasStoredPiggies(B)).toBe(false);
+  });
+
+  it('warns at sign-out while the cold-start claim is still copying', async () => {
+    mockStore.set(LEGACY, JSON.stringify([piggy('old1')]));
+    void claimLegacyPiggies(A);
+    expect(await hasStoredPiggies(A)).toBe(true);
+  });
+
+  it("a failing sign-out never strands A's legacy Piglets or hands them to B", async () => {
+    mockStore.set(LEGACY, JSON.stringify([piggy('old1')]));
+    const restore = failOwnCopy(A);
+    await claimLegacyPiggies(A);
+    restore();
+    // A signs out; reading the claim marker throws, so the wipe can't clean up.
+    jest.mocked(SecureStore.getItemAsync).mockRejectedValueOnce(new Error('keystore busy'));
+    await expect(deletePiggiesForOwner(A)).rejects.toThrow();
+    expect(mockStore.get(LEGACY_MARKER)).toBe(`pending:${A}`);
+    expect(mockStore.has(piggyStorageKey(A))).toBe(false);
+    // B is next: the departed claimant's records are deleted, not handed on.
+    expect(await loadPiggies(B)).toEqual([]);
+    expect(mockStore.has(LEGACY)).toBe(false);
+    expect(mockStore.has(LEGACY_MARKER)).toBe(false);
+  });
+
+  it('after a restart, a claimant gone from the registry has its legacy Piglets deleted', async () => {
+    mockStore.set(LEGACY, JSON.stringify([piggy('old1')]));
+    mockStore.set(LEGACY_MARKER, `pending:${A}`);
+    registryOf(B);
+    expect(await loadPiggies(B)).toEqual([]);
+    expect(mockStore.has(LEGACY)).toBe(false);
+    expect(mockStore.has(LEGACY_MARKER)).toBe(false);
   });
 
   it('a sign-out during the claim still leaves nothing behind', async () => {

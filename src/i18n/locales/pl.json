@@ -793,6 +793,7 @@
     "couldNotResolveLnurl": "Nie udało się rozpoznać LNURL: {{message}}",
     "notAWithdrawLink": "To nie jest link do wypłaty",
     "couldNotSavePiggy": "Nie udało się zapisać Piggy",
+    "closedOnAccountSwitch": "Okno „Ukryj Piglet” zamknięto po przełączeniu konta. Nic nie zostało zapisane.",
     "piggyUpdated": "Piggy zaktualizowany 🐷",
     "piggyHidden": "Piggy ukryty 🐷",
     "savedLocallyDropPin": "Zapisano lokalnie — dodaj pinezkę, aby opublikować",
@@ -3079,6 +3080,10 @@
     "relaysUnreachable": "Nie udało się połączyć z żadnym przekaźnikiem, więc nic nie wysłano. Sprawdź połączenie (dane komórkowe, Wi-Fi lub VPN) i spróbuj ponownie.",
     "groupStateError": "Błąd bezpiecznego czatu, więc nic nie wysłano. Jeśli to się powtarza, użyj „Napraw bezpieczny czat” w informacjach o czacie.",
     "sendFailed": "Nie udało się wysłać wiadomości. Spróbuj ponownie."
+  },
+  "piggyStorage": {
+    "signedOutNotSaved": "To konto zostało wylogowane, więc Piglet nie został zapisany na tym telefonie.",
+    "signInToSave": "Zaloguj się, aby zapisywać Piglety na tym telefonie."
   },
   "signOutPrompt": {
     "walletsRemoved": "Wszystkie portfele połączone z tym kontem, w tym zapisane tu frazy odzyskiwania, również zostaną usunięte z tego telefonu. Przed wylogowaniem zapisz osobno ich frazy odzyskiwania i dane połączenia.",

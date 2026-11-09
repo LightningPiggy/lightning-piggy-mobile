@@ -205,6 +205,10 @@ it("closes a create wizard holding one account's LNURL when the account switches
   expect(navigation.goBack).not.toHaveBeenCalled();
   await act(async () => h.rerender({ editingId: null, fallbackCache: null, pubkey: 'other' }));
   expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  expect(Toast.show).toHaveBeenCalledWith({
+    type: 'info',
+    text1: 'Hide a Piglet closed because you switched accounts. Nothing was saved.',
+  });
   await act(async () => h.rerender({ editingId: null, fallbackCache: null, pubkey: 'third' }));
   expect(navigation.goBack).toHaveBeenCalledTimes(1);
 });

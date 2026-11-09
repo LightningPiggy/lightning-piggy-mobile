@@ -1,5 +1,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
+import { t } from '../i18n';
+import { loadIdentities } from './identitiesStore';
 import { perAccountKey } from './perAccountStorage';
 
 /**
@@ -219,10 +221,19 @@ const readOwnPiggies = async (owner: string): Promise<HiddenPiggy[]> => {
 const retiredOwners = new Set<string>();
 const pendingWrites = new Set<Promise<unknown>>();
 
-const persist = async (owner: string, next: HiddenPiggy[]): Promise<void> => {
-  if (retiredOwners.has(owner.toLowerCase())) {
-    throw new Error('Signed out — Piglet not saved.');
+/** A save refused because no account (or a signed-out one) owns it. Its
+ * message is already translated, so callers can show it as is. */
+export class PiggyOwnerError extends Error {
+  constructor(readonly reason: 'signed-out' | 'no-account') {
+    super(
+      t(reason === 'signed-out' ? 'piggyStorage.signedOutNotSaved' : 'piggyStorage.signInToSave'),
+    );
+    this.name = 'PiggyOwnerError';
   }
+}
+
+const persist = async (owner: string, next: HiddenPiggy[]): Promise<void> => {
+  if (retiredOwners.has(owner.toLowerCase())) throw new PiggyOwnerError('signed-out');
   const write = SecureStore.setItemAsync(
     piggyStorageKey(owner),
     JSON.stringify(next),
@@ -252,6 +263,15 @@ const deleteLegacyBlobs = async (): Promise<void> => {
   await SecureStore.deleteItemAsync(LEGACY_CLAIM_MARKER_KEY);
 };
 
+/** The account that left a `pending:` marker is signed out or gone from this
+ * phone. (NIP-46 sessions aren't in the registry, but one that isn't active
+ * can't come back without signing in again, so it counts as gone too.) */
+const claimantLeft = async (claimant: string): Promise<boolean> => {
+  if (retiredOwners.has(claimant)) return true;
+  const { identities } = await loadIdentities();
+  return !identities.some((i) => i.pubkey.toLowerCase() === claimant);
+};
+
 /** Resolves true once the legacy blobs are gone (claimed by someone, or absent). */
 const runLegacyClaim = async (owner: string): Promise<boolean> => {
   const me = owner.toLowerCase();
@@ -272,9 +292,17 @@ const runLegacyClaim = async (owner: string): Promise<boolean> => {
     await deleteLegacyBlobs();
     return true;
   }
-  // Another account started the claim and may not have its copy yet: leave
-  // the blobs for that account to finish, and give this one nothing.
-  if (marker && marker !== `pending:${me}`) return false;
+  if (marker && marker !== `pending:${me}`) {
+    // Another account started the claim and may not have its copy yet. If it
+    // has since left (signed out, or gone from this phone), its sign-out was
+    // meant to wipe these records: delete them, never hand them on. Otherwise
+    // leave them for that account to finish, and give this one nothing.
+    if (await claimantLeft(marker.slice('pending:'.length))) {
+      await deleteLegacyBlobs();
+      return true;
+    }
+    return false;
+  }
   await SecureStore.setItemAsync(LEGACY_CLAIM_MARKER_KEY, `pending:${me}`, SECURE_OPTIONS);
   const legacy = [...parsePiggies(raw), ...parsePiggies(rawIos)];
   if (legacy.length > 0) {
@@ -336,7 +364,7 @@ export const savePiggy = async (
   owner: string | null | undefined,
   piggy: HiddenPiggy,
 ): Promise<HiddenPiggy[]> => {
-  if (!owner) throw new Error('No signed-in account — Piglet not saved.');
+  if (!owner) throw new PiggyOwnerError('no-account');
   const list = await loadPiggies(owner);
   // Replace by id if a record with the same id already exists, otherwise
   // prepend so the newest sits at the top of the user's list.
@@ -365,17 +393,37 @@ export const deletePiggiesForOwner = async (owner: string): Promise<void> => {
   retiredOwners.add(me);
   await legacyClaim;
   await Promise.allSettled([...pendingWrites]);
-  await SecureStore.deleteItemAsync(piggyStorageKey(owner));
-  // Legacy blobs this account had started claiming are its records too.
-  const marker = await SecureStore.getItemAsync(LEGACY_CLAIM_MARKER_KEY, SECURE_OPTIONS);
-  if (marker === `pending:${me}` || marker === `done:${me}`) await deleteLegacyBlobs();
+  try {
+    // Legacy blobs this account had started claiming are its records too.
+    // Handled first so a failing own-key delete can't strand them; if this
+    // step fails instead, the marker names a retired account and the next
+    // claimant deletes them (see claimantLeft).
+    const marker = await SecureStore.getItemAsync(LEGACY_CLAIM_MARKER_KEY, SECURE_OPTIONS);
+    if (marker === `pending:${me}` || marker === `done:${me}`) await deleteLegacyBlobs();
+  } finally {
+    await SecureStore.deleteItemAsync(piggyStorageKey(owner));
+  }
 };
 
-/** True when `owner` has Piglets stored here (or the read failed: warn anyway). */
+/**
+ * True when signing `owner` out would delete Piglets: its own records, or
+ * legacy ones it has started claiming (which its sign-out deletes too). A
+ * failed read warns anyway. Never starts a claim: `owner` may not be active.
+ */
 export const hasStoredPiggies = async (owner: string): Promise<boolean> => {
   try {
+    await legacyClaim;
     const raw = await SecureStore.getItemAsync(piggyStorageKey(owner), SECURE_OPTIONS);
-    return parsePiggies(raw).length > 0;
+    if (parsePiggies(raw).length > 0) return true;
+    const marker = await SecureStore.getItemAsync(LEGACY_CLAIM_MARKER_KEY, SECURE_OPTIONS);
+    const me = owner.toLowerCase();
+    if (marker !== `pending:${me}` && marker !== `done:${me}`) return false;
+    const legacy = await SecureStore.getItemAsync(LEGACY_STORAGE_KEY, SECURE_OPTIONS);
+    const legacyIos =
+      Platform.OS === 'ios'
+        ? await SecureStore.getItemAsync(LEGACY_STORAGE_KEY_IOS, SECURE_OPTIONS).catch(() => null)
+        : null;
+    return parsePiggies(legacy).length + parsePiggies(legacyIos).length > 0;
   } catch {
     return true;
   }
