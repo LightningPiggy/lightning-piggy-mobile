@@ -295,7 +295,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // and then notify the in-memory state so the UI picks it up on
         // the next render without waiting for loadWotSettings to re-run.
         await saveWotSettings({ wotTier: next }, pubkey);
-        setWotTier(next);
+        // Derived, not chosen: it must not widen notifications (#1764).
+        setWotTier(next, { explicit: false });
         await AsyncStorage.setItem(WOT_MIGRATION_DONE_KEY, 'true');
       } catch {
         // Best-effort; failures leave the marker unset so a later mount
@@ -346,7 +347,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // false → 'all'. The hard-lock guard in the predicate above means
       // a non-secret-mode user who flips this to false still sees the
       // 'friends' behaviour at the visibility layer.
-      setWotTier(next ? 'friends' : 'all');
+      // Not an explicit tier pick (#1764): the chip widens the list, but
+      // says nothing about alerts, so notifications keep following the last
+      // tier picked in the Web of Trust sheet (Friends if none).
+      setWotTier(next ? 'friends' : 'all', { explicit: false });
     },
     [setWotTier],
   );

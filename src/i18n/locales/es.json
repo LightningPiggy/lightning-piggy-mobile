@@ -2275,7 +2275,7 @@
     "friendsTitle": "Amigos",
     "friendsSubtitle": "Solo las personas que sigues.",
     "fofTitle": "Amigos de amigos",
-    "fofSubtitle": "Las personas que sigues y las personas a las que más siguen. La red se crea cuando eliges esta opción — la primera vez tarda un momento.",
+    "fofSubtitle": "Las personas que sigues y las personas a las que más siguen. Sus mensajes también pueden avisarte. La red se crea cuando eliges esta opción — la primera vez tarda un momento.",
     "fofProgressStarting": "Comprobando a quién siguen tus amigos…",
     "fofProgress": "Comprobando a quién siguen tus amigos… {{done}} de {{total}}",
     "fofCancel": "Cancelar",
@@ -2286,7 +2286,7 @@
       "other": "{{count}} amigos de amigos en tu red de confianza"
     },
     "allTitle": "Todos",
-    "allSubtitle": "Todo de cada relé. Es lo predeterminado hasta que tu red de confianza esté lista: cambia a Amigos para restringir.",
+    "allSubtitle": "Todo de cada relé. Si lo eliges, también te avisarán los mensajes de cualquier persona. Es lo predeterminado hasta que tu red de confianza esté lista: cambia a Amigos para restringir.",
     "gateHint": "Amigos de amigos incluye a las {{max}} personas a las que más siguen tus amigos y actualiza la lista una vez al día. Amigos es el feed más seguro; Todos es el más amplio.",
     "done": "Listo"
   },
@@ -3291,7 +3291,7 @@
   "messageSettingsScreen": {
     "title": "Mensajes",
     "trustTitle": "A quién ves",
-    "trustHint": "Este filtro de Red de Confianza también decide lo que ves en el Mapa, en Eventos y en Grupos.",
+    "trustHint": "Este filtro de Red de Confianza también decide lo que ves en el Mapa, en Eventos y en Grupos. Cuando eliges un filtro, también decide qué mensajes te avisan; hasta entonces, solo te avisan las personas que sigues.",
     "trustRowA11y": "A quién ves: {{tier}}"
   },
   "hermesProfiler": {

@@ -191,6 +191,9 @@ test.each([
 });
 
 test('splits live filters by serialized UTF-8 size', () => {
+  // A fixed clock: `since` is stamped from Date.now() inside the merge, and a
+  // second boundary crossed before the assertion re-read it would fail (#1815).
+  jest.useFakeTimers({ now: 1_000_000 });
   const filters = mergedGroupFilters(
     Array.from({ length: 40 }, (_, i) => ({
       kinds: [445],
@@ -204,7 +207,8 @@ test('splits live filters by serialized UTF-8 size', () => {
   expect(chunks.every((chunk) => wireBytes(chunk) <= 64 * 1024)).toBe(true);
   expect(filters.flatMap((f) => f['#h'])).toHaveLength(40);
   expect(filters.every((f) => f.limit === 100)).toBe(true);
-  expect(filters.every((f) => f.since === Math.floor(Date.now() / 1000) - 60)).toBe(true);
+  expect(filters.every((f) => f.since === 940)).toBe(true);
+  jest.useRealTimers();
 });
 
 test('oversized routing sets rotate REQs on one group slot alongside a limit-4 inbox', () => {
