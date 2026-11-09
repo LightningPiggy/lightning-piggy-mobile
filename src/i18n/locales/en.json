@@ -772,6 +772,10 @@
     "addWalletText": "+ Add a Wallet",
     "updatingTransactions": "Updating transactions"
   },
+  "findLogHeader": {
+    "title": "Find log ({{total}})",
+    "titleCapped": "Find log ({{total}}+)"
+  },
   "huntCreateScreen": {
     "ok": "OK",
     "cancel": "Cancel",

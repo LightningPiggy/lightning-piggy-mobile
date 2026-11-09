@@ -772,6 +772,10 @@
     "addWalletText": "+ वॉलेट जोडा",
     "updatingTransactions": "व्यवहार अपडेट करत आहे"
   },
+  "findLogHeader": {
+    "title": "शोध नोंदी ({{total}})",
+    "titleCapped": "शोध नोंदी ({{total}}+)"
+  },
   "huntCreateScreen": {
     "ok": "ठीक आहे",
     "cancel": "रद्द करा",

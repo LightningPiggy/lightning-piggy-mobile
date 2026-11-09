@@ -772,6 +772,10 @@
     "addWalletText": "+ Pénztárca hozzáadása",
     "updatingTransactions": "Tranzakciók frissítése"
   },
+  "findLogHeader": {
+    "title": "Találati napló ({{total}})",
+    "titleCapped": "Találati napló ({{total}}+)"
+  },
   "huntCreateScreen": {
     "ok": "OK",
     "cancel": "Mégse",

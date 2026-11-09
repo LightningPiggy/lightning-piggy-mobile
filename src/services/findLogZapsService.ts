@@ -48,6 +48,11 @@ export interface FindLogZap {
  * history can't stream all of it into the client to be decoded one bolt11
  * at a time (#1789). No `since`: the row totals are all-time sums, so a time
  * window would under-count them.
+ *
+ * Known limitation: this is ONE limit shared by every log id in the filter,
+ * and relays clamp it to their own `max_limit` (damus and nos.lol advertise
+ * 500). On a Piglet whose recent logs carry hundreds of zaps, older logs'
+ * receipts can fall outside the window and show 0 sats. Not paged here.
  */
 export const FIND_LOG_ZAP_LIMIT = 1000;
 

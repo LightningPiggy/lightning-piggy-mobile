@@ -5,10 +5,14 @@
 // Hoist mocks before imports (jest.mock is hoisted automatically by babel-jest;
 // the vars are captured via the factory closures).
 const mockSubscribeMany = jest.fn();
+const mockSubscribeMap = jest.fn();
 const mockClose = jest.fn();
 
 jest.mock('./nostrService', () => ({
-  pool: { subscribeMany: (...a: unknown[]) => mockSubscribeMany(...a) },
+  pool: {
+    subscribeMany: (...a: unknown[]) => mockSubscribeMany(...a),
+    subscribeMap: (...a: unknown[]) => mockSubscribeMap(...a),
+  },
   DEFAULT_RELAYS: ['wss://default.example'],
   publishSignedEvent: jest.fn(),
 }));
@@ -31,6 +35,7 @@ jest.mock('./geocacheRelays', () => ({
 
 // eslint-disable-next-line import/first
 import {
+  fetchFoundLogsByAuthors,
   subscribeComments,
   subscribeFoundLogs,
   subscribeFoundLogsByAuthors,
@@ -43,6 +48,7 @@ import {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSubscribeMany.mockReturnValue({ close: mockClose });
+  mockSubscribeMap.mockReturnValue({ close: mockClose });
 });
 
 // ---------------------------------------------------------------------------
@@ -161,9 +167,6 @@ describe('subscribeRecentFoundLogs', () => {
 // ---------------------------------------------------------------------------
 
 describe('found-log and comment subscription bounds', () => {
-  const pubkeys = (n: number): string[] =>
-    Array.from({ length: n }, (_, i) => i.toString(16).padStart(64, '0'));
-
   it('caps a cache’s found-log backfill at 500 without a time window', () => {
     subscribeFoundLogs('37516:abc:d', jest.fn());
     const filter = mockSubscribeMany.mock.calls[0][1];
@@ -187,37 +190,83 @@ describe('found-log and comment subscription bounds', () => {
     });
   });
 
-  it('splits a 2,000-author trust set into REQs of at most 500 authors', () => {
-    // Before #1789 this was ONE filter carrying all 2,000 authors and no limit.
-    const authors = pubkeys(2000);
-    subscribeFoundLogsByAuthors(authors, jest.fn(), undefined, 200);
-    expect(mockSubscribeMany).toHaveBeenCalledTimes(4);
-    const sent: string[] = [];
-    for (const [, filter] of mockSubscribeMany.mock.calls) {
-      expect(filter.authors.length).toBeLessThanOrEqual(500);
-      expect(filter.limit).toBe(200);
-      expect(filter.since).toBeUndefined();
-      sent.push(...filter.authors);
-    }
-    // Every author is still asked for exactly once.
-    expect(sent).toEqual(authors);
-  });
-
-  it('forwards events from every chunk and closes every chunk', () => {
-    const onEvent = jest.fn();
-    const close = subscribeFoundLogsByAuthors(pubkeys(501), onEvent);
-    expect(mockSubscribeMany).toHaveBeenCalledTimes(2);
-    for (const [, , handlers] of mockSubscribeMany.mock.calls) {
-      handlers.onevent({ id: 'x' });
-    }
-    expect(onEvent).toHaveBeenCalledTimes(2);
-    close();
-    expect(mockClose).toHaveBeenCalledTimes(2);
-  });
-
   it('opens nothing for an empty author set', () => {
     subscribeFoundLogsByAuthors([], jest.fn())();
     expect(mockSubscribeMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('fetchFoundLogsByAuthors (Friends’ finds, #1789)', () => {
+  type MapCall = [
+    { url: string; filter: Record<string, unknown> }[],
+    {
+      reqOptions: { mode: string };
+      onevent: (e: { id: string; created_at: number }) => void;
+      onclose: (reasons: string[]) => void;
+    },
+  ];
+  const calls = (): MapCall[] => mockSubscribeMap.mock.calls as MapCall[];
+  const pubkeys = (n: number): string[] =>
+    Array.from({ length: n }, (_, i) => i.toString(16).padStart(64, '0'));
+
+  it('sends one one-shot REQ per relay for a normal-sized author set', () => {
+    fetchFoundLogsByAuthors(pubkeys(300), jest.fn(), ['wss://a.example'], 200);
+    expect(mockSubscribeMany).not.toHaveBeenCalled();
+    expect(calls()).toHaveLength(1);
+    const [requests, params] = calls()[0];
+    // One filter per relay → one physical REQ (one budget slot) per relay,
+    // released at EOSE.
+    expect(params.reqOptions.mode).toBe('oneshot');
+    expect(requests.map((r) => r.url)).toEqual(['wss://a.example', 'wss://gc.example']);
+    expect(requests[0].filter).toEqual({ kinds: [7516], authors: pubkeys(300), limit: 200 });
+  });
+
+  it('sends a 2,000-author set as 4 sequential one-shot chunks, one at a time', () => {
+    const authors = pubkeys(2000);
+    fetchFoundLogsByAuthors(authors, jest.fn(), ['wss://a.example'], 200);
+    const sent: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      // Only the chunk in flight is open: the next is not sent until every
+      // relay has closed this one.
+      expect(calls()).toHaveLength(i + 1);
+      const [requests, params] = calls()[i];
+      expect(params.reqOptions.mode).toBe('oneshot');
+      expect(new Set(requests.map((r) => r.url)).size).toBe(requests.length);
+      const chunk = requests[0].filter.authors as string[];
+      expect(chunk.length).toBe(500);
+      sent.push(...chunk);
+      params.onclose(['closed automatically on eose']);
+    }
+    expect(calls()).toHaveLength(4);
+    expect(sent).toEqual(authors);
+  });
+
+  it('only asks later chunks for logs newer than the current limit-th newest', () => {
+    fetchFoundLogsByAuthors(pubkeys(1000), jest.fn(), ['wss://a.example'], 3);
+    const [, first] = calls()[0];
+    for (const created_at of [100, 400, 300, 200])
+      first.onevent({ id: `e${created_at}`, created_at });
+    first.onclose([]);
+    // Newest 3 so far: 400, 300, 200 → nothing older than 200 can make the cut.
+    expect(calls()[1][0][0].filter).toMatchObject({ limit: 3, since: 200 });
+  });
+
+  it('does not tighten `since` until `limit` logs are in hand', () => {
+    fetchFoundLogsByAuthors(pubkeys(1000), jest.fn(), ['wss://a.example'], 3);
+    calls()[0][1].onevent({ id: 'e1', created_at: 100 });
+    calls()[0][1].onclose([]);
+    expect(calls()[1][0][0].filter.since).toBeUndefined();
+  });
+
+  it('closing cancels the chunk in flight and the rest', () => {
+    const onEvent = jest.fn();
+    const close = fetchFoundLogsByAuthors(pubkeys(1000), onEvent, ['wss://a.example']);
+    close();
+    expect(mockClose).toHaveBeenCalledTimes(1);
+    calls()[0][1].onevent({ id: 'late', created_at: 1 });
+    calls()[0][1].onclose([]);
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(calls()).toHaveLength(1);
   });
 });
 

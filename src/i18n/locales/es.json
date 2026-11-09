@@ -772,6 +772,10 @@
     "addWalletText": "+ Añadir una cartera",
     "updatingTransactions": "Actualizando transacciones"
   },
+  "findLogHeader": {
+    "title": "Registro de hallazgos ({{total}})",
+    "titleCapped": "Registro de hallazgos ({{total}}+)"
+  },
   "huntCreateScreen": {
     "ok": "OK",
     "cancel": "Cancelar",
