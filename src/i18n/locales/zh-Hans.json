@@ -1994,6 +1994,7 @@
     "permissionNeeded": "需要权限",
     "photoLibraryMessage": "请允许访问相册以发送图片。",
     "cameraPhotoMessage": "请允许访问相机以拍摄并发送照片。",
+    "ok": "好的",
     "cancel": "取消",
     "openSettings": "打开设置"
   },

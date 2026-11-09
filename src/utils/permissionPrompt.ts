@@ -63,7 +63,7 @@ export async function ensurePermission(
             testID: 'permission-open-settings',
           },
         ]
-      : undefined,
+      : [{ text: t('permissionPrompt.ok') }],
   );
   return false;
 }

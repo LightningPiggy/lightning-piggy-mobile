@@ -1994,6 +1994,7 @@
     "permissionNeeded": "Permission needed",
     "photoLibraryMessage": "Allow photo library access to send images.",
     "cameraPhotoMessage": "Allow camera access to take and send photos.",
+    "ok": "OK",
     "cancel": "Cancel",
     "openSettings": "Open Settings"
   },

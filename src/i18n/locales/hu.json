@@ -1994,6 +1994,7 @@
     "permissionNeeded": "Engedély szükséges",
     "photoLibraryMessage": "Engedélyezd a fotótár elérését a képek küldéséhez.",
     "cameraPhotoMessage": "Engedélyezd a kamera elérését a fotók készítéséhez és küldéséhez.",
+    "ok": "OK",
     "cancel": "Mégse",
     "openSettings": "Beállítások megnyitása"
   },

@@ -1994,6 +1994,7 @@
     "permissionNeeded": "Permiso necesario",
     "photoLibraryMessage": "Permite el acceso a la galería de fotos para enviar imágenes.",
     "cameraPhotoMessage": "Permite el acceso a la cámara para hacer y enviar fotos.",
+    "ok": "OK",
     "cancel": "Cancelar",
     "openSettings": "Abrir Ajustes"
   },

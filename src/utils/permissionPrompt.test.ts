@@ -62,7 +62,7 @@ describe('ensurePermission', () => {
     await expect(ensurePermission(jest.fn().mockResolvedValue(DENIED), 'T', 'M')).resolves.toBe(
       false,
     );
-    expect(Alert.alert).toHaveBeenCalledWith('T', 'M', undefined);
+    expect(Alert.alert).toHaveBeenCalledWith('T', 'M', [{ text: expect.any(String) }]);
   });
 
   it('offers Open Settings once permanently denied', async () => {

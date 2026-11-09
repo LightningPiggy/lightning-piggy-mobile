@@ -1,16 +1,12 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView } from 'expo-camera';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSendScanPaneStyles } from '../styles/SendScanPane.styles';
-import {
-  isPermissionBlocked,
-  requestOrOpenSettings,
-  type PermissionState,
-  type RequestPermission,
-} from '../utils/permissionPrompt';
+import { useScanPermissionButton } from '../hooks/useScanPermissionButton';
+import type { RequestPermission } from '../utils/permissionPrompt';
 
 interface Props {
   permissionGranted: boolean;
@@ -37,14 +33,10 @@ const SendScanPane: React.FC<Props> = ({
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createSendScanPaneStyles(colors), [colors]);
-  // Only read here to tell "never asked" from "permanently denied" (#1798) —
-  // the parent owns the request so its `permissionGranted` stays in sync.
-  const [initialPermission] = useCameraPermissions();
-  const [latestPermission, setLatestPermission] = useState<PermissionState | null>(null);
-  const blocked = isPermissionBlocked(latestPermission ?? initialPermission);
-  const handlePermissionPress = useCallback(async () => {
-    setLatestPermission(await requestOrOpenSettings(onRequestPermission, blocked));
-  }, [onRequestPermission, blocked]);
+  const { blocked, onPress: handlePermissionPress } = useScanPermissionButton(
+    permissionGranted,
+    onRequestPermission,
+  );
   const [zoom, setZoom] = useState(0);
   // Gesture callbacks close over the first render — track the live zoom
   // (and the value at pinch-start) in refs so each pinch accumulates
