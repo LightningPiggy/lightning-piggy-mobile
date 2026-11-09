@@ -16,8 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
-import * as amberService from '../services/amberService';
-import { nip46Sign } from './nip46DmDecrypt';
+import { signAccountEvent } from '../services/signAccountEvent';
 import { NSEC_KEY } from './nostrAuthKeys';
 import { perAccountKey } from '../services/perAccountStorage';
 import { CONTACTS_CACHE_KEY_BASE, CONTACTS_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
@@ -117,20 +116,12 @@ export function useContactActions({
           if (!nsec || !isCurrentSession()) return false;
           const { secretKey } = nostrService.decodeNsec(nsec);
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
-        } else if (signerType === 'amber') {
-          const eventJson = JSON.stringify(event);
-          const { event: signedEventJson } = await amberService.requestEventSignature(
-            eventJson,
-            '',
-            pubkey,
-          );
-          if (!signedEventJson || !isCurrentSession()) return false;
-          const signed = JSON.parse(signedEventJson);
+        } else if (signerType === 'amber' || signerType === 'nip46') {
+          // Null unless the signer returned this exact list, signed by this
+          // account: another key's follow list must never be replaced (#1779).
+          const signed = await signAccountEvent(event, { pubkey, isLoggedIn, signerType });
+          if (!signed || !isCurrentSession()) return false;
           await nostrService.publishSignedEvent(signed, targetRelays);
-        } else if (signerType === 'nip46') {
-          const signedEventJson = await nip46Sign(event, pubkey);
-          if (!signedEventJson || !isCurrentSession()) return false;
-          await nostrService.publishSignedEvent(JSON.parse(signedEventJson), targetRelays);
         } else {
           // No usable signer (null / unsupported): nothing was published, so
           // report failure. Returning true here would let the callers commit

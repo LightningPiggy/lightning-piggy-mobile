@@ -11,6 +11,7 @@ import { nip44EncryptForRecipient, nostrFinalizeEvent, nostrGetEventHash } from 
 import { yieldToEventLoop } from '../contexts/nostrDecryptPacing';
 import { deliverToPeerRelays, type PeerRoutingOptions } from './peerOutboxDelivery';
 import { getManyPeerRelayLists } from './peerRelayLists';
+import { assertRemoteSignedEvent } from './remoteSignedEvent';
 
 /**
  * Outbox routing (#1570): each wrap ALSO goes to its recipient's kind-10050
@@ -176,7 +177,15 @@ export async function sendNip17ToManyWithSigner(input: {
         content: sealCiphertext,
         pubkey: input.senderPubkey,
       };
-      const signedSeal = await input.signerSignSeal(unsignedSeal);
+      // A seal signed by another of the signer's accounts would send the
+      // message as that identity (#1779). Pubkey + template only: this runs
+      // per recipient per message, and receivers verify the seal signature.
+      const signedSeal = assertRemoteSignedEvent(
+        await input.signerSignSeal(unsignedSeal),
+        unsignedSeal,
+        input.senderPubkey,
+        { verifySignature: false },
+      );
 
       // The wrap uses an ephemeral key — never the user's key — so we
       // can finalize it locally without any signer round-trip. The wrap's

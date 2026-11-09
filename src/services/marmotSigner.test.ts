@@ -153,4 +153,22 @@ describe('createMarmotSigner', () => {
       jest.useRealTimers();
     }
   });
+
+  it.each([
+    ['amber', mockAmberSign],
+    ['nip46', mockBunkerSign],
+  ] as const)(
+    '%s: rejects an event signed by another account or changed (#1779)',
+    async (type, mock) => {
+      const answer = (event: object) => ({ event: JSON.stringify(event) });
+      mock.mockResolvedValueOnce(answer({ ...draft, id: 'i', sig: 's', pubkey: 'b'.repeat(64) }));
+      await expect(createMarmotSigner(PK, type).signEvent(draft)).rejects.toThrow(
+        /different account/,
+      );
+      mock.mockResolvedValueOnce(answer({ ...draft, content: 'y', id: 'i', sig: 's', pubkey: PK }));
+      await expect(createMarmotSigner(PK, type).signEvent(draft)).rejects.toThrow(
+        /different event/,
+      );
+    },
+  );
 });

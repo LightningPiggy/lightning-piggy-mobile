@@ -9,6 +9,7 @@ import { useContactActions } from './useContactActions';
 import { clearFollowGateStores } from '../services/followSetEvents';
 import { relayAllowsKind } from '../services/relayKindPolicy';
 import * as amberService from '../services/amberService';
+import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
 import {
   __resetForTests,
   isAccountCreatedHere,
@@ -332,4 +333,54 @@ it('an account switch during the publish-target lookup never asks the signer', a
   expect(ok).toBe(false);
   expect(sign).not.toHaveBeenCalled();
   expect(nostrService.publishSignedEvent).not.toHaveBeenCalled();
+});
+
+describe('remote-signed follow list (#1779)', () => {
+  const accountKey = generateSecretKey();
+  const account = getPublicKey(accountKey);
+
+  async function followWithAmberSigningAs(signingKey: Uint8Array) {
+    mockFetch.mockResolvedValue({
+      status: 'found',
+      base: { tags: [['p', BIG]], content: '', createdAt: 10 },
+    });
+    jest.spyOn(amberService, 'requestEventSignature').mockImplementation(async (eventJson) => ({
+      event: JSON.stringify(finalizeEvent(JSON.parse(eventJson), signingKey)),
+      signature: '',
+    }));
+    const setContacts = jest.fn();
+    const { result } = renderHook(() =>
+      useContactActions({
+        pubkey: account,
+        isLoggedIn: true,
+        signerType: 'amber',
+        relays,
+        contacts: [],
+        setContacts,
+        getReadRelays: () => ['wss://mine'],
+        loadContacts: jest.fn(async () => {}),
+      }),
+    );
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.followContact(NEW);
+    });
+    return { ok, setContacts };
+  }
+
+  it('never publishes or adopts a follow list Amber signed with another account', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const { ok, setContacts } = await followWithAmberSigningAs(generateSecretKey());
+    expect(ok).toBe(false);
+    expect(nostrService.publishSignedEvent).not.toHaveBeenCalled();
+    expect(setContacts).not.toHaveBeenCalled();
+  });
+
+  it('publishes the follow list Amber signed with the active account', async () => {
+    const { ok } = await followWithAmberSigningAs(accountKey);
+    expect(ok).toBe(true);
+    const published = jest.mocked(nostrService.publishSignedEvent).mock.calls[0][0];
+    expect(published.pubkey).toBe(account);
+    expect(published.tags.some((tag) => tag[0] === 'p' && tag[1] === NEW)).toBe(true);
+  });
 });

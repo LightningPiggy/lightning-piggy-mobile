@@ -11,6 +11,13 @@ jest.mock('./nostrPool', () => ({
 }));
 const publicRelays = ['wss://public.example'];
 const rumor = { kind: 14, created_at: 123, tags: [], content: 'pending test message' };
+// A fake remote signer answering for the requested account. Seals are checked
+// for pubkey + template only (no schnorr), so the claimed pubkey is enough.
+// (finalizeEvent mutates its argument, hence the copy.)
+const signAsRequested = (seal: Parameters<typeof finalizeEvent>[0] & { pubkey: string }) => ({
+  ...finalizeEvent({ ...seal }, generateSecretKey()),
+  pubkey: seal.pubkey,
+});
 
 afterEach(() => {
   setCurrentUserPubkey(null);
@@ -47,7 +54,6 @@ it('keeps nsec wraps on LAN when the account switches while yielding', async () 
 
 it.each(['encrypt', 'sign'])('keeps signer wraps on LAN when switching during %s', async (step) => {
   setCurrentUserPubkey(TEST_ACCOUNT_KEYS.little);
-  const signerKey = generateSecretKey();
   const result = await sendNip17ToManyWithSigner({
     senderPubkey: TEST_ACCOUNT_KEYS.little,
     rumor: { ...rumor, pubkey: TEST_ACCOUNT_KEYS.little },
@@ -61,7 +67,7 @@ it.each(['encrypt', 'sign'])('keeps signer wraps on LAN when switching during %s
     signerSignSeal: async (seal) => {
       if (step === 'sign') setCurrentUserPubkey('a'.repeat(64));
       await Promise.resolve();
-      return finalizeEvent(seal, signerKey);
+      return signAsRequested(seal);
     },
   });
   expect(result.wrapsPublished).toBe(1);
@@ -87,7 +93,6 @@ it('preserves public destinations for an ordinary sender', async () => {
 
 it('retains LAN destinations through stale-socket retry after an account switch', async () => {
   setCurrentUserPubkey(TEST_ACCOUNT_KEYS.little);
-  const signerKey = generateSecretKey();
   const close = jest.fn();
   Object.assign(pool, { close });
   jest.mocked(pool.publish).mockImplementationOnce(() => {
@@ -100,11 +105,30 @@ it('retains LAN destinations through stale-socket retry after an account switch'
     recipientPubkeys: [],
     relays: publicRelays,
     signerNip44Encrypt: async () => 'ciphertext',
-    signerSignSeal: async (seal) => finalizeEvent(seal, signerKey),
+    signerSignSeal: async (seal) => signAsRequested(seal),
   });
   expect(result.wrapsPublished).toBe(1);
   expect(close).toHaveBeenCalledWith([TEST_RELAY_URL]);
   expect(pool.publish).toHaveBeenCalledTimes(2);
   for (const [relays] of jest.mocked(pool.publish).mock.calls)
     expect(relays).toEqual([TEST_RELAY_URL]);
+});
+
+it.each([
+  ['signed by another account', { pubkey: 'b'.repeat(64) }, /different account/],
+  ['with changed content', { content: 'other' }, /different event/],
+])('publishes nothing when the signer returns a seal %s (#1779)', async (_, change, reason) => {
+  const sender = getPublicKey(generateSecretKey());
+  setCurrentUserPubkey(sender);
+  const result = await sendNip17ToManyWithSigner({
+    senderPubkey: sender,
+    rumor: { ...rumor, pubkey: sender },
+    recipientPubkeys: [getPublicKey(generateSecretKey())],
+    relays: publicRelays,
+    signerNip44Encrypt: async () => 'ciphertext',
+    signerSignSeal: async (seal) => ({ ...signAsRequested(seal), ...change }),
+  });
+  expect(result.wrapsPublished).toBe(0);
+  expect(pool.publish).not.toHaveBeenCalled();
+  expect(result.errors[0]).toMatch(reason);
 });
