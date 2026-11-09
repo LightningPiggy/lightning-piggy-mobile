@@ -6,6 +6,7 @@ import type { SharedLocation } from '../services/locationService';
 import type { Item } from '../utils/conversationItems';
 import type { RelayConfig } from '../types/nostr';
 import { liveKey } from '../services/liveLocationUpdateStore';
+import { nextLiveShareExpiry } from '../utils/liveShareExpiry';
 import {
   useLiveUpdateRelaySubscriptions,
   useLiveUpdates,
@@ -187,8 +188,16 @@ export function useLiveLocationThread(params: {
   // countdown bubble's own row still re-renders every tick (#778).
   const liveLocationBubbleRemaining = useStableRecord(liveLocationBubbleRemainingRaw);
 
-  // Drive the 1 Hz tick only while focused with a live-location bubble.
-  const tick = markers.length > 0 && focused;
+  // Drive the 1 Hz tick only while focused AND some share is still running
+  // (#1792) — ended / expired bubbles alone never tick. Re-evaluated on every
+  // tick, so the tick that crosses the last expiry also stops it; a new start
+  // marker changes `markers` and restarts it.
+  const anyRunning = useMemo(
+    () => nextLiveShareExpiry(markers, Date.now()) !== null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() expiry check each second
+    [markers, secondTick],
+  );
+  const tick = anyRunning && focused;
   useEffect(() => {
     if (!tick) return;
     const id = setInterval(() => setSecondTick((n) => (n + 1) % 1000), 1000);
