@@ -27,7 +27,8 @@ const tagValue = (tags: string[][], name: string): string | undefined =>
  * A receipt is pinned to a payment by the payment itself, never guessed:
  *  - a tx with a payment hash matches only a receipt whose invoice carries
  *    that hash (NIP-47 may omit `invoice`, but sends `payment_hash`);
- *  - a tx with only a bolt11 matches that exact invoice;
+ *  - a tx with only a bolt11 matches that exact invoice (case-insensitive);
+ *  - an on-chain tx (`txid`) is never a zap and never matches;
  *  - only a legacy row with neither falls back to (amount, ±5 min).
  * Without the hash rule, a provider-signed receipt for someone else's
  * payment (e.g. a replayed old zap request paid to another address on the
@@ -49,7 +50,8 @@ export function matchIncomingZapReceipts<R extends ZapReceiptEvent & { created_a
   const untrustedBolt11 = new Set<string>();
   const byBolt11 = new Map<string, R>();
   for (const r of receipts) {
-    const bolt11 = tagValue(r.tags, 'bolt11');
+    // BOLT11 is case-insensitive: compare invoices lower-cased.
+    const bolt11 = tagValue(r.tags, 'bolt11')?.toLowerCase();
     if (r.pubkey && providers.has(r.pubkey.toLowerCase())) {
       trusted.push(r);
       if (bolt11) byBolt11.set(bolt11, r);
@@ -111,9 +113,11 @@ export function matchIncomingZapReceipts<R extends ZapReceiptEvent & { created_a
   };
 
   const findReceipt = (tx: WalletTransaction): R | null => {
+    // An on-chain deposit is never a zap; it must not pair by amount + time.
+    if (tx.txid) return null;
     const hash = tx.paymentHash?.toLowerCase();
     if (tx.bolt11) {
-      const r = byBolt11.get(tx.bolt11) ?? null;
+      const r = byBolt11.get(tx.bolt11.toLowerCase()) ?? null;
       return r && (!hash || hashOf(r) === hash) ? r : null;
     }
     if (hash) return findByHash(hash);
@@ -139,7 +143,7 @@ export function matchIncomingZapReceipts<R extends ZapReceiptEvent & { created_a
         comment: zap.comment,
         anonymous: zap.anonymous,
       });
-    } else if (tx.bolt11 && (receipt || !untrustedBolt11.has(tx.bolt11))) {
+    } else if (tx.bolt11 && (receipt || !untrustedBolt11.has(tx.bolt11.toLowerCase()))) {
       // Definitive miss: no receipt at all, or a trusted one that failed a
       // hard check (signature, recipient, amount). A receipt whose only
       // fault is its author leaves the tx unresolved (no sender shown).

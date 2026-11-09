@@ -672,7 +672,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return;
       }
 
-      const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming');
+      // On-chain (txid) deposits are never zaps: no receipt fetch for them.
+      const incomingPending = pending.filter(({ tx }) => tx.type === 'incoming' && !tx.txid);
       const outgoingPending = pending.filter(({ tx }) => tx.type === 'outgoing');
 
       // Capture each resolved transaction, never its moving array index.
@@ -835,10 +836,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return;
       }
 
-      // Incoming receipts are only trusted when signed by the wallet's LNURL
-      // server key (#1780). Without one (no lightning address, or the server
-      // can't be reached) nothing can be verified, so attribute nothing and
-      // leave the txs unresolved rather than show an unverified sender.
+      // Receipts are only trusted when signed by the wallet's LNURL server key
+      // (#1780). Without one (no lightning address / server unreachable) leave
+      // incoming txs unresolved rather than show an unverified sender.
       if (incomingPending.length === 0 || !providerPubkey) {
         // Nothing to fetch from relays — commit the outgoing results and bail.
         if (__DEV__ && resultsByTransaction.size > 0) {

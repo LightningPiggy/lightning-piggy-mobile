@@ -175,6 +175,21 @@ describe('self-payment replay on a shared custodial provider', () => {
     expect(out.matches.map((m) => m.senderPubkey)).toEqual([FRIEND]);
   });
 
+  it('never labels an on-chain deposit, even with a same-amount receipt in the window', () => {
+    // On-chain rows carry only txid + amount + timestamps (no invoice, no hash).
+    const deposit = tx({ txid: 'd'.repeat(64) });
+    const out = matchIncomingZapReceipts([deposit], [replayedReceipt()], [SERVER]);
+    expect(out.matches).toEqual([]);
+    expect(out.misses).toEqual([]);
+  });
+
+  it('matches invoices case-insensitively', () => {
+    const payment = tx({ bolt11: INVOICE.toUpperCase(), paymentHash: ATTACKER_INVOICE_HASH });
+    const out = matchIncomingZapReceipts([payment], [replayedReceipt()], [SERVER]);
+    expect(out.matches.map((m) => m.senderPubkey)).toEqual([FRIEND]);
+    expect(out.misses).toEqual([]);
+  });
+
   it('rejects a bolt11 match whose invoice hash disagrees with the payment hash', () => {
     const payment = tx({ bolt11: INVOICE, paymentHash: VICTIM_HASH });
     const out = matchIncomingZapReceipts([payment], [replayedReceipt()], [SERVER]);
