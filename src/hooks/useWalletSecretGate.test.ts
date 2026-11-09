@@ -35,9 +35,11 @@ beforeEach(() => {
 });
 
 function setup(active = true) {
-  return renderHook(({ on }: { on: boolean }) => useWalletSecretGate(on), {
-    initialProps: { on: active },
-  });
+  return renderHook(
+    ({ on, walletId }: { on: boolean; walletId: string | null }) =>
+      useWalletSecretGate(on, walletId),
+    { initialProps: { on: active, walletId: 'wallet-a' as string | null } },
+  );
 }
 
 it('blocks screen capture while a secret is on the tab and releases it on unmount', async () => {
@@ -138,4 +140,30 @@ it('warns before revealing when capture protection could not be enabled', async 
   });
   expect(shown).toBe(false);
   expect(authenticateForKeyReveal).not.toHaveBeenCalled();
+});
+
+it('needs a fresh unlock when the wallet changes under a mounted tab', async () => {
+  const { result, rerender } = setup();
+  await act(async () => {
+    await result.current.reveal();
+  });
+  expect(result.current.unlocked).toBe(true);
+  rerender({ on: true, walletId: 'wallet-b' });
+  expect(result.current.unlocked).toBe(false);
+  await act(async () => {
+    await result.current.copy(SECRET);
+  });
+  expect(authenticateForKeyReveal).toHaveBeenCalledTimes(2);
+});
+
+it('locks and releases capture when the view goes inactive (screen blurred)', async () => {
+  const { result, rerender } = setup();
+  await act(async () => {
+    await result.current.reveal();
+  });
+  rerender({ on: false, walletId: 'wallet-a' });
+  expect(result.current.unlocked).toBe(false);
+  expect(ScreenCapture.allowScreenCaptureAsync).toHaveBeenCalledWith('wallet-secret');
+  rerender({ on: true, walletId: 'wallet-a' });
+  expect(result.current.unlocked).toBe(false);
 });

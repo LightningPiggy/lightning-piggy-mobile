@@ -658,9 +658,8 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             <Text style={styles.fieldLabel}>{t('nostrLoginSheet.privateKeyLabel')}</Text>
             <View style={styles.nsecDisplay}>
-              <Text style={styles.nsecText} selectable>
-                {generatedNsec}
-              </Text>
+              {/* Never selectable: long-press Copy would bypass the secret clipboard. */}
+              <Text style={styles.nsecText}>{generatedNsec}</Text>
             </View>
 
             {canCopySensitiveText() && (

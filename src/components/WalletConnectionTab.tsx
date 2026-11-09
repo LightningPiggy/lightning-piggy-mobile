@@ -28,6 +28,11 @@ interface Props {
   colors: Palette;
   t: ReturnType<typeof useTranslation>;
   walletType: WalletType;
+  // Scopes the secret unlock to this wallet (#1784).
+  walletId: string;
+  // False while the screen behind the sheet is unfocused (e.g. after Share
+  // navigates to a conversation): secrets re-lock and capture is released.
+  screenFocused: boolean;
   // On-chain. `undefined` = still loading, `null` = loaded but absent, `string` = ready.
   xpubDisplay: string | null | undefined;
   onCopyXpub: () => void;
@@ -62,6 +67,8 @@ const WalletConnectionTab: React.FC<Props> = ({
   colors,
   t,
   walletType,
+  walletId,
+  screenFocused,
   xpubDisplay,
   onCopyXpub,
   relayUrl,
@@ -90,7 +97,7 @@ const WalletConnectionTab: React.FC<Props> = ({
     (walletType === 'onchain' && (xpubLoading || !!xpubDisplay)) || walletType === 'nwc';
 
   const showsNwc = walletType === 'nwc' && !!nwcConnection;
-  const gate = useWalletSecretGate(showsNwc || !!coinosRecovery);
+  const gate = useWalletSecretGate(screenFocused && (showsNwc || !!coinosRecovery), walletId);
   // A toggle the parent left on still shows nothing until this visit is unlocked.
   const nwcShown = nwcRevealed && gate.unlocked;
   const qrShown = nwcQrShown && gate.unlocked;
@@ -161,7 +168,8 @@ const WalletConnectionTab: React.FC<Props> = ({
             testID="wallet-recovery-password-row"
           />
           <View style={styles.credentialRow}>
-            <Text style={styles.credentialText} selectable={passwordShown}>
+            {/* Never selectable: long-press Copy would bypass the secret clipboard. */}
+            <Text style={styles.credentialText}>
               {passwordShown ? coinosRecovery.password : '••••••••••••'}
             </Text>
             <TouchableOpacity
@@ -240,11 +248,8 @@ const WalletConnectionTab: React.FC<Props> = ({
             details={t('walletSettingsSheet.nwcConnectionHint')}
           />
           <View style={styles.nwcRow}>
-            <Text
-              style={styles.nwcRowText}
-              selectable={nwcShown}
-              numberOfLines={nwcShown ? undefined : 1}
-            >
+            {/* Never selectable: long-press Copy would bypass the secret clipboard. */}
+            <Text style={styles.nwcRowText} numberOfLines={nwcShown ? undefined : 1}>
               {nwcShown ? nwcConnection : '••••••••••••'}
             </Text>
             <TouchableOpacity

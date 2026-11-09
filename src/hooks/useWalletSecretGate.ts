@@ -7,19 +7,20 @@
 //  - revealing, showing the QR and copying need device authentication
 //    (`keyRevealGate` + `authenticateForKeyReveal`), or an explicit
 //    confirmation when the phone has no screen lock;
-//  - the unlock is dropped on app background and on unmount, so leaving the
-//    tab or the app needs a fresh unlock;
+//  - the unlock is dropped on app background, on unmount, when the wallet
+//    changes and when the view stops being active (e.g. the screen behind
+//    the sheet loses focus), so each of those needs a fresh unlock;
 //  - copies go through the secret clipboard (`copySensitiveText`).
 // The secrets themselves never pass through this hook — callers render or
 // copy them only after `unlocked` / `reveal()` / `copy()` say so. Nothing
 // here logs.
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Platform } from 'react-native';
-import * as ScreenCapture from 'expo-screen-capture';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { Alert } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
 import { authenticateForKeyReveal, keyRevealGate } from '../services/accountKeyAccess';
 import { copySensitiveText } from '../services/sensitiveClipboard';
+import { useScreenCaptureBlock } from './useScreenCaptureBlock';
 
 const SCREEN_CAPTURE_KEY = 'wallet-secret';
 
@@ -34,8 +35,11 @@ export interface WalletSecretGate {
   copy: (text: string) => Promise<boolean>;
 }
 
-/** `active` = a secret is on this view (NWC string or CoinOS password). */
-export function useWalletSecretGate(active: boolean): WalletSecretGate {
+/**
+ * `active` = a secret is on this view (NWC string or CoinOS password) and the
+ * view is in front. `walletId` scopes the unlock to one wallet.
+ */
+export function useWalletSecretGate(active: boolean, walletId: string | null): WalletSecretGate {
   const t = useTranslation();
   const [unlocked, setUnlocked] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -45,7 +49,6 @@ export function useWalletSecretGate(active: boolean): WalletSecretGate {
   const unlockingRef = useRef(false);
   const authenticatingRef = useRef(false);
   const foregroundWaitRef = useRef<((active: boolean) => void) | null>(null);
-  const protectionRef = useRef<Promise<boolean>>(Promise.resolve(false));
 
   const lock = useCallback(() => {
     generationRef.current += 1;
@@ -57,6 +60,10 @@ export function useWalletSecretGate(active: boolean): WalletSecretGate {
     setBusy(false);
     setAuthFailed(false);
   }, []);
+
+  // Invalidate before paint when the wallet changes or the view goes inactive,
+  // so another wallet's secret is never revealable on this unlock.
+  useLayoutEffect(lock, [walletId, active, lock]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -78,25 +85,7 @@ export function useWalletSecretGate(active: boolean): WalletSecretGate {
 
   // Capture protection for the whole time a secret is on this view — before
   // anything is revealed, so no frame showing it is painted unprotected.
-  useEffect(() => {
-    if (!active) {
-      protectionRef.current = Promise.resolve(false);
-      return;
-    }
-    const enable = async () => {
-      await ScreenCapture.preventScreenCaptureAsync(SCREEN_CAPTURE_KEY);
-      if (Platform.OS === 'ios') await ScreenCapture.enableAppSwitcherProtectionAsync();
-    };
-    protectionRef.current = enable().then(
-      () => true,
-      () => false,
-    );
-    return () => {
-      protectionRef.current = Promise.resolve(false);
-      ScreenCapture.allowScreenCaptureAsync(SCREEN_CAPTURE_KEY).catch(() => {});
-      if (Platform.OS === 'ios') ScreenCapture.disableAppSwitcherProtectionAsync().catch(() => {});
-    };
-  }, [active]);
+  const protectionRef = useScreenCaptureBlock(SCREEN_CAPTURE_KEY, active);
 
   const confirm = useCallback(
     (title: string, message: string, confirmText: string, testIDPrefix: string) =>
@@ -186,7 +175,7 @@ export function useWalletSecretGate(active: boolean): WalletSecretGate {
       return false;
     if (!isCurrent()) return false;
     return (await unlock()) && isCurrent();
-  }, [unlock, confirm, t]);
+  }, [unlock, confirm, t, protectionRef]);
 
   const copy = useCallback(
     async (text: string) => {
