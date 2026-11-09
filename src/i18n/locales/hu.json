@@ -2245,8 +2245,6 @@
     "removeWalletTitle": "Pénztárca eltávolítása",
     "removeConfirmMessage": "Biztosan eltávolítod ezt: „{{alias}}”?",
     "disconnectConfirmMessage": "Biztosan leválasztod ezt: „{{alias}}”?",
-    "cancel": "Mégse",
-    "remove": "Eltávolítás",
     "copiedTitle": "Kimásolva",
     "xpubCopied": "Kiterjesztett nyilvános kulcs a vágólapra másolva."
   },
@@ -2262,8 +2260,6 @@
     "hideBalance": "{{alias}} egyenlegének elrejtése",
     "removeWalletTitle": "Pénztárca eltávolítása",
     "removeWalletMessage": "Eltávolítod ezt: „{{alias}}”? A pénztárca le lesz választva.",
-    "cancel": "Mégse",
-    "remove": "Eltávolítás",
     "removeWalletA11y": "Eltávolítás: {{alias}}",
     "addWalletA11y": "Pénztárca hozzáadása",
     "addWallet": "Pénztárca hozzáadása"
@@ -3804,5 +3800,14 @@
     "noRelays": "Jelenleg nem érhetők el megfelelő relék. Próbáld újra egy kis idő múlva.",
     "confirmChangedTitle": "Inkább ezeket a reléket teszed közzé?",
     "confirmChangedBody": "A reléid megváltoztak a javaslat megjelenítése óta. Közzétételkor ezek kerülnek a listára: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "Ezzel eltávolítod a(z) „{{alias}}” tárcát erről a telefonról, az itt tárolt helyreállítási kifejezéssel együtt. Előbb mindenképp írd le — a helyreállítási kifejezés nélkül ennek a tárcának a pénze nem állítható vissza.",
+    "withCoinosLogin": "Ezzel eltávolítod a(z) „{{alias}}” tárcát erről a telefonról, az itt tárolt CoinOS felhasználónévvel, jelszóval és kapcsolódási adatokkal együtt. Előbb mentsd el őket — nélkülük ennek a tárcának a pénze nem állítható vissza.",
+    "balance": "{{amount}} sats van rajta.",
+    "viewRecoveryFirst": "Előbb a helyreállítási adatok megtekintése",
+    "removeAnyway": "Mégis eltávolítom",
+    "remove": "Eltávolítás",
+    "cancel": "Mégse"
   }
 }
