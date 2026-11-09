@@ -6,17 +6,25 @@ import {
   ingestLiveUpdate,
 } from '../services/liveLocationUpdateStore';
 import type { LiveLocationMarker } from '../services/liveLocationService';
+import { useLiveUpdateRelaySubscriptions } from './useLiveUpdates';
 
-jest.mock('@react-navigation/native', () => ({ useIsFocused: () => true }));
+let mockFocused = true;
+let mockLiveCtx: {
+  sessionsByRecipient: Map<string, { sessionId: string; status: string }[]>;
+  remainingMsForSession: (id: string) => number | null;
+} = { sessionsByRecipient: new Map(), remainingMsForSession: () => null };
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused }));
 jest.mock('../contexts/LiveLocationContext', () => ({
-  useLiveLocation: () => ({ sessionsByRecipient: new Map(), remainingMsForSession: () => null }),
+  useLiveLocation: () => mockLiveCtx,
 }));
 jest.mock('./useLiveUpdates', () => ({
   ...jest.requireActual('./useLiveUpdates'),
   useLiveUpdateRelaySubscriptions: jest.fn(),
 }));
+const relaySubs = useLiveUpdateRelaySubscriptions as jest.Mock;
 
 const PEER = 'b'.repeat(64);
+const ME = 'a'.repeat(64);
 const start = (startedAt: number): ThreadLiveMarker => ({
   fromMe: false,
   sender: PEER,
@@ -48,7 +56,7 @@ function render(markers: ThreadLiveMarker[]) {
         threadKey: PEER,
         marmot: true,
         isLoggedIn: true,
-        myPubkey: 'a'.repeat(64),
+        myPubkey: ME,
         signerType: 'nsec',
         relays: [],
       });
@@ -60,8 +68,14 @@ function render(markers: ThreadLiveMarker[]) {
 beforeEach(() => {
   jest.useFakeTimers();
   clearLiveUpdates();
+  mockFocused = true;
+  mockLiveCtx = { sessionsByRecipient: new Map(), remainingMsForSession: () => null };
+  relaySubs.mockClear();
 });
-afterEach(() => jest.useRealTimers());
+afterEach(() => {
+  jest.restoreAllMocks();
+  jest.useRealTimers();
+});
 
 const update = (lat: number) =>
   act(() => {
@@ -137,5 +151,84 @@ describe('1 Hz tick (#1792)', () => {
     const fresh = start(Date.now());
     rerender({ m: [expired, { ...fresh, marker: { ...fresh.marker, sessionId: 's2' } }] });
     expect(rendersOver(10_000)).toBe(10);
+  });
+
+  it('cannot freeze a bubble on "live" when the clock crosses expiry mid-render', () => {
+    const t0 = Date.now();
+    const expiresAt = t0 + 3_000;
+    const { result } = render([start(expiresAt - 15 * 60_000)]);
+    rendersOver(2_000);
+    expect(result.current.liveLocationBubbleStatus.s1).toBe('active');
+    // On the tick that lands on the expiry instant, make the first two clock
+    // reads in the render fall 1 ms short and every later read land on it, so
+    // the separate reads would disagree if the hook took more than one.
+    const realNow = Date.now.bind(Date);
+    let calls = 0;
+    jest
+      .spyOn(Date, 'now')
+      .mockImplementation(() =>
+        realNow() >= expiresAt ? (calls++ < 2 ? expiresAt - 1 : expiresAt) : realNow(),
+      );
+    rendersOver(1_000);
+    jest.restoreAllMocks();
+    rendersOver(1_000);
+    // Either way the bubble must not be left showing 'active' with the timer
+    // stopped and the relay subscription still open.
+    expect(result.current.liveLocationBubbleStatus.s1).toBe('ended');
+    expect(rendersOver(10_000)).toBe(0);
+    expect(relaySubs.mock.lastCall?.[0].shares).toEqual([]);
+  });
+
+  it('stops while blurred and resumes on refocus mid-share', () => {
+    const markers = [start(Date.now())];
+    const { rerender } = render(markers);
+    expect(rendersOver(3_000)).toBe(3);
+    mockFocused = false;
+    rerender({ m: markers });
+    expect(rendersOver(5_000)).toBe(0);
+    mockFocused = true;
+    rerender({ m: markers });
+    expect(rendersOver(10_000)).toBe(10);
+  });
+
+  it('shows the share ended on refocus when it expired while blurred, and stays quiet', () => {
+    const markers = [start(Date.now() - 15 * 60_000 + 3_000)];
+    const { result, rerender } = render(markers);
+    mockFocused = false;
+    rerender({ m: markers });
+    expect(rendersOver(10_000)).toBe(0);
+    expect(result.current.liveLocationBubbleStatus.s1).toBe('active');
+    mockFocused = true;
+    rerender({ m: markers });
+    expect(result.current.liveLocationBubbleStatus.s1).toBe('ended');
+    expect(rendersOver(10_000)).toBe(0);
+  });
+
+  it('flips my own share to expired from the context after the tick has stopped', () => {
+    const t0 = Date.now();
+    const mine: ThreadLiveMarker = {
+      ...start(t0 - 15 * 60_000 + 2_000),
+      fromMe: true,
+      sender: ME,
+    };
+    mockLiveCtx = {
+      sessionsByRecipient: new Map([[PEER, [{ sessionId: 's1', status: 'active' }]]]),
+      remainingMsForSession: () => Math.max(0, t0 + 2_000 - Date.now()),
+    };
+    const { result, rerender } = render([mine]);
+    expect(result.current.liveLocationBubbleStatus.s1).toBe('active');
+    // Wall clock passes the expiry: the tick stops, but the context (which only
+    // checks expiry every 5 s) still says active.
+    expect(rendersOver(5_000)).toBe(2);
+    expect(result.current.liveLocationBubbleStatus.s1).toBe('active');
+    // The context's own expiry check lands: its change alone updates the bubble.
+    mockLiveCtx = {
+      ...mockLiveCtx,
+      sessionsByRecipient: new Map([[PEER, [{ sessionId: 's1', status: 'expired' }]]]),
+    };
+    rerender({ m: [mine] });
+    expect(result.current.liveLocationBubbleStatus.s1).toBe('expired');
+    expect(result.current.liveLocationBubbleRemaining.s1).toBe(0);
+    expect(rendersOver(10_000)).toBe(0);
   });
 });
