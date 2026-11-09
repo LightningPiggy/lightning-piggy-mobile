@@ -8,6 +8,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   appendGroupMessage,
+  appendGroupMessages,
   clearGroupMessages,
   loadGroupMessages,
   removeGroupMessage,
@@ -816,4 +817,106 @@ it('removes a failed hidden vote even after a self-echo changes its id', async (
   await appendGroupMessage(OWNER, GROUP, local('echo_vote', 'vote', 100));
   await removeGroupMessage(OWNER, GROUP, 'local_vote');
   expect(await loadGroupMessages(OWNER, GROUP)).toEqual([]);
+});
+
+describe('appendGroupMessages — one read-modify-write per batch (#1786)', () => {
+  const key = groupMessagesKey(OWNER, GROUP);
+  const hex = (i: number) => i.toString(16).padStart(64, '0');
+  // The storage mock's methods are jest.fn()s already: count from a cleared
+  // baseline (restoring them would break the mock for later tests).
+  const countIo = () => {
+    const get = AsyncStorage.getItem as jest.Mock;
+    const set = AsyncStorage.setItem as jest.Mock;
+    get.mockClear();
+    set.mockClear();
+    return {
+      reads: () => get.mock.calls.filter(([k]) => k === key).length,
+      writes: () => set.mock.calls.filter(([k]) => k === key).length,
+    };
+  };
+  const batchOf = (n: number) =>
+    Array.from({ length: n }, (_, i) => wrap(hex(i + 1), `m${i}`, 1700000000 + i));
+
+  it('stores a 200-message batch with one read and one write (per-message: 200 of each)', async () => {
+    // Warm the one-time legacy migration so it doesn't count as group IO.
+    await loadGroupMessages(OWNER, GROUP);
+    const before = countIo();
+    for (const m of batchOf(200)) await appendGroupMessage(OWNER, GROUP, m);
+    expect([before.reads(), before.writes()]).toEqual([200, 200]);
+
+    await AsyncStorage.clear();
+    const after = countIo();
+    const stored = await appendGroupMessages(OWNER, GROUP, batchOf(200));
+    expect([after.reads(), after.writes()]).toEqual([1, 1]);
+    expect(stored).toHaveLength(200);
+    expect(await loadGroupMessages(OWNER, GROUP)).toEqual(stored);
+  });
+
+  it('ends in the same state as appending the messages one by one', async () => {
+    const seed = [
+      local('local_1', 'hi', 1700000000),
+      local('local_2', 'hi', 1700000002),
+      { ...wrap(hex(9), '', 1700000004), localId: 'local_9', sendFailed: true },
+      wrap(hex(8), 'kept', 1700000006, OTHER_SENDER),
+    ];
+    const batch = [
+      wrap(hex(1), 'hi', 1700000003), // absorbs local_2 (closest)
+      wrap(hex(1), 'hi', 1700000003), // replay: must not consume local_1
+      wrap(hex(9), 'a real caption', 1700000004), // repairs the placeholder
+      wrap(hex(8), 'older copy', 1700000001, OTHER_SENDER), // older: ignored
+      wrap(hex(7), 'late', 1699999990), // sorts first
+      { ...wrap(hex(6), 'reply', 1700000010), replyTo: hex(1) },
+    ];
+    for (const m of seed) await appendGroupMessage(OWNER, GROUP, m);
+    for (const m of batch) await appendGroupMessage(OWNER, GROUP, m);
+    const oneByOne = await loadGroupMessages(OWNER, GROUP);
+
+    await AsyncStorage.clear();
+    for (const m of seed) await appendGroupMessage(OWNER, GROUP, m);
+    expect(await appendGroupMessages(OWNER, GROUP, batch)).toEqual(oneByOne);
+    expect(oneByOne.map((m) => m.localId ?? m.id)).toEqual([
+      hex(7),
+      'local_1',
+      'local_2',
+      'local_9',
+      hex(8),
+      hex(6),
+    ]);
+    expect(oneByOne.find((m) => m.id === hex(9))).toMatchObject({
+      text: 'a real caption',
+      sendFailed: true,
+    });
+  });
+
+  it('keeps only the newest 500 after the merge', async () => {
+    await appendGroupMessage(OWNER, GROUP, wrap(hex(9999), 'oldest', 1600000000));
+    const stored = await appendGroupMessages(OWNER, GROUP, batchOf(600));
+    expect(stored).toHaveLength(500);
+    expect(stored[0].text).toBe('m100');
+    expect(stored[499].text).toBe('m599');
+  });
+
+  it('loses nothing when batches and single sends race for the same group', async () => {
+    const all = batchOf(100);
+    await Promise.all([
+      appendGroupMessages(OWNER, GROUP, all.slice(0, 50)),
+      appendGroupMessage(OWNER, GROUP, local('local_x', 'sending', 1800000000)),
+      appendGroupMessages(OWNER, GROUP, all.slice(50)),
+    ]);
+    expect(await loadGroupMessages(OWNER, GROUP)).toHaveLength(101);
+  });
+
+  it('is a no-op for an empty batch', async () => {
+    const io = countIo();
+    expect(await appendGroupMessages(OWNER, GROUP, [])).toEqual([]);
+    expect([io.reads(), io.writes()]).toEqual([0, 0]);
+  });
+
+  it('scopes to the owner and refuses a signed-out account', async () => {
+    await appendGroupMessages(OWNER, GROUP, batchOf(3));
+    expect(await loadGroupMessages(OWNER_B, GROUP)).toEqual([]);
+    await deleteGroupMessagesForOwner(OWNER);
+    await expect(appendGroupMessages(OWNER, GROUP, batchOf(1))).rejects.toThrow();
+    await expect(appendGroupMessages(null, GROUP, batchOf(1))).rejects.toThrow();
+  });
 });
