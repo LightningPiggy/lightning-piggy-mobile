@@ -116,7 +116,7 @@ it('retains LAN destinations through stale-socket retry after an account switch'
 
 it.each([
   ['signed by another account', { pubkey: 'b'.repeat(64) }, /different account/],
-  ['with changed content', { content: 'other' }, /different event/],
+  ['with changed content', { content: 'other' }, /changed the request/],
 ])('publishes nothing when the signer returns a seal %s (#1779)', async (_, change, reason) => {
   const sender = getPublicKey(generateSecretKey());
   setCurrentUserPubkey(sender);

@@ -4,13 +4,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
 import * as nostrService from '../services/nostrService';
-import * as amberService from '../services/amberService';
+import { signAccountEvent } from '../services/signAccountEvent';
 import { ownEventPublishTargets } from '../services/ownEventPublishTargets';
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile, RelayConfig, SignerType } from '../types/nostr';
 import { NSEC_KEY } from './nostrAuthKeys';
 import { OWN_PROFILE_CACHE_KEY_BASE, OWN_PROFILE_TIMESTAMP_KEY_BASE } from './nostrCacheKeys';
-import { nip46Sign } from './nip46DmDecrypt';
 import { assertSigningKey } from '../utils/sellerSigning';
 
 export interface ProfileFields {
@@ -56,22 +55,11 @@ export function usePublishProfile({
           // target lookup would otherwise sign A's edits with B's key).
           assertSigningKey(secretKey, pubkey);
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
-        } else if (signerType === 'amber') {
-          const eventJson = JSON.stringify(event);
-          const { event: signedEventJson } = await amberService.requestEventSignature(
-            eventJson,
-            '',
-            pubkey,
-          );
-          if (!signedEventJson) return false;
-          const signed = JSON.parse(signedEventJson);
-          if (signed.pubkey !== pubkey) return false;
-          await nostrService.publishSignedEvent(signed, targetRelays);
-        } else if (signerType === 'nip46') {
-          const signedEventJson = await nip46Sign(event, pubkey);
-          if (!signedEventJson) return false;
-          const signed = JSON.parse(signedEventJson);
-          if (signed.pubkey !== pubkey) return false;
+        } else if (signerType === 'amber' || signerType === 'nip46') {
+          // Null unless the signer returned this exact profile, validly signed
+          // by this account: never publish or adopt anything else (#1779).
+          const signed = await signAccountEvent(event, { pubkey, isLoggedIn, signerType });
+          if (!signed) return false;
           await nostrService.publishSignedEvent(signed, targetRelays);
         } else {
           // No usable signer: nothing was published, so don't adopt or cache it.

@@ -5,6 +5,9 @@ import { signAccountEvent } from './signAccountEvent';
 import { signEvent } from './nostrService';
 import { requestEventSignature } from './amberService';
 import { nip46Sign } from '../contexts/nip46DmDecrypt';
+import { Toast } from '../components/BrandedToast';
+import { __resetMismatchNoticeForTests } from './remoteSignerMismatchNotice';
+jest.mock('../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 jest.mock('./nostrService', () => ({
   decodeNsec: () => ({ secretKey: new Uint8Array(32).fill(8) }),
   signEvent: jest.fn(),
@@ -43,6 +46,8 @@ describe('remote signers (#1779)', () => {
   beforeEach(() => {
     jest.mocked(requestEventSignature).mockReset();
     jest.mocked(nip46Sign).mockReset();
+    jest.mocked(Toast.show).mockClear();
+    __resetMismatchNoticeForTests();
     jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
   afterEach(() => jest.restoreAllMocks());
@@ -52,8 +57,23 @@ describe('remote signers (#1779)', () => {
     async (signerType) => {
       answer(finalizeEvent({ ...template }, generateSecretKey()));
       await expect(signAccountEvent(template, { ...account, signerType })).resolves.toBeNull();
+      // The caller only sees null, so the user is told why, once per burst.
+      await signAccountEvent(template, { ...account, signerType });
+      expect(Toast.show).toHaveBeenCalledTimes(1);
+      expect(Toast.show).toHaveBeenCalledWith({
+        type: 'error',
+        text1:
+          'Your signer answered with a different account. Switch it to this account and try again.',
+      });
     },
   );
+
+  it.each(['amber', 'nip46'] as const)('accepts %s restamping created_at', async (signerType) => {
+    answer(finalizeEvent({ ...template, created_at: 999 }, accountKey));
+    await expect(signAccountEvent(template, { ...account, signerType })).resolves.toMatchObject({
+      created_at: 999,
+    });
+  });
 
   it.each(['amber', 'nip46'] as const)('returns null when %s signs a changed event', async (st) => {
     answer(finalizeEvent({ ...template, tags: [] }, accountKey));
@@ -68,6 +88,7 @@ describe('remote signers (#1779)', () => {
       await expect(
         signAccountEvent(template, { ...account, signerType: st }),
       ).resolves.toMatchObject({ id: signed.id, pubkey: account.pubkey });
+      expect(Toast.show).not.toHaveBeenCalled();
     },
   );
 });

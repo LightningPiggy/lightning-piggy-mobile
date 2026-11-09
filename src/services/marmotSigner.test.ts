@@ -167,7 +167,7 @@ describe('createMarmotSigner', () => {
       );
       mock.mockResolvedValueOnce(answer({ ...draft, content: 'y', id: 'i', sig: 's', pubkey: PK }));
       await expect(createMarmotSigner(PK, type).signEvent(draft)).rejects.toThrow(
-        /different event/,
+        /changed the request/,
       );
     },
   );

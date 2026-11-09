@@ -136,6 +136,11 @@
     "unavailable": "Amber konnte nicht geöffnet werden. Prüfe, ob es installiert ist, und versuche es dann erneut.",
     "failed": "Amber konnte die Anfrage nicht abschließen. Versuche es erneut."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Dein Signierer hat mit einem anderen Konto geantwortet. Wechsle dort zu diesem Konto und versuche es erneut.",
+    "modified": "Dein Signierer hat die Anfrage vor dem Signieren verändert, daher wurde nichts gesendet. Versuche es erneut.",
+    "badSignature": "Die Antwort deines Signierers hatte eine ungültige Signatur, daher wurde nichts gesendet. Versuche es erneut."
+  },
   "alphabetBar": {
     "alphabetIndex": "Alphabet-Index",
     "jumpTo": "Zu {{letter}} springen",

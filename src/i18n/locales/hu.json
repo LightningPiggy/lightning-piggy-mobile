@@ -136,6 +136,11 @@
     "unavailable": "Nem sikerült megnyitni az Ambert. Ellenőrizd, hogy telepítve van-e, majd próbáld újra.",
     "failed": "Az Amber nem tudta teljesíteni a kérést. Próbáld újra."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Az aláíród egy másik fiókkal válaszolt. Válts át benne erre a fiókra, és próbáld újra.",
+    "modified": "Az aláíród aláírás előtt megváltoztatta a kérést, ezért semmi sem lett elküldve. Próbáld újra.",
+    "badSignature": "Az aláíród válaszában érvénytelen aláírás volt, ezért semmi sem lett elküldve. Próbáld újra."
+  },
   "alphabetBar": {
     "alphabetIndex": "Betűmutató",
     "jumpTo": "Ugrás ide: {{letter}}",
