@@ -122,3 +122,15 @@ describe('held alerts wait for an audience that cannot answer yet', () => {
     expect(mockFire).not.toHaveBeenCalled();
   });
 });
+
+it('an ordinary DM held with its rumor alerts; a room chat (subject) does not', async () => {
+  publishNotificationAudience(VIEWER, { tier: 'all', fof: null });
+  const rumor = { pubkey: STRANGER, kind: 14, content: 'hi', created_at: 1 };
+  notifyDroppedDeferred(VIEWER, { ...item('d1'), groupRumor: { ...rumor, tags: [] } });
+  notifyDroppedDeferred(VIEWER, {
+    ...item('d2'),
+    groupRumor: { ...rumor, tags: [['subject', 'Book club']] },
+  });
+  await flush();
+  expect(mockFire.mock.calls.map((c) => c[0].data.messageId)).toEqual(['d1']);
+});

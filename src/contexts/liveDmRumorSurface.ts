@@ -12,6 +12,7 @@ import {
   partnerFromRumor,
   textForRumor,
   rumorEventId,
+  subjectFromRumor,
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import { upsertDmMessages, type DmMessageRow } from '../services/dmDb';
@@ -341,10 +342,12 @@ export function createLiveRumorSurfacer(
         });
     if (decision !== 'pass') {
       // Kept out of Messages, but the Web of Trust tier may still let it
-      // notify. Not a two-party room chat: its thread isn't the 1:1 one.
+      // notify. Not a two-party room chat (it carries a subject): its thread
+      // isn't the 1:1 one. The router hands back `deferredGroupRumor` for an
+      // ordinary DM too, so that can't tell the two apart.
       if (
         decision === 'drop' &&
-        !routeResult.deferredGroupRumor &&
+        !subjectFromRumor(rumor) &&
         mayAudienceNotify(viewerPubkey, gateEntry, isFreshArrival(rumor.created_at))
       ) {
         const alert = audienceAlert(

@@ -14,6 +14,7 @@ import {
 import { dmThreadId, MARMOT_WELCOME_KIND, protocolForWireKind } from '../utils/dmProtocol';
 import { isChatReactionKind } from '../utils/nip17Reactions';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
+import { subjectFromRumor } from '../utils/nip17Unwrap';
 import type { DeferredFollowGateEntry } from './liveSubFollowGate';
 
 // Notify-only for the live DM sub: the follow gate kept a message out of
@@ -78,10 +79,11 @@ export function fireAudienceNotification(viewer: string, entry: AlertEntry, body
 /**
  * A fresh message the follow gate held while follows loaded, then turned away
  * at reconciliation (not followed): the tier may still let it notify. Two-party
- * room chats are skipped, as on the live drop path.
+ * room chats (a rumor with a subject) are skipped, as on the live drop path;
+ * an ordinary DM is held with its rumor too, so the rumor alone doesn't say.
  */
 export function notifyDroppedDeferred(viewer: string, item: DeferredFollowGateEntry): void {
-  if (!item.notify || item.groupRumor) return;
+  if (!item.notify || (item.groupRumor && subjectFromRumor(item.groupRumor))) return;
   // Follows usually load before the tier's friends-of-friends set does (it is
   // read from cache once follows are known), so at cold start the audience
   // can't answer yet: park the alert briefly rather than lose it.

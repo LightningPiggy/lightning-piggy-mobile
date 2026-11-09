@@ -56,11 +56,13 @@ jest.mock('../utils/nip17Unwrap', () => ({
     pubkey: mockSender,
     created_at: Math.floor(Date.now() / 1000),
     content: 'hi',
-    tags: [],
+    tags: mockSubject ? [['subject', mockSubject]] : [],
   }),
   partnerFromRumor: () => ({ partnerPubkey: mockSender, fromMe: false }),
+  subjectFromRumor: jest.requireActual('../utils/nip17Unwrap').subjectFromRumor,
   textForRumor: () => 'hi',
 }));
+let mockSubject: string | null = null;
 jest.mock('./backgroundDmIngest', () => ({
   ...jest.requireActual('./backgroundDmIngest'),
   storeDecryptedWrap: jest.fn().mockResolvedValue(undefined),
@@ -141,6 +143,7 @@ beforeEach(async () => {
   __resetNotificationAudiences();
   __resetFofMemory();
   mockReplied = new Set();
+  mockSubject = null;
   await AsyncStorage.clear();
   mockSubscribe.mockReturnValue(() => {});
 });
@@ -163,6 +166,16 @@ describe.each<[WotTier, boolean, boolean]>([
     expect(await notifies(STRANGER)).toBe(strangerNotifies);
     expect(jest.mocked(storeDecryptedWrap).mock.calls.map((c) => c[2].pubkey)).toEqual([FRIEND]);
   });
+});
+
+it('the tier never widens room messages: a subject from an unfollowed sender stays silent', async () => {
+  await seedAccount(ME, 'all', null);
+  await arm(ME);
+  mockSubject = 'Book club';
+  expect(await notifies(STRANGER)).toBe(false);
+  expect(await notifies(FRIEND)).toBe(true); // as before, for a followed sender
+  mockSubject = null;
+  expect(await notifies(STRANGER)).toBe(true);
 });
 
 it('an unchosen tier notifies like Friends: nothing stored, or an unchosen All', async () => {

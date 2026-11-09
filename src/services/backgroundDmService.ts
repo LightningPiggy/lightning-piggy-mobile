@@ -87,7 +87,12 @@ import {
   dismissForegroundServiceNotification,
 } from './notificationService';
 import * as zapSenderProfileStorage from './zapSenderProfileStorage';
-import { partnerFromRumor, textForRumor, type DecodedRumor } from '../utils/nip17Unwrap';
+import {
+  partnerFromRumor,
+  subjectFromRumor,
+  textForRumor,
+  type DecodedRumor,
+} from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { isChatReactionKind } from '../utils/nip17Reactions';
 import { isNip171InboxRumor } from '../contexts/nip171InboxRouting';
@@ -354,7 +359,13 @@ async function handleWrap(input: {
     // Signed out / switched account meanwhile: not this watch's to alert.
     if (activeWatch?.viewerPubkey !== viewerPubkey) return;
     storable = hasRepliedTo(viewerPubkey, partnership.partnerPubkey);
-    if (!storable && !audienceAdmits(input.notificationAudience?.(), partnership.partnerPubkey))
+    // The tier only widens 1:1 alerts: a room message (it carries a subject)
+    // from someone unfollowed would open the sender's 1:1 thread instead.
+    if (
+      !storable &&
+      (subjectFromRumor(rumor) ||
+        !audienceAdmits(input.notificationAudience?.(), partnership.partnerPubkey))
+    )
       return;
   }
   // Keep what we just decrypted (#1325): tapping the alert or opening
