@@ -4,6 +4,11 @@
  * address (self-hosted LNbits tags zap receipts with the server's pubkey, not
  * the user's).
  *
+ * `providerPubkey` is that same LNURL server key: NIP-57 requires every
+ * receipt to be authored by it, so it is the only key a receipt for this
+ * wallet may be signed with (#1780). Null when the wallet has no lightning
+ * address, the server doesn't support zaps, or it can't be reached.
+ *
  * The caller awaits this only AFTER the zap resolver's pending/fingerprint
  * short-circuits, so the common no-op balance tick (nothing new to attribute)
  * never pays the `resolveLud16ToNostrPubkey` network round-trip — that
@@ -13,12 +18,12 @@ export async function collectZapRecipientPubkeys(
   userPubkey: string | null,
   lightningAddress: string | null | undefined,
   resolveLud16ToNostrPubkey: (lud16: string) => Promise<string | null>,
-): Promise<string[]> {
+): Promise<{ recipients: string[]; providerPubkey: string | null }> {
   const recipients: string[] = [];
   if (userPubkey) recipients.push(userPubkey);
-  if (lightningAddress) {
-    const pk = await resolveLud16ToNostrPubkey(lightningAddress);
-    if (pk) recipients.push(pk);
-  }
-  return recipients;
+  const providerPubkey = lightningAddress
+    ? await resolveLud16ToNostrPubkey(lightningAddress)
+    : null;
+  if (providerPubkey) recipients.push(providerPubkey);
+  return { recipients, providerPubkey };
 }
