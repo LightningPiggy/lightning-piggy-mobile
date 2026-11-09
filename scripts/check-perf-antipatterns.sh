@@ -21,11 +21,8 @@ set -euo pipefail
 # Check 1: per-event Map clones
 declare -A MAP_CLONE_BASELINE=(
   ["src/contexts/LiveLocationContext.tsx"]=1
-  ["src/screens/EventsScreen.tsx"]=1
-  ["src/screens/ExploreHomeScreen.tsx"]=3
-  ["src/screens/HuntPiggyDetailScreen.tsx"]=3
-  ["src/screens/HuntScreen.tsx"]=2
-  ["src/screens/MyPigletsScreen.tsx"]=3
+  ["src/screens/HuntScreen.tsx"]=1
+  ["src/screens/MyPigletsScreen.tsx"]=2
 )
 
 # Check 2: react-native Image imports (multi-line aware — full sweep 2026-07-11)
@@ -80,11 +77,14 @@ check_pattern() {
 # run once per <=150 ms flush (or per batch), not per incoming event — the
 # same criterion that exempts useCoalescedMap itself. A file only belongs
 # here if its clones are provably flush-scoped; per-event clones never do.
+# Comment lines (`//`, `/*`, ` *`) are skipped so prose that names the
+# anti-pattern can't use up a file's allowance.
 map_clones=$(git ls-files 'src/**/*.ts' 'src/**/*.tsx' \
   | grep -v '\.test\.' \
   | grep -v '^src/utils/useCoalescedMap\.ts$' \
   | grep -v '^src/hooks/useFoundLogIngest\.ts$' \
-  | xargs grep -c "new Map(prev" 2>/dev/null | grep -v ':0$' || true)
+  | xargs perl -ne 'next if m{^\s*(//|/?\*)}; $c{$ARGV}++ if /new Map\(prev/; END { print "$_:$c{$_}\n" for sort keys %c }' \
+    2>/dev/null || true)
 check_pattern "per-event Map clone" "$map_clones" MAP_CLONE_BASELINE \
   "Batch relay/event ingest with src/utils/useCoalescedMap.ts instead of cloning per event."
 
