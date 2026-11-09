@@ -3,6 +3,9 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import SendSheet from './SendSheet';
 import { LinkActionSheetHost } from './LinkActionSheet';
 import { INVOICE_WITH_AMOUNT } from '../utils/bolt11TestVectors';
+import { Toast } from './BrandedToast';
+import { recordOutgoing } from '../services/zapCounterpartyStorage';
+import { fetchInvoiceWithVerification } from '../services/lnurlService';
 
 // Boundary test for the real SendSheet: native sheet/camera, contexts and
 // payment services are stubbed; the sheet's own open effect, tab state and
@@ -128,7 +131,20 @@ jest.mock('../contexts/LocaleContext', () =>
 );
 jest.mock('./BrandedAlert', () => ({ Alert: { alert: jest.fn() } }));
 jest.mock('./BrandedToast', () => ({ Toast: { show: jest.fn() } }));
-jest.mock('./PaymentProgressOverlay', () => () => null);
+// The overlay's state and its Cancel / OK (Continue in background) taps.
+jest.mock('./PaymentProgressOverlay', () => {
+  const { Text, TouchableOpacity, View } = jest.requireActual('react-native');
+  return function MockOverlay(p: { state: string; onCancel: () => void; onDismiss: () => void }) {
+    if (p.state === 'hidden') return null;
+    return (
+      <View>
+        <Text testID="mock-overlay-state">{p.state}</Text>
+        <TouchableOpacity testID="payment-overlay-cancel" onPress={p.onCancel} />
+        <TouchableOpacity testID="payment-overlay-ok" onPress={p.onDismiss} />
+      </View>
+    );
+  };
+});
 jest.mock('./AmountEntryScreen', () => () => null);
 jest.mock('./SendAmountSection', () => {
   const { Text } = jest.requireActual('react-native');
@@ -152,7 +168,13 @@ jest.mock('./SendScanPane', () => {
     );
   };
 });
-jest.mock('../hooks/useSendSheetLnurl', () => ({ useSendSheetLnurl: () => undefined }));
+let mockSetLnurlParams: ((p: import('../services/lnurlService').LnurlPayParams) => void) | null =
+  null;
+jest.mock('../hooks/useSendSheetLnurl', () => ({
+  useSendSheetLnurl: (a: { setLnurlParams: typeof mockSetLnurlParams }) => {
+    mockSetLnurlParams = a.setLnurlParams;
+  },
+}));
 const mockProcessInput = jest.fn();
 const mockResetInputForOpen = jest.fn();
 // The sheet's own setters, so a test can play out a resolved target + amount.
@@ -186,7 +208,10 @@ jest.mock('../services/sendThresholdService', () => ({
   shouldConfirmSend: jest.fn(),
 }));
 jest.mock('../services/lnurlService', () => ({ fetchInvoiceWithVerification: jest.fn() }));
-jest.mock('../services/boltzService', () => ({ isBitcoinAddress: () => false }));
+jest.mock('../services/boltzService', () => ({
+  isBitcoinAddress: () => false,
+  isQuoteChangedError: () => false,
+}));
 jest.mock('../services/onchainService', () => ({}));
 jest.mock('../services/nostrService', () => ({ npubEncode: jest.fn() }));
 jest.mock('../services/zapCounterpartyStorage', () => ({ recordOutgoing: jest.fn() }));
@@ -194,14 +219,17 @@ jest.mock('../services/nwcService', () => ({
   isReplyTimeoutError: jest.fn(),
   isConnectionError: jest.fn(),
 }));
-jest.mock('../services/swapRecoveryService', () => ({}));
+jest.mock('../services/swapRecoveryService', () => ({
+  recoverPendingSwaps: jest.fn(async () => undefined),
+}));
 jest.mock('../utils/reverseSwapSend', () => ({
   executeReverseSwap: jest.fn(),
   isSwapSettlingError: jest.fn(),
+  isSwapCreateTimeout: () => false,
 }));
 jest.mock('../utils/perfLog', () => ({ perfLog: jest.fn() }));
 
-const mockConfirmLargeSend = jest.fn(async () => false);
+const mockConfirmLargeSend = jest.fn(async (_args: unknown) => false);
 jest.mock('../hooks/useLargeSendConfirm', () => ({
   useLargeSendConfirm: () => mockConfirmLargeSend,
 }));
@@ -217,6 +245,7 @@ beforeEach(() => {
   mockModalStack = [];
   onClose.mockClear();
   mockConfirmLargeSend.mockClear();
+  mockConfirmLargeSend.mockImplementation(async () => false);
   mockPermission = null;
   mockSetPermission = null;
   mockNativeKeystroke = null;
@@ -470,3 +499,108 @@ it.each([
     expect(mockConfirmLargeSend).not.toHaveBeenCalled();
   },
 );
+
+// #1776: once the pay request has gone out, Cancel can't recall it. The wallet
+// mock fires onDispatched, then hangs (rejecting only on abort, like nwcService).
+describe('Cancel after the pay request was dispatched (#1776)', () => {
+  let settle: { resolve: (v: unknown) => void; reject: (e: unknown) => void };
+  beforeEach(() => {
+    jest.mocked(Toast.show).mockClear();
+    jest.mocked(recordOutgoing).mockClear();
+    mockWallet.addPendingTransaction.mockClear();
+    mockWallet.refreshBalanceForWallet.mockReset().mockResolvedValue(undefined);
+    mockConfirmLargeSend.mockImplementation(async () => true);
+    mockWallet.payInvoiceForWallet.mockReset().mockImplementation(
+      (_w: string, _b: string, o: { signal: AbortSignal; onDispatched?: () => void }) =>
+        new Promise((resolve, reject) => {
+          o.onDispatched?.();
+          settle = { resolve, reject };
+          o.signal.addEventListener('abort', () =>
+            reject(Object.assign(new Error('Payment cancelled'), { name: 'AbortError' })),
+          );
+        }),
+    );
+    jest.mocked(fetchInvoiceWithVerification).mockResolvedValue({ invoice: INVOICE_WITH_AMOUNT });
+  });
+
+  const overlay = () => screen.queryByTestId('mock-overlay-state')?.props.children;
+  const sendPasted = async () => {
+    render(<SendSheet visible onClose={onClose} />);
+    act(() => {
+      mockInputArgs?.setInvoiceData(INVOICE_WITH_AMOUNT);
+      mockInputArgs?.setScanned(true);
+      mockInputArgs?.setDecoded({ amountSats: 250000, description: '', expiry: null });
+    });
+    // Braces: don't await handleSend's promise — the payment is still in flight.
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('sendsheet-send-button'));
+    });
+  };
+  const sendToAddress = async () => {
+    render(<SendSheet visible onClose={onClose} recipientPubkey={'a'.repeat(64)} />);
+    act(() => {
+      mockInputArgs?.setInvoiceData('alice@example.com');
+      mockInputArgs?.setScanned(true);
+      mockInputArgs?.setSatsValue('21');
+      mockSetLnurlParams?.({
+        callback: 'https://example.com/cb',
+        minSats: 1,
+        maxSats: 1_000_000,
+        description: '',
+        commentAllowed: 0,
+        allowsNostr: false,
+        nostrPubkey: null,
+      });
+    });
+    // Braces: don't await handleSend's promise — the payment is still in flight.
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('sendsheet-send-button'));
+    });
+  };
+  const cancel = () => act(() => fireEvent.press(screen.getByTestId('payment-overlay-cancel')));
+
+  it.each([
+    ['pasted invoice', sendPasted],
+    ['Lightning address', sendToAddress],
+  ])('a %s keeps the overlay up and reports the result that follows', async (_k, send) => {
+    await send();
+    expect(mockWallet.payInvoiceForWallet).toHaveBeenCalledTimes(1);
+    expect(overlay()).toBe('sending');
+    cancel();
+    expect(overlay()).toBe('in-flight-extended');
+    await act(async () => settle.resolve({ preimage: 'p' }));
+    expect(overlay()).toBe('success');
+    expect(mockWallet.refreshBalanceForWallet).toHaveBeenCalledWith('w1');
+  });
+
+  it('a failure after Cancel is still shown', async () => {
+    await sendPasted();
+    cancel();
+    await act(async () => settle.reject(new Error('Insufficient balance')));
+    expect(overlay()).toBe('error');
+  });
+
+  it('continued in background: a zap is still recorded and refreshed when it settles', async () => {
+    await sendToAddress();
+    cancel();
+    act(() => fireEvent.press(screen.getByTestId('payment-overlay-ok')));
+    act(() => jest.runOnlyPendingTimers());
+    expect(onClose).toHaveBeenCalled();
+    expect(overlay()).toBeUndefined();
+    await act(async () => settle.resolve({ preimage: 'p' }));
+    expect(recordOutgoing).toHaveBeenCalledTimes(1);
+    expect(mockWallet.addPendingTransaction).toHaveBeenCalledTimes(1);
+    expect(mockWallet.refreshBalanceForWallet).toHaveBeenCalledWith('w1');
+    expect(overlay()).toBeUndefined();
+  });
+
+  it('continued in background: a failure is toasted, not lost', async () => {
+    await sendPasted();
+    cancel();
+    act(() => fireEvent.press(screen.getByTestId('payment-overlay-ok')));
+    await act(async () => settle.reject(new Error('Insufficient balance')));
+    expect(Toast.show).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', text2: 'Insufficient balance.' }),
+    );
+  });
+});

@@ -1,11 +1,14 @@
 import { act, renderHook } from '@testing-library/react-native';
 import { useSendProgressOverlay, type SendInvocation } from './useSendProgressOverlay';
 import * as swapRecoveryService from '../services/swapRecoveryService';
+import { Toast } from '../components/BrandedToast';
 
 // Hoisted above the imports by babel-jest.
 jest.mock('../services/swapRecoveryService', () => ({
   recoverPendingSwaps: jest.fn(async () => undefined),
 }));
+jest.mock('../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
+jest.mock('../contexts/LocaleContext', () => ({ useTranslation: () => (k: string) => k }));
 
 const setup = () => {
   const onClose = jest.fn();
@@ -135,7 +138,7 @@ describe('useSendProgressOverlay — per-send scoping', () => {
     expect(result.current.progressState).toBe('in-flight-extended');
   });
 
-  it('a plain Lightning send cancelled after dispatch warns, then closes the sheet (#1776)', () => {
+  it('Cancel after dispatch keeps the completion race running so the result still lands (#1776)', () => {
     const { result, onClose, setSending } = setup();
     let send!: SendInvocation;
     act(() => {
@@ -146,13 +149,53 @@ describe('useSendProgressOverlay — per-send scoping', () => {
     expect(result.current.swapSteps).toBeNull();
     expect(result.current.canContinueInBackground).toBe(false);
     act(() => result.current.handleCancelPayment());
-    expect(send.controller.signal.aborted).toBe(true);
+    // Aborting would stop the lookup/notification race and drop the outcome.
+    expect(send.controller.signal.aborted).toBe(false);
     expect(result.current.progressState).toBe('in-flight-extended');
     expect(setSending).toHaveBeenCalledWith(false);
     // Acknowledging the warning closes the sheet rather than leaving Send armed.
     act(() => result.current.handleOverlayDismiss());
     act(() => jest.runAllTimers());
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('the user who stays after Cancel still sees the real outcome', () => {
+    const { result } = setup();
+    let send!: SendInvocation;
+    act(() => {
+      send = result.current.beginSend();
+    });
+    act(() => result.current.callbacksFor(send).onPaymentDispatched());
+    act(() => result.current.handleCancelPayment());
+    act(() => result.current.showOutcome(send, 'success'));
+    expect(result.current.progressState).toBe('success');
+  });
+
+  it('a backgrounded send that fails is toasted; a superseded one is not', () => {
+    const { result } = setup();
+    let a!: SendInvocation;
+    act(() => {
+      a = result.current.beginSend();
+    });
+    act(() => result.current.showOutcome(a, 'in-flight-extended'));
+    act(() => result.current.handleOverlayDismiss());
+    act(() => result.current.showOutcome(a, 'error', 'Insufficient balance'));
+    expect(Toast.show).toHaveBeenCalledWith({
+      type: 'error',
+      text1: 'paymentProgressOverlay.failedTitle',
+      text2: 'Insufficient balance.',
+    });
+    expect(result.current.progressState).toBe('hidden');
+
+    let b!: SendInvocation;
+    act(() => {
+      b = result.current.beginSend();
+    });
+    act(() => {
+      result.current.beginSend(); // supersedes b without backgrounding it
+    });
+    act(() => result.current.showOutcome(b, 'error', 'no route'));
+    expect(Toast.show).toHaveBeenCalledTimes(1);
   });
 
   it('Continue in background from in-flight-extended closes the sheet and kicks recovery', () => {

@@ -1,5 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PaymentProgressState } from '../components/PaymentProgressOverlay';
+import { Toast } from '../components/BrandedToast';
+import { useTranslation } from '../contexts/LocaleContext';
+import { humanizePaymentError } from '../utils/paymentErrors';
 import * as swapRecoveryService from '../services/swapRecoveryService';
 import type { ReverseSwapSendStage } from '../utils/reverseSwapSend';
 import { swapSendSteps } from '../utils/swapSendStage';
@@ -38,6 +41,7 @@ type OutcomeState = Exclude<PaymentProgressState, 'hidden' | 'sending'>;
  * it only lands while that send is still current and not backgrounded.
  */
 export function useSendProgressOverlay({ onClose, setSending }: Options) {
+  const t = useTranslation();
   const [progressState, setProgressState] = useState<PaymentProgressState>('hidden');
   const [progressError, setProgressError] = useState<string | undefined>(undefined);
   // Whether the in-flight send is a Boltz reverse swap (Lightning → on-chain).
@@ -89,14 +93,22 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
     return true;
   }, []);
 
-  /** Paint a terminal/extended outcome for `send` — ignored once superseded or backgrounded. */
+  /** Paint a terminal/extended outcome for `send` — ignored once superseded. A
+   *  send continued in the background has no overlay, so its failure is toasted. */
   const showOutcome = useCallback(
     (send: SendInvocation, state: OutcomeState, error?: string) => {
+      if (send.dismissed && state === 'error') {
+        Toast.show({
+          type: 'error',
+          text1: t('paymentProgressOverlay.failedTitle'),
+          text2: humanizePaymentError(error).message,
+        });
+      }
       if (!ownsOverlay(send)) return;
       setProgressError(error);
       setProgressState(state);
     },
-    [ownsOverlay],
+    [ownsOverlay, t],
   );
 
   /** Progress callbacks for one send's payment / reverse swap. */
@@ -119,10 +131,12 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
   );
 
   const handleCancelPayment = useCallback(() => {
-    // Cancelling the reply wait cannot recall a pay request the wallet already
-    // has: keep the in-flight warning up rather than re-arming Send (#1776).
+    // Cancel cannot recall a pay request the wallet already has (#1776). Don't
+    // abort it: the (time-capped) completion race keeps running so its result
+    // is still painted — or, once continued in the background, still refreshed
+    // and recorded. Show the in-flight warning rather than re-arming Send.
     const send = currentSendRef.current;
-    send?.controller.abort();
+    if (!send?.dispatched) send?.controller.abort();
     setProgressState(send?.dispatched ? 'in-flight-extended' : 'hidden');
     setProgressError(undefined);
     setSending(false);
