@@ -3804,6 +3804,7 @@
   "removeWalletPrompt": {
     "withPhrase": "Damit wird „{{alias}}“ von diesem Handy entfernt, einschließlich der hier gespeicherten Wiederherstellungsphrase. Schreib sie vorher auf – ohne ihre Wiederherstellungsphrase kann das Geld dieser Wallet nicht wiederhergestellt werden.",
     "withCoinosLogin": "Damit wird „{{alias}}“ von diesem Handy entfernt, einschließlich des hier gespeicherten CoinOS-Benutzernamens, Passworts und der Verbindungsdaten. Speichere sie vorher – ohne sie kann das Geld dieser Wallet nicht wiederhergestellt werden.",
+    "mayHoldRecovery": "Dadurch wird „{{alias}}“ von diesem Handy entfernt, einschließlich aller hier gespeicherten Wiederherstellungsphrasen oder Logins. Wenn du sie nicht gesichert hast, lässt sich das Geld in dieser Wallet möglicherweise nicht wiederherstellen.",
     "balance": "Sie enthält {{amount}} sats.",
     "viewRecoveryFirst": "Erst Wiederherstellungsdaten ansehen",
     "removeAnyway": "Trotzdem entfernen",

@@ -12,7 +12,8 @@
 import type { WalletMetadata } from '../types/wallet';
 import { hasStoredRecoveryPhrase, type I18nRef } from './signOutPrompt';
 
-export type RemoveWalletRisk = 'phrase' | 'coinos' | 'none';
+/** `unknown` = the storage read failed, so we can't say what's stored. */
+export type RemoveWalletRisk = 'phrase' | 'coinos' | 'unknown' | 'none';
 
 export interface RemoveWalletPromptInput {
   wallet: Pick<WalletMetadata, 'alias' | 'walletType' | 'onchainImportMethod' | 'hideBalance'> & {
@@ -38,27 +39,31 @@ export interface RemoveWalletPrompt {
   offerViewRecovery: boolean;
 }
 
-// Fails safe: a storage read that errored counts as "may hold recovery
-// details", so the user is warned rather than shown the plain message
-// while removeWallet goes on to delete a phrase or login.
+// Fails safe: a storage read that errored is 'unknown', which still warns
+// (hedged — it doesn't claim a secret exists) rather than showing the plain
+// message while removeWallet goes on to delete whatever is stored.
 export function removeWalletRisk(input: RemoveWalletPromptInput): RemoveWalletRisk {
   const { wallet } = input;
   if (wallet.walletType === 'onchain') {
-    return hasStoredRecoveryPhrase(wallet) || input.mnemonicStored !== false ? 'phrase' : 'none';
+    if (hasStoredRecoveryPhrase(wallet) || input.mnemonicStored === true) return 'phrase';
+    return input.mnemonicStored === null ? 'unknown' : 'none';
   }
-  return input.hasCoinosRecovery !== false ? 'coinos' : 'none';
+  if (input.hasCoinosRecovery === true) return 'coinos';
+  return input.hasCoinosRecovery === null ? 'unknown' : 'none';
 }
+
+const WARNING_KEY: Record<Exclude<RemoveWalletRisk, 'none'>, string> = {
+  phrase: 'removeWalletPrompt.withPhrase',
+  coinos: 'removeWalletPrompt.withCoinosLogin',
+  unknown: 'removeWalletPrompt.mayHoldRecovery',
+};
 
 export function buildRemoveWalletPrompt(input: RemoveWalletPromptInput): RemoveWalletPrompt {
   const risk = removeWalletRisk(input);
   if (risk === 'none') return { risk, paragraphs: [], offerViewRecovery: false };
 
   const alias = { alias: input.wallet.alias };
-  const paragraphs: I18nRef[] = [
-    risk === 'phrase'
-      ? { key: 'removeWalletPrompt.withPhrase', params: alias }
-      : { key: 'removeWalletPrompt.withCoinosLogin', params: alias },
-  ];
+  const paragraphs: I18nRef[] = [{ key: WARNING_KEY[risk], params: alias }];
   // Name the money at stake — unless the user has hidden this wallet's balance.
   const { balance, hideBalance } = input.wallet;
   if (!hideBalance && balance !== null && balance > 0) {
@@ -67,8 +72,8 @@ export function buildRemoveWalletPrompt(input: RemoveWalletPromptInput): RemoveW
       params: { amount: input.formatAmount(balance) },
     });
   }
-  // The CoinOS login can be re-displayed in Wallet Settings → Connection. The
-  // app has no screen that re-shows an on-chain recovery phrase, so there's
-  // nothing to offer there beyond the warning.
-  return { risk, paragraphs, offerViewRecovery: risk === 'coinos' };
+  // The CoinOS login can be re-displayed in Wallet Settings → Connection, so
+  // offer it only when the read confirmed it's there. The app has no screen
+  // that re-shows an on-chain recovery phrase.
+  return { risk, paragraphs, offerViewRecovery: input.hasCoinosRecovery === true };
 }

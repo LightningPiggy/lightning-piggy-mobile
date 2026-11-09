@@ -3868,6 +3868,7 @@
   "removeWalletPrompt": {
     "withPhrase": "To usunie „{{alias}}” z tego telefonu, łącznie z zapisaną tu frazą odzyskiwania. Najpierw upewnij się, że masz ją zapisaną — bez frazy odzyskiwania nie da się odzyskać pieniędzy z tego portfela.",
     "withCoinosLogin": "To usunie „{{alias}}” z tego telefonu, łącznie z zapisaną tu nazwą użytkownika CoinOS, hasłem i danymi połączenia. Najpierw je zachowaj — bez nich nie da się odzyskać pieniędzy z tego portfela.",
+    "mayHoldRecovery": "To usunie „{{alias}}” z tego telefonu, w tym każdą frazę odzyskiwania lub dane logowania tu zapisane. Jeśli nie masz ich kopii, pieniędzy z tego portfela może nie dać się odzyskać.",
     "balance": "Jest w nim {{amount}} sats.",
     "viewRecoveryFirst": "Najpierw zobacz dane odzyskiwania",
     "removeAnyway": "Usuń mimo to",

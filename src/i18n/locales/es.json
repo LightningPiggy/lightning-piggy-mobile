@@ -3804,6 +3804,7 @@
   "removeWalletPrompt": {
     "withPhrase": "Esto elimina \"{{alias}}\" de este teléfono, incluida la frase de recuperación guardada aquí. Asegúrate de tenerla apuntada antes: sin su frase de recuperación, el dinero de esta cartera no se puede recuperar.",
     "withCoinosLogin": "Esto elimina \"{{alias}}\" de este teléfono, incluidos el usuario, la contraseña y los datos de conexión de CoinOS guardados aquí. Guárdalos antes: sin ellos, el dinero de esta cartera no se puede recuperar.",
+    "mayHoldRecovery": "Esto elimina \"{{alias}}\" de este teléfono, incluida cualquier frase de recuperación o inicio de sesión guardados aquí. Si no los has guardado, puede que no se pueda recuperar el dinero de esta cartera.",
     "balance": "Contiene {{amount}} sats.",
     "viewRecoveryFirst": "Ver datos de recuperación antes",
     "removeAnyway": "Eliminar igualmente",

@@ -3804,6 +3804,7 @@
   "removeWalletPrompt": {
     "withPhrase": "这会从这部手机上移除“{{alias}}”，包括保存在这里的恢复短语。请先确认已把它抄写下来——没有恢复短语，这个钱包里的钱将无法找回。",
     "withCoinosLogin": "这会从这部手机上移除“{{alias}}”，包括保存在这里的 CoinOS 用户名、密码和连接信息。请先保存好它们——没有这些信息，这个钱包里的钱将无法找回。",
+    "mayHoldRecovery": "这会从这部手机上移除“{{alias}}”，包括存储在这里的所有恢复短语或登录信息。如果你还没有保存它们，这个钱包里的钱可能无法找回。",
     "balance": "其中有 {{amount}} sats。",
     "viewRecoveryFirst": "先查看恢复信息",
     "removeAnyway": "仍然移除",

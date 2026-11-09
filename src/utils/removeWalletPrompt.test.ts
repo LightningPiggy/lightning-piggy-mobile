@@ -61,17 +61,33 @@ describe('buildRemoveWalletPrompt', () => {
     expect(p.paragraphs[0].key).toBe('removeWalletPrompt.withPhrase');
   });
 
-  it('warns about a phrase when the mnemonic read failed', () => {
+  it('gives the hedged warning, not the phrase one, when the mnemonic read failed', () => {
     const p = buildRemoveWalletPrompt(
-      input({ walletType: 'onchain', onchainImportMethod: 'xpub' }, false, null),
+      input({ walletType: 'onchain', onchainImportMethod: 'xpub', balance: 42 }, false, null),
+    );
+    expect(p).toEqual({
+      risk: 'unknown',
+      paragraphs: [
+        { key: 'removeWalletPrompt.mayHoldRecovery', params: { alias: 'Savings' } },
+        { key: 'removeWalletPrompt.balance', params: { amount: '42' } },
+      ],
+      offerViewRecovery: false,
+    });
+  });
+
+  it('still names the phrase when metadata says so, even if the read failed', () => {
+    const p = buildRemoveWalletPrompt(
+      input({ walletType: 'onchain', onchainImportMethod: 'mnemonic' }, false, null),
     );
     expect(p.risk).toBe('phrase');
   });
 
-  it('warns about a CoinOS login when the recovery read failed', () => {
+  it('gives the hedged warning without "View recovery info" when the CoinOS read failed', () => {
     const p = buildRemoveWalletPrompt(input({}, null));
-    expect(p.risk).toBe('coinos');
-    expect(p.offerViewRecovery).toBe(true);
+    expect(p.risk).toBe('unknown');
+    expect(p.paragraphs[0].key).toBe('removeWalletPrompt.mayHoldRecovery');
+    // Nothing confirmed to view, so no button that could open an empty tab.
+    expect(p.offerViewRecovery).toBe(false);
   });
 
   it('ignores CoinOS recovery info on an on-chain wallet', () => {

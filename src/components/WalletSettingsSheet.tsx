@@ -212,10 +212,14 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose, initialTab = 
         // a masked password row. The password is never logged or
         // serialised — it only travels from SecureStore → state →
         // Clipboard.setStringAsync when the user explicitly taps copy.
-        getCoinosRecovery(walletId).then((rec) => {
-          if (cancelled) return;
-          setCoinosRecovery(rec);
-        });
+        getCoinosRecovery(walletId)
+          .then((rec) => {
+            if (cancelled) return;
+            setCoinosRecovery(rec);
+          })
+          // A failed read leaves the callout hidden (state was cleared above)
+          // rather than surfacing as an unhandled rejection.
+          .catch(() => {});
       } else {
         setXpubDisplay(null);
       }
