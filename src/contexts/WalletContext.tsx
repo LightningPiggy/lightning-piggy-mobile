@@ -47,6 +47,7 @@ import { deferPostPaymentRefresh } from '../utils/deferPostPaymentRefresh';
 import { applyResolverResults, mergeWalletUpdate } from '../utils/walletStateMerge';
 import { addNwcWalletForIdentity } from '../services/addNwcWalletForIdentity';
 import { collectZapRecipientPubkeys } from '../utils/zapRecipients';
+import { matchIncomingZapReceipts } from '../services/incomingZapMatching';
 import { upsertPendingWalletTransaction } from '../utils/pendingWalletTransaction';
 
 perfLog('WalletContext module-eval');
@@ -280,7 +281,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       cache.set(normalized, pk);
       return pk;
     } catch {
-      cache.set(normalized, null);
+      // Unreachable (e.g. offline) isn't an answer: don't cache it, so a later
+      // pass can still resolve the key that incoming zaps are verified with.
       return null;
     }
   }, []);
@@ -660,7 +662,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // fingerprint short-circuits so the common no-op balance tick never pays
       // the resolveLud16ToNostrPubkey round-trip. userPubkey reused below.
       const userPubkey = nostrService.getCurrentUserPubkey();
-      const recipients = await collectZapRecipientPubkeys(
+      const { recipients, providerPubkey } = await collectZapRecipientPubkeys(
         userPubkey,
         walletsRef.current.find((w) => w.id === walletId)?.lightningAddress,
         resolveLud16ToNostrPubkey,
@@ -833,7 +835,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return;
       }
 
-      if (incomingPending.length === 0) {
+      // Incoming receipts are only trusted when signed by the wallet's LNURL
+      // server key (#1780). Without one (no lightning address, or the server
+      // can't be reached) nothing can be verified, so attribute nothing and
+      // leave the txs unresolved rather than show an unverified sender.
+      if (incomingPending.length === 0 || !providerPubkey) {
         // Nothing to fetch from relays — commit the outgoing results and bail.
         if (__DEV__ && resultsByTransaction.size > 0) {
           const attributed = [...resultsByTransaction.values()].filter((v) => v !== null).length;
@@ -870,85 +876,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return;
       }
 
-      // Primary match: bolt11. Secondary: (amount_sats, created_at) with a
-      // 5-minute window, which handles cached txs that predate bolt11 capture.
-      type Receipt = (typeof receipts)[number];
-      const byBolt11 = new Map<string, Receipt>();
-      const byAmountTime: { amountSats: number; ts: number; receipt: Receipt }[] = [];
-      for (const r of receipts) {
-        const bolt11Tag = r.tags.find((t) => t[0] === 'bolt11');
-        if (bolt11Tag?.[1]) byBolt11.set(bolt11Tag[1], r);
-
-        // The zap request embedded in `description` carries the authoritative
-        // amount (msats) — fall back to it for the (amount, time) index.
-        const descTag = r.tags.find((t) => t[0] === 'description');
-        let amountSats: number | null = null;
-        if (descTag?.[1]) {
-          try {
-            const zr = JSON.parse(descTag[1]) as { tags?: string[][] };
-            const amtTag = zr.tags?.find((t) => t[0] === 'amount');
-            if (amtTag?.[1]) {
-              const msats = parseInt(amtTag[1], 10);
-              if (Number.isFinite(msats)) amountSats = Math.round(msats / 1000);
-            }
-          } catch {}
-        }
-        if (amountSats != null) byAmountTime.push({ amountSats, ts: r.created_at, receipt: r });
-      }
-
-      const TIME_WINDOW_S = 5 * 60;
-      const findReceipt = (tx: WalletTransaction): Receipt | null => {
-        if (tx.bolt11) {
-          const hit = byBolt11.get(tx.bolt11);
-          if (hit) return hit;
-        }
-        const txTs = tx.settled_at ?? tx.created_at ?? null;
-        if (txTs == null) return null;
-        const txSats = Math.abs(tx.amount);
-        let best: { receipt: Receipt; dt: number } | null = null;
-        for (const entry of byAmountTime) {
-          if (entry.amountSats !== txSats) continue;
-          const dt = Math.abs(entry.ts - txTs);
-          if (dt > TIME_WINDOW_S) continue;
-          if (!best || dt < best.dt) best = { receipt: entry.receipt, dt };
-        }
-        return best?.receipt ?? null;
-      };
-
-      // First pass: parse every receipt + collect the unique sender
-      // pubkeys so we can batch-fetch their profiles in one relay round
-      // trip instead of a serial per-tx `fetchProfile`.
-      type ParsedEntry = {
-        tx: WalletTransaction;
-        senderPubkey: string | null;
-        comment: string;
-        anonymous: boolean;
-      };
-      const parsedEntries: ParsedEntry[] = [];
+      // Pair each tx with its receipt and keep only NIP-57-valid ones (#1780),
+      // then collect the unique senders so their profiles batch-fetch in one
+      // relay round trip instead of a serial per-tx `fetchProfile`.
+      const { matches: parsedEntries, misses } = matchIncomingZapReceipts(
+        incomingPending.map(({ tx }) => tx),
+        receipts,
+        [providerPubkey],
+      );
+      for (const tx of misses) resultsByTransaction.set(tx, null);
       const pubkeysToFetch = new Set<string>();
-
-      for (const { tx } of incomingPending) {
-        const receipt = findReceipt(tx);
-        if (!receipt) {
-          // Negative cache only when we had bolt11 to match with (definitive
-          // miss). Otherwise leave undefined so future refreshes retry once
-          // the tx has bolt11 / more receipts arrive.
-          if (tx.bolt11) resultsByTransaction.set(tx, null);
-          continue;
-        }
-        const parsed = nostrService.parseZapReceipt(receipt);
-        if (!parsed) {
-          if (tx.bolt11) resultsByTransaction.set(tx, null);
-          continue;
-        }
-        parsedEntries.push({
-          tx,
-          senderPubkey: parsed.senderPubkey,
-          comment: parsed.comment,
-          anonymous: parsed.anonymous,
-        });
-        if (parsed.senderPubkey && !parsed.anonymous) pubkeysToFetch.add(parsed.senderPubkey);
-      }
+      for (const e of parsedEntries) if (e.senderPubkey) pubkeysToFetch.add(e.senderPubkey);
 
       // Persistent cache hit first — strangers' kind-0 events change
       // infrequently and the relay round-trip is the slow part of the

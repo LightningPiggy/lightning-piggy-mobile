@@ -138,13 +138,23 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
   // ----- zap receipts subscription (coalesced) ----------------------------
 
   // Re-subscribe to kind-9735 zap receipts on the `#e` tag of find-logs.
-  // Keyed on sorted log ids so a new log re-opens the sub while an
-  // unchanged set doesn't. Receipts deduped by receiptId across relays.
-  const logIdsKey = useMemo(() => [...logs.keys()].sort().join(','), [logs]);
+  // Keyed on sorted `logId:finderPubkey` pairs so a new log re-opens the sub
+  // while an unchanged set doesn't. The finder is needed to validate each
+  // receipt (#1780). Receipts deduped by receiptId across relays.
+  const logIdsKey = useMemo(
+    () =>
+      [...logs.values()]
+        .map((l) => `${l.id}:${l.pubkey}`)
+        .sort()
+        .join(','),
+    [logs],
+  );
   useFocusEffect(
     useCallback(() => {
-      const logIds = logIdsKey ? logIdsKey.split(',') : [];
-      if (logIds.length === 0) return undefined;
+      const logAuthors = new Map<string, string>(
+        logIdsKey ? logIdsKey.split(',').map((pair) => pair.split(':') as [string, string]) : [],
+      );
+      if (logAuthors.size === 0) return undefined;
       let cancelled = false;
 
       const flush = (): void => {
@@ -180,7 +190,7 @@ export function useFoundLogIngest(coord: string): UseFoundLogIngestResult {
           return next ?? prev;
         });
       };
-      const closer = subscribeFindLogZaps(logIds, ({ receiptId, logId, sats }) => {
+      const closer = subscribeFindLogZaps(logAuthors, ({ receiptId, logId, sats }) => {
         // Same reasoning as the found-logs callback above: never buffer into
         // the shared ref once this effect instance is cancelled.
         if (cancelled) return;

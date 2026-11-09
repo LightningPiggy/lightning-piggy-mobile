@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nwcService from '../services/nwcService';
 import * as nostrService from '../services/nostrService';
+import * as lnurlService from '../services/lnurlService';
+import { validateZapReceipt } from '../services/zapReceiptValidation';
 import * as zapResolverFingerprintStorage from '../services/zapResolverFingerprintStorage';
 import * as walletStorage from '../services/walletStorageService';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -61,6 +63,14 @@ jest.mock('../services/nostrService', () => ({
   fetchZapReceiptsForRecipient: jest.fn(async () => []),
   parseZapReceipt: jest.fn(() => ({ senderPubkey: 'alice', comment: 'hi', anonymous: false })),
   fetchProfiles: jest.fn(async () => new Map()),
+}));
+jest.mock('../services/lnurlService', () => ({
+  ...jest.requireActual('../services/lnurlService'),
+  resolveLightningAddress: jest.fn(),
+}));
+// NIP-57 validation has its own tests; here only the resolver plumbing matters.
+jest.mock('../services/zapReceiptValidation', () => ({
+  validateZapReceipt: jest.fn(),
 }));
 jest.mock('../services/fiatService', () => ({
   ...jest.requireActual('../services/fiatService'),
@@ -215,8 +225,10 @@ describe('deferred zap attribution after a transaction fetch', () => {
   // and a relay receipt that pairs with it.
   const zapped = { type: 'incoming', amount: 5000, settled_at: 1000, paymentHash: 'h0' };
   const other = { type: 'incoming', amount: 2100, settled_at: 2000, paymentHash: 'h1' };
+  // Signed by the wallet's LNURL server — the only author a receipt may have.
   const receipt = {
     id: 'r0',
+    pubkey: 'srv',
     created_at: 1000,
     tags: [['description', JSON.stringify({ tags: [['amount', '5000000']] })]],
   };
@@ -231,7 +243,7 @@ describe('deferred zap attribution after a transaction fetch', () => {
     await AsyncStorage.multiSet([
       [
         'wallet_list_B',
-        JSON.stringify([{ ...metadata, walletType: 'nwc', lightningAddress: null }]),
+        JSON.stringify([{ ...metadata, walletType: 'nwc', lightningAddress: 'w@example.com' }]),
       ],
       ['txs_W', JSON.stringify([zapped])],
     ]);
@@ -239,9 +251,17 @@ describe('deferred zap attribution after a transaction fetch', () => {
     jest.mocked(nostrService.getCurrentUserPubkey).mockReturnValue('pkB');
     jest.mocked(nostrService.getCurrentUserReadRelays).mockReturnValue([]);
     jest.mocked(nostrService.fetchProfiles).mockResolvedValue(new Map());
+    jest.mocked(lnurlService.resolveLightningAddress).mockResolvedValue({
+      allowsNostr: true,
+      nostrPubkey: 'srv',
+    } as never);
     jest
-      .mocked(nostrService.parseZapReceipt)
-      .mockReturnValue({ senderPubkey: 'alice', comment: 'hi', anonymous: false } as never);
+      .mocked(validateZapReceipt)
+      .mockImplementation((r, providers) =>
+        r.pubkey && [...providers].includes(r.pubkey)
+          ? { senderPubkey: 'alice', comment: 'hi', anonymous: false, amountMsats: 5000000 }
+          : null,
+      );
     jest
       .mocked(nwcService.listTransactions)
       .mockResolvedValueOnce([
@@ -257,7 +277,7 @@ describe('deferred zap attribution after a transaction fetch', () => {
     await act(async () => latest!.fetchTransactionsForWallet('W'));
     await flushStartup();
     await waitFor(() =>
-      expect(nostrService.fetchZapReceiptsForRecipient).toHaveBeenCalledWith(['pkB'], [], {
+      expect(nostrService.fetchZapReceiptsForRecipient).toHaveBeenCalledWith(['pkB', 'srv'], [], {
         limit: 500,
       }),
     );
