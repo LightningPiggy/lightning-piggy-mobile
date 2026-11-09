@@ -774,6 +774,7 @@
     "receive": "Odbierz",
     "transfer": "Przenieś",
     "send": "Wyślij",
+    "watchOnlySend": "To portfel tylko do podglądu. Może odbierać, ale nie może wysyłać.",
     "addWallet": "Dodaj portfel",
     "addWalletText": "+ Dodaj portfel",
     "updatingTransactions": "Aktualizowanie transakcji"

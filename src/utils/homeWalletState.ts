@@ -12,8 +12,11 @@ export function selectHomeWalletState(
   const activeWallet = wallets.find((wallet) => wallet.id === activeWalletId) ?? null;
   const hasWallets = wallets.length > 0;
   const isReceiveDisabled = walletsHydrated && !hasWallets;
-  const isSendDisabled =
-    isReceiveDisabled || (activeWallet !== null && !isSendableWallet(activeWallet));
+  // A watch-only wallet (xpub / single address) has no signing key. Send stays
+  // pressable so the tap can explain why, rather than silently doing nothing.
+  const isSendWatchOnly =
+    !isReceiveDisabled && activeWallet !== null && !isSendableWallet(activeWallet);
+  const isSendDisabled = isReceiveDisabled;
   const isTransferDisabled = walletsHydrated && wallets.length < 2;
   return {
     activeWallet,
@@ -21,6 +24,7 @@ export function selectHomeWalletState(
     showWelcome: walletsHydrated && !hasWallets,
     isReceiveDisabled,
     isSendDisabled,
+    isSendWatchOnly,
     isTransferDisabled,
     // A visible card must never look unavailable. Capability restrictions
     // still apply to taps; the sheets handle loading and connection errors.

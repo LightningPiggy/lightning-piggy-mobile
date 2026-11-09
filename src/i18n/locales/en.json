@@ -768,6 +768,7 @@
     "receive": "Receive",
     "transfer": "Move",
     "send": "Send",
+    "watchOnlySend": "This is a watch-only wallet. It can receive, but not send.",
     "addWallet": "Add a wallet",
     "addWalletText": "+ Add a Wallet",
     "updatingTransactions": "Updating transactions"
