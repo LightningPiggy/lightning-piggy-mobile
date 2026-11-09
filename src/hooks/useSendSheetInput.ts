@@ -246,7 +246,7 @@ export function useSendSheetInput(opts: {
       const session = sessionRef.current;
       const clip = await Clipboard.getStringAsync();
       if (session !== sessionRef.current || opts.visible === false) return;
-      if (clip) {
+      if (clip.trim()) {
         applyPasteText(clip);
         processInput(clip);
       }

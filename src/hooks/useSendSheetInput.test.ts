@@ -173,6 +173,19 @@ it('rejects unpayable clipboard text too', async () => {
   );
 });
 
+it.each(['', '   ', '\n\t '])(
+  'ignores an empty or whitespace-only clipboard (%p)',
+  async (clip) => {
+    const { result, opts } = setup();
+    jest.mocked(Clipboard.getStringAsync).mockResolvedValue(clip);
+    await act(async () => {
+      await result.current.handlePaste();
+    });
+    expect(Alert.alert).not.toHaveBeenCalled();
+    expect(opts.applyPasteText).not.toHaveBeenCalled();
+  },
+);
+
 it.each(['QR', 'NFC', 'paste'])(
   'accepts an in-sheet %s target straight away, without a link-consent prompt',
   (entry) => {
