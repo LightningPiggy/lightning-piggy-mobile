@@ -1,7 +1,12 @@
-import { normaliseSocialUrl, placeContactLinks } from './placeContactLinks';
+import { normaliseSocialUrl, placeContactLinks, placeSocialLinks } from './placeContactLinks';
 import type { BtcMapPlace } from '../services/btcMapService';
 
-const place = (tags: Record<string, string>, phone?: string, email?: string): BtcMapPlace => ({
+const place = (
+  tags: Record<string, string>,
+  phone?: string,
+  email?: string,
+  extra: Partial<BtcMapPlace> = {},
+): BtcMapPlace => ({
   id: 42,
   lat: 0,
   lon: 0,
@@ -9,12 +14,20 @@ const place = (tags: Record<string, string>, phone?: string, email?: string): Bt
   verified_at: null,
   phone,
   email,
+  ...extra,
 });
 
 it.each(['phone', 'contact:phone'])('reads %s and provides a tel link', (key) => {
   expect(placeContactLinks(place({ [key]: ' +44 1234 ' })).phone).toEqual({
     value: '+44 1234',
-    href: 'tel:+44 1234',
+    href: 'tel:+441234',
+  });
+});
+it('strips every whitespace from the tel href but keeps the displayed number', () => {
+  // iOS 15/16 returns a nil NSURL for a tel: href containing spaces.
+  expect(placeContactLinks(place({}, '+44 (0)20\t7946 0000')).phone).toEqual({
+    value: '+44 (0)20\t7946 0000',
+    href: 'tel:+44(0)2079460000',
   });
 });
 it.each(['website', 'contact:website'])('reads %s and normalises bare domains', (key) => {
@@ -62,8 +75,14 @@ it('builds a mailto link only from a plain email address', () => {
 });
 describe('normaliseSocialUrl', () => {
   it('keeps http(s) URLs and expands bare handles onto the network host', () => {
-    expect(normaliseSocialUrl('facebook', 'https://www.facebook.com/shop').href).toBe(
+    expect(normaliseSocialUrl('facebook', 'https://www.facebook.com/shop')?.href).toBe(
       'https://www.facebook.com/shop',
+    );
+    expect(normaliseSocialUrl('facebook', 'https://m.facebook.com/shop')?.href).toBe(
+      'https://m.facebook.com/shop',
+    );
+    expect(normaliseSocialUrl('x', 'https://twitter.com/shop')?.href).toBe(
+      'https://twitter.com/shop',
     );
     expect(normaliseSocialUrl('instagram', '@shop')).toEqual({
       display: 'instagram.com/shop',
@@ -73,7 +92,41 @@ describe('normaliseSocialUrl', () => {
   it.each(['lightning:lnurl1abc', 'bitcoin:bc1qxyz', 'tel:+441234', 'javascript:alert(1)'])(
     'never yields a non-web href for %s',
     (value) => {
-      expect(normaliseSocialUrl('x', value).href).toMatch(/^https:\/\/x\.com\//);
+      expect(normaliseSocialUrl('x', value)?.href).toMatch(/^https:\/\/x\.com\//);
     },
   );
+  it.each([
+    'https://evil.example',
+    'https://evil.example/facebook.com',
+    'http://facebook.com.evil.example/shop',
+    'https://notfacebook.com/shop',
+    'https://facebook.com@evil.example/shop',
+    'https://www.facebook.com:443@evil.example/',
+    'https://evil.example\\@facebook.com',
+    'HTTPS://EVIL.EXAMPLE',
+  ])('drops a full URL off the network domain: %s', (value) => {
+    expect(normaliseSocialUrl('facebook', value)).toBeNull();
+  });
+  it('accepts the network host case-insensitively and with a port', () => {
+    expect(normaliseSocialUrl('instagram', 'HTTPS://Instagram.com:443/shop')?.href).toBe(
+      'HTTPS://Instagram.com:443/shop',
+    );
+  });
+});
+describe('placeSocialLinks', () => {
+  it('keeps safe links in network order and drops hostile ones', () => {
+    const p = place({}, undefined, undefined, {
+      facebookUrl: 'https://evil.example',
+      twitterUrl: '@shop',
+      instagramUrl: 'https://www.instagram.com/shop',
+      telegramUrl: '   ',
+      whatsappUrl: 'https://wa.me/441234',
+    });
+    expect(placeSocialLinks(p).map((l) => [l.network, l.href])).toEqual([
+      ['x', 'https://x.com/shop'],
+      ['instagram', 'https://www.instagram.com/shop'],
+      ['whatsapp', 'https://wa.me/441234'],
+    ]);
+    expect(placeSocialLinks(p, ['facebook', 'x']).map((l) => l.network)).toEqual(['x']);
+  });
 });

@@ -25,7 +25,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { createPlaceDetailScreenStyles } from '../styles/PlaceDetailScreen.styles';
-import { normaliseSocialUrl, placeContactLinks } from '../utils/placeContactLinks';
+import { placeContactLinks, placeSocialLinks } from '../utils/placeContactLinks';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import {
   type BtcMapPlace,
@@ -71,10 +71,10 @@ const formatYMD = (iso: string): string => {
 
 const SocialRow: React.FC<{
   network: SocialNetwork;
-  url: string;
+  display: string;
+  href: string;
   styles: Record<string, ReturnType<typeof StyleSheet.create>[string]>;
-}> = ({ network, url, styles }) => {
-  const { display, href } = normaliseSocialUrl(network, url);
+}> = ({ network, display, href, styles }) => {
   return (
     <TouchableOpacity
       style={styles.contactRow}
@@ -173,12 +173,14 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     });
   }, [place, t]);
 
-  const openContact = useCallback((scheme: 'tel' | 'mailto' | 'https', value: string) => {
-    const uri = scheme === 'https' ? value : `${scheme}:${value}`;
-    Linking.openURL(uri).catch(() => {});
+  // Every href is built and validated by placeContactLinks / placeSocialLinks
+  // — raw OSM values never reach Linking (#1785).
+  const openContact = useCallback((href: string) => {
+    Linking.openURL(href).catch(() => {});
   }, []);
 
   const contacts = place ? placeContactLinks(place) : null;
+  const socials = place ? placeSocialLinks(place) : [];
 
   return (
     <View style={styles.container} testID="place-detail-screen">
@@ -378,14 +380,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               </View>
             ) : null}
 
-            {contacts?.phone ||
-            contacts?.website ||
-            place.email ||
-            place.facebookUrl ||
-            place.twitterUrl ||
-            place.instagramUrl ||
-            place.telegramUrl ||
-            place.whatsappUrl ? (
+            {contacts?.phone || contacts?.website || contacts?.email || socials.length > 0 ? (
               <View style={styles.contactSection}>
                 <Text style={styles.sectionLabel}>{t('placeDetailScreen.contact')}</Text>
                 {contacts?.phone ? (
@@ -393,7 +388,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     style={styles.contactRow}
                     testID="place-phone"
                     accessibilityLabel={t('placeDetailScreen.phone')}
-                    onPress={() => openContact('tel', contacts.phone!.value)}
+                    onPress={() => openContact(contacts.phone!.href)}
                   >
                     <Phone size={14} color={colors.brandPink} strokeWidth={2.5} />
                     <Text style={styles.contactText}>{contacts.phone.value}</Text>
@@ -404,7 +399,7 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     style={styles.contactRow}
                     testID="place-website"
                     accessibilityLabel={t('placeDetailScreen.website')}
-                    onPress={() => openContact('https', contacts.website!.href)}
+                    onPress={() => openContact(contacts.website!.href)}
                   >
                     <Globe size={14} color={colors.brandPink} strokeWidth={2.5} />
                     <Text style={styles.contactText} numberOfLines={1}>
@@ -413,30 +408,26 @@ const PlaceDetailScreen: React.FC<Props> = ({ navigation, route }) => {
                     <ExternalLink size={12} color={colors.textSupplementary} />
                   </TouchableOpacity>
                 ) : null}
-                {place.email ? (
+                {contacts?.email ? (
                   <TouchableOpacity
                     style={styles.contactRow}
-                    onPress={() => openContact('mailto', place.email!)}
+                    testID="place-email"
+                    accessibilityLabel={contacts.email.value}
+                    onPress={() => openContact(contacts.email!.href)}
                   >
                     <Mail size={14} color={colors.brandPink} strokeWidth={2.5} />
-                    <Text style={styles.contactText}>{place.email}</Text>
+                    <Text style={styles.contactText}>{contacts.email.value}</Text>
                   </TouchableOpacity>
                 ) : null}
-                {place.facebookUrl ? (
-                  <SocialRow network="facebook" url={place.facebookUrl} styles={styles} />
-                ) : null}
-                {place.twitterUrl ? (
-                  <SocialRow network="x" url={place.twitterUrl} styles={styles} />
-                ) : null}
-                {place.instagramUrl ? (
-                  <SocialRow network="instagram" url={place.instagramUrl} styles={styles} />
-                ) : null}
-                {place.telegramUrl ? (
-                  <SocialRow network="telegram" url={place.telegramUrl} styles={styles} />
-                ) : null}
-                {place.whatsappUrl ? (
-                  <SocialRow network="whatsapp" url={place.whatsappUrl} styles={styles} />
-                ) : null}
+                {socials.map((social) => (
+                  <SocialRow
+                    key={social.network}
+                    network={social.network}
+                    display={social.display}
+                    href={social.href}
+                    styles={styles}
+                  />
+                ))}
               </View>
             ) : null}
 

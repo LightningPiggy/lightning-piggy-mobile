@@ -19,7 +19,9 @@ export function placeContactLinks(place: BtcMapPlace) {
       : `https://${website}`
     : null;
   return {
-    phone: phone ? { value: phone, href: `tel:${phone}` } : null,
+    // iOS 15/16 can't build an NSURL from a tel: href with spaces, so the
+    // tap would silently do nothing. Display keeps the original formatting.
+    phone: phone ? { value: phone, href: `tel:${phone.replace(/\s+/g, '')}` } : null,
     website: website && href && /^https?:\/\//i.test(href) ? { value: website, href } : null,
     email: email && EMAIL_RE.test(email) ? { value: email, href: `mailto:${email}` } : null,
   };
@@ -36,15 +38,61 @@ const SOCIAL_HOSTS: Record<SocialNetwork, string> = {
   whatsapp: 'wa.me',
 };
 
-/** Always yields an http(s) href: anything that isn't one becomes a handle on the network's host. */
+// Full URLs are only trusted on the network's own domains (or subdomains such
+// as www. / m.), so a chip labelled "Facebook" can't open an arbitrary site.
+const SOCIAL_DOMAINS: Record<SocialNetwork, readonly string[]> = {
+  facebook: ['facebook.com', 'fb.com'],
+  x: ['x.com', 'twitter.com'],
+  instagram: ['instagram.com'],
+  telegram: ['t.me', 'telegram.me'],
+  whatsapp: ['wa.me', 'whatsapp.com'],
+};
+
+const isNetworkUrl = (network: SocialNetwork, url: string): boolean => {
+  const authority = /^https?:\/\/([^/?#\\]*)/i.exec(url)?.[1];
+  // Reject userinfo (`https://facebook.com@evil.example`) outright.
+  if (!authority || authority.includes('@')) return false;
+  const host = authority.replace(/:\d*$/, '').toLowerCase();
+  return SOCIAL_DOMAINS[network].some((d) => host === d || host.endsWith(`.${d}`));
+};
+
+/**
+ * Yields an http(s) href on the network's own domain: a bare handle becomes a
+ * path on the network's host, and a full URL on any other host (or a non-web
+ * scheme that looks like one) is refused with `null`.
+ */
 export const normaliseSocialUrl = (
   network: SocialNetwork,
   value: string,
-): { display: string; href: string } => {
+): { display: string; href: string } | null => {
   const trimmed = value.trim().replace(/^@/, '');
+  if (!trimmed) return null;
   const isUrl = /^https?:\/\//i.test(trimmed);
+  if (isUrl && !isNetworkUrl(network, trimmed)) return null;
   const host = SOCIAL_HOSTS[network];
   const display = isUrl ? trimmed.replace(/^https?:\/\/(www\.)?/i, '') : `${host}/${trimmed}`;
   const href = isUrl ? trimmed : `https://${host}/${trimmed}`;
   return { display, href };
 };
+
+const SOCIAL_FIELDS = {
+  facebook: 'facebookUrl',
+  x: 'twitterUrl',
+  instagram: 'instagramUrl',
+  telegram: 'telegramUrl',
+  whatsapp: 'whatsappUrl',
+} as const satisfies Record<SocialNetwork, keyof BtcMapPlace>;
+
+const ALL_NETWORKS = Object.keys(SOCIAL_FIELDS) as SocialNetwork[];
+
+/** The place's social links in display order, keeping only the safe ones. */
+export function placeSocialLinks<N extends SocialNetwork = SocialNetwork>(
+  place: BtcMapPlace,
+  networks: readonly N[] = ALL_NETWORKS as N[],
+): { network: N; display: string; href: string }[] {
+  return networks.flatMap((network) => {
+    const value = place[SOCIAL_FIELDS[network]];
+    const link = value ? normaliseSocialUrl(network, value) : null;
+    return link ? [{ network, ...link }] : [];
+  });
+}

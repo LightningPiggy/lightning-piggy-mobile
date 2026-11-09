@@ -26,9 +26,17 @@ import { useDismissibleSheet } from '../hooks/useDismissibleSheet';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSheetStyles } from '../styles/sheetStyles';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
-import { normaliseSocialUrl, placeContactLinks } from '../utils/placeContactLinks';
+import { placeContactLinks, placeSocialLinks } from '../utils/placeContactLinks';
 import SocialIcon from './SocialIcon';
 import type { Palette } from '../styles/palettes';
+
+const SHEET_NETWORKS = ['facebook', 'x', 'instagram'] as const;
+// Brand names stay untranslated; the accessibility label is localised.
+const SOCIAL_CHIPS = {
+  facebook: { name: 'Facebook', labelKey: 'merchantDetailSheet.openFacebook' },
+  x: { name: 'X', labelKey: 'merchantDetailSheet.openX' },
+  instagram: { name: 'Instagram', labelKey: 'merchantDetailSheet.openInstagram' },
+} as const;
 
 interface Props {
   place: BtcMapPlace;
@@ -55,6 +63,7 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
   // Crowd-sourced OSM values never reach Linking raw: the app builds every
   // href (http(s) / tel: / mailto:) from validated values (#1785).
   const contacts = placeContactLinks(place);
+  const socials = placeSocialLinks(place, SHEET_NETWORKS);
   const openLink = (href: string) => Linking.openURL(href).catch(() => {});
 
   return (
@@ -113,12 +122,7 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
           </View>
         ) : null}
         {verifyText && <Text style={styles.sheetVerify}>{verifyText}</Text>}
-        {(contacts.website ||
-          contacts.phone ||
-          contacts.email ||
-          place.facebookUrl ||
-          place.twitterUrl ||
-          place.instagramUrl) && (
+        {(contacts.website || contacts.phone || contacts.email || socials.length > 0) && (
           <View style={styles.sheetContactRow}>
             {contacts.website ? (
               <TouchableOpacity
@@ -163,45 +167,20 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 </Text>
               </TouchableOpacity>
             ) : null}
-            {place.facebookUrl ? (
+            {socials.map(({ network, href }) => (
               <TouchableOpacity
+                key={network}
                 style={styles.sheetContactChip}
-                onPress={() => openLink(normaliseSocialUrl('facebook', place.facebookUrl!).href)}
-                testID="merchant-detail-facebook"
-                accessibilityLabel={t('merchantDetailSheet.openFacebook')}
+                onPress={() => openLink(href)}
+                testID={`merchant-detail-${network}`}
+                accessibilityLabel={t(SOCIAL_CHIPS[network].labelKey)}
               >
-                <SocialIcon network="facebook" size={14} />
+                <SocialIcon network={network} size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Facebook
+                  {SOCIAL_CHIPS[network].name}
                 </Text>
               </TouchableOpacity>
-            ) : null}
-            {place.twitterUrl ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => openLink(normaliseSocialUrl('x', place.twitterUrl!).href)}
-                testID="merchant-detail-x"
-                accessibilityLabel={t('merchantDetailSheet.openX')}
-              >
-                <SocialIcon network="x" size={14} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  X
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {place.instagramUrl ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => openLink(normaliseSocialUrl('instagram', place.instagramUrl!).href)}
-                testID="merchant-detail-instagram"
-                accessibilityLabel={t('merchantDetailSheet.openInstagram')}
-              >
-                <SocialIcon network="instagram" size={14} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Instagram
-                </Text>
-              </TouchableOpacity>
-            ) : null}
+            ))}
           </View>
         )}
         <View style={styles.sheetActions}>
