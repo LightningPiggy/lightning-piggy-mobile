@@ -768,7 +768,7 @@
     "receive": "收款",
     "transfer": "转账",
     "send": "发送",
-    "watchOnlySend": "这是一个仅观察钱包。它可以接收，但不能发送。",
+    "watchOnlySend": "这是一个只读钱包。它可以接收，但不能发送。",
     "addWallet": "添加钱包",
     "addWalletText": "+ 添加钱包",
     "updatingTransactions": "正在更新交易"

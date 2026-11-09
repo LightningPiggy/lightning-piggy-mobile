@@ -768,7 +768,7 @@
     "receive": "Fogadás",
     "transfer": "Áthelyezés",
     "send": "Küldés",
-    "watchOnlySend": "Ez egy csak megtekintésre szolgáló pénztárca. Fogadni tud, küldeni nem.",
+    "watchOnlySend": "Ez egy figyelő pénztárca. Fogadni tud, küldeni nem.",
     "addWallet": "Pénztárca hozzáadása",
     "addWalletText": "+ Pénztárca hozzáadása",
     "updatingTransactions": "Tranzakciók frissítése"

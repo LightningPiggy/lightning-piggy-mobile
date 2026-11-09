@@ -14,9 +14,16 @@ export function selectHomeWalletState(
   const isReceiveDisabled = walletsHydrated && !hasWallets;
   // A watch-only wallet (xpub / single address) has no signing key. Send stays
   // pressable so the tap can explain why, rather than silently doing nothing.
+  // Only when the import method is KNOWN to be watch-only: an undefined method
+  // (legacy migration pending or its read failed) may be a seed wallet, so it
+  // stays disabled as before rather than being called watch-only.
   const isSendWatchOnly =
-    !isReceiveDisabled && activeWallet !== null && !isSendableWallet(activeWallet);
-  const isSendDisabled = isReceiveDisabled;
+    !isReceiveDisabled &&
+    activeWallet?.walletType === 'onchain' &&
+    activeWallet.onchainImportMethod === 'xpub';
+  const isSendDisabled =
+    isReceiveDisabled ||
+    (activeWallet !== null && !isSendWatchOnly && !isSendableWallet(activeWallet));
   const isTransferDisabled = walletsHydrated && wallets.length < 2;
   return {
     activeWallet,

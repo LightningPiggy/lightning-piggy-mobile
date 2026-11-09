@@ -768,7 +768,7 @@
     "receive": "Empfangen",
     "transfer": "Verschieben",
     "send": "Senden",
-    "watchOnlySend": "Dies ist eine Nur-ansehen-Wallet. Sie kann empfangen, aber nicht senden.",
+    "watchOnlySend": "Dies ist eine Watch-only-Wallet. Sie kann empfangen, aber nicht senden.",
     "addWallet": "Wallet hinzufügen",
     "addWalletText": "+ Wallet hinzufügen",
     "updatingTransactions": "Transaktionen werden aktualisiert"

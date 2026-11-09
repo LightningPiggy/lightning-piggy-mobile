@@ -63,6 +63,18 @@ it('keeps Send pressable on a watch-only wallet so the tap can explain why (#179
   });
 });
 
+it.each([undefined, 'generated' as const])(
+  'does not call an on-chain wallet watch-only when its import method is %p',
+  (onchainImportMethod) => {
+    const unknown = wallet('chain', { walletType: 'onchain', onchainImportMethod });
+    expect(selectHomeWalletState([unknown], 'chain', true)).toMatchObject({
+      isSendDisabled: true,
+      isSendWatchOnly: false,
+      dimActions: false,
+    });
+  },
+);
+
 it('does not flag a signing wallet as watch-only', () => {
   const mnemonic = wallet('seed', { walletType: 'onchain', onchainImportMethod: 'mnemonic' });
   expect(selectHomeWalletState([mnemonic], 'seed', true).isSendWatchOnly).toBe(false);
