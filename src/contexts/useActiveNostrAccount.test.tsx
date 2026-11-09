@@ -14,6 +14,7 @@ import { captureSessionGeneration } from '../services/sessionGeneration';
 import { useNip65Relays } from './useNip65Relays';
 import { fetchRelayListEvent } from '../services/nostrService';
 import { fetchLatestReplaceable } from '../services/nostrRelayLists';
+import { claimLegacyPiggies } from '../services/piggyStorageService';
 
 jest.mock('../services/nostrService', () => ({
   DEFAULT_RELAYS: ['wss://disabled.example', 'wss://ok.example'],
@@ -33,6 +34,9 @@ jest.mock('../services/nostrActiveAccount', () => ({
 }));
 jest.mock('../services/walletStorageService', () => ({
   setActivePubkeyForWalletStorage: jest.fn(),
+}));
+jest.mock('../services/piggyStorageService', () => ({
+  claimLegacyPiggies: jest.fn().mockResolvedValue(undefined),
 }));
 
 const getItem = jest.mocked(AsyncStorage.getItem).getMockImplementation()!;
@@ -177,4 +181,12 @@ it('supersedes an in-flight session restore on every identity change (#1746)', (
   const afterLogin = captureSessionGeneration();
   act(() => result.current[1](null)); // logout
   expect(afterLogin()).toBe(false);
+});
+
+it('hands the pre-#1781 device-wide Piglets to each newly active account to claim', () => {
+  jest.mocked(claimLegacyPiggies).mockClear();
+  const { result } = renderHook(() => useActiveNostrAccount());
+  act(() => result.current[1]('restored'));
+  act(() => result.current[1](null));
+  expect(jest.mocked(claimLegacyPiggies).mock.calls).toEqual([['restored']]);
 });

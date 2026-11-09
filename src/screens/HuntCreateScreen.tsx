@@ -71,7 +71,7 @@ import {
   msatToSats,
   resolveLnurlWithdraw,
 } from '../services/lnurlWithdrawService';
-import { loadPiggies, newPiggyId, savePiggy } from '../services/piggyStorageService';
+import { findPiggy, newPiggyId, savePiggy } from '../services/piggyStorageService';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
 import { encodeGeohash } from '../utils/geohash';
 import { buildCacheListing, GC_LISTING_KIND, parseCache } from '../services/nostrPlacesService';
@@ -408,7 +408,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // write path, never reconstructed from wizard state). Without this
     // an edit-save wiped the stored PIN and the hider could no longer
     // unlock the tag (Copilot #572 review).
-    const existing = editingId ? (await loadPiggies()).find((p) => p.id === editingId) : undefined;
+    const existing = editingId ? await findPiggy(pubkey, editingId) : undefined;
     // In cross-device mode the stage may still be `idle` — pick up
     // defaults from the wizard state instead of `stage.params`. The
     // user can still paste a fresh LNURL on step 2, which flips stage
@@ -491,7 +491,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     };
     console.log(`[Publish] savePiggy starting (id=${piggy.id})`);
     try {
-      await savePiggy(piggy);
+      await savePiggy(pubkey, piggy);
     } catch (e) {
       console.log(`[Publish] savePiggy threw: ${(e as Error)?.message ?? e}`);
       Toast.show({
@@ -838,17 +838,16 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     // keeps showing the PIN card until the sheet calls onClose.
     const id = ensurePiggyId();
     try {
-      const all = await loadPiggies();
-      const existing = all.find((p) => p.id === id);
+      const existing = await findPiggy(pubkey, id);
       if (existing && existing.nfcLock) {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { nfcLock, ...rest } = existing;
-        await savePiggy(rest);
+        await savePiggy(pubkey, rest);
       }
     } catch (e) {
       console.warn(`[HuntCreate] clear nfcLock after unlock failed: ${(e as Error)?.message ?? e}`);
     }
-  }, [ensurePiggyId]);
+  }, [ensurePiggyId, pubkey]);
 
   const handleNfcWritten = useCallback(
     async (result?: {
@@ -875,8 +874,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         // the PIN manually from the on-screen card before dismissing.
         try {
           const id = ensurePiggyId();
-          const all = await loadPiggies();
-          const existing = all.find((p) => p.id === id);
+          const existing = await findPiggy(pubkey, id);
           if (existing) {
             const next = {
               ...existing,
@@ -887,7 +885,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
                 lockedAt: Math.floor(Date.now() / 1000),
               },
             };
-            await savePiggy(next);
+            await savePiggy(pubkey, next);
             console.log(`[HuntCreate] persisted nfcLock for piggy=${id} uid=${result.lock.tagUid}`);
           } else {
             // The local HiddenPiggy hasn't been written yet (locked
@@ -913,7 +911,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
       }
       setStage({ kind: 'wrote-nfc' });
     },
-    [ensurePiggyId, t],
+    [ensurePiggyId, pubkey, t],
   );
 
   const handleDone = useCallback(() => navigation.goBack(), [navigation]);

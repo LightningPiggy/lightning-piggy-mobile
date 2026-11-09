@@ -182,5 +182,19 @@ it('still waits for signer identity before hydrating the cross-device event', as
     h.rerender({ editingId: 'piggy', fallbackCache, pubkey: 'author' });
   });
   expect(h.result.current.name).toBe('Cross-device draft');
-  expect(load).toHaveBeenCalledTimes(2);
+  // No signer, no owner: records are only read once the account is known (#1781).
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(load).toHaveBeenCalledWith('author');
+});
+
+it('does not report a local draft missing before the signer resolves', async () => {
+  load.mockResolvedValue([piggy]);
+  const h = setup({ editingId: 'piggy', fallbackCache: null, pubkey: null });
+  await act(async () => {});
+  expect(load).not.toHaveBeenCalled();
+  expect(Toast.show).not.toHaveBeenCalled();
+  expect(navigation.goBack).not.toHaveBeenCalled();
+  await act(async () => h.rerender({ editingId: 'piggy', fallbackCache: null, pubkey: 'author' }));
+  expect(load).toHaveBeenCalledWith('author');
+  expect(h.result.current.name).toBe('Saved name');
 });

@@ -86,9 +86,12 @@ export function useHuntCreateHydration({
   // expiryDays picker is reverse-engineered from the saved window so
   // the chip selection lines up with what the user originally picked.
   useEffect(() => {
-    if (!editingId) return;
+    // Local records belong to an account (#1781), so wait for the signer:
+    // `pubkey` is in the deps and the effect re-runs once it resolves. Showing
+    // the error toast before then would flash a false "Local record missing".
+    if (!editingId || !pubkey) return;
     let cancelled = false;
-    loadPiggies().then((all) => {
+    loadPiggies(pubkey).then((all) => {
       if (cancelled) return;
       // Shared hydration for the published-event fields (the cross-device
       // source of truth). Used by BOTH the no-local-record path and the
@@ -159,20 +162,7 @@ export function useHuntCreateHydration({
         // of bailing. LNURL stays empty — the user will paste a fresh
         // one if they want to re-write the tag, otherwise step 6 is
         // skippable and the save updates the listing only.
-        //
-        // Defer (return silently) when pubkey hasn't hydrated yet but
-        // fallbackCache is present: the effect's deps include `pubkey`,
-        // so it will re-run when NostrContext resolves the signer.
-        // Showing the error toast in this window would flash a false
-        // "Local record missing" before ownership can even be checked.
-        if (fallbackCache && !pubkey) {
-          return;
-        }
-        if (
-          fallbackCache &&
-          pubkey &&
-          fallbackCache.hiderPubkey.toLowerCase() === pubkey.toLowerCase()
-        ) {
+        if (fallbackCache && fallbackCache.hiderPubkey.toLowerCase() === pubkey.toLowerCase()) {
           setCrossDeviceEdit(true);
           setIsLpPiggyEdit(fallbackCache.isLpPiggy);
           // Seed the editable "Sats per claim" field from the published
