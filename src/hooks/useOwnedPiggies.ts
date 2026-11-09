@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadPiggies, type HiddenPiggy } from '../services/piggyStorageService';
 
 interface OwnedPiggies {
@@ -20,9 +20,13 @@ const NONE: ReadonlyMap<string, HiddenPiggy> = new Map();
  */
 export function useOwnedPiggies(owner: string | null) {
   const [state, setState] = useState<OwnedPiggies>({ owner: null, byId: new Map() });
+  // The account shown now: a reload for an earlier one must not replace it.
+  const ownerRef = useRef(owner);
+  ownerRef.current = owner;
 
   const reloadPiggies = useCallback(async () => {
     const list = await loadPiggies(owner);
+    if (ownerRef.current !== owner) return;
     setState({ owner, byId: new Map(list.map((p) => [p.id, p])) });
   }, [owner]);
 

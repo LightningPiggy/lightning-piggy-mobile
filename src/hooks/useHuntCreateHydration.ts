@@ -1,4 +1,4 @@
-import { useEffect, type Dispatch, type SetStateAction, type RefObject } from 'react';
+import { useEffect, useRef, type Dispatch, type SetStateAction, type RefObject } from 'react';
 import type { ExploreNavigation, HuntCacheFallback } from '../navigation/types';
 import type { LnurlWithdrawParams } from '../services/lnurlWithdrawService';
 import { loadPiggies } from '../services/piggyStorageService';
@@ -79,6 +79,21 @@ export function useHuntCreateHydration({
   setCacheType,
   setExpiryDays,
 }: HydrationOptions) {
+  // A wizard holds one account's pasted LNURL bearer. If the account switches
+  // while it's open, saving would store it under (and publish as) the next
+  // account, so close it (#1781). Edit mode closes itself on the reload below,
+  // which can't find the record under the new account.
+  const wizardOwner = useRef(pubkey);
+  const closedOnSwitch = useRef(false);
+  useEffect(() => {
+    if (!pubkey || editingId || closedOnSwitch.current) return;
+    if (!wizardOwner.current) wizardOwner.current = pubkey;
+    else if (wizardOwner.current !== pubkey) {
+      closedOnSwitch.current = true;
+      navigation.goBack();
+    }
+  }, [pubkey, editingId, navigation]);
+
   // Edit-mode hydration: load the matching HiddenPiggy on mount and
   // seed every wizard field. We synthesise a `validated` Stage too so
   // the LNURL step renders its "looks good" affordance straight away —

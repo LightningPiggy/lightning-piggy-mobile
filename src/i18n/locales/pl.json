@@ -3089,6 +3089,7 @@
     "nsecBacked": "To usunie klucz prywatny konta {{name}} z tego telefonu. Oznaczono go jako zapisany w kopii zapasowej — będziesz potrzebować tej kopii, aby zalogować się ponownie.",
     "amber": "Klucz twojego konta pozostaje w Amber. Możesz użyć Amber, aby zalogować się ponownie.",
     "nip46": "Klucz twojego konta pozostaje w aplikacji podpisującej. Możesz użyć tej aplikacji, aby zalogować się ponownie.",
+    "hiddenPiglets": "Twoje ukryte Piglets, ich linki do wypłaty i kody PIN tagów również zostaną usunięte z tego telefonu. Bez kodu PIN tagu nie odblokujesz go ani nie zapiszesz ponownie.",
     "otherAccountOne": "Twoje drugie konto na tym telefonie pozostaje zalogowane.",
     "otherAccountsMany": "Twoje pozostałe konta na tym telefonie ({{count}}) pozostają zalogowane.",
     "backUpFirst": "Najpierw zrób kopię klucza",

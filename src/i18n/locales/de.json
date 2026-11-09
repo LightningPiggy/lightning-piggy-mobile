@@ -3059,6 +3059,7 @@
     "nsecBacked": "Dadurch wird der geheime Schlüssel von {{name}} von diesem Handy entfernt. Du hast ihn als gesichert markiert – du brauchst diese Kopie, um dich wieder anzumelden.",
     "amber": "Dein Kontoschlüssel bleibt in Amber. Du kannst dich mit Amber wieder anmelden.",
     "nip46": "Dein Kontoschlüssel bleibt in deiner Signer-App. Du kannst dich mit dieser App wieder anmelden.",
+    "hiddenPiglets": "Deine versteckten Piglets, ihre Auszahlungslinks und die PINs ihrer Tags werden ebenfalls von diesem Handy entfernt. Ohne die PIN eines Tags kannst du ihn nicht entsperren oder neu beschreiben.",
     "otherAccountOne": "Dein anderes Konto auf diesem Handy bleibt angemeldet.",
     "otherAccountsMany": "Deine {{count}} anderen Konten auf diesem Handy bleiben angemeldet.",
     "backUpFirst": "Zuerst Schlüssel sichern",

@@ -213,17 +213,48 @@ const readOwnPiggies = async (owner: string): Promise<HiddenPiggy[]> => {
   }
 };
 
+// Signed-out accounts: a save that read before the sign-out wipe and writes
+// after it must not recreate the account's bearer links (#1781). Revived when
+// the account becomes active again (same pattern as retireBuyerOrderTitles).
+const retiredOwners = new Set<string>();
+const pendingWrites = new Set<Promise<unknown>>();
+
 const persist = async (owner: string, next: HiddenPiggy[]): Promise<void> => {
-  await SecureStore.setItemAsync(piggyStorageKey(owner), JSON.stringify(next), SECURE_OPTIONS);
+  if (retiredOwners.has(owner.toLowerCase())) {
+    throw new Error('Signed out — Piglet not saved.');
+  }
+  const write = SecureStore.setItemAsync(
+    piggyStorageKey(owner),
+    JSON.stringify(next),
+    SECURE_OPTIONS,
+  );
+  pendingWrites.add(write);
+  try {
+    await write;
+  } finally {
+    pendingWrites.delete(write);
+  }
 };
 
-// One claim per app run: the first account to ask takes the legacy blobs, and
-// concurrent callers (another account included) wait on that same claim. A
-// failed claim leaves the blobs in place and is retried on the next call.
-let legacyClaim: Promise<void> | null = null;
-let legacyClaimed = false;
+/** Account activation: `owner` may store Piglets again after a sign-out. */
+export const revivePiggyOwner = (owner: string): void => {
+  retiredOwners.delete(owner.toLowerCase());
+};
 
-const runLegacyClaim = async (owner: string): Promise<void> => {
+// Who is mid-claim, persisted so a restart can't hand the same legacy bearer
+// links to a second account: `pending:<owner>` before the copy is written,
+// `done:<owner>` once it is, removed with the legacy blobs.
+const LEGACY_CLAIM_MARKER_KEY = 'hunt-piggies-legacy-claim';
+
+const deleteLegacyBlobs = async (): Promise<void> => {
+  await SecureStore.deleteItemAsync(LEGACY_STORAGE_KEY);
+  if (Platform.OS === 'ios') await SecureStore.deleteItemAsync(LEGACY_STORAGE_KEY_IOS);
+  await SecureStore.deleteItemAsync(LEGACY_CLAIM_MARKER_KEY);
+};
+
+/** Resolves true once the legacy blobs are gone (claimed by someone, or absent). */
+const runLegacyClaim = async (owner: string): Promise<boolean> => {
+  const me = owner.toLowerCase();
   const raw = await SecureStore.getItemAsync(LEGACY_STORAGE_KEY, SECURE_OPTIONS);
   // Android rejects the colon key outright, so only iOS can hold it; an
   // unreadable iOS entry is dropped rather than blocking the main claim.
@@ -231,7 +262,20 @@ const runLegacyClaim = async (owner: string): Promise<void> => {
     Platform.OS === 'ios'
       ? await SecureStore.getItemAsync(LEGACY_STORAGE_KEY_IOS, SECURE_OPTIONS).catch(() => null)
       : null;
-  if (raw === null && rawIos === null) return;
+  if (raw === null && rawIos === null) {
+    await SecureStore.deleteItemAsync(LEGACY_CLAIM_MARKER_KEY).catch(() => undefined);
+    return true;
+  }
+  const marker = await SecureStore.getItemAsync(LEGACY_CLAIM_MARKER_KEY, SECURE_OPTIONS);
+  // Already copied to its owner: only the cleanup is left, safe for anyone.
+  if (marker?.startsWith('done:')) {
+    await deleteLegacyBlobs();
+    return true;
+  }
+  // Another account started the claim and may not have its copy yet: leave
+  // the blobs for that account to finish, and give this one nothing.
+  if (marker && marker !== `pending:${me}`) return false;
+  await SecureStore.setItemAsync(LEGACY_CLAIM_MARKER_KEY, `pending:${me}`, SECURE_OPTIONS);
   const legacy = [...parsePiggies(raw), ...parsePiggies(rawIos)];
   if (legacy.length > 0) {
     // The account's own records win an id clash, then the newer legacy key.
@@ -241,9 +285,16 @@ const runLegacyClaim = async (owner: string): Promise<void> => {
     }
     await persist(owner, [...merged.values()]);
   }
-  if (raw !== null) await SecureStore.deleteItemAsync(LEGACY_STORAGE_KEY);
-  if (Platform.OS === 'ios') await SecureStore.deleteItemAsync(LEGACY_STORAGE_KEY_IOS);
+  await SecureStore.setItemAsync(LEGACY_CLAIM_MARKER_KEY, `done:${me}`, SECURE_OPTIONS);
+  await deleteLegacyBlobs();
+  return true;
 };
+
+// One claim at a time; concurrent callers (another account included) wait on
+// it. Until the blobs are gone, later calls retry: a failed delete is redone
+// by anyone, an unfinished copy only by the account that started it.
+let legacyClaim: Promise<void> | null = null;
+let legacyClaimed = false;
 
 /**
  * Move the pre-#1781 device-wide Piglets to `owner`, once per device (see
@@ -256,8 +307,9 @@ export const claimLegacyPiggies = (owner: string | null | undefined): Promise<vo
   if (!legacyClaim) {
     if (!owner) return Promise.resolve();
     legacyClaim = runLegacyClaim(owner).then(
-      () => {
-        legacyClaimed = true;
+      (settled) => {
+        legacyClaimed = settled;
+        if (!settled) legacyClaim = null;
       },
       () => {
         legacyClaim = null;
@@ -307,15 +359,33 @@ export const removePiggy = async (
 
 /** Sign-out wipe: delete every Piglet (bearer links, tag PINs) of `owner`. */
 export const deletePiggiesForOwner = async (owner: string): Promise<void> => {
-  // A claim still writing this account's copy must land before the delete.
+  const me = owner.toLowerCase();
+  // No later save may land; one already writing (or a claim copying this
+  // account's records) must finish before the delete.
+  retiredOwners.add(me);
   await legacyClaim;
+  await Promise.allSettled([...pendingWrites]);
   await SecureStore.deleteItemAsync(piggyStorageKey(owner));
+  // Legacy blobs this account had started claiming are its records too.
+  const marker = await SecureStore.getItemAsync(LEGACY_CLAIM_MARKER_KEY, SECURE_OPTIONS);
+  if (marker === `pending:${me}` || marker === `done:${me}`) await deleteLegacyBlobs();
 };
 
-/** Test-only: forget this run's legacy claim. */
+/** True when `owner` has Piglets stored here (or the read failed: warn anyway). */
+export const hasStoredPiggies = async (owner: string): Promise<boolean> => {
+  try {
+    const raw = await SecureStore.getItemAsync(piggyStorageKey(owner), SECURE_OPTIONS);
+    return parsePiggies(raw).length > 0;
+  } catch {
+    return true;
+  }
+};
+
+/** Test-only: forget this run's legacy claim and retired owners. */
 export const __resetLegacyPiggyClaimForTests = (): void => {
   legacyClaim = null;
   legacyClaimed = false;
+  retiredOwners.clear();
 };
 
 /**

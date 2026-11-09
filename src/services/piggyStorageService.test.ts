@@ -5,9 +5,11 @@ import {
   claimLegacyPiggies,
   deletePiggiesForOwner,
   findPiggy,
+  hasStoredPiggies,
   loadPiggies,
   piggyStorageKey,
   removePiggy,
+  revivePiggyOwner,
   savePiggy,
   type HiddenPiggy,
 } from './piggyStorageService';
@@ -28,6 +30,7 @@ const A = 'a'.repeat(64);
 const B = 'b'.repeat(64);
 const LEGACY = 'hunt-piggies-v1';
 const LEGACY_IOS = 'hunt-piggies:v1';
+const LEGACY_MARKER = 'hunt-piggies-legacy-claim';
 
 const piggy = (id: string, extra: Partial<HiddenPiggy> = {}): HiddenPiggy => ({
   id,
@@ -78,6 +81,45 @@ describe('per-account Piglet storage (#1781)', () => {
     await removePiggy(A, 'same');
     expect(await loadPiggies(A)).toEqual([]);
     expect(ids(await loadPiggies(B))).toEqual(['same']);
+  });
+
+  it('a save that resolves after the sign-out wipe does not recreate the record', async () => {
+    const save = savePiggy(A, piggy('late'));
+    const wipe = deletePiggiesForOwner(A);
+    await expect(save).rejects.toThrow();
+    await wipe;
+    expect(mockStore.has(piggyStorageKey(A))).toBe(false);
+    // Signing back in makes saves work again.
+    revivePiggyOwner(A);
+    await savePiggy(A, piggy('again'));
+    expect(ids(await loadPiggies(A))).toEqual(['again']);
+  });
+
+  it('the wipe waits for a write already in flight, then deletes', async () => {
+    const set = jest.mocked(SecureStore.setItemAsync);
+    const realSet = set.getMockImplementation()!;
+    let release: () => void = () => {};
+    let writing: () => void = () => {};
+    const started = new Promise<void>((r) => (writing = r));
+    set.mockImplementationOnce(async (key, value) => {
+      writing();
+      await new Promise<void>((r) => (release = r));
+      return realSet(key, value);
+    });
+    const save = savePiggy(A, piggy('slow'));
+    await started;
+    const wipe = deletePiggiesForOwner(A);
+    release();
+    await save;
+    await wipe;
+    expect(mockStore.has(piggyStorageKey(A))).toBe(false);
+  });
+
+  it('reports whether an account has Piglets to warn about at sign-out', async () => {
+    expect(await hasStoredPiggies(A)).toBe(false);
+    await savePiggy(A, piggy('a1'));
+    expect(await hasStoredPiggies(A)).toBe(true);
+    expect(await hasStoredPiggies(B)).toBe(false);
   });
 
   it("sign-out wipe deletes that account's bearer links and PINs only", async () => {
@@ -149,6 +191,38 @@ describe('legacy device-wide blob migration (#1781)', () => {
       .mocked(SecureStore.getItemAsync)
       .mock.calls.filter(([key]) => key === LEGACY);
     expect(legacyReads).toHaveLength(1);
+  });
+
+  it('a failed legacy delete after the copy is finished by anyone, never re-copied', async () => {
+    mockStore.set(LEGACY, JSON.stringify([piggy('old1')]));
+    jest.mocked(SecureStore.deleteItemAsync).mockRejectedValueOnce(new Error('keystore busy'));
+    await claimLegacyPiggies(A);
+    expect(mockStore.has(LEGACY)).toBe(true);
+    // App restart, then the other account becomes active.
+    __resetLegacyPiggyClaimForTests();
+    expect(await loadPiggies(B)).toEqual([]);
+    expect(mockStore.has(LEGACY)).toBe(false);
+    expect(mockStore.has(LEGACY_MARKER)).toBe(false);
+    expect(ids(await loadPiggies(A))).toEqual(['old1']);
+  });
+
+  it('an unfinished copy is retried only by the account that started it', async () => {
+    mockStore.set(LEGACY, JSON.stringify([piggy('old1')]));
+    const set = jest.mocked(SecureStore.setItemAsync);
+    const realSet = set.getMockImplementation()!;
+    set.mockImplementation(async (key, value) => {
+      if (key === piggyStorageKey(A)) throw new Error('write failed');
+      return realSet(key, value);
+    });
+    await claimLegacyPiggies(A);
+    set.mockImplementation(realSet);
+    expect(mockStore.get(LEGACY_MARKER)).toBe(`pending:${A}`);
+    __resetLegacyPiggyClaimForTests();
+    expect(await loadPiggies(B)).toEqual([]);
+    expect(mockStore.has(LEGACY)).toBe(true);
+    expect(ids(await loadPiggies(A))).toEqual(['old1']);
+    expect(mockStore.has(LEGACY)).toBe(false);
+    expect(await loadPiggies(B)).toEqual([]);
   });
 
   it('a sign-out during the claim still leaves nothing behind', async () => {

@@ -48,7 +48,7 @@ function changeLocale(locale: 'en' | 'es') {
 
 function setup(
   initialProps: {
-    editingId: string;
+    editingId: string | null;
     fallbackCache: HuntCacheFallback | null;
     pubkey: string | null;
   } = { editingId: 'piggy', fallbackCache: null, pubkey: 'author' },
@@ -197,4 +197,14 @@ it('does not report a local draft missing before the signer resolves', async () 
   await act(async () => h.rerender({ editingId: 'piggy', fallbackCache: null, pubkey: 'author' }));
   expect(load).toHaveBeenCalledWith('author');
   expect(h.result.current.name).toBe('Saved name');
+});
+
+it("closes a create wizard holding one account's LNURL when the account switches (#1781)", async () => {
+  const h = setup({ editingId: null, fallbackCache: null, pubkey: null });
+  await act(async () => h.rerender({ editingId: null, fallbackCache: null, pubkey: 'author' }));
+  expect(navigation.goBack).not.toHaveBeenCalled();
+  await act(async () => h.rerender({ editingId: null, fallbackCache: null, pubkey: 'other' }));
+  expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  await act(async () => h.rerender({ editingId: null, fallbackCache: null, pubkey: 'third' }));
+  expect(navigation.goBack).toHaveBeenCalledTimes(1);
 });

@@ -3059,6 +3059,7 @@
     "nsecBacked": "Esto elimina la clave secreta de {{name}} de este teléfono. La marcaste como respaldada: necesitarás esa copia para volver a iniciar sesión.",
     "amber": "La clave de tu cuenta permanece en Amber. Puedes usar Amber para volver a iniciar sesión.",
     "nip46": "La clave de tu cuenta permanece en tu app de firma. Puedes usarla para volver a iniciar sesión.",
+    "hiddenPiglets": "Tus Piglets escondidos, sus enlaces de retiro y los PIN de sus etiquetas también se eliminarán de este teléfono. Sin el PIN de una etiqueta, no podrás desbloquearla ni reescribirla.",
     "otherAccountOne": "Tu otra cuenta en este teléfono sigue con la sesión iniciada.",
     "otherAccountsMany": "Tus otras {{count}} cuentas en este teléfono siguen con la sesión iniciada.",
     "backUpFirst": "Respaldar la clave primero",

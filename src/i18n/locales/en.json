@@ -3059,6 +3059,7 @@
     "nsecBacked": "This removes {{name}}'s secret key from this phone. You've marked it as backed up — you'll need that copy to sign back in.",
     "amber": "Your account key stays in Amber. You can use Amber to sign back in.",
     "nip46": "Your account key stays in your signer app. You can use that app to sign back in.",
+    "hiddenPiglets": "Your hidden Piglets, their withdraw links and tag PINs will also be removed from this phone. Without a tag's PIN you can't unlock or rewrite it.",
     "otherAccountOne": "Your other account on this phone stays signed in.",
     "otherAccountsMany": "Your {{count}} other accounts on this phone stay signed in.",
     "backUpFirst": "Back Up Key First",

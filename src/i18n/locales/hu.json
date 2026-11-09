@@ -3059,6 +3059,7 @@
     "nsecBacked": "Ez eltávolítja {{name}} titkos kulcsát erről a telefonról. Megjelölted mentettként – a visszajelentkezéshez szükséged lesz arra a másolatra.",
     "amber": "A fiókkulcsod az Amberben marad. Az Ambert használhatod a visszajelentkezéshez.",
     "nip46": "A fiókkulcsod az aláíró alkalmazásodban marad. Azt az alkalmazást használhatod a visszajelentkezéshez.",
+    "hiddenPiglets": "A rejtett Pigletjeid, a hozzájuk tartozó pénzfelvételi linkek és a címkék PIN-kódjai is törlődnek erről a telefonról. Egy címke PIN-kódja nélkül nem tudod feloldani vagy újraírni.",
     "otherAccountOne": "A telefonon lévő másik fiókod bejelentkezve marad.",
     "otherAccountsMany": "A telefonon lévő másik {{count}} fiókod bejelentkezve marad.",
     "backUpFirst": "Előbb kulcs mentése",

@@ -51,3 +51,25 @@ it("ignores a patch for an account that's no longer shown", async () => {
   act(() => h.result.current.dropPiggy('B', 'b1'));
   expect(keys(h.result.current.piggiesById)).toEqual(['b2']);
 });
+
+it("keeps the new account's list when an earlier account's refresh lands late", async () => {
+  let resolveA: (list: HiddenPiggy[]) => void = () => {};
+  const h = renderHook(({ owner }: { owner: string }) => useOwnedPiggies(owner), {
+    initialProps: { owner: 'A' },
+  });
+  await act(async () => {});
+  load.mockImplementationOnce(() => new Promise((r) => (resolveA = r)));
+  let refresh: Promise<void> = Promise.resolve();
+  act(() => {
+    refresh = h.result.current.reloadPiggies();
+  });
+  h.rerender({ owner: 'B' });
+  await act(async () => {});
+  expect(keys(h.result.current.piggiesById)).toEqual(['b1']);
+  // A's pull-to-refresh finishes after the switch.
+  await act(async () => {
+    resolveA(RECORDS.A);
+    await refresh;
+  });
+  expect(keys(h.result.current.piggiesById)).toEqual(['b1']);
+});
