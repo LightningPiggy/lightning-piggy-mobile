@@ -20,6 +20,7 @@ jest.mock('./devEventDenylist', () => ({
 jest.mock('./nostrPlacesService', () => ({
   GC_LISTING_KIND: 37516,
   GC_FOUND_LOG_KIND: 7516,
+  GC_COMMENT_KIND: 1111,
   parseCache: (e: unknown) => e,
   parseFoundLogEvent: (e: unknown) => e,
 }));
@@ -30,6 +31,9 @@ jest.mock('./geocacheRelays', () => ({
 
 // eslint-disable-next-line import/first
 import {
+  subscribeComments,
+  subscribeFoundLogs,
+  subscribeFoundLogsByAuthors,
   subscribeNearbyCaches,
   subscribeNearbyEvents,
   subscribeRecentCaches,
@@ -149,6 +153,71 @@ describe('subscribeRecentFoundLogs', () => {
     // Each is independently computed via RECENT_SINCE_SECS() at call time.
     // ±10 s is generous enough to be stable under CI load.
     expect(Math.abs(cachesSince - logsSince)).toBeLessThan(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-cache and per-author subscriptions — bounded backfill (#1789)
+// ---------------------------------------------------------------------------
+
+describe('found-log and comment subscription bounds', () => {
+  const pubkeys = (n: number): string[] =>
+    Array.from({ length: n }, (_, i) => i.toString(16).padStart(64, '0'));
+
+  it('caps a cache’s found-log backfill at 500 without a time window', () => {
+    subscribeFoundLogs('37516:abc:d', jest.fn());
+    const filter = mockSubscribeMany.mock.calls[0][1];
+    expect(filter).toEqual({ kinds: [7516], '#a': ['37516:abc:d'], limit: 500 });
+  });
+
+  it('caps a cache’s comment backfill at 500 without a time window', () => {
+    subscribeComments('37516:abc:d', jest.fn());
+    const filter = mockSubscribeMany.mock.calls[0][1];
+    expect(filter.limit).toBe(500);
+    expect(filter.since).toBeUndefined();
+  });
+
+  it('sends one bounded REQ for a small author set', () => {
+    subscribeFoundLogsByAuthors(['me'], jest.fn());
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(1);
+    expect(mockSubscribeMany.mock.calls[0][1]).toEqual({
+      kinds: [7516],
+      authors: ['me'],
+      limit: 500,
+    });
+  });
+
+  it('splits a 2,000-author trust set into REQs of at most 500 authors', () => {
+    // Before #1789 this was ONE filter carrying all 2,000 authors and no limit.
+    const authors = pubkeys(2000);
+    subscribeFoundLogsByAuthors(authors, jest.fn(), undefined, 200);
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(4);
+    const sent: string[] = [];
+    for (const [, filter] of mockSubscribeMany.mock.calls) {
+      expect(filter.authors.length).toBeLessThanOrEqual(500);
+      expect(filter.limit).toBe(200);
+      expect(filter.since).toBeUndefined();
+      sent.push(...filter.authors);
+    }
+    // Every author is still asked for exactly once.
+    expect(sent).toEqual(authors);
+  });
+
+  it('forwards events from every chunk and closes every chunk', () => {
+    const onEvent = jest.fn();
+    const close = subscribeFoundLogsByAuthors(pubkeys(501), onEvent);
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(2);
+    for (const [, , handlers] of mockSubscribeMany.mock.calls) {
+      handlers.onevent({ id: 'x' });
+    }
+    expect(onEvent).toHaveBeenCalledTimes(2);
+    close();
+    expect(mockClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens nothing for an empty author set', () => {
+    subscribeFoundLogsByAuthors([], jest.fn())();
+    expect(mockSubscribeMany).not.toHaveBeenCalled();
   });
 });
 

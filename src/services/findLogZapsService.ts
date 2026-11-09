@@ -43,14 +43,22 @@ export interface FindLogZap {
  * primal, relay.snort, and the rest of the mainstream set; unlike the
  * `#bolt11` filter (which most relays reject as unindexed) we don't
  * need a fallback path.
+ *
+ * `limit` caps the backfill (newest first) so a cache with a huge zap
+ * history can't stream all of it into the client to be decoded one bolt11
+ * at a time (#1789). No `since`: the row totals are all-time sums, so a time
+ * window would under-count them.
  */
+export const FIND_LOG_ZAP_LIMIT = 1000;
+
 export const subscribeFindLogZaps = (
   logIds: string[],
   onZap: (zap: FindLogZap) => void,
   relays: string[] = enabledAppRelays('default', DEFAULT_RELAYS),
+  limit: number = FIND_LOG_ZAP_LIMIT,
 ): (() => void) => {
   if (logIds.length === 0) return () => {};
-  const filter: Filter = { kinds: [9735], '#e': logIds };
+  const filter: Filter = { kinds: [9735], '#e': logIds, limit };
   const sub = pool.subscribeMany(relays, filter, {
     onevent: (event: NostrEvent) => {
       const bolt11 = event.tags.find((t) => t[0] === 'bolt11')?.[1];

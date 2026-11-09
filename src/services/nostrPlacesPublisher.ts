@@ -241,12 +241,27 @@ export const subscribeRecentFoundLogs = (
   return () => sub.close();
 };
 
+// Backfill caps for the per-cache and per-author subscriptions below (#1789).
+// Sized well above a real cache or finder so normal data is unchanged; they
+// stop a busy (or hostile) relay from streaming an unbounded history that
+// the client then verifies and parses event by event. Relays return the
+// newest events first, so anything cut is the oldest.
+export const CACHE_LOG_LIMIT = 500;
+export const AUTHOR_LOG_LIMIT = 500;
+// Largest `authors` array sent in one REQ. The friends-of-friends trust set
+// runs to 2,000 pubkeys; split it so no single filter carries the lot.
+export const AUTHORS_PER_REQ = 500;
+
+// No `since` on the per-cache and per-author filters: a cache's detail screen
+// shows its whole log history and My Piglets shows a person's whole find
+// history, however old, so a time window would hide real finds.
 export const subscribeFoundLogs = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
   relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
+  limit: number = CACHE_LOG_LIMIT,
 ): (() => void) => {
-  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], '#a': [cacheCoord] };
+  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], '#a': [cacheCoord], limit };
   const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
   });
@@ -258,25 +273,44 @@ export const subscribeFoundLogs = (
 // the "Found" section and once with the WoT-trusted set (minus me) for
 // "Friends' finds". Empty list short-circuits — relays reject empty
 // `authors` filters as a free-firehose request.
+//
+// The author list is split into REQs of at most AUTHORS_PER_REQ pubkeys,
+// each with its own `limit`. The newest `limit` logs across the whole set
+// are always inside the union of each chunk's newest `limit`, so chunking
+// never drops a log that a single REQ would have returned.
 export const subscribeFoundLogsByAuthors = (
   authors: string[],
   onEvent: (event: VerifiedEvent) => void,
   relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
+  limit: number = AUTHOR_LOG_LIMIT,
 ): (() => void) => {
   if (authors.length === 0) return () => {};
-  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], authors };
-  const sub = pool.subscribeMany(withGcRelays(relays), filter, {
-    onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
-  });
-  return () => sub.close();
+  const targets = withGcRelays(relays);
+  const subs: { close: () => void }[] = [];
+  for (let i = 0; i < authors.length; i += AUTHORS_PER_REQ) {
+    const filter: Filter = {
+      kinds: [GC_FOUND_LOG_KIND],
+      authors: authors.slice(i, i + AUTHORS_PER_REQ),
+      limit,
+    };
+    subs.push(
+      pool.subscribeMany(targets, filter, {
+        onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
+      }),
+    );
+  }
+  return () => {
+    for (const sub of subs) sub.close();
+  };
 };
 
 export const subscribeComments = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
   relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
+  limit: number = CACHE_LOG_LIMIT,
 ): (() => void) => {
-  const filter: Filter = { kinds: [GC_COMMENT_KIND], '#A': [cacheCoord] };
+  const filter: Filter = { kinds: [GC_COMMENT_KIND], '#A': [cacheCoord], limit };
   const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
   });

@@ -25,6 +25,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
+import { useTrustedAuthors } from '../hooks/useTrustedAuthors';
 import { fetchCachesByAuthor, subscribeFoundLogsByAuthors } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { loadPiggies, removePiggy, type HiddenPiggy } from '../services/piggyStorageService';
@@ -83,6 +84,9 @@ type SectionRow =
   | { kind: 'hidden'; cache: ParsedCache; isDraft: boolean }
   | { kind: 'found'; entry: FoundEntry }
   | { kind: 'friend-found'; entry: FoundEntry };
+
+// Friends' finds keeps (and backfills per REQ) the newest 200; 50 are shown.
+const FRIEND_FINDS_LIMIT = 200;
 
 const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTranslation();
@@ -243,34 +247,34 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   // Friends' finds — kind 7516 authored by anyone in the trust set,
-  // excluding me. `trustSet` includes the user per TrustGraphContext
-  // docs, so we explicitly filter pubkey out.
-  const trustedAuthors = useMemo(() => {
-    if (!pubkey) return [];
-    const lower = pubkey.toLowerCase();
-    return Array.from(trustSet).filter((p) => p.toLowerCase() !== lower);
-  }, [trustSet, pubkey]);
+  // excluding me. Content-stable, so a trust-set rebuild with the same
+  // members doesn't re-send the (up to 2,000-author) REQ.
+  const trustedAuthors = useTrustedAuthors(trustSet, pubkey);
 
   // Friends' finds — batched with CoalescedMap so a burst of kind 7516
   // events doesn't clone the friend-finds Map N times. Keyed by event id
-  // (never replaced) so the key space is unbounded — and the subscription
-  // sets no `limit` of its own, so this cap is what bounds growth: it stops
-  // relay history over a long session from ballooning the Map (and the
+  // (never replaced) so the key space is unbounded; this cap stops live
+  // events over a long session from ballooning the Map (and the
   // sort-then-slice-50 in `friendList`). 200 keeps a comfortable buffer above
-  // the 50 shown.
+  // the 50 shown, and the subscription's per-REQ backfill `limit` matches it.
   const friendFinds = useCoalescedMap<FoundEntry>({
     // Keyed by event id per the social-feed convention — never replace.
     shouldReplace: () => false,
-    maxSize: 200,
+    maxSize: FRIEND_FINDS_LIMIT,
   });
   useFocusEffect(
     useCallback(() => {
       friendFinds.reset();
       if (trustedAuthors.length === 0) return undefined;
-      const close = subscribeFoundLogsByAuthors(trustedAuthors, (e) => {
-        const entry = parseFoundEvent(e);
-        friendFinds.enqueue(entry.id, entry);
-      });
+      const close = subscribeFoundLogsByAuthors(
+        trustedAuthors,
+        (e) => {
+          const entry = parseFoundEvent(e);
+          friendFinds.enqueue(entry.id, entry);
+        },
+        undefined,
+        FRIEND_FINDS_LIMIT,
+      );
       return () => {
         close();
         friendFinds.flush();
