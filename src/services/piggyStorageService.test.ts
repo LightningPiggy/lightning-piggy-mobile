@@ -293,6 +293,17 @@ describe('legacy device-wide blob migration (#1781)', () => {
     expect(mockStore.has(LEGACY_MARKER)).toBe(false);
   });
 
+  it('an empty or corrupt registry never counts a pending claimant as gone', async () => {
+    mockStore.set(LEGACY, JSON.stringify([piggy('old1')]));
+    mockStore.set(LEGACY_MARKER, `pending:${A}`);
+    registryOf();
+    expect(await loadPiggies(B)).toEqual([]);
+    expect(mockStore.has(LEGACY)).toBe(true);
+    expect(mockStore.get(LEGACY_MARKER)).toBe(`pending:${A}`);
+    // A comes back and finishes its own claim.
+    expect(ids(await loadPiggies(A))).toEqual(['old1']);
+  });
+
   it('a sign-out during the claim still leaves nothing behind', async () => {
     mockStore.set(LEGACY, JSON.stringify([piggy('old1')]));
     const claim = claimLegacyPiggies(A);

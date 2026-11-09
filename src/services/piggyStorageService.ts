@@ -269,6 +269,9 @@ const deleteLegacyBlobs = async (): Promise<void> => {
 const claimantLeft = async (claimant: string): Promise<boolean> => {
   if (retiredOwners.has(claimant)) return true;
   const { identities } = await loadIdentities();
+  // An empty list may be a corrupt registry (it parses to empty): unknown,
+  // so never delete on it.
+  if (identities.length === 0) return false;
   return !identities.some((i) => i.pubkey.toLowerCase() === claimant);
 };
 
