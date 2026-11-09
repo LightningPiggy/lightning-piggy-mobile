@@ -1999,6 +1999,8 @@
     "invalidInvoiceDismiss": "OK",
     "invalidInvoiceTitle": "Nieprawidłowa faktura",
     "invalidInvoiceBody": "Ta faktura jest nieprawidłowa lub niepełna — sprawdź ją i spróbuj ponownie.",
+    "unrecognisedInputTitle": "Nie można tego zapłacić",
+    "unrecognisedInputBody": "To nie jest faktura Lightning, adres Lightning ani adres Bitcoin — sprawdź i spróbuj ponownie.",
     "offerUnsupportedTitle": "Oferty Lightning nie są jeszcze obsługiwane",
     "offerUnsupportedBody": "To oferta Lightning (BOLT12), za którą Lightning Piggy jeszcze nie zapłaci. Poproś zamiast tego o fakturę Lightning lub adres Lightning.",
     "walletFallback": "Portfel",

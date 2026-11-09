@@ -194,6 +194,14 @@ export function useSendSheetInput(opts: {
       setInvoiceData(input);
       setDecoded({ amountSats: null, description: null, expiry: null });
       markScanned(true);
+    } else {
+      // Anything else (an npub, a name, truncated text) isn't payable. Say so
+      // instead of leaving the sheet silently unchanged.
+      rejectInvoiceInput(
+        input,
+        'sendSheet.unrecognisedInputTitle',
+        'sendSheet.unrecognisedInputBody',
+      );
     }
   };
 

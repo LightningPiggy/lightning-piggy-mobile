@@ -1993,6 +1993,8 @@
     "invalidInvoiceDismiss": "OK",
     "invalidInvoiceTitle": "Érvénytelen számla",
     "invalidInvoiceBody": "Ez a számla érvénytelen vagy hiányos – ellenőrizd, és próbáld újra.",
+    "unrecognisedInputTitle": "Ez nem fizethető ki",
+    "unrecognisedInputBody": "Ez nem Lightning-számla, Lightning-cím vagy Bitcoin-cím – ellenőrizd, és próbáld újra.",
     "offerUnsupportedTitle": "A Lightning-ajánlatok még nem támogatottak",
     "offerUnsupportedBody": "Ez egy Lightning-ajánlat (BOLT12), amelyet a Lightning Piggy még nem tud kifizetni. Kérj helyette Lightning-számlát vagy Lightning-címet.",
     "walletFallback": "Pénztárca",

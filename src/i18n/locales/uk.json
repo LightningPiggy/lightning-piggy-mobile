@@ -1999,6 +1999,8 @@
     "invalidInvoiceDismiss": "Гаразд",
     "invalidInvoiceTitle": "Недійсний інвойс",
     "invalidInvoiceBody": "Цей інвойс недійсний або неповний — перевірте його та спробуйте ще раз.",
+    "unrecognisedInputTitle": "Це неможливо оплатити",
+    "unrecognisedInputBody": "Це не інвойс Lightning, не адреса Lightning і не адреса Bitcoin — перевірте та спробуйте ще раз.",
     "offerUnsupportedTitle": "Пропозиції Lightning поки що не підтримуються",
     "offerUnsupportedBody": "Це пропозиція Lightning (BOLT12), яку Lightning Piggy поки що не може оплатити. Попросіть натомість інвойс Lightning або адресу Lightning.",
     "walletFallback": "Гаманець",

@@ -1993,6 +1993,8 @@
     "invalidInvoiceDismiss": "Aceptar",
     "invalidInvoiceTitle": "Factura no válida",
     "invalidInvoiceBody": "Esta factura no es válida o está incompleta — compruébala e inténtalo de nuevo.",
+    "unrecognisedInputTitle": "No se puede pagar",
+    "unrecognisedInputBody": "Esto no es una factura Lightning, una dirección Lightning ni una dirección de Bitcoin — compruébalo e inténtalo de nuevo.",
     "offerUnsupportedTitle": "Las ofertas Lightning aún no son compatibles",
     "offerUnsupportedBody": "Esto es una oferta Lightning (BOLT12), que Lightning Piggy todavía no puede pagar. Pide una factura Lightning o una dirección Lightning.",
     "walletFallback": "Cartera",

@@ -140,6 +140,39 @@ it.each(['lno1qcp4256ypq', 'lightning:LNO1QCP4256YPQ'])(
   },
 );
 
+it.each(['npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq', 'alice', 'bitcoin:', 'hello world'])(
+  'tells the user when pasted text %p is not something they can pay (#1800)',
+  (text) => {
+    const { result, opts } = setup();
+    opts.pasteTextRef.current = text;
+    act(() => result.current.handlePasteSubmit());
+    expect(Alert.alert).toHaveBeenCalledWith(
+      'sendSheet.unrecognisedInputTitle',
+      'sendSheet.unrecognisedInputBody',
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(opts.setScanned).not.toHaveBeenCalledWith(true);
+    expect(opts.setInvoiceData).toHaveBeenCalledWith(null);
+    expect(opts.applyPasteText).toHaveBeenCalledWith(text);
+    expect(opts.onInvalidInvoice).toHaveBeenCalledTimes(1);
+  },
+);
+
+it('rejects unpayable clipboard text too', async () => {
+  const { result } = setup();
+  jest.mocked(Clipboard.getStringAsync).mockResolvedValue('just some text');
+  await act(async () => {
+    await result.current.handlePaste();
+  });
+  expect(Alert.alert).toHaveBeenCalledWith(
+    'sendSheet.unrecognisedInputTitle',
+    'sendSheet.unrecognisedInputBody',
+    expect.any(Array),
+    expect.any(Object),
+  );
+});
+
 it.each(['QR', 'NFC', 'paste'])(
   'accepts an in-sheet %s target straight away, without a link-consent prompt',
   (entry) => {
