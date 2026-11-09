@@ -5,9 +5,28 @@
 import { useCallback } from 'react';
 import { Alert, type BrandedAlertButton } from '../components/BrandedAlert';
 import { useLocale } from '../contexts/LocaleContext';
-import { getCoinosRecovery } from '../services/walletStorageService';
+import { getCoinosRecovery, hasMnemonic } from '../services/walletStorageService';
 import { buildRemoveWalletPrompt } from '../utils/removeWalletPrompt';
 import type { WalletState } from '../types/wallet';
+
+/**
+ * Reads which recovery secrets removing `wallet` would delete. Existence
+ * checks only. A failed read resolves to `null` ("unknown"), which
+ * `buildRemoveWalletPrompt` treats as "may hold recovery details".
+ */
+export async function readStoredRecoverySecrets(
+  wallet: Pick<WalletState, 'id' | 'walletType'>,
+): Promise<{ mnemonicStored: boolean | null; hasCoinosRecovery: boolean | null }> {
+  if (wallet.walletType === 'onchain') {
+    const mnemonicStored = await hasMnemonic(wallet.id).catch(() => null);
+    return { mnemonicStored, hasCoinosRecovery: false };
+  }
+  const hasCoinosRecovery = await getCoinosRecovery(wallet.id).then(
+    (rec) => rec !== null,
+    () => null,
+  );
+  return { mnemonicStored: false, hasCoinosRecovery };
+}
 
 export interface RemoveWalletConfirmRequest {
   wallet: WalletState;
@@ -24,13 +43,9 @@ export function useRemoveWalletConfirm(): (req: RemoveWalletConfirmRequest) => P
   return useCallback(
     async (req: RemoveWalletConfirmRequest) => {
       const { wallet } = req;
-      // Existence check only; a failed read counts as "no CoinOS login".
-      const hasCoinosRecovery =
-        wallet.walletType === 'nwc' &&
-        (await getCoinosRecovery(wallet.id).catch(() => null)) !== null;
       const prompt = buildRemoveWalletPrompt({
         wallet,
-        hasCoinosRecovery,
+        ...(await readStoredRecoverySecrets(wallet)),
         formatAmount: (sats) => sats.toLocaleString(formatLocale),
       });
       const message =

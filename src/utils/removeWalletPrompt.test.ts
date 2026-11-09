@@ -4,11 +4,13 @@ const formatAmount = (n: number) => n.toLocaleString('en-US');
 
 function input(
   wallet: Partial<RemoveWalletPromptInput['wallet']>,
-  hasCoinosRecovery = false,
+  hasCoinosRecovery: boolean | null = false,
+  mnemonicStored: boolean | null = false,
 ): RemoveWalletPromptInput {
   return {
     wallet: { alias: 'Savings', walletType: 'nwc', balance: null, ...wallet },
     hasCoinosRecovery,
+    mnemonicStored,
     formatAmount,
   };
 }
@@ -49,6 +51,27 @@ describe('buildRemoveWalletPrompt', () => {
     ]) {
       expect(p).toEqual({ risk: 'none', paragraphs: [], offerViewRecovery: false });
     }
+  });
+
+  it('warns for a legacy on-chain wallet whose import method is not filled in yet', () => {
+    const p = buildRemoveWalletPrompt(
+      input({ walletType: 'onchain', onchainImportMethod: undefined }, false, true),
+    );
+    expect(p.risk).toBe('phrase');
+    expect(p.paragraphs[0].key).toBe('removeWalletPrompt.withPhrase');
+  });
+
+  it('warns about a phrase when the mnemonic read failed', () => {
+    const p = buildRemoveWalletPrompt(
+      input({ walletType: 'onchain', onchainImportMethod: 'xpub' }, false, null),
+    );
+    expect(p.risk).toBe('phrase');
+  });
+
+  it('warns about a CoinOS login when the recovery read failed', () => {
+    const p = buildRemoveWalletPrompt(input({}, null));
+    expect(p.risk).toBe('coinos');
+    expect(p.offerViewRecovery).toBe(true);
   });
 
   it('ignores CoinOS recovery info on an on-chain wallet', () => {

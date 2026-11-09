@@ -18,8 +18,13 @@ export interface RemoveWalletPromptInput {
   wallet: Pick<WalletMetadata, 'alias' | 'walletType' | 'onchainImportMethod' | 'hideBalance'> & {
     balance: number | null;
   };
-  /** Whether CoinOS username / password are stored for this wallet. */
-  hasCoinosRecovery: boolean;
+  /** Whether a recovery phrase is stored for this (on-chain) wallet.
+   *  `null` = the read failed. Checked as well as `onchainImportMethod`,
+   *  which older wallets lack until the legacy migration fills it in. */
+  mnemonicStored: boolean | null;
+  /** Whether CoinOS username / password are stored for this (NWC) wallet.
+   *  `null` = the read failed. */
+  hasCoinosRecovery: boolean | null;
   /** Formats a sats amount for display (locale-aware). */
   formatAmount: (sats: number) => string;
 }
@@ -33,10 +38,15 @@ export interface RemoveWalletPrompt {
   offerViewRecovery: boolean;
 }
 
+// Fails safe: a storage read that errored counts as "may hold recovery
+// details", so the user is warned rather than shown the plain message
+// while removeWallet goes on to delete a phrase or login.
 export function removeWalletRisk(input: RemoveWalletPromptInput): RemoveWalletRisk {
-  if (hasStoredRecoveryPhrase(input.wallet)) return 'phrase';
-  if (input.wallet.walletType === 'nwc' && input.hasCoinosRecovery) return 'coinos';
-  return 'none';
+  const { wallet } = input;
+  if (wallet.walletType === 'onchain') {
+    return hasStoredRecoveryPhrase(wallet) || input.mnemonicStored !== false ? 'phrase' : 'none';
+  }
+  return input.hasCoinosRecovery !== false ? 'coinos' : 'none';
 }
 
 export function buildRemoveWalletPrompt(input: RemoveWalletPromptInput): RemoveWalletPrompt {

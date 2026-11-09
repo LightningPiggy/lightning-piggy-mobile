@@ -3802,8 +3802,8 @@
     "confirmChangedBody": "Tus relays han cambiado desde que se mostró esta sugerencia. Al publicar, se incluirán: {{relays}}"
   },
   "removeWalletPrompt": {
-    "withPhrase": "Esto elimina \"{{alias}}\" de este teléfono, incluida la frase de recuperación guardada aquí. Asegúrate de tenerla apuntada antes: sin su frase de recuperación, el dinero de este monedero no se puede recuperar.",
-    "withCoinosLogin": "Esto elimina \"{{alias}}\" de este teléfono, incluidos el usuario, la contraseña y los datos de conexión de CoinOS guardados aquí. Guárdalos antes: sin ellos, el dinero de este monedero no se puede recuperar.",
+    "withPhrase": "Esto elimina \"{{alias}}\" de este teléfono, incluida la frase de recuperación guardada aquí. Asegúrate de tenerla apuntada antes: sin su frase de recuperación, el dinero de esta cartera no se puede recuperar.",
+    "withCoinosLogin": "Esto elimina \"{{alias}}\" de este teléfono, incluidos el usuario, la contraseña y los datos de conexión de CoinOS guardados aquí. Guárdalos antes: sin ellos, el dinero de esta cartera no se puede recuperar.",
     "balance": "Contiene {{amount}} sats.",
     "viewRecoveryFirst": "Ver datos de recuperación antes",
     "removeAnyway": "Eliminar igualmente",
