@@ -23,7 +23,13 @@ import {
   saveWotSettings,
   type WotSettings,
   type WotTier,
+  notificationTierFor,
+  wotSettingsAfter,
 } from '../services/wotSettingsService';
+import {
+  publishNotificationAudience,
+  unpublishNotificationAudience,
+} from '../services/notificationAudience';
 
 // Pre-#565 uncapped L2 blob (~2 MB, the CursorWindow freeze). Deleted on
 // launch; the capped set now lives under friendsOfFriendsService's keys.
@@ -71,7 +77,9 @@ interface TrustGraphContextType {
   // starts the friends-of-friends build (progress + Cancel via
   // `useTrustGraphL2Status`) and the tier only becomes 'fof' once the set is
   // ready (#565). Choosing another tier cancels a build in flight.
-  setWotTier: (next: WotTier) => void;
+  // A pick is recorded as EXPLICIT (it then also widens notifications — see
+  // `notificationTierFor`); the legacy migration passes `explicit: false`.
+  setWotTier: (next: WotTier, opts?: { explicit?: boolean }) => void;
   // True while the friends-of-friends set is being built (foreground pick
   // or a background refresh of a stale persisted set).
   l2Loading: boolean;
@@ -179,12 +187,16 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
   const knownSettings = loadedSettings ?? peekWotSettings(pubkey);
   const wotTierReady = knownSettings !== null;
   const wotTier: WotTier = knownSettings?.wotTier ?? HYDRATING_TIER;
+  const notifyTier: WotTier = knownSettings ? notificationTierFor(knownSettings) : HYDRATING_TIER;
 
+  const knownSettingsRef = useRef(knownSettings);
+  knownSettingsRef.current = knownSettings;
   const persistTier = useCallback(
-    (next: WotTier) => {
+    (next: WotTier, explicit = true) => {
       changeVersion.current += 1;
-      setLoadedSettings({ wotTier: next });
-      saveWotSettings({ wotTier: next }, pubkey).catch(() => {});
+      const settings = wotSettingsAfter(knownSettingsRef.current, next, explicit);
+      setLoadedSettings(settings);
+      saveWotSettings(settings, pubkey).catch(() => {});
     },
     [pubkey, setLoadedSettings],
   );
@@ -205,6 +217,18 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
     wotTierReady,
     persistTier,
   });
+  // Message notifications follow the CHOSEN tier (notificationAudience): an
+  // unchosen one notifies like Friends. The live DM gate reads it per
+  // message, so a change applies without a restart. Unknown tier
+  // (hydrating) publishes nothing — follows only.
+  useEffect(() => {
+    if (!pubkey || !wotTierReady) return;
+    publishNotificationAudience(pubkey, {
+      tier: notifyTier,
+      fof: notifyTier === 'fof' && l2Follows.size > 0 ? l2Follows : null,
+    });
+    return () => unpublishNotificationAudience(pubkey);
+  }, [pubkey, notifyTier, wotTierReady, l2Follows]);
   const l2Loading = l2Status.building;
   const l2Empty = l2Follows.size === 0;
 
@@ -214,7 +238,7 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
   const tierStateRef = useRef({ wotTier, l2Empty, l2Loading, l2Failed });
   tierStateRef.current = { wotTier, l2Empty, l2Loading, l2Failed };
   const setWotTier = useCallback(
-    (next: WotTier) => {
+    (next: WotTier, opts?: { explicit?: boolean }) => {
       if (next === 'fof') {
         const current = tierStateRef.current;
         // A build is already running (from any surface — sheet or Settings):
@@ -223,12 +247,18 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
         // Already on FoF: only rebuild a set that never arrived or whose last
         // build failed (the tap is the retry) — never re-fetch on an
         // accidental re-tap of a healthy set.
-        if (current.wotTier !== 'fof') enableFof();
-        else if (current.l2Empty || current.l2Failed) void refreshL2();
+        if (current.wotTier !== 'fof') {
+          enableFof();
+          return;
+        }
+        // Re-picking it still records the choice (no build): a tier saved
+        // before the explicit marker existed must be confirmable (#1764).
+        persistTier('fof', opts?.explicit ?? true);
+        if (current.l2Empty || current.l2Failed) void refreshL2();
         return;
       }
       cancelL2();
-      persistTier(next);
+      persistTier(next, opts?.explicit ?? true);
     },
     [enableFof, refreshL2, cancelL2, persistTier],
   );

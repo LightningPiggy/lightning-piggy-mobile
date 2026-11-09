@@ -276,10 +276,14 @@ describe('MarmotWelcomePayloads routing and retries', () => {
   it('a declined Welcome is asked again on every send a minute apart (no doubling backoff)', async () => {
     const t = setup([INBOX]);
     t.signEvent.mockRejectedValue(new NostrConnectError('permission', 'denied'));
+    // Pin the clock before the decline is recorded: its backoff is stamped from
+    // Date.now(), so an unpinned millisecond tick between that stamp and the
+    // test's `now` would put "now + 1 min - 1 ms" past the backoff (#1815).
+    const now = Date.now();
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
     await t.deliver(hinted).catch(() => undefined);
     expect(t.signEvent).toHaveBeenCalledTimes(1);
-    const now = Date.now();
-    const clock = jest.spyOn(Date, 'now').mockReturnValue(now + NO_RELAYS_RETRY_MS - 1);
+    clock.mockReturnValue(now + NO_RELAYS_RETRY_MS - 1);
     await t.payloads.retry(GROUP); // inside the minute: not asked
     expect(t.signEvent).toHaveBeenCalledTimes(1);
     clock.mockReturnValue(now + NO_RELAYS_RETRY_MS);

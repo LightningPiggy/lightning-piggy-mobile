@@ -2279,7 +2279,7 @@
     "friendsTitle": "Freunde",
     "friendsSubtitle": "Nur Personen, denen du folgst.",
     "fofTitle": "Freunde von Freunden",
-    "fofSubtitle": "Personen, denen du folgst, und die Personen, denen sie am häufigsten folgen. Das Netz wird erstellt, wenn du diese Option wählst — beim ersten Mal dauert das einen Moment.",
+    "fofSubtitle": "Personen, denen du folgst, und die Personen, denen sie am häufigsten folgen. Auch ihre Nachrichten können dich benachrichtigen. Das Netz wird erstellt, wenn du diese Option wählst — beim ersten Mal dauert das einen Moment.",
     "fofProgressStarting": "Es wird geprüft, wem deine Freunde folgen…",
     "fofProgress": "Es wird geprüft, wem deine Freunde folgen… {{done}} von {{total}}",
     "fofCancel": "Abbrechen",
@@ -2290,7 +2290,7 @@
       "other": "{{count}} Freunde von Freunden in deinem Vertrauensnetz"
     },
     "allTitle": "Alle",
-    "allSubtitle": "Alles von allen Relays. Standard, bis dein Vertrauensnetz bereit ist – wechsle zu „Freunde“, um strenger zu filtern.",
+    "allSubtitle": "Alles von allen Relays. Wenn du es auswählst, können dich auch Nachrichten von allen benachrichtigen. Standard, bis dein Vertrauensnetz bereit ist – wechsle zu „Freunde“, um strenger zu filtern.",
     "gateHint": "„Freunde von Freunden“ enthält die {{max}} Personen, denen deine Freunde am häufigsten folgen, und aktualisiert die Liste einmal täglich. „Freunde“ ist der sicherste Feed; „Alle“ der breiteste.",
     "done": "Fertig"
   },
@@ -3295,7 +3295,7 @@
   "messageSettingsScreen": {
     "title": "Nachrichten",
     "trustTitle": "Wen du siehst",
-    "trustHint": "Dieser Filter für das Vertrauensnetz bestimmt auch, was du auf der Karte, bei Events und in Gruppen siehst.",
+    "trustHint": "Dieser Filter für das Vertrauensnetz bestimmt auch, was du auf der Karte, bei Events und in Gruppen siehst. Sobald du einen Filter auswählst, bestimmt er auch, bei welchen Nachrichten du benachrichtigt wirst; bis dahin nur bei Leuten, denen du folgst.",
     "trustRowA11y": "Wen du siehst: {{tier}}"
   },
   "hermesProfiler": {

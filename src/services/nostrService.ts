@@ -425,6 +425,9 @@ export function parseZapReceipt(event: { tags: string[][] }): {
   }
 }
 
+/** A fetched kind-9735. `pubkey` (the signer) is what NIP-57 validation checks. */
+export type ZapReceiptRecord = { tags: string[][]; created_at: number; id: string; pubkey: string };
+
 /**
  * Fetch NIP-57 zap receipts (kind 9735) addressed to `recipientPubkey`.
  *
@@ -438,7 +441,7 @@ export async function fetchZapReceiptsForRecipient(
   recipientPubkeys: string | string[],
   relays: string[],
   options: { limit?: number; since?: number } = {},
-): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+): Promise<ZapReceiptRecord[]> {
   return fetchZapReceiptsByTag('#p', recipientPubkeys, relays, options);
 }
 
@@ -458,7 +461,7 @@ export async function fetchZapReceiptsForSender(
   senderPubkeys: string | string[],
   relays: string[],
   options: { limit?: number; since?: number } = {},
-): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+): Promise<ZapReceiptRecord[]> {
   return fetchZapReceiptsByTag('#P', senderPubkeys, relays, options);
 }
 
@@ -467,7 +470,7 @@ async function fetchZapReceiptsByTag(
   pubkeys: string | string[],
   relays: string[],
   options: { limit?: number; since?: number } = {},
-): Promise<{ tags: string[][]; created_at: number; id: string }[]> {
+): Promise<ZapReceiptRecord[]> {
   const arr = Array.isArray(pubkeys) ? pubkeys : [pubkeys];
   const deduped = [...new Set(arr.filter(Boolean))];
   if (deduped.length === 0) return [];
@@ -485,7 +488,7 @@ async function fetchZapReceiptsByTag(
     // maxWait: per-relay EOSE timeout — closes the sub at 15 s if EOSE never
     // arrives (unlike withTimeout, which only raced the Promise and left the sub open).
     const events = await pool.querySync(allRelays, filter, { maxWait: 15000 });
-    const byId = new Map<string, { tags: string[][]; created_at: number; id: string }>();
+    const byId = new Map<string, ZapReceiptRecord>();
     for (const e of events) byId.set(e.id, e);
     return Array.from(byId.values());
   } catch (error) {
