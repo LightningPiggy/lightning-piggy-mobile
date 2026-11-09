@@ -107,4 +107,77 @@ describe('matchIncomingZapReceipts', () => {
     );
     expect(out.matches).toEqual([]);
   });
+
+  it('leaves a payment unresolved when its only receipt is by another author', () => {
+    // e.g. a second LNURL address paying into this wallet, signed by its own key.
+    const payment = tx({ bolt11: INVOICE });
+    const out = matchIncomingZapReceipts(
+      [payment],
+      [receipt(signedRequest(), { bolt11: INVOICE, pubkey: ATTACKER })],
+      [PROVIDER],
+    );
+    expect(out.matches).toEqual([]);
+    expect(out.misses).toEqual([]);
+  });
+
+  it('records a miss when a trusted receipt fails a hard check', () => {
+    const payment = tx({ bolt11: INVOICE });
+    const tampered = { ...signedRequest(), content: 'edited' };
+    const out = matchIncomingZapReceipts(
+      [payment],
+      [receipt(tampered, { bolt11: INVOICE })],
+      [PROVIDER],
+    );
+    expect(out.misses).toEqual([payment]);
+  });
+});
+
+describe('self-payment replay on a shared custodial provider', () => {
+  // The victim's address and the attacker's address live on the same
+  // custodial LNURL server. A friend's old zap request (p = victim) is public
+  // inside an old receipt. The attacker replays it to the callback of their
+  // OWN address and pays it; the server publishes a genuinely server-signed
+  // receipt (p = victim, sender = friend) for the ATTACKER's invoice.
+  const providerKey = new Uint8Array(32).fill(5);
+  const SERVER = getPublicKey(providerKey);
+  // Payment hash of INVOICE (the BOLT11 spec vector).
+  const ATTACKER_INVOICE_HASH = '0001020304050607080900010203040506070809000102030405060708090102';
+  const VICTIM_HASH = 'ab'.repeat(32);
+
+  const replayedReceipt = () => {
+    const oldFriendRequest = signedRequest(); // real, validly signed by the friend
+    return finalizeEvent(
+      {
+        kind: 9735,
+        created_at: T + 10,
+        content: '',
+        tags: [
+          ['p', ME],
+          ['bolt11', INVOICE],
+          ['description', JSON.stringify(oldFriendRequest)],
+        ],
+      },
+      providerKey,
+    );
+  };
+
+  it('does not label an invoice-less payment with a payment hash by amount and time', () => {
+    // NIP-47 may omit `invoice` but sends `payment_hash`: same amount, same minute.
+    const victimPayment = tx({ paymentHash: VICTIM_HASH });
+    const out = matchIncomingZapReceipts([victimPayment], [replayedReceipt()], [SERVER]);
+    expect(out.matches).toEqual([]);
+    expect(out.misses).toEqual([]);
+  });
+
+  it('still attributes an invoice-less payment whose hash matches the receipt invoice', () => {
+    const payment = tx({ paymentHash: ATTACKER_INVOICE_HASH.toUpperCase() });
+    const out = matchIncomingZapReceipts([payment], [replayedReceipt()], [SERVER]);
+    expect(out.matches.map((m) => m.senderPubkey)).toEqual([FRIEND]);
+  });
+
+  it('rejects a bolt11 match whose invoice hash disagrees with the payment hash', () => {
+    const payment = tx({ bolt11: INVOICE, paymentHash: VICTIM_HASH });
+    const out = matchIncomingZapReceipts([payment], [replayedReceipt()], [SERVER]);
+    expect(out.matches).toEqual([]);
+  });
 });

@@ -221,16 +221,22 @@ it('drops balance and transaction reads that finish after a B → C → B round 
 });
 
 describe('deferred zap attribution after a transaction fetch', () => {
-  // One unattributed incoming tx (no bolt11, so it's matched by amount + time)
-  // and a relay receipt that pairs with it.
-  const zapped = { type: 'incoming', amount: 5000, settled_at: 1000, paymentHash: 'h0' };
+  // One unattributed incoming tx (no bolt11, so it's matched by payment hash)
+  // and a relay receipt whose invoice carries that hash.
+  const INVOICE =
+    'lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsyp3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4evs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp';
+  const H0 = '0001020304050607080900010203040506070809000102030405060708090102';
+  const zapped = { type: 'incoming', amount: 5000, settled_at: 1000, paymentHash: H0 };
   const other = { type: 'incoming', amount: 2100, settled_at: 2000, paymentHash: 'h1' };
   // Signed by the wallet's LNURL server — the only author a receipt may have.
   const receipt = {
     id: 'r0',
     pubkey: 'srv',
     created_at: 1000,
-    tags: [['description', JSON.stringify({ tags: [['amount', '5000000']] })]],
+    tags: [
+      ['bolt11', INVOICE],
+      ['description', JSON.stringify({ tags: [['amount', '5000000']] })],
+    ],
   };
 
   // Hydrates B with W's cached history, fetches it, and holds the relay
@@ -265,7 +271,7 @@ describe('deferred zap attribution after a transaction fetch', () => {
     jest
       .mocked(nwcService.listTransactions)
       .mockResolvedValueOnce([
-        { type: 'incoming', amount: 5000, settled_at: 1000, payment_hash: 'h0' },
+        { type: 'incoming', amount: 5000, settled_at: 1000, payment_hash: H0 },
       ]);
     const receipts = deferred<(typeof receipt)[]>();
     jest.mocked(nostrService.fetchZapReceiptsForRecipient).mockReturnValueOnce(receipts.promise);
