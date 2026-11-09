@@ -103,3 +103,38 @@ it('opens Settings when the button is tapped while blocked', async () => {
   expect(Linking.openSettings).toHaveBeenCalledTimes(1);
   expect(result.current.blocked).toBe(true);
 });
+
+it("skips the resume check while a tap's own request is still in flight", async () => {
+  let settle: (value: typeof GRANTED) => void = () => undefined;
+  const request = jest.fn(() => new Promise<typeof GRANTED>((resolve) => (settle = resolve)));
+  mockGetPermission.mockResolvedValue(GRANTED);
+  const { result } = renderHook(() => useScanPermissionButton(false, request));
+
+  let tap: Promise<void> = Promise.resolve();
+  act(() => {
+    tap = result.current.onPress();
+  });
+  // The OS permission screen backgrounds the app; coming back mid-request
+  // must not read or request again.
+  await returnToApp();
+  expect(mockGetPermission).not.toHaveBeenCalled();
+  expect(request).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    settle(GRANTED);
+    await tap;
+  });
+  expect(result.current.blocked).toBe(false);
+});
+
+it('requests at most once after a granted resume, even if resumed again', async () => {
+  const request = jest.fn().mockResolvedValue(GRANTED);
+  mockGetPermission.mockResolvedValue(GRANTED);
+  // The parent hasn't flipped `permissionGranted` yet, so the listener stays.
+  renderHook(() => useScanPermissionButton(false, request));
+
+  await returnToApp();
+  await returnToApp();
+
+  expect(request).toHaveBeenCalledTimes(1);
+});
