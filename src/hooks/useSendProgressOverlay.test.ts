@@ -135,6 +135,26 @@ describe('useSendProgressOverlay — per-send scoping', () => {
     expect(result.current.progressState).toBe('in-flight-extended');
   });
 
+  it('a plain Lightning send cancelled after dispatch warns, then closes the sheet (#1776)', () => {
+    const { result, onClose, setSending } = setup();
+    let send!: SendInvocation;
+    act(() => {
+      send = result.current.beginSend();
+    });
+    act(() => result.current.callbacksFor(send).onPaymentDispatched());
+    // Not a swap: no checklist, no swap-only "Continue in background" while sending.
+    expect(result.current.swapSteps).toBeNull();
+    expect(result.current.canContinueInBackground).toBe(false);
+    act(() => result.current.handleCancelPayment());
+    expect(send.controller.signal.aborted).toBe(true);
+    expect(result.current.progressState).toBe('in-flight-extended');
+    expect(setSending).toHaveBeenCalledWith(false);
+    // Acknowledging the warning closes the sheet rather than leaving Send armed.
+    act(() => result.current.handleOverlayDismiss());
+    act(() => jest.runAllTimers());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('Continue in background from in-flight-extended closes the sheet and kicks recovery', () => {
     const { result, onClose } = setup();
     let send!: SendInvocation;

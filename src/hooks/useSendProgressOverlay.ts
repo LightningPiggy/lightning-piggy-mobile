@@ -21,7 +21,8 @@ export interface SendInvocation {
   readonly controller: AbortController;
   /** The user chose "Continue in background" for this send. */
   dismissed: boolean;
-  /** This send's reverse-swap hold invoice has been dispatched. */
+  /** This send's pay request (plain Lightning, or a swap's hold invoice) has
+   *  been dispatched to the wallet — a Cancel can no longer recall it (#1776). */
   dispatched: boolean;
 }
 
@@ -118,8 +119,8 @@ export function useSendProgressOverlay({ onClose, setSending }: Options) {
   );
 
   const handleCancelPayment = useCallback(() => {
-    // Cancelling a reply cannot recall an already dispatched hold invoice.
-    // Keep the in-flight warning visible until the user chooses background recovery.
+    // Cancelling the reply wait cannot recall a pay request the wallet already
+    // has: keep the in-flight warning up rather than re-arming Send (#1776).
     const send = currentSendRef.current;
     send?.controller.abort();
     setProgressState(send?.dispatched ? 'in-flight-extended' : 'hidden');

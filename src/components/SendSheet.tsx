@@ -434,7 +434,8 @@ const SendSheet: React.FC<Props> = ({
     // superseded or continued in the background it must not repaint.
     const send = beginSend();
     const { signal } = send.controller;
-    const { onReplyTimeout } = callbacksFor(send);
+    // onDispatched: once pay_invoice is sent, Cancel keeps the in-flight warning (#1776).
+    const { onReplyTimeout, onPaymentDispatched: onDispatched } = callbacksFor(send);
     setSwapReceipt(null);
     setSending(true);
     let swapPaymentHash: string | null = null;
@@ -539,6 +540,7 @@ const SendSheet: React.FC<Props> = ({
           verifyUrl,
           signal,
           onReplyTimeout,
+          onDispatched,
         });
 
         if (__DEV__)
@@ -625,6 +627,7 @@ const SendSheet: React.FC<Props> = ({
         await payInvoiceForWallet(walletId!, invoiceData, {
           signal,
           onReplyTimeout,
+          onDispatched,
           amountMsats: isAmountlessBolt11 ? currentSats * 1000 : undefined,
         });
       }
@@ -641,14 +644,10 @@ const SendSheet: React.FC<Props> = ({
         showOutcome(send, 'in-flight-extended');
         return;
       }
-      // User-initiated cancel via PaymentProgressOverlay's Cancel button:
-      // the overlay has already been hidden by handleCancelPayment, so
-      // just let the send complete silently without surfacing an error.
-      // Only THIS send's signal proves a cancel — an internal timeout abort
-      // must fall through to an error, or the overlay spins forever.
-      if (signal.aborted) {
-        return;
-      }
+      // User Cancel: handleCancelPayment already hid the overlay, or kept the
+      // in-flight warning if the pay request was sent. Only THIS send's signal
+      // proves a cancel — an internal timeout abort must fall through to an error.
+      if (signal.aborted) return;
       // A relay/transport connectivity failure (relay unreachable, publish
       // never completed) is an UNKNOWN outcome, not a confirmed failure —
       // the payment may have settled. Surface "Connection lost" with a
