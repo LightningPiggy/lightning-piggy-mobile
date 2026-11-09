@@ -1,6 +1,10 @@
-// Before a Boltz cross-chain Move, offer a same-chain source wallet that can
-// cover the amount — moving from it avoids the swap fee. Extracted from
-// TransferSheet so the selection rule is testable on its own.
+// The prompts the Move sheet (TransferSheet) awaits before it moves anything.
+//
+// Every prompt resolves on `onDismiss` as a cancel. BrandedAlert closes an open
+// alert when another one replaces it (e.g. a background swap's refund alert)
+// and only calls the displaced alert's `onDismiss` (#1264). A prompt without
+// it never settles, and because Move runs behind a single-flight guard, every
+// later Move tap would be silently dropped (#1778).
 
 import { Alert } from '../components/BrandedAlert';
 import type { WalletState } from '../types/wallet';
@@ -31,12 +35,13 @@ export function findSameChainAlternative(
 }
 
 /**
- * Ask whether to switch to `alternative`. Resolves `'switch'`, `'continue'`
- * (keep the swap) or `'cancel'`.
+ * Before a Boltz cross-chain Move, offer the same-chain `alternative` — moving
+ * from it avoids the swap fee. Resolves `'switch'`, `'continue'` (keep the
+ * swap) or `'cancel'` (also on dismissal).
  */
 export function promptSameChainAlternative(
   alternative: WalletState,
-  transferType: 'onchain-to-ln' | 'ln-to-onchain',
+  transferType: TransferType,
   formatLocale: string,
 ): Promise<'switch' | 'continue' | 'cancel'> {
   const toLightning = transferType === 'onchain-to-ln';
@@ -58,6 +63,29 @@ export function promptSameChainAlternative(
           onPress: () => resolve('continue'),
         },
       ],
+      { onDismiss: () => resolve('cancel') },
+    ),
+  );
+}
+
+/**
+ * High-value confirmation (issue #82). `amountLabel` is pre-formatted, e.g.
+ * "5,000 sats ($3.10)". Resolves true only on Confirm — false on Cancel or dismissal.
+ */
+export function confirmLargeMove(
+  amountLabel: string,
+  sourceAlias: string,
+  destAlias: string,
+): Promise<boolean> {
+  return new Promise((resolve) =>
+    Alert.alert(
+      'Confirm large move',
+      `You're about to move ${amountLabel} from ${sourceAlias} to ${destAlias}. Tap Confirm to proceed.`,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Confirm', onPress: () => resolve(true) },
+      ],
+      { onDismiss: () => resolve(false) },
     ),
   );
 }

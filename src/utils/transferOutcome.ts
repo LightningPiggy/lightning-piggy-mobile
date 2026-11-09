@@ -24,21 +24,31 @@ export function exceedsSourceBalance(
 export type TransferFailureKind = 'quote-changed' | 'unknown-outcome' | 'dev-reload' | 'failed';
 
 /**
+ * How far the Move got before it threw: nothing sent yet, a Lightning payment
+ * request sent, or an on-chain broadcast attempted.
+ */
+export type TransferDispatch = 'none' | 'lightning' | 'onchain';
+
+/**
  * Classify an error thrown by the Move flow.
  *
- * `paymentDispatched` is true once the pay / broadcast call was made. Past
- * that point a reply timeout or a relay/connection drop means the outcome is
- * UNKNOWN — the sats may well have moved — so it must never read as "Move
- * Failed": a user who trusts that retries and moves the amount twice (the
- * same rule SendSheet follows, #891 / #648). Before dispatch nothing can have
- * moved, so those errors are plain failures.
+ * An unknown outcome — the sats may well have moved — must never read as
+ * "Move Failed": a user who trusts that retries and moves the amount twice
+ * (the same rule SendSheet follows, #891 / #648).
+ *  - After a Lightning payment was sent, a reply timeout or relay/connection
+ *    drop is unknown; the wallet's own rejection is still a failure.
+ *  - After an on-chain broadcast was attempted, ANY error is unknown: a lost
+ *    Electrum reply surfaces as arbitrary BDK text, and the transaction may
+ *    already be in the mempool.
+ *  - Before dispatch nothing can have moved, so errors are plain failures.
  */
 export function classifyTransferError(
   error: unknown,
-  paymentDispatched: boolean,
+  dispatch: TransferDispatch,
 ): TransferFailureKind {
   if (boltzService.isQuoteChangedError(error)) return 'quote-changed';
-  if (paymentDispatched && isUnansweredError(error)) return 'unknown-outcome';
+  if (dispatch === 'onchain') return 'unknown-outcome';
+  if (dispatch === 'lightning' && isUnansweredError(error)) return 'unknown-outcome';
   const message = error instanceof Error ? error.message : '';
   // react-native's HMRClient throws this when Metro drops the dev-client
   // connection — nothing was signed or broadcast.

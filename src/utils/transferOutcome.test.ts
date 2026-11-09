@@ -30,33 +30,49 @@ describe('exceedsSourceBalance (#1778)', () => {
 
 describe('classifyTransferError (#1778)', () => {
   it('reports a reply timeout after the payment was sent as an unknown outcome', () => {
-    expect(classifyTransferError(createReplyTimeoutError(), true)).toBe('unknown-outcome');
+    expect(classifyTransferError(createReplyTimeoutError(), 'lightning')).toBe('unknown-outcome');
   });
 
   it('reports a relay / connection drop after the payment was sent as an unknown outcome', () => {
     const relayDrop = new Error("Couldn't reach your wallet: relay publish timed out");
-    expect(classifyTransferError(relayDrop, true)).toBe('unknown-outcome');
-    expect(classifyTransferError(new Error('Network request failed'), true)).toBe(
+    expect(classifyTransferError(relayDrop, 'lightning')).toBe('unknown-outcome');
+    expect(classifyTransferError(new Error('Network request failed'), 'lightning')).toBe(
       'unknown-outcome',
     );
   });
 
   it('treats the same errors as failures before anything was sent', () => {
-    expect(classifyTransferError(createReplyTimeoutError(), false)).toBe('failed');
-    expect(classifyTransferError(new Error('Failed to connect to wss://relay'), false)).toBe(
+    expect(classifyTransferError(createReplyTimeoutError(), 'none')).toBe('failed');
+    expect(classifyTransferError(new Error('Failed to connect to wss://relay'), 'none')).toBe(
       'failed',
     );
   });
 
   it('keeps a wallet’s own rejection a failure even after dispatch', () => {
-    expect(classifyTransferError(new Error('Insufficient balance'), true)).toBe('failed');
+    expect(classifyTransferError(new Error('Insufficient balance'), 'lightning')).toBe('failed');
+  });
+
+  it('treats ANY error after an on-chain broadcast attempt as an unknown outcome', () => {
+    // A lost Electrum reply surfaces as arbitrary BDK text, matching no NWC pattern.
+    expect(classifyTransferError(new Error('electrum: unexpected EOF'), 'onchain')).toBe(
+      'unknown-outcome',
+    );
+    // Even the Metro-reload text: the transaction may already be in the mempool.
+    expect(
+      classifyTransferError(new TypeError("Cannot read property 'reload' of undefined"), 'onchain'),
+    ).toBe('unknown-outcome');
+  });
+
+  it('keeps on-chain errors before the broadcast (sync, build, funds) as failures', () => {
+    expect(classifyTransferError(new Error('Insufficient funds'), 'none')).toBe('failed');
+    expect(classifyTransferError(new Error('electrum: unexpected EOF'), 'none')).toBe('failed');
   });
 
   it('recognises a changed swap quote and a Metro dev reload', () => {
     const quote = { minAmount: 1, maxAmount: 2 } as unknown as SwapFees;
-    expect(classifyTransferError(new QuoteChangedError(quote), false)).toBe('quote-changed');
+    expect(classifyTransferError(new QuoteChangedError(quote), 'none')).toBe('quote-changed');
     expect(
-      classifyTransferError(new TypeError("Cannot read property 'reload' of undefined"), false),
+      classifyTransferError(new TypeError("Cannot read property 'reload' of undefined"), 'none'),
     ).toBe('dev-reload');
   });
 });

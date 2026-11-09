@@ -99,6 +99,13 @@ const TransferProgress: React.FC<Props> = ({
           {progress.errorMessage}
         </Text>
       )}
+      {/* Unknown outcome (#1778): neutral text, not error styling — the sats
+          may well have moved. */}
+      {progress.phase === 'unknown' && progress.errorMessage && (
+        <Text style={styles.progressText} testID="transfer-unknown-msg">
+          {progress.errorMessage}
+        </Text>
+      )}
       {backgroundError !== null && !recoveryAcked && (
         <TouchableOpacity
           style={[styles.closeButton, retryingRecovery && styles.closeButtonDisabled]}

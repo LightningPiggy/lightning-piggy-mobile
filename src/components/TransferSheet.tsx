@@ -65,6 +65,8 @@ import {
   advanceTransfer,
   completeTransfer,
   failTransfer,
+  isTransferStopped,
+  unknownTransfer,
   idleProgress,
   startTransfer,
   type TransferProgress as TransferProgressState,
@@ -75,11 +77,13 @@ import {
   classifyTransferError,
   exceedsSourceBalance,
   transferFailureMessage,
+  type TransferDispatch,
 } from '../utils/transferOutcome';
 import {
+  confirmLargeMove,
   findSameChainAlternative,
   promptSameChainAlternative,
-} from '../utils/transferAlternativeSource';
+} from '../utils/transferPrompts';
 
 interface Props {
   visible: boolean;
@@ -395,13 +399,13 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     // React setState is async, so a state flag wouldn't be updated in the
     // same closure by the time `finally` runs; a `let` survives the scope.
     let didHandOff = false;
-    // Set just before the pay / broadcast call: past it, a timeout or relay
-    // drop leaves the outcome unknown rather than failed (#1778).
-    let paymentDispatched = false;
+    // Set as the pay / broadcast goes out: past it, a lost reply leaves the
+    // outcome unknown rather than failed (#1778; see classifyTransferError).
+    let dispatch: TransferDispatch = 'none';
 
     // Warn if doing a cross-chain swap when a same-chain wallet has funds
     const alternative = findSameChainAlternative(wallets, sourceId, transferType, currentSats);
-    if (alternative && (transferType === 'onchain-to-ln' || transferType === 'ln-to-onchain')) {
+    if (alternative) {
       const choice = await promptSameChainAlternative(alternative, transferType, formatLocale);
       if (choice === 'cancel') return;
       if (choice === 'switch') {
@@ -438,17 +442,8 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         btcPrice !== null
           ? ` (${satsToFiatString(currentSats, btcPrice, currency, formatLocale)})`
           : '';
-      const confirmed = await new Promise<boolean>((resolve) => {
-        Alert.alert(
-          'Confirm large move',
-          `You're about to move ${currentSats.toLocaleString(formatLocale)} sats${fiat} from ${source.alias} to ${dest.alias}. Tap Confirm to proceed.`,
-          [
-            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-            { text: 'Confirm', onPress: () => resolve(true) },
-          ],
-        );
-      });
-      if (!confirmed) return;
+      const amountLabel = `${currentSats.toLocaleString(formatLocale)} sats${fiat}`;
+      if (!(await confirmLargeMove(amountLabel, source.alias, dest.alias))) return;
     }
 
     setSending(true);
@@ -540,7 +535,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const invoice = await fetchInvoiceForDest(dest);
         setProgress((p) => advanceTransfer(p)); // invoice → pay
         setProgressMsg('Sending payment...');
-        paymentDispatched = true;
+        dispatch = 'lightning';
         await payInvoiceForWallet(sourceId, invoice);
         setProgress((p) => advanceTransfer(p)); // pay → refresh
       } else if (transferType === 'ln-to-onchain') {
@@ -682,11 +677,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
-        paymentDispatched = true;
         const lockupTxId = await onchainService.sendTransaction(
           sourceId,
           swap.address,
           swap.expectedAmount,
+          undefined,
+          () => (dispatch = 'onchain'),
         );
         // Tag both legs so the settled on-chain lockup + LN receive badge as a
         // Boltz swap rather than generic Sent/Received (#895).
@@ -725,8 +721,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       } else if (transferType === 'onchain-to-onchain') {
         setProgressMsg('Broadcasting on-chain transaction...');
         const address = await onchainService.getNextReceiveAddress(destId);
-        paymentDispatched = true;
-        await onchainService.sendTransaction(sourceId, address, currentSats);
+        await onchainService.sendTransaction(sourceId, address, currentSats, undefined, () => {
+          dispatch = 'onchain';
+        });
         setProgress((p) => advanceTransfer(p)); // broadcast → refresh
       }
 
@@ -763,9 +760,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         return;
       }
-      const kind = classifyTransferError(error, paymentDispatched);
+      const kind = classifyTransferError(error, dispatch);
       const message = transferFailureMessage(kind, error, t);
-      setProgress((p) => failTransfer(p, message));
+      const stop = kind === 'unknown-outcome' ? unknownTransfer : failTransfer;
+      setProgress((p) => stop(p, message));
       alertTransferFailure(kind, message, t);
     } finally {
       // When a Boltz swap has been handed off to a background IIFE we leave
@@ -909,7 +907,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
             <Text style={styles.title}>Move</Text>
 
             {/* Source wallet selector */}
-            {sending || progress.phase === 'failed' ? (
+            {sending || isTransferStopped(progress) ? (
               /* Progress view — replaces the form while a transfer is
                  executing (`sending`) and stays mounted on failure
                  (`phase === 'failed'`) so the failing step renders its X
