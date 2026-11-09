@@ -2146,6 +2146,11 @@
     "loadingMore": "Cargando más transacciones",
     "noTransactions": "Aún no hay transacciones"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "Eso es más de lo que tiene {{wallet}} ({{balance}} sats).",
+    "unknownOutcomeTitle": "Estado del movimiento desconocido",
+    "unknownOutcomeBody": "No pudimos confirmar el movimiento. Es posible que tus sats ya se hayan movido: revisa el saldo de ambos wallets antes de intentarlo de nuevo."
+  },
   "unsupportedEntityScreen": {
     "back": "Atrás",
     "cantOpenTitle": "Lo sentimos, no se puede abrir esto",

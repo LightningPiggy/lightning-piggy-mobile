@@ -2146,6 +2146,11 @@
     "loadingMore": "और लेन-देन लोड हो रहे हैं",
     "noTransactions": "अभी कोई लेन-देन नहीं हुआ"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "यह {{wallet}} में मौजूद राशि ({{balance}} sats) से ज़्यादा है।",
+    "unknownOutcomeTitle": "ट्रांसफ़र की स्थिति पता नहीं",
+    "unknownOutcomeBody": "हम ट्रांसफ़र की पुष्टि नहीं कर पाए। हो सकता है आपके sats फिर भी ट्रांसफ़र हो गए हों — दोबारा कोशिश करने से पहले दोनों वॉलेट का बैलेंस जाँच लें।"
+  },
   "unsupportedEntityScreen": {
     "back": "वापस",
     "cantOpenTitle": "माफ़ करें — इसे खोल नहीं सकते",

@@ -69,6 +69,17 @@ import {
   startTransfer,
   type TransferProgress as TransferProgressState,
 } from '../utils/transferPhase';
+import { singleFlight } from '../utils/singleFlight';
+import {
+  alertTransferFailure,
+  classifyTransferError,
+  exceedsSourceBalance,
+  transferFailureMessage,
+} from '../utils/transferOutcome';
+import {
+  findSameChainAlternative,
+  promptSameChainAlternative,
+} from '../utils/transferAlternativeSource';
 
 interface Props {
   visible: boolean;
@@ -148,6 +159,9 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   // concurrent recoverPendingSwaps() calls before `disabled` flips. The
   // ref is checked + set synchronously inside the onPress closure.
   const retryInFlightRef = useRef(false);
+  // Same guard for Move (#1778): `sending` only flips after the pre-flight
+  // awaits, so without it a double-tap starts two transfers.
+  const [runTransferOnce] = useState(() => singleFlight((run: () => Promise<void>) => run()));
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const scrollRef = useRef<any>(null);
@@ -381,65 +395,18 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
     // React setState is async, so a state flag wouldn't be updated in the
     // same closure by the time `finally` runs; a `let` survives the scope.
     let didHandOff = false;
+    // Set just before the pay / broadcast call: past it, a timeout or relay
+    // drop leaves the outcome unknown rather than failed (#1778).
+    let paymentDispatched = false;
 
     // Warn if doing a cross-chain swap when a same-chain wallet has funds
-    if (transferType === 'onchain-to-ln') {
-      const altLnWallet =
-        wallets
-          .filter(
-            (w) =>
-              w.id !== sourceId &&
-              w.walletType === 'nwc' &&
-              w.isConnected &&
-              (w.balance ?? 0) >= currentSats,
-          )
-          .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
-      if (altLnWallet) {
-        const confirmed = await new Promise<boolean | null>((resolve) =>
-          Alert.alert(
-            'Use Lightning wallet instead?',
-            `"${altLnWallet.alias}" has ${altLnWallet.balance?.toLocaleString(formatLocale)} sats. Sending from a Lightning wallet avoids Boltz swap fees.`,
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
-              { text: 'Use Lightning', onPress: () => resolve(true) },
-              { text: 'Continue with on-chain', onPress: () => resolve(false) },
-            ],
-          ),
-        );
-        if (confirmed === null) return; // cancelled
-        if (confirmed) {
-          setSourceId(altLnWallet.id);
-          return;
-        }
-      }
-    } else if (transferType === 'ln-to-onchain') {
-      const altOnchainWallet =
-        wallets
-          .filter(
-            (w) =>
-              w.id !== sourceId &&
-              w.walletType === 'onchain' &&
-              w.onchainImportMethod === 'mnemonic' &&
-              (w.balance ?? 0) >= currentSats,
-          )
-          .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))[0] ?? null;
-      if (altOnchainWallet) {
-        const confirmed = await new Promise<boolean | null>((resolve) =>
-          Alert.alert(
-            'Use on-chain wallet instead?',
-            `"${altOnchainWallet.alias}" has ${altOnchainWallet.balance?.toLocaleString(formatLocale)} sats. Sending from an on-chain wallet avoids Boltz swap fees.`,
-            [
-              { text: 'Cancel', style: 'cancel', onPress: () => resolve(null) },
-              { text: 'Use on-chain', onPress: () => resolve(true) },
-              { text: 'Continue with Lightning', onPress: () => resolve(false) },
-            ],
-          ),
-        );
-        if (confirmed === null) return; // cancelled
-        if (confirmed) {
-          setSourceId(altOnchainWallet.id);
-          return;
-        }
+    const alternative = findSameChainAlternative(wallets, sourceId, transferType, currentSats);
+    if (alternative && (transferType === 'onchain-to-ln' || transferType === 'ln-to-onchain')) {
+      const choice = await promptSameChainAlternative(alternative, transferType, formatLocale);
+      if (choice === 'cancel') return;
+      if (choice === 'switch') {
+        setSourceId(alternative.id);
+        return;
       }
     }
 
@@ -573,6 +540,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         const invoice = await fetchInvoiceForDest(dest);
         setProgress((p) => advanceTransfer(p)); // invoice → pay
         setProgressMsg('Sending payment...');
+        paymentDispatched = true;
         await payInvoiceForWallet(sourceId, invoice);
         setProgress((p) => advanceTransfer(p)); // pay → refresh
       } else if (transferType === 'ln-to-onchain') {
@@ -714,6 +682,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         console.log(
           `[Transfer] Sending ${swap.expectedAmount} sats on-chain to Boltz address ${swap.address}`,
         );
+        paymentDispatched = true;
         const lockupTxId = await onchainService.sendTransaction(
           sourceId,
           swap.address,
@@ -756,6 +725,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
       } else if (transferType === 'onchain-to-onchain') {
         setProgressMsg('Broadcasting on-chain transaction...');
         const address = await onchainService.getNextReceiveAddress(destId);
+        paymentDispatched = true;
         await onchainService.sendTransaction(sourceId, address, currentSats);
         setProgress((p) => advanceTransfer(p)); // broadcast → refresh
       }
@@ -780,7 +750,6 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
 
       Alert.alert('Move Complete', settleMsg, [{ text: 'OK', onPress: onClose }]);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Move failed';
       // Stale reverse-swap quote: nothing was created or paid. Back to the
       // filled-in form (not the failed view, which has no Move button) with
       // the server's refreshed fee; the user must review it and tap Move again.
@@ -794,21 +763,10 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
         );
         return;
       }
+      const kind = classifyTransferError(error, paymentDispatched);
+      const message = transferFailureMessage(kind, error, t);
       setProgress((p) => failTransfer(p, message));
-      // "Cannot read property 'reload' of undefined" comes from
-      // react-native's HMRClient when Metro drops the dev-client
-      // connection. It is NOT a transfer failure — nothing was signed
-      // or broadcast. Surface it as a dev-mode hiccup with a clear
-      // retry hint instead of a scary "Move Failed" alert.
-      if (/reload.*of undefined|DevSettings/i.test(message)) {
-        Alert.alert(
-          'Development Reload Needed',
-          'Metro disconnected from the app mid-move. No funds were moved. Relaunch the app (or reconnect Metro) and try again.',
-          [{ text: 'OK' }],
-        );
-      } else {
-        Alert.alert('Move Failed', message);
-      }
+      alertTransferFailure(kind, message, t);
     } finally {
       // When a Boltz swap has been handed off to a background IIFE we leave
       // the "Swap underway — safe to close" message visible so the user gets
@@ -886,10 +844,12 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
   const boltzMin = cachedBoltzFees?.minAmount;
   const belowBoltzMin =
     isBoltzTransfer && currentSats > 0 && boltzMin !== undefined && currentSats < boltzMin;
+  const overBalance = exceedsSourceBalance(source?.balance, currentSats);
   const canTransfer =
     sourceId &&
     destId &&
     currentSats > 0 &&
+    !overBalance &&
     transferType !== null &&
     (!isBoltzTransfer || cachedBoltzFees !== null) &&
     !belowBoltzMin &&
@@ -1227,6 +1187,15 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                       </Text>
                     )}
 
+                    {overBalance && source && (
+                      <Text style={styles.warningText} testID="transfer-over-balance">
+                        {t('transferSheet.amountExceedsBalance', {
+                          wallet: source.alias,
+                          balance: (source.balance ?? 0).toLocaleString(formatLocale),
+                        })}
+                      </Text>
+                    )}
+
                     {/* Cross-profile LN without lightning address — see #485.
                     NWC-based invoice creation against another profile's
                     wallet isn't wired up yet (would require running that
@@ -1255,7 +1224,7 @@ const TransferSheet: React.FC<Props> = ({ visible, onClose }) => {
                           styles.transferButton,
                           (!canTransfer || sending) && styles.buttonDisabled,
                         ]}
-                        onPress={handleTransfer}
+                        onPress={() => runTransferOnce(handleTransfer)}
                         disabled={!canTransfer || sending}
                         testID="transfer-execute"
                         accessibilityLabel="Execute move"

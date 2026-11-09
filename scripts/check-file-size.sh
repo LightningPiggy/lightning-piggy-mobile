@@ -20,7 +20,7 @@ declare -A BASELINE=(
   ["src/contexts/WalletContext.tsx"]=1557
   ["src/screens/HuntPiggyDetailScreen.tsx"]=1206
   ["src/screens/MapScreen.tsx"]=1107
-  ["src/components/TransferSheet.tsx"]=1277
+  ["src/components/TransferSheet.tsx"]=1246
   ["src/components/SendSheet.tsx"]=1008
 )
 
