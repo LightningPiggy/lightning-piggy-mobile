@@ -1993,7 +1993,15 @@
     "cameraAccessNeeded": "Для сканування QR-кодів потрібен доступ до камери",
     "grantCameraPermission": "Надати доступ до камери",
     "grantPermission": "Надати дозвіл",
+    "openCameraSettings": "Відкрийте Налаштування, щоб дозволити доступ до камери",
     "qrViewfinder": "Видошукач QR-коду"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Потрібен дозвіл",
+    "photoLibraryMessage": "Дозвольте доступ до фототеки, щоб надсилати зображення.",
+    "cameraPhotoMessage": "Дозвольте доступ до камери, щоб знімати й надсилати фото.",
+    "cancel": "Скасувати",
+    "openSettings": "Відкрити Налаштування"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "Гаразд",

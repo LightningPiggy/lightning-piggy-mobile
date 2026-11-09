@@ -1,14 +1,21 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
-import { CameraView } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSendScanPaneStyles } from '../styles/SendScanPane.styles';
+import {
+  isPermissionBlocked,
+  requestOrOpenSettings,
+  type PermissionState,
+  type RequestPermission,
+} from '../utils/permissionPrompt';
 
 interface Props {
   permissionGranted: boolean;
-  onRequestPermission: () => void;
+  /** The parent's camera-permission request, so its `permissionGranted` updates. */
+  onRequestPermission: RequestPermission;
   onBarcodeScanned: (event: { data: string }) => void;
 }
 
@@ -30,6 +37,14 @@ const SendScanPane: React.FC<Props> = ({
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createSendScanPaneStyles(colors), [colors]);
+  // Only read here to tell "never asked" from "permanently denied" (#1798) —
+  // the parent owns the request so its `permissionGranted` stays in sync.
+  const [initialPermission] = useCameraPermissions();
+  const [latestPermission, setLatestPermission] = useState<PermissionState | null>(null);
+  const blocked = isPermissionBlocked(latestPermission ?? initialPermission);
+  const handlePermissionPress = useCallback(async () => {
+    setLatestPermission(await requestOrOpenSettings(onRequestPermission, blocked));
+  }, [onRequestPermission, blocked]);
   const [zoom, setZoom] = useState(0);
   // Gesture callbacks close over the first render — track the live zoom
   // (and the value at pinch-start) in refs so each pinch accumulates
@@ -71,11 +86,15 @@ const SendScanPane: React.FC<Props> = ({
           <TouchableOpacity
             accessibilityRole="button"
             style={styles.permissionButton}
-            onPress={onRequestPermission}
-            accessibilityLabel={t('sendScanPane.grantCameraPermission')}
+            onPress={handlePermissionPress}
+            accessibilityLabel={t(
+              blocked ? 'sendScanPane.openCameraSettings' : 'sendScanPane.grantCameraPermission',
+            )}
             testID="send-scan-grant-permission"
           >
-            <Text style={styles.permissionButtonText}>{t('sendScanPane.grantPermission')}</Text>
+            <Text style={styles.permissionButtonText}>
+              {t(blocked ? 'permissionPrompt.openSettings' : 'sendScanPane.grantPermission')}
+            </Text>
           </TouchableOpacity>
         </View>
       ) : (

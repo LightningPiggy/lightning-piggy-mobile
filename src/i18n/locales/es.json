@@ -1987,7 +1987,15 @@
     "cameraAccessNeeded": "Se necesita acceso a la cámara para escanear códigos QR",
     "grantCameraPermission": "Conceder permiso de cámara",
     "grantPermission": "Conceder permiso",
+    "openCameraSettings": "Abre Ajustes para permitir el acceso a la cámara",
     "qrViewfinder": "Visor de código QR"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Permiso necesario",
+    "photoLibraryMessage": "Permite el acceso a la galería de fotos para enviar imágenes.",
+    "cameraPhotoMessage": "Permite el acceso a la cámara para hacer y enviar fotos.",
+    "cancel": "Cancelar",
+    "openSettings": "Abrir Ajustes"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "Aceptar",
