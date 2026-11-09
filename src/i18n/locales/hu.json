@@ -2276,7 +2276,7 @@
     "friendsTitle": "Barátok",
     "friendsSubtitle": "Csak azok, akiket követsz.",
     "fofTitle": "Barátok barátai",
-    "fofSubtitle": "Az általad követett emberek és azok, akiket ők a legtöbben követnek. A háló akkor épül fel, amikor ezt választod — első alkalommal ez eltart egy kis ideig.",
+    "fofSubtitle": "Az általad követett emberek és azok, akiket ők a legtöbben követnek. Az ő üzeneteikről is kaphatsz értesítést. A háló akkor épül fel, amikor ezt választod — első alkalommal ez eltart egy kis ideig.",
     "fofProgressStarting": "Megnézzük, kiket követnek a barátaid…",
     "fofProgress": "Megnézzük, kiket követnek a barátaid… {{done}} / {{total}}",
     "fofCancel": "Mégse",
@@ -2287,7 +2287,7 @@
       "other": "{{count}} barátok barátja a bizalmi hálódban"
     },
     "allTitle": "Mind",
-    "allSubtitle": "Minden, minden relay-ről. Alapértelmezett, amíg a bizalmi hálód nem készül el – a szigorításhoz válts Barátokra.",
+    "allSubtitle": "Minden, minden relay-ről. Ha ezt választod, bárki üzenetéről kaphatsz értesítést. Alapértelmezett, amíg a bizalmi hálód nem készül el – a szigorításhoz válts Barátokra.",
     "gateHint": "A Barátok barátai a barátaid által legtöbbet követett {{max}} embert tartalmazza, és naponta egyszer frissíti a listát. A Barátok a legbiztonságosabb hírfolyam; a Mind a legszélesebb.",
     "done": "Kész"
   },
@@ -3297,7 +3297,7 @@
   "messageSettingsScreen": {
     "title": "Üzenetek",
     "trustTitle": "Kiket látsz",
-    "trustHint": "Ez a Bizalmi háló szűrő azt is meghatározza, mit látsz a Térképen, az Eseményekben és a Csoportokban.",
+    "trustHint": "Ez a Bizalmi háló szűrő azt is meghatározza, mit látsz a Térképen, az Eseményekben és a Csoportokban. Ha kiválasztasz egy szűrőt, az azt is eldönti, mely üzenetekről kapsz értesítést; addig csak azoktól, akiket követsz.",
     "trustRowA11y": "Kiket látsz: {{tier}}"
   },
   "hermesProfiler": {

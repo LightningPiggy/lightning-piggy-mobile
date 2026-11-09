@@ -229,3 +229,17 @@ describe('our own Marmot group messages never alert (any device)', () => {
     unmount();
   });
 });
+
+it('writes a burst of group messages to history once, not once per message (#1786)', async () => {
+  const setItem = AsyncStorage.setItem as jest.Mock;
+  setItem.mockClear();
+  renderHook(() => useMarmotGroups('a'.repeat(64)));
+  await act(async () => {
+    for (let i = 0; i < 200; i++)
+      mockOnMessage(message((i + 1).toString(16).padStart(64, '0'), 'bob', `m${i}`));
+    await jest.advanceTimersByTimeAsync(150);
+  });
+  const historyWrites = setItem.mock.calls.filter(([k]) => k.startsWith('group_history_'));
+  expect(historyWrites).toHaveLength(1);
+  expect(await loadGroupMessages('a'.repeat(64), 'g')).toHaveLength(200);
+});

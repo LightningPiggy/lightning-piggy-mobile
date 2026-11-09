@@ -5,7 +5,7 @@ import { useAccountState } from './useAccountState';
 import { useCallback, useEffect, useMemo } from 'react';
 
 import {
-  appendGroupMessage,
+  appendGroupMessages,
   editGroupMessages,
   isEditableGroupText,
   loadGroupMessages,
@@ -87,9 +87,8 @@ export function useMarmotGroups(
     let timer: ReturnType<typeof setTimeout> | null = null;
     let unsubscribeMessages: (() => void) | null = null;
 
-    // Flushes run strictly one after another: appendGroupMessage is an
-    // AsyncStorage read-modify-write, so overlapping flushes for one group
-    // could clobber each other's rows.
+    // Flushes run strictly one after another so a batch's append, edits,
+    // deletions and notify for a group stay in order with the next batch.
     let chain: Promise<void> = Promise.resolve();
     const flush = () => {
       timer = null;
@@ -177,7 +176,8 @@ export function useMarmotGroups(
         }
       }
       for (const [groupId, messages] of byGroup) {
-        for (const m of messages) await appendGroupMessage(pubkey, groupId, m);
+        // One read-modify-write for the whole batch, not one per message (#1786).
+        if (messages.length > 0) await appendGroupMessages(pubkey, groupId, messages);
         // Edits to messages stored by earlier batches / sessions: one pass.
         const edited = await editGroupMessages(pubkey, groupId, editsIn.get(groupId) ?? []);
         // Erase what's already stored (earlier batches / sessions).

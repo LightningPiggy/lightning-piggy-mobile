@@ -121,12 +121,28 @@ export async function loadGroupMessages(
 const LOCAL_ECHO_MATCH_WINDOW_SECS = 30;
 const CAP = 500;
 
-export async function appendGroupMessage(
+export function appendGroupMessage(
   owner: string | null | undefined,
   groupId: string,
   message: GroupMessage,
 ): Promise<GroupMessage[]> {
+  return appendGroupMessages(owner, groupId, [message]);
+}
+
+/**
+ * Append a batch of messages to one group's log with a single read and a
+ * single write (#1786), through the group storage queue. Each message is
+ * merged in order with exactly the rules of `appendGroupMessage` (optimistic
+ * echo absorption, id dedup, replay repair); the result is sorted and capped
+ * once at the end. An empty batch is a no-op (no read, no write) returning `[]`.
+ */
+export async function appendGroupMessages(
+  owner: string | null | undefined,
+  groupId: string,
+  messages: readonly GroupMessage[],
+): Promise<GroupMessage[]> {
   requireOwnerKey(owner, groupId); // fail fast for a signed-out account
+  if (messages.length === 0) return [];
   await ensureGroupMessagesMigrated();
   const key = requireOwnerKey(owner, groupId);
   return mutateGroupStorage(key, async () => {
@@ -134,81 +150,85 @@ export async function appendGroupMessage(
     const existing = await readLog(key);
     const map = new Map<string, GroupMessage>();
     for (const m of existing) map.set(m.id, m);
-
-    // When a real (non-local_) event arrives, look for a pending optimistic
-    // local_* row from the same sender with identical text and a close-enough
-    // createdAt — and replace it with the real one rather than appending
-    // alongside. Pick the closest createdAt match so back-to-back identical
-    // sends are matched in order even when relay echoes arrive out-of-order.
-    // senderPubkey is lowercased on both sides because inbound rumors are
-    // lowercased upstream while optimistic locals may use the viewer pubkey
-    // as-is.
-    // Repeated delivery must not consume another pending send. Continue to
-    // ID dedup below so replays can still repair stored metadata.
-    if (!message.id.startsWith('local_') && !map.has(message.id)) {
-      const targetSender = message.senderPubkey.toLowerCase();
-      let bestKey: string | null = null;
-      let bestDelta = Infinity;
-      for (const [k, m] of map) {
-        if (!k.startsWith('local_')) continue;
-        if (m.senderPubkey.toLowerCase() !== targetSender) continue;
-        if (m.text !== message.text) continue;
-        // Identical replies can quote different parents. An echo must consume
-        // the matching send, not whichever same-text row is closest in time.
-        if (m.replyTo?.toLowerCase() !== message.replyTo?.toLowerCase()) continue;
-        const delta = Math.abs(m.createdAt - message.createdAt);
-        if (delta > LOCAL_ECHO_MATCH_WINDOW_SECS) continue;
-        if (delta < bestDelta) {
-          bestDelta = delta;
-          bestKey = k;
-        }
-      }
-      if (bestKey !== null) {
-        const optimistic = map.get(bestKey)!;
-        message = {
-          ...message,
-          localId: optimistic.localId ?? bestKey,
-          ...(optimistic.sendFailed ? { sendFailed: true } : {}),
-        };
-        map.delete(bestKey);
-      }
-    }
-
-    // Dedup on id; keep the newer copy when ids collide (createdAt wins). At the
-    // same timestamp a replay can repair an attachment placeholder or restore
-    // a missing reply reference, without rolling back an overlaid text edit.
-    const prior = map.get(message.id);
-    const repairs =
-      prior?.createdAt === message.createdAt &&
-      message.text !== '' &&
-      message.text !== prior.text &&
-      isAttachmentPlaceholderText(prior.text);
-    if (!prior || prior.createdAt < message.createdAt || repairs) {
-      map.set(message.id, {
-        ...message,
-        ...(prior?.localId ? { localId: prior.localId } : {}),
-        ...(prior?.sendFailed ? { sendFailed: true } : {}),
-      });
-    } else if (
-      prior.createdAt === message.createdAt &&
-      prior.senderPubkey.toLowerCase() === message.senderPubkey.toLowerCase()
-    ) {
-      // Authenticated replay repairs missing metadata, never overlaid text edits.
-      map.set(message.id, {
-        ...prior,
-        ...(prior.wireKind === undefined && message.wireKind !== undefined
-          ? { wireKind: message.wireKind }
-          : {}),
-        ...(!prior.replyTo && message.replyTo && /^[0-9a-f]{64}$/i.test(message.replyTo)
-          ? { replyTo: message.replyTo.toLowerCase() }
-          : {}),
-      });
-    }
+    for (const message of messages) mergeGroupMessage(map, message);
     const all = Array.from(map.values()).sort((a, b) => a.createdAt - b.createdAt);
     const capped = all.length <= CAP ? all : all.slice(all.length - CAP);
     await AsyncStorage.setItem(key, JSON.stringify(capped));
     return capped;
   });
+}
+
+/** Merge one incoming message into a group's id → message map, in place. */
+function mergeGroupMessage(map: Map<string, GroupMessage>, message: GroupMessage): void {
+  // When a real (non-local_) event arrives, look for a pending optimistic
+  // local_* row from the same sender with identical text and a close-enough
+  // createdAt — and replace it with the real one rather than appending
+  // alongside. Pick the closest createdAt match so back-to-back identical
+  // sends are matched in order even when relay echoes arrive out-of-order.
+  // senderPubkey is lowercased on both sides because inbound rumors are
+  // lowercased upstream while optimistic locals may use the viewer pubkey
+  // as-is.
+  // Repeated delivery must not consume another pending send. Continue to
+  // ID dedup below so replays can still repair stored metadata.
+  if (!message.id.startsWith('local_') && !map.has(message.id)) {
+    const targetSender = message.senderPubkey.toLowerCase();
+    let bestKey: string | null = null;
+    let bestDelta = Infinity;
+    for (const [k, m] of map) {
+      if (!k.startsWith('local_')) continue;
+      if (m.senderPubkey.toLowerCase() !== targetSender) continue;
+      if (m.text !== message.text) continue;
+      // Identical replies can quote different parents. An echo must consume
+      // the matching send, not whichever same-text row is closest in time.
+      if (m.replyTo?.toLowerCase() !== message.replyTo?.toLowerCase()) continue;
+      const delta = Math.abs(m.createdAt - message.createdAt);
+      if (delta > LOCAL_ECHO_MATCH_WINDOW_SECS) continue;
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestKey = k;
+      }
+    }
+    if (bestKey !== null) {
+      const optimistic = map.get(bestKey)!;
+      message = {
+        ...message,
+        localId: optimistic.localId ?? bestKey,
+        ...(optimistic.sendFailed ? { sendFailed: true } : {}),
+      };
+      map.delete(bestKey);
+    }
+  }
+
+  // Dedup on id; keep the newer copy when ids collide (createdAt wins). At the
+  // same timestamp a replay can repair an attachment placeholder or restore
+  // a missing reply reference, without rolling back an overlaid text edit.
+  const prior = map.get(message.id);
+  const repairs =
+    prior?.createdAt === message.createdAt &&
+    message.text !== '' &&
+    message.text !== prior.text &&
+    isAttachmentPlaceholderText(prior.text);
+  if (!prior || prior.createdAt < message.createdAt || repairs) {
+    map.set(message.id, {
+      ...message,
+      ...(prior?.localId ? { localId: prior.localId } : {}),
+      ...(prior?.sendFailed ? { sendFailed: true } : {}),
+    });
+  } else if (
+    prior.createdAt === message.createdAt &&
+    prior.senderPubkey.toLowerCase() === message.senderPubkey.toLowerCase()
+  ) {
+    // Authenticated replay repairs missing metadata, never overlaid text edits.
+    map.set(message.id, {
+      ...prior,
+      ...(prior.wireKind === undefined && message.wireKind !== undefined
+        ? { wireKind: message.wireKind }
+        : {}),
+      ...(!prior.replyTo && message.replyTo && /^[0-9a-f]{64}$/i.test(message.replyTo)
+        ? { replyTo: message.replyTo.toLowerCase() }
+        : {}),
+    });
+  }
 }
 
 export async function clearGroupMessages(
