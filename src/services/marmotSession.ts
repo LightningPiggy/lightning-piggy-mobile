@@ -44,7 +44,7 @@ import {
 import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
 import { loadOrDeriveMediaKeys, rememberMediaKeys } from './marmotMediaKeyStore';
 import { historyNamespace, replayGroupHistory } from './marmotHistoryReplay';
-import { MarmotStateSaves } from './marmotStateSaves';
+import { GROUP_STATE_NAMESPACE, MarmotStateSaves } from './marmotStateSaves';
 import {
   advertisesMediaV2,
   ensureKeyPackageSlot,
@@ -305,7 +305,7 @@ export class MarmotSession {
         const slot = await this.installationSlot();
         return this.gate.guard(getInstallationSignatureKeyPair(this.pubkey, slot, ciphersuite));
       },
-      groupStateStore: store('groups'),
+      groupStateStore: store(GROUP_STATE_NAMESPACE),
       keyPackageStore: store('keyPackages'),
       inviteStore: store('invites'),
       lifecycleStore: store('lifecycle'),

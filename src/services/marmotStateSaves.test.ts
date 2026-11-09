@@ -1,6 +1,6 @@
 // #1754: a confirmed commit whose group-state save failed is retried, and
 // marked for Repair (in storage and in the UI snapshot) if it keeps failing.
-import { MarmotStateSaves, type SavableGroup } from './marmotStateSaves';
+import { GROUP_STATE_NAMESPACE, MarmotStateSaves, type SavableGroup } from './marmotStateSaves';
 import { createMemoryMarmotBackend } from './marmotStore';
 import { clearMarmotUnsavedState, getMarmotUnsavedStateSnapshot } from './marmotUnsavedStateStore';
 
@@ -209,6 +209,68 @@ describe('MarmotStateSaves (#1754)', () => {
     expect(group.save).not.toHaveBeenCalled();
     expect(saves.isUnsaved(ID)).toBe(false);
     expect(await backend.keys('unsavedState')).toEqual([]);
+  });
+
+  it('keeps the mark for the next start when the app stops before a retry lands', async () => {
+    const backend = createMemoryMarmotBackend();
+    const saves = new MarmotStateSaves({
+      owner: OWNER,
+      backend,
+      stopped: () => false,
+      retryMs: [60_000, 60_000],
+    });
+    const group = fakeGroup(Infinity, 6n);
+    saves.watch(group);
+    saves.check(group, [FAILED]);
+    expect(uiFlag()).toBe(false); // the UI waits for the retries
+    saves.stop(); // killed / account switched mid-backoff
+    await saves.settled(ID);
+    expect(group.save).not.toHaveBeenCalled();
+
+    // Next start: storage still holds the old epoch.
+    const next = makeSaves(backend).saves;
+    await next.load([fakeGroup(0, 5n, ID)]);
+    expect(next.isUnsaved(ID)).toBe(true);
+    expect(uiFlag()).toBe(true);
+  });
+
+  it('leaves no mark once a retry lands', async () => {
+    const { saves, backend } = makeSaves();
+    const group = fakeGroup(0, 6n);
+    saves.check(group, [FAILED]);
+    expect(await backend.get('unsavedState', ID)).toBe('6'); // written up front
+    await saves.settled(ID);
+    expect(await backend.keys('unsavedState')).toEqual([]);
+  });
+
+  it('keeps the mark when it stops after a save that may predate a newer failure', async () => {
+    let stopped = false;
+    const { saves, backend } = makeSaves(undefined, () => stopped);
+    const group = fakeGroup(0, 2n);
+    group.save.mockImplementationOnce(async () => {
+      group.state.groupContext.epoch = 3n;
+      saves.check(group, [FAILED]); // epoch 3's own save failed mid-retry
+      stopped = true; // ...and the app dies before the next pass
+    });
+    saves.check(group, [FAILED]);
+    await saves.settled(ID);
+    expect(await backend.get('unsavedState', ID)).toBe('3');
+  });
+
+  it('removes the state a retry wrote back for a group left during that save', async () => {
+    const { saves, backend } = makeSaves();
+    const group = fakeGroup(0);
+    group.save.mockImplementationOnce(async () => {
+      // marmot-ts deletes the state row and emits `left` while this save
+      // awaits the history flush; then the save writes the state row.
+      await saves.forget(ID);
+      await backend.set(GROUP_STATE_NAMESPACE, ID, 'state');
+    });
+    saves.check(group, [FAILED]);
+    await saves.settled(ID);
+    expect(await backend.keys(GROUP_STATE_NAMESPACE)).toEqual([]);
+    expect(await backend.keys('unsavedState')).toEqual([]);
+    expect(group.save).toHaveBeenCalledTimes(1);
   });
 
   it('a Repair only drops the mark (the replaced 1:1 still receives)', async () => {

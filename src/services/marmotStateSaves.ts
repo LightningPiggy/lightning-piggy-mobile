@@ -10,11 +10,13 @@
 // So every publish result the session gets is checked here. A failed save is
 // retried in the background while the session is live, a few times with
 // backoff, via the group's own `save(true)` (the exact write marmot-ts made:
-// the fork-history tree, then the serialized state). If it still fails, the
-// chat is marked "not saved on this device" — recorded in our KV store and
-// published to the UI, which offers Repair. Any later successful save of the
-// group at that epoch or newer (a retry, our next commit, an inbound one)
-// clears the mark. Only persistence is handled here; no MLS logic changes.
+// the fork-history tree, then the serialized state). The durable "unsaved"
+// mark is written as soon as the failure is seen, so a kill or account switch
+// mid-retry still leaves it for the next start; the UI is only told once the
+// retries are exhausted (or on that next start, if storage never caught up),
+// and offers Repair. Any later successful save of the group at that epoch or
+// newer (a retry, our next commit, an inbound one) clears the mark. Only
+// persistence is handled here; no MLS logic changes.
 
 import type { GroupPublishResult } from '@internet-privacy/marmot-ts';
 
@@ -24,6 +26,8 @@ import { clearMarmotUnsavedState, publishMarmotUnsavedState } from './marmotUnsa
 /** Backoff between save retries (ms). Bounded: three tries, ~20 s in all. */
 export const STATE_SAVE_RETRY_MS: readonly number[] = [1_000, 4_000, 15_000];
 const NAMESPACE = 'unsavedState';
+/** The KV namespace marmot-ts keeps each group's serialized state in. */
+export const GROUP_STATE_NAMESPACE = 'groups';
 
 /** The bit of a MarmotGroup this needs. */
 export interface SavableGroup {
@@ -69,6 +73,11 @@ export class MarmotStateSaves {
     if (failed?.kind !== 'failed' || this.stopped()) return;
     if (__DEV__)
       console.warn(`[PerfBlock] marmot state save failed ${short(group.idStr)}: ${failed.error}`);
+    // Durable mark now, not after the retries: if the app dies (or the account
+    // switches) before one lands, the next start still knows this epoch never
+    // reached storage. A successful retry, or load() finding storage caught
+    // up, removes it. Best effort — the same storage just failed.
+    void this.persistMark(group);
     // One retry loop per group: every try writes the group's CURRENT state.
     // A failure landing while that loop's save is already in flight may be
     // for a newer state than the one being written — the loop goes again.
@@ -170,14 +179,25 @@ export class MarmotStateSaves {
       this.rerun.delete(group.idStr);
       try {
         await group.save(true);
+        // Left / destroyed while this save was writing: undo the write-back.
+        if (this.gone.has(group.idStr)) {
+          await this.dropState(group.idStr);
+          return false;
+        }
         if (__DEV__)
           console.log(
             `[PerfBlock] marmot state save retry ${i + 1}/${delays.length} ok ` +
               `${short(group.idStr)} ms=${Date.now() - started}`,
           );
-        await this.clear(group.idStr);
+        // A newer failure during this save means it may have written the older
+        // state: keep the durable mark until the next pass lands.
+        if (!this.rerun.has(group.idStr)) await this.clear(group.idStr);
         return true;
       } catch (e) {
+        if (this.gone.has(group.idStr)) {
+          await this.dropState(group.idStr); // a partial write may have landed
+          return false;
+        }
         if (__DEV__)
           console.warn(
             `[PerfBlock] marmot state save retry ${i + 1}/${delays.length} failed ` +
@@ -198,7 +218,19 @@ export class MarmotStateSaves {
       console.warn(`[PerfBlock] marmot state unsaved ${short(group.idStr)} epoch=${epoch}`);
     // Best effort: the same storage just failed, but the mark is what lets
     // the chat offer Repair after a restart (when the old epoch loads).
-    await this.deps.backend.set(NAMESPACE, group.idStr, epoch.toString()).catch(() => undefined);
+    await this.persistMark(group);
+  }
+
+  private persistMark(group: SavableGroup): Promise<void> {
+    const epoch = epochOf(group).toString();
+    return this.deps.backend.set(NAMESPACE, group.idStr, epoch).catch(() => undefined);
+  }
+
+  /** Remove a forgotten group's state row (and any mark) a save just wrote back. */
+  private async dropState(mlsId: string): Promise<void> {
+    if (__DEV__) console.warn(`[PerfBlock] marmot state save after leave ${short(mlsId)}: dropped`);
+    await this.deps.backend.remove(GROUP_STATE_NAMESPACE, mlsId).catch(() => undefined);
+    await this.clear(mlsId);
   }
 
   private async clear(mlsId: string): Promise<void> {
