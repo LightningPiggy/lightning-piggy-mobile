@@ -121,7 +121,7 @@ export class MarmotStateSaves {
         epoch = null;
       }
       if (group && epoch !== null && epochOf(group) < epoch) this.unsaved.set(id, epoch);
-      else await this.deps.backend.remove(NAMESPACE, id);
+      else await this.deps.backend.remove(NAMESPACE, id).catch(() => undefined);
     }
     this.publish();
   }

@@ -133,6 +133,18 @@ describe('MarmotStateSaves (#1754)', () => {
     expect(await backend.keys('unsavedState')).toEqual([ID]);
   });
 
+  it('keeps loading marks when dropping an obsolete one fails', async () => {
+    const backend = createMemoryMarmotBackend();
+    const stale = 'c'.repeat(64);
+    await backend.set('unsavedState', stale, '5'); // group no longer here
+    await backend.set('unsavedState', ID, '5');
+    const failing = { ...backend, remove: jest.fn(async () => Promise.reject(new Error('io'))) };
+    const saves = new MarmotStateSaves({ owner: OWNER, backend: failing, stopped: () => false });
+    await saves.load([fakeGroup(0, 4n, ID)]);
+    expect(saves.isUnsaved(ID)).toBe(true);
+    expect(uiFlag(ID)).toBe(true);
+  });
+
   it('stops retrying once the session stops, and clears its UI snapshot', async () => {
     let stopped = false;
     const { saves } = makeSaves(undefined, () => stopped);
