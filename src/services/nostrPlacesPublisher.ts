@@ -253,6 +253,13 @@ export const AUTHOR_LOG_LIMIT = 500;
 // runs to 2,000 pubkeys (~134 KB as one REQ), over nos.lol's advertised
 // 128 KB `max_message_length`; 500 hex pubkeys is ~34 KB.
 export const AUTHORS_PER_REQ = 500;
+// Relays accept events dated a little ahead of their clock; anything further
+// out is a bad clock or a deliberate attempt to sort first.
+const MAX_FUTURE_SKEW_SECS = 15 * 60;
+
+/** True when a `created_at` (seconds) is more than 15 minutes in the future. */
+export const isFutureDated = (createdAt: number, nowMs: number = Date.now()): boolean =>
+  createdAt > Math.floor(nowMs / 1000) + MAX_FUTURE_SKEW_SECS;
 
 // No `since` on the per-cache and per-author filters: a cache's detail screen
 // shows its whole log history and My Piglets shows a person's whole find
@@ -329,13 +336,15 @@ export const fetchFoundLogsByAuthors = (
       ...(floor !== undefined ? { since: floor } : {}),
     };
     let done = false;
-    current = pool.subscribeMap(
+    const handle = pool.subscribeMap(
       targets.map((url) => ({ url, filter })),
       {
         reqOptions: { mode: 'oneshot', label: reqLabel([filter], 'oneshot') },
         onevent: (e: NostrEvent) => {
           if (cancelled) return;
-          seenCreatedAt.push(e.created_at);
+          // A future-dated log must not push the floor forward and blank the
+          // later chunks, so it doesn't count toward it (it's still delivered).
+          if (!isFutureDated(e.created_at)) seenCreatedAt.push(e.created_at);
           onEvent(e as VerifiedEvent);
         },
         // Fires once every relay has reached EOSE, failed or timed out.
@@ -347,6 +356,10 @@ export const fetchFoundLogsByAuthors = (
         },
       },
     );
+    // The pool can close synchronously inside subscribeMap (budget disposed,
+    // or the REQ failed to start), having already started the next chunk —
+    // don't overwrite that chunk's handle with this dead one.
+    if (!done) current = handle;
   };
   runChunk(0);
   return () => {

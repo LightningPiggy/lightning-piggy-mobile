@@ -36,6 +36,7 @@ jest.mock('./geocacheRelays', () => ({
 // eslint-disable-next-line import/first
 import {
   fetchFoundLogsByAuthors,
+  isFutureDated,
   subscribeComments,
   subscribeFoundLogs,
   subscribeFoundLogsByAuthors,
@@ -267,6 +268,53 @@ describe('fetchFoundLogsByAuthors (Friends’ finds, #1789)', () => {
     calls()[0][1].onclose([]);
     expect(onEvent).not.toHaveBeenCalled();
     expect(calls()).toHaveLength(1);
+  });
+
+  it('closes the next chunk, not a dead one, when the pool closes synchronously', () => {
+    // First chunk: the pool calls onclose inside subscribeMap (budget
+    // disposed / REQ failed to start), which starts chunk 2 before the call
+    // returns. The closer must then close chunk 2's handle.
+    const deadClose = jest.fn();
+    const liveClose = jest.fn();
+    mockSubscribeMap
+      .mockImplementationOnce((_req, params: MapCall[1]) => {
+        params.onclose(['pool closed']);
+        return { close: deadClose };
+      })
+      .mockImplementationOnce(() => ({ close: liveClose }));
+    const close = fetchFoundLogsByAuthors(pubkeys(1000), jest.fn(), ['wss://a.example']);
+    expect(calls()).toHaveLength(2);
+    close();
+    expect(liveClose).toHaveBeenCalledTimes(1);
+    expect(deadClose).not.toHaveBeenCalled();
+  });
+
+  it('ignores future-dated logs (>15 min ahead) when tightening `since`', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const onEvent = jest.fn();
+    fetchFoundLogsByAuthors(pubkeys(1000), onEvent, ['wss://a.example'], 2);
+    const [, first] = calls()[0];
+    // Two far-future logs would otherwise set the floor a year ahead and
+    // blank every later chunk.
+    first.onevent({ id: 'f1', created_at: now + 365 * 24 * 3600 });
+    first.onevent({ id: 'f2', created_at: now + 3600 });
+    first.onevent({ id: 'ok', created_at: now - 100 });
+    first.onevent({ id: 'skew', created_at: now + 60 }); // within tolerance
+    first.onclose([]);
+    // Still delivered to the caller…
+    expect(onEvent).toHaveBeenCalledTimes(4);
+    // …but the floor is the 2nd newest of the plausible ones.
+    expect(calls()[1][0][0].filter.since).toBe(now - 100);
+  });
+});
+
+describe('isFutureDated', () => {
+  const nowMs = 1_700_000_000_000;
+  const now = nowMs / 1000;
+  it('allows up to 15 minutes of clock skew', () => {
+    expect(isFutureDated(now + 15 * 60, nowMs)).toBe(false);
+    expect(isFutureDated(now + 15 * 60 + 1, nowMs)).toBe(true);
+    expect(isFutureDated(now - 1, nowMs)).toBe(false);
   });
 });
 

@@ -29,6 +29,7 @@ import { useTrustedAuthors } from '../hooks/useTrustedAuthors';
 import {
   fetchCachesByAuthor,
   fetchFoundLogsByAuthors,
+  isFutureDated,
   subscribeFoundLogsByAuthors,
 } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
@@ -267,7 +268,9 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     // Keyed by event id per the social-feed convention — never replace.
     shouldReplace: () => false,
     maxSize: FRIEND_FINDS_LIMIT,
-    evictBy: (entry) => entry.createdAt,
+    // Future-dated finds (>15 min ahead) rank lowest, so they're evicted
+    // first instead of crowding out real recent ones.
+    evictBy: (entry) => (isFutureDated(entry.createdAt) ? -Infinity : entry.createdAt),
   });
   // A list section, so a one-shot fetch (on focus and on pull-to-refresh)
   // rather than a live subscription holding a relay slot per chunk (#1789).
