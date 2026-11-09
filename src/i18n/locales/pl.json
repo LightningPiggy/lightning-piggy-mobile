@@ -2259,7 +2259,7 @@
     "friendsTitle": "Znajomi",
     "friendsSubtitle": "Tylko osoby, które obserwujesz.",
     "fofTitle": "Znajomi znajomych",
-    "fofSubtitle": "Osoby, które obserwujesz, oraz osoby obserwowane przez największą liczbę tych osób. Lista powstaje po wybraniu tej opcji — za pierwszym razem zajmie to chwilę.",
+    "fofSubtitle": "Osoby, które obserwujesz, oraz osoby obserwowane przez największą liczbę tych osób. O ich wiadomościach też możesz dostawać powiadomienia. Lista powstaje po wybraniu tej opcji — za pierwszym razem zajmie to chwilę.",
     "fofProgressStarting": "Sprawdzanie, kogo obserwują twoi znajomi…",
     "fofProgress": "Sprawdzanie, kogo obserwują twoi znajomi… {{done}} z {{total}}",
     "fofCancel": "Anuluj",
@@ -2272,7 +2272,7 @@
       "other": "{{count}} znajomego znajomych w twoim grafie zaufania"
     },
     "allTitle": "Wszyscy",
-    "allSubtitle": "Wszystko ze wszystkich przekaźników. Ustawienie domyślne, dopóki twój graf zaufania nie będzie gotowy — przełącz na Znajomych, aby zaostrzyć filtr.",
+    "allSubtitle": "Wszystko ze wszystkich przekaźników. Gdy to wybierzesz, możesz też dostawać powiadomienia o wiadomościach od każdego. Ustawienie domyślne, dopóki twój graf zaufania nie będzie gotowy — przełącz na Znajomych, aby zaostrzyć filtr.",
     "gateHint": "Opcja Znajomi znajomych obejmuje {{max}} osób obserwowanych przez największą liczbę twoich znajomych i odświeża listę raz dziennie. Znajomi to najbezpieczniejszy strumień; Wszyscy to najszerszy.",
     "done": "Gotowe"
   },
@@ -3319,7 +3319,7 @@
   "messageSettingsScreen": {
     "title": "Wiadomości",
     "trustTitle": "Kogo widzisz",
-    "trustHint": "Ten filtr sieci zaufania decyduje też o tym, co widzisz na mapie, w wydarzeniach i w grupach.",
+    "trustHint": "Ten filtr sieci zaufania decyduje też o tym, co widzisz na mapie, w wydarzeniach i w grupach. Gdy wybierzesz filtr, decyduje on też o tym, o których wiadomościach dostajesz powiadomienia; do tego czasu tylko o wiadomościach od osób, które obserwujesz.",
     "trustRowA11y": "Kogo widzisz: {{tier}}"
   },
   "hermesProfiler": {

@@ -51,7 +51,11 @@ export function clearFollowGateStores(): void {
   stores.clear();
 }
 
-export function replayFollowGateStore(store: FollowGateStore): void {
+/** `onDrop` gets each entry reconciliation turns away (not followed). */
+export function replayFollowGateStore(
+  store: FollowGateStore,
+  onDrop?: (item: DeferredFollowGateEntry) => void,
+): void {
   const replay = store.deferredReplayRef.current;
   if (!store.followHydratedRef.current || !replay) return;
   const buffer = store.followGateBufferRef.current;
@@ -62,7 +66,7 @@ export function replayFollowGateStore(store: FollowGateStore): void {
     replay(item);
   });
   const dropped = buffer.size;
-  buffer.clear();
+  buffer.clear(onDrop);
   if (__DEV__) console.log(`[Nostr] follow-gate replay: ${released} released, ${dropped} dropped`);
 }
 
