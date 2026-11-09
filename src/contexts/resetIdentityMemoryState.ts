@@ -1,5 +1,6 @@
 import { setRemoteMediaOwner } from '../services/remoteMediaCache';
 import { clearFollowGateStores } from '../services/followSetEvents';
+import { clearParkedAudienceAlerts } from './liveDmAudienceNotify';
 import { clearConversationReactions } from '../utils/conversationReactionCache';
 import { clearFailedMedia } from '../utils/failedMediaMemory';
 import { useCallback, useLayoutEffect } from 'react';
@@ -27,6 +28,7 @@ export interface IdentityMemoryState {
  */
 export function dropIdentityKeyMaterial(): void {
   clearFollowGateStores();
+  clearParkedAudienceAlerts();
   clearConversationReactions();
   // Which media URLs the outgoing account's feed found dead (#1718).
   clearFailedMedia();

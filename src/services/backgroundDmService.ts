@@ -66,6 +66,12 @@ import { loadIdentities } from './identitiesStore';
 import { resolveReadRelays } from './backgroundDmReadRelays';
 import { buildNsecDecryptor, loadFollowedPubkeys, storeDecryptedWrap } from './backgroundDmIngest';
 import {
+  audienceAdmits,
+  liveNotificationAudience,
+  loadNotificationAudience,
+  type NotificationAudience,
+} from './notificationAudience';
+import {
   claimWrapNotification,
   isLiveDmSubArmed,
   noteContentlessWrapAlert,
@@ -81,7 +87,12 @@ import {
   dismissForegroundServiceNotification,
 } from './notificationService';
 import * as zapSenderProfileStorage from './zapSenderProfileStorage';
-import { partnerFromRumor, textForRumor, type DecodedRumor } from '../utils/nip17Unwrap';
+import {
+  partnerFromRumor,
+  subjectFromRumor,
+  textForRumor,
+  type DecodedRumor,
+} from '../utils/nip17Unwrap';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { isChatReactionKind } from '../utils/nip17Reactions';
 import { isNip171InboxRumor } from '../contexts/nip171InboxRouting';
@@ -242,8 +253,11 @@ async function handleWrap(input: {
   decryptWrap: ((wrap: nostrService.RawGiftWrapEvent) => DecodedRumor | null) | null;
   /** True once the subscription's initial backlog replay has settled (EOSE). */
   backlogSettled: () => boolean;
-  /** Followed pubkeys for the follow gate; null = cache absent → fail open. */
+  /** Followed pubkeys for the follow gate; null = cache absent → fail closed
+   * (replied partners and an explicit All only, #1764). */
   followedPubkeys: Set<string> | null;
+  /** Who else the Web of Trust tier lets notify (null = follows only). */
+  notificationAudience?: () => NotificationAudience | null;
 }): Promise<void> {
   const { ev, viewerPubkey, readRelays, subOpenedAtSec, decryptWrap } = input;
   // This background watch only cares about NIP-17 gift wraps (kind 1059) —
@@ -330,27 +344,38 @@ async function handleWrap(input: {
   // A NIP-171 ticket or group rumor isn't a 1:1 message (the app ingests it).
   if (isNip171InboxRumor(rumor)) return;
   // Follow gate (mirrors the live sub's): a stranger must not be able to
-  // spam OS notifications by gift-wrapping to our pubkey. Deliberately does
-  // NOT claim the wrap id — the live sub's follow-gate defer buffer may
+  // spam OS notifications by gift-wrapping to our pubkey — unless the CHOSEN
+  // Web of Trust tier admits them (friends of friends, or All). With no
+  // contacts cache (fresh install, unreadable) nobody counts as followed: it
+  // fails CLOSED to replied partners and an explicit All (#1764). Deliberately
+  // does NOT claim the wrap id — the live sub's follow-gate defer buffer may
   // legitimately replay and notify for this wrap once follows hydrate.
-  if (
-    input.followedPubkeys &&
-    !input.followedPubkeys.has(partnership.partnerPubkey.toLowerCase())
-  ) {
+  // `storable`: passes the follow gate, so Messages shows it (see below).
+  let storable = true;
+  if (!input.followedPubkeys?.has(partnership.partnerPubkey.toLowerCase())) {
     // …unless we've replied to them (#1623), like the live sub. Wait for that
     // set to load so a cold start can't mistake them for a stranger.
     await loadRepliedPartners(viewerPubkey);
     // Signed out / switched account meanwhile: not this watch's to alert.
     if (activeWatch?.viewerPubkey !== viewerPubkey) return;
-    if (!hasRepliedTo(viewerPubkey, partnership.partnerPubkey)) return;
+    storable = hasRepliedTo(viewerPubkey, partnership.partnerPubkey);
+    // The tier only widens 1:1 alerts: a room message (it carries a subject)
+    // from someone unfollowed would open the sender's 1:1 thread instead.
+    if (
+      !storable &&
+      (subjectFromRumor(rumor) ||
+        !audienceAdmits(input.notificationAudience?.(), partnership.partnerPubkey))
+    )
+      return;
   }
   // Keep what we just decrypted (#1325): tapping the alert or opening
   // Messages then shows it at once instead of waiting for an inbox refresh.
   // Fresh, gated 1:1 messages only: the on-open backlog, Marmot invites and
   // an unknown follow set are left to the refresh; and not while the app's
   // live sub is armed, which stores it already. Not awaited: the write
-  // mustn't delay the alert.
-  if (input.followedPubkeys && !isLiveDmSubArmed()) {
+  // mustn't delay the alert. Storage keeps the follow gate: a sender the tier
+  // only lets NOTIFY isn't stored (opening the alert fetches the thread).
+  if (input.followedPubkeys && storable && !isLiveDmSubArmed()) {
     void storeDecryptedWrap(viewerPubkey, ev, rumor, input.followedPubkeys).catch(() => undefined);
   }
   // Claim BEFORE the async name resolution below — the claim is the
@@ -469,6 +494,13 @@ async function armBackgroundDmWatchOnce(isCurrent: () => boolean): Promise<boole
   // path can't know the sender, so it can't be gated). Loaded once per arm;
   // the 15-min safety re-arm refreshes it as follows change.
   const followedPubkeys = decryptWrap ? await loadFollowedPubkeys(activePubkey) : null;
+  // The account's Web of Trust tier widens who may notify. Read from storage
+  // once per arm (a headless start has no React tree); the app's own live
+  // audience wins when it runs in this context, so a tier change applies at
+  // once. Built once — a Set lookup per wrap.
+  const storedAudience = decryptWrap
+    ? await loadNotificationAudience(activePubkey, followedPubkeys)
+    : null;
   // A headless start has no React tree to load who we've replied to (#1623).
   // Start it now; the follow gate waits for it before treating anyone as a
   // stranger.
@@ -513,6 +545,7 @@ async function armBackgroundDmWatchOnce(isCurrent: () => boolean): Promise<boole
         decryptWrap,
         backlogSettled: () => eosed,
         followedPubkeys,
+        notificationAudience: () => liveNotificationAudience(activePubkey) ?? storedAudience,
       }).catch((e) => {
         console.warn('[backgroundDmService] handleWrap failed:', e);
       });

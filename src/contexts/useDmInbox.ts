@@ -186,8 +186,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     [inboxSetterFor],
   );
   const setDmInboxForPubkey = useMemo(() => inboxSetterFor(pubkey), [inboxSetterFor, pubkey]);
-  // Marmot 1:1 chats land in the same store + list (protocol 'marmot').
-  useMarmotDmInbound(isLoggedIn ? pubkey : null, setDmInboxForPubkey, followPubkeys);
+  const marmotOwner = isLoggedIn ? pubkey : null; // Marmot 1:1 chats share this store + list
+  useMarmotDmInbound(marmotOwner, setDmInboxForPubkey, followPubkeys, followHydrated);
   useDmInboxDeletions(inboxSetterFor);
   const [dmInboxLoading, setDmInboxLoading] = useState(false);
   // Welcomes and DMs must arrive before first Messages focus (#1399).
