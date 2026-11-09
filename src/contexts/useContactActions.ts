@@ -74,6 +74,12 @@ export interface UseContactActionsResult {
   >;
 }
 
+/** The id and timestamp of the kind 3 that actually went out. */
+interface PublishedContactList {
+  id: string;
+  createdAt: number;
+}
+
 export function useContactActions({
   pubkey,
   isLoggedIn,
@@ -103,37 +109,39 @@ export function useContactActions({
     async (
       event: { kind: number; created_at: number; tags: string[][]; content: string },
       isCurrentSession: () => boolean,
-    ): Promise<boolean> => {
-      if (!pubkey || !isLoggedIn || !isCurrentSession()) return false;
+    ): Promise<PublishedContactList | null> => {
+      if (!pubkey || !isLoggedIn || !isCurrentSession()) return null;
       try {
         // Write relays plus the indexers other clients read follow lists from.
         const targetRelays = await ownEventPublishTargets(pubkey, relays, 3);
         // That lookup awaited: never ask a signer for an old session's follow change.
-        if (!isCurrentSession()) return false;
+        if (!isCurrentSession()) return null;
 
         if (signerType === 'nsec') {
           const nsec = await SecureStore.getItemAsync(NSEC_KEY);
-          if (!nsec || !isCurrentSession()) return false;
+          if (!nsec || !isCurrentSession()) return null;
           const { secretKey } = nostrService.decodeNsec(nsec);
           await nostrService.signAndPublishEvent(event, secretKey, targetRelays);
+          return { id: getEventHash({ ...event, pubkey }), createdAt: event.created_at };
         } else if (signerType === 'amber' || signerType === 'nip46') {
           // Null unless the signer returned this exact list, signed by this
           // account: another key's follow list must never be replaced (#1779).
           const signed = await signAccountEvent(event, { pubkey, isLoggedIn, signerType });
-          if (!signed || !isCurrentSession()) return false;
+          if (!signed || !isCurrentSession()) return null;
           await nostrService.publishSignedEvent(signed, targetRelays);
+          // The signer may restamp created_at (and so the id): adopt what it published.
+          return { id: signed.id, createdAt: signed.created_at };
         } else {
           // No usable signer (null / unsupported): nothing was published, so
           // report failure. Returning true here would let the callers commit
           // the follow/unfollow to local state + cache while the kind-3 never
           // hit a relay, silently diverging the device from the network.
           console.warn('Failed to publish contact list: no active signer');
-          return false;
+          return null;
         }
-        return true;
       } catch (error) {
         console.warn('Failed to publish contact list:', error);
-        return false;
+        return null;
       }
     },
     [pubkey, isLoggedIn, signerType, relays],
@@ -186,13 +194,14 @@ export function useContactActions({
           Toast.show({ type: 'error', text1: t('followList.unavailable') });
           return false;
         }
+        let published: PublishedContactList | null = null;
         if (update.changed) {
-          if (!(await publishContactList(update.event, isCurrentSession))) return false;
-          if (!isCurrentSession()) return false;
+          published = await publishContactList(update.event, isCurrentSession);
+          if (!published || !isCurrentSession()) return false;
           lastPublished.current.set(pubkey, {
             tags: update.event.tags,
             content: update.event.content,
-            createdAt: update.event.created_at,
+            createdAt: published.createdAt,
           });
           await clearAccountCreatedHere(pubkey);
         }
@@ -200,8 +209,8 @@ export function useContactActions({
           pubkey,
           {
             contacts: update.contacts,
-            createdAt: update.changed ? update.event.created_at : update.base.createdAt,
-            id: update.changed ? getEventHash({ ...update.event, pubkey }) : update.base.id,
+            createdAt: published ? published.createdAt : update.base.createdAt,
+            id: published ? published.id : update.base.id,
           },
           (next) => startTransition(() => setContacts(next)),
           isCurrentSession,

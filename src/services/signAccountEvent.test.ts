@@ -7,6 +7,7 @@ import { requestEventSignature } from './amberService';
 import { nip46Sign } from '../contexts/nip46DmDecrypt';
 import { Toast } from '../components/BrandedToast';
 import { __resetMismatchNoticeForTests } from './remoteSignerMismatchNotice';
+import { setCurrentUserPubkey } from './nostrActiveAccount';
 jest.mock('../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 jest.mock('./nostrService', () => ({
   decodeNsec: () => ({ secretKey: new Uint8Array(32).fill(8) }),
@@ -48,9 +49,11 @@ describe('remote signers (#1779)', () => {
     jest.mocked(nip46Sign).mockReset();
     jest.mocked(Toast.show).mockClear();
     __resetMismatchNoticeForTests();
+    setCurrentUserPubkey(account.pubkey);
     jest.spyOn(console, 'warn').mockImplementation(() => {});
   });
   afterEach(() => jest.restoreAllMocks());
+  afterAll(() => setCurrentUserPubkey(null));
 
   it.each(['amber', 'nip46'] as const)(
     'returns null when %s answers with another account’s signature',

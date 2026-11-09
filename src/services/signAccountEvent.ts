@@ -45,7 +45,7 @@ export async function signAccountEvent(
     if (__DEV__ && event.kind !== 22242) console.warn('[Nostr] signEvent failed:', error);
     // Callers only see null, so say why when the signer answered for the wrong
     // account (rate-limited: a burst of refusals shows one message).
-    noticeRemoteSignerMismatch(error);
+    noticeRemoteSignerMismatch(error, pubkey);
     return null;
   }
 }

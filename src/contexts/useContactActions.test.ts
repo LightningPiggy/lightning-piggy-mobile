@@ -10,6 +10,7 @@ import { clearFollowGateStores } from '../services/followSetEvents';
 import { relayAllowsKind } from '../services/relayKindPolicy';
 import * as amberService from '../services/amberService';
 import { finalizeEvent, generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+import * as contactFollowFreshness from '../services/contactFollowFreshness';
 import {
   __resetForTests,
   isAccountCreatedHere,
@@ -32,12 +33,15 @@ jest.mock('../components/BrandedToast', () => ({ Toast: { show: jest.fn() } }));
 jest.mock('../services/relayKindPolicy', () => ({ relayAllowsKind: jest.fn(async () => true) }));
 
 const mockFetch = jest.fn<Promise<ContactListFetchResult>, [string, string[]]>();
+const mockPrepareArgs = jest.fn();
 jest.mock('../services/contactListSync', () => {
   const actual = jest.requireActual('../services/contactListSync');
   return {
     ...actual,
-    prepareContactListUpdate: (args: object) =>
-      actual.prepareContactListUpdate({ ...args, fetchLatest: mockFetch }),
+    prepareContactListUpdate: (args: object) => {
+      mockPrepareArgs(args);
+      return actual.prepareContactListUpdate({ ...args, fetchLatest: mockFetch });
+    },
   };
 });
 
@@ -339,15 +343,16 @@ describe('remote-signed follow list (#1779)', () => {
   const accountKey = generateSecretKey();
   const account = getPublicKey(accountKey);
 
-  async function followWithAmberSigningAs(signingKey: Uint8Array) {
+  async function followWithAmberSigningAs(signingKey: Uint8Array, restampBy = 0) {
     mockFetch.mockResolvedValue({
       status: 'found',
       base: { tags: [['p', BIG]], content: '', createdAt: 10 },
     });
-    jest.spyOn(amberService, 'requestEventSignature').mockImplementation(async (eventJson) => ({
-      event: JSON.stringify(finalizeEvent(JSON.parse(eventJson), signingKey)),
-      signature: '',
-    }));
+    jest.spyOn(amberService, 'requestEventSignature').mockImplementation(async (eventJson) => {
+      const template = JSON.parse(eventJson);
+      const stamped = { ...template, created_at: template.created_at + restampBy };
+      return { event: JSON.stringify(finalizeEvent(stamped, signingKey)), signature: '' };
+    });
     const setContacts = jest.fn();
     const { result } = renderHook(() =>
       useContactActions({
@@ -365,7 +370,7 @@ describe('remote-signed follow list (#1779)', () => {
     await act(async () => {
       ok = await result.current.followContact(NEW);
     });
-    return { ok, setContacts };
+    return { ok, setContacts, result };
   }
 
   it('never publishes or adopts a follow list Amber signed with another account', async () => {
@@ -382,5 +387,26 @@ describe('remote-signed follow list (#1779)', () => {
     const published = jest.mocked(nostrService.publishSignedEvent).mock.calls[0][0];
     expect(published.pubkey).toBe(account);
     expect(published.tags.some((tag) => tag[0] === 'p' && tag[1] === NEW)).toBe(true);
+  });
+
+  it('adopts the id and created_at the signer actually published when it restamps', async () => {
+    const adopt = jest.spyOn(contactFollowFreshness, 'adoptFollowSnapshot');
+    const { ok, result } = await followWithAmberSigningAs(accountKey, 7);
+    expect(ok).toBe(true);
+    const published = jest.mocked(nostrService.publishSignedEvent).mock.calls[0][0];
+    const template = JSON.parse(jest.mocked(amberService.requestEventSignature).mock.calls[0][0]);
+    expect(published.created_at).toBe(template.created_at + 7);
+    expect(adopt.mock.calls[0][1]).toMatchObject({
+      createdAt: published.created_at,
+      id: published.id,
+    });
+    // The next write builds on the published timestamp, not the template's.
+    await act(async () => {
+      await result.current.followContact(LITTLE);
+    });
+    const next = mockPrepareArgs.mock.calls.at(-1)?.[0] as {
+      lastPublished?: { createdAt: number };
+    };
+    expect(next.lastPublished?.createdAt).toBe(published.created_at);
   });
 });

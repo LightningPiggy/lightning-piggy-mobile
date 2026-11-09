@@ -133,7 +133,7 @@ export async function sendNip17ToManyWithSigner(input: {
   /** Also wrap to the sender (default); see sendNip17ToManyWithNsec. */
   includeSelf?: boolean;
   peerRouting?: PeerRouting;
-}): Promise<DmSendResult> {
+}): Promise<DmSendResult & { signerError?: unknown }> {
   const relays = [...lockRelays(input.relays, input.senderPubkey)];
   trackRelays(relays);
 
@@ -164,6 +164,7 @@ export async function sendNip17ToManyWithSigner(input: {
 
   const errors: string[] = [];
   const signedWraps: VerifiedEvent[] = [];
+  let signerError: unknown;
 
   // SEQUENTIAL — Amber's BUSY guard rejects parallel intents, and
   // alternating "seal sign" / "nip44 encrypt" prompts share that guard.
@@ -205,6 +206,9 @@ export async function sendNip17ToManyWithSigner(input: {
       );
       signedWraps.push(wrap);
     } catch (e) {
+      // Kept as the object too, so a caller can tell a refused answer (#1779)
+      // from a relay failure.
+      signerError = e;
       errors.push((e as Error)?.message ?? 'signer step failed');
       // First failure is almost certainly user-cancellation in Amber or
       // a permission denial; bail rather than firing N more dialogs.
@@ -225,5 +229,6 @@ export async function sendNip17ToManyWithSigner(input: {
   return {
     ...publishResult,
     errors: [...errors, ...publishResult.errors],
+    ...(signerError !== undefined && { signerError }),
   };
 }

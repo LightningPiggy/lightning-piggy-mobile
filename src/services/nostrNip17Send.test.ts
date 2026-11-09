@@ -4,6 +4,7 @@ import { TEST_ACCOUNT_PUBKEYS, TEST_RELAY_URL } from '../config/testRelayLockdow
 import { setCurrentUserPubkey } from './nostrActiveAccount';
 import { pool } from './nostrPool';
 import { sendNip17ToManyWithNsec, sendNip17ToManyWithSigner } from './nostrNip17Send';
+import { RemoteSignerMismatchError } from './remoteSignedEvent';
 
 jest.mock('./nostrPool', () => ({
   pool: { publish: jest.fn((relays: string[]) => relays.map(() => Promise.resolve('saved'))) },
@@ -131,4 +132,6 @@ it.each([
   expect(result.wrapsPublished).toBe(0);
   expect(pool.publish).not.toHaveBeenCalled();
   expect(result.errors[0]).toMatch(reason);
+  // The typed refusal travels too, so market flows can show the signer reason.
+  expect(result.signerError).toBeInstanceOf(RemoteSignerMismatchError);
 });
