@@ -54,11 +54,33 @@ it('ignores a slow earlier failure once a newer request has succeeded', async ()
   const get = jest.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce('bc1qnew');
   const { result } = setup(get);
   act(() => result.current.request('w1'));
-  await act(async () => result.current.retry());
+  await act(async () => result.current.request('w1'));
   expect(result.current.address).toBe('bc1qnew');
   await act(async () => first.reject(new Error('timeout')));
   expect(result.current.failed).toBe(false);
   expect(result.current.address).toBe('bc1qnew');
+});
+
+it('ignores a second Retry tap while a lookup is in flight (no skipped address index)', async () => {
+  const pending = deferred<string>();
+  const get = jest
+    .fn()
+    .mockRejectedValueOnce(new Error('x'))
+    .mockReturnValueOnce(pending.promise)
+    .mockResolvedValueOnce('bc1qthird');
+  const { result } = setup(get);
+  await act(async () => result.current.request('w1'));
+  act(() => {
+    result.current.retry();
+    result.current.retry();
+  });
+  expect(get).toHaveBeenCalledTimes(2);
+  await act(async () => pending.reject(new Error('still down')));
+  expect(result.current.failed).toBe(true);
+  // Once it settles, Retry works again.
+  await act(async () => result.current.retry());
+  expect(get).toHaveBeenCalledTimes(3);
+  expect(result.current.address).toBe('bc1qthird');
 });
 
 it('drops results from a previous sheet session', async () => {

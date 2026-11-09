@@ -18,10 +18,14 @@ export function useOnchainReceiveAddress(
   const [failed, setFailed] = useState(false);
   const requestIdRef = useRef(0);
   const walletIdRef = useRef<string | null>(null);
+  // Each lookup asks the wallet for a NEW address, so a double tap on Retry
+  // must not fire a second one (it would skip an address index).
+  const inFlightRef = useRef(false);
 
   const reset = useCallback(() => {
     requestIdRef.current += 1;
     walletIdRef.current = null;
+    inFlightRef.current = false;
     setAddress(null);
     setFailed(false);
   }, []);
@@ -31,6 +35,7 @@ export function useOnchainReceiveAddress(
       const token = sessionTokenRef.current;
       const requestId = ++requestIdRef.current;
       walletIdRef.current = walletId;
+      inFlightRef.current = true;
       setFailed(false);
       const isCurrent = () =>
         sessionTokenRef.current === token && requestIdRef.current === requestId;
@@ -41,13 +46,16 @@ export function useOnchainReceiveAddress(
         .catch(() => {
           console.warn('Failed to fetch on-chain address');
           if (isCurrent()) setFailed(true);
+        })
+        .finally(() => {
+          if (requestIdRef.current === requestId) inFlightRef.current = false;
         });
     },
     [getReceiveAddress, sessionTokenRef],
   );
 
   const retry = useCallback(() => {
-    if (walletIdRef.current) request(walletIdRef.current);
+    if (walletIdRef.current && !inFlightRef.current) request(walletIdRef.current);
   }, [request]);
 
   return { address, failed, request, reset, retry };
