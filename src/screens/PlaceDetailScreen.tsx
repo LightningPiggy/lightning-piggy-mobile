@@ -25,7 +25,7 @@ import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { useNostr } from '../contexts/NostrContext';
 import { createPlaceDetailScreenStyles } from '../styles/PlaceDetailScreen.styles';
-import { placeContactLinks } from '../utils/placeContactLinks';
+import { normaliseSocialUrl, placeContactLinks } from '../utils/placeContactLinks';
 import { ExploreNavigation, ExploreStackParamList } from '../navigation/types';
 import {
   type BtcMapPlace,
@@ -67,29 +67,6 @@ const formatYMD = (iso: string): string => {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toISOString().slice(0, 10);
-};
-
-// BTC Map / OSM stores some contact:* tags as bare handles
-// ("tasteofcambridgefalafels") instead of full URLs. Map each network to its
-// canonical web host so the row always renders a recognisable URL.
-const SOCIAL_HOSTS: Record<SocialNetwork, string> = {
-  facebook: 'facebook.com',
-  x: 'x.com',
-  instagram: 'instagram.com',
-  telegram: 't.me',
-  whatsapp: 'wa.me',
-};
-
-const normaliseSocialUrl = (
-  network: SocialNetwork,
-  value: string,
-): { display: string; href: string } => {
-  const trimmed = value.trim().replace(/^@/, '');
-  const isUrl = /^https?:\/\//i.test(trimmed);
-  const host = SOCIAL_HOSTS[network];
-  const display = isUrl ? trimmed.replace(/^https?:\/\/(www\.)?/i, '') : `${host}/${trimmed}`;
-  const href = isUrl ? trimmed : `https://${host}/${trimmed}`;
-  return { display, href };
 };
 
 const SocialRow: React.FC<{
