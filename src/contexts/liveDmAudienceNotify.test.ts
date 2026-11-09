@@ -2,7 +2,7 @@
 // still alert per the chosen tier. If a remote-signer background watch already
 // posted a contentless placeholder for it (and so holds the claim), the real
 // alert must REPLACE it, as on the live drop path (#1764).
-import { notifyDroppedDeferred } from './liveDmAudienceNotify';
+import { clearParkedAudienceAlerts, notifyDroppedDeferred } from './liveDmAudienceNotify';
 import {
   claimWrapNotification,
   noteContentlessWrapAlert,
@@ -42,6 +42,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   __resetDedupe();
   __resetNotificationAudiences();
+  clearParkedAudienceAlerts();
   mockFire.mockResolvedValue('real-alert');
 });
 
@@ -81,4 +82,43 @@ it('never alerts twice without a placeholder, and stays silent outside the tier'
   await flush();
   expect(mockFire).not.toHaveBeenCalled();
   expect(mockDismiss).not.toHaveBeenCalled();
+});
+
+describe('held alerts wait for an audience that cannot answer yet', () => {
+  it('alerts once the friends-of-friends set loads', async () => {
+    // Follows reconciled before the set was read from cache.
+    publishNotificationAudience(VIEWER, { tier: 'fof', fof: null });
+    notifyDroppedDeferred(VIEWER, item('p1'));
+    await flush();
+    expect(mockFire).not.toHaveBeenCalled();
+    publishNotificationAudience(VIEWER, { tier: 'fof', fof: new Set([STRANGER]) });
+    await flush();
+    expect(mockFire).toHaveBeenCalledTimes(1);
+    // Released once: a later publish doesn't alert again.
+    publishNotificationAudience(VIEWER, { tier: 'fof', fof: new Set([STRANGER]) });
+    await flush();
+    expect(mockFire).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays silent when the tier turns out not to admit the sender, or on sign-out', async () => {
+    notifyDroppedDeferred(VIEWER, item('p2')); // nothing published yet
+    publishNotificationAudience(VIEWER, { tier: 'friends', fof: null });
+    notifyDroppedDeferred(VIEWER, item('p3'));
+    __resetNotificationAudiences();
+    notifyDroppedDeferred(VIEWER, item('p4'));
+    clearParkedAudienceAlerts();
+    publishNotificationAudience(VIEWER, { tier: 'all', fof: null });
+    await flush();
+    expect(mockFire).not.toHaveBeenCalled();
+  });
+
+  it('drops an alert parked for longer than a minute', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    notifyDroppedDeferred(VIEWER, item('p5'));
+    now.mockReturnValue(1_000_000 + 61_000);
+    publishNotificationAudience(VIEWER, { tier: 'all', fof: null });
+    await flush();
+    now.mockRestore();
+    expect(mockFire).not.toHaveBeenCalled();
+  });
 });

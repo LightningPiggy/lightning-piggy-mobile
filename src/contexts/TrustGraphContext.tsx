@@ -24,6 +24,7 @@ import {
   type WotSettings,
   type WotTier,
   notificationTierFor,
+  wotSettingsAfter,
 } from '../services/wotSettingsService';
 import {
   publishNotificationAudience,
@@ -188,10 +189,12 @@ export const TrustGraphProvider: React.FC<ProviderProps> = ({ children }) => {
   const wotTier: WotTier = knownSettings?.wotTier ?? HYDRATING_TIER;
   const notifyTier: WotTier = knownSettings ? notificationTierFor(knownSettings) : HYDRATING_TIER;
 
+  const knownSettingsRef = useRef(knownSettings);
+  knownSettingsRef.current = knownSettings;
   const persistTier = useCallback(
     (next: WotTier, explicit = true) => {
       changeVersion.current += 1;
-      const settings: WotSettings = explicit ? { wotTier: next, explicit } : { wotTier: next };
+      const settings = wotSettingsAfter(knownSettingsRef.current, next, explicit);
       setLoadedSettings(settings);
       saveWotSettings(settings, pubkey).catch(() => {});
     },

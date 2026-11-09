@@ -366,6 +366,74 @@ describe('our own Marmot messages never alert (any device)', () => {
     expect(fireMessageNotification).toHaveBeenCalledTimes(1);
   });
 
+  describe('follow list still loading at cold start', () => {
+    beforeEach(() => {
+      __resetRepliedPartnersForTests();
+      __resetNotificationAudiences();
+      mockReplied = [];
+    });
+    // The alert first waits for who we've replied to (an async load).
+    const settle = async (ms: number) => {
+      await jest.advanceTimersByTimeAsync(ms);
+      await jest.advanceTimersByTimeAsync(0);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+
+    it("holds a friend's alert until the follows are known, instead of dropping it", async () => {
+      const setter = jest.fn(); // stable: a new one would re-arm the hook
+      const { rerender } = renderHook(
+        ({ follows, hydrated }: { follows: Set<string>; hydrated: boolean }) =>
+          useMarmotDmInbound('alice', setter, follows, hydrated),
+        { initialProps: { follows: new Set<string>(), hydrated: false } },
+      );
+      await act(async () => {
+        mockOnMessage(chat('bob', 'd'.repeat(64)));
+        await settle(150);
+      });
+      expect(fireMessageNotification).not.toHaveBeenCalled();
+      await act(async () => {
+        rerender({ follows: new Set(['bob']), hydrated: true });
+        await settle(0);
+      });
+      expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it('a stranger still stays silent once the wait runs out', async () => {
+      renderHook(() => useMarmotDmInbound('alice', jest.fn(), new Set(), false));
+      await act(async () => {
+        mockOnMessage(chat('bob', '2'.repeat(64)));
+        await settle(150);
+        await settle(10_000);
+      });
+      expect(fireMessageNotification).not.toHaveBeenCalled();
+    });
+
+    it('decides with what it has after 10 s, and drops held alerts on unmount', async () => {
+      const { unmount } = renderHook(() =>
+        useMarmotDmInbound('alice', jest.fn(), new Set(['bob']), false),
+      );
+      await act(async () => {
+        mockOnMessage(chat('bob', 'e'.repeat(64)));
+        await settle(150);
+      });
+      expect(fireMessageNotification).not.toHaveBeenCalled();
+      await act(async () => {
+        await settle(10_000);
+      });
+      expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        mockOnMessage(chat('bob', '1'.repeat(64)));
+        await settle(150);
+      });
+      // Its own act: the cleanup must have run before the wait elapses.
+      await act(async () => unmount());
+      await act(async () => {
+        await settle(10_000);
+      });
+      expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('no follows known yet, unchosen tier (#1764)', () => {
     beforeEach(() => {
       __resetRepliedPartnersForTests();

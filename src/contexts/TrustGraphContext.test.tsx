@@ -16,6 +16,7 @@ jest.mock('./NostrContext', () => ({
 }));
 jest.mock('../services/wotSettingsService', () => ({
   notificationTierFor: jest.requireActual('../services/wotSettingsService').notificationTierFor,
+  wotSettingsAfter: jest.requireActual('../services/wotSettingsService').wotSettingsAfter,
   peekWotSettings: (pk: string | null) => (pk ? (mockKnown.get(pk) ?? null) : null),
   // Each load stays pending until the test resolves it (slow AsyncStorage).
   loadWotSettings: (pk: string) =>

@@ -348,7 +348,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // a non-secret-mode user who flips this to false still sees the
       // 'friends' behaviour at the visibility layer.
       // Not an explicit tier pick (#1764): the chip widens the list, but
-      // says nothing about alerts, so notifications stay Friends.
+      // says nothing about alerts, so notifications keep following the last
+      // tier picked in the Web of Trust sheet (Friends if none).
       setWotTier(next ? 'friends' : 'all', { explicit: false });
     },
     [setWotTier],

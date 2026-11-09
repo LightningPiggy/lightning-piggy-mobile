@@ -1,4 +1,9 @@
-import { audienceAdmits, liveNotificationAudience } from '../services/notificationAudience';
+import {
+  audienceAdmits,
+  audiencePending,
+  liveNotificationAudience,
+  onNotificationAudience,
+} from '../services/notificationAudience';
 import { fireMessageNotification, isThreadActivelyViewed } from '../services/notificationService';
 import {
   claimWrapNotification,
@@ -77,6 +82,45 @@ export function fireAudienceNotification(viewer: string, entry: AlertEntry, body
  */
 export function notifyDroppedDeferred(viewer: string, item: DeferredFollowGateEntry): void {
   if (!item.notify || item.groupRumor) return;
+  // Follows usually load before the tier's friends-of-friends set does (it is
+  // read from cache once follows are known), so at cold start the audience
+  // can't answer yet: park the alert briefly rather than lose it.
+  if (audiencePending(liveNotificationAudience(viewer))) {
+    park(viewer, item);
+    return;
+  }
   if (!mayAudienceNotify(viewer, item.entry, true)) return;
   fireAudienceNotification(viewer, item.entry, item.notify.body);
+}
+
+// Alerts waiting for the audience, per viewer. Small and short-lived: the
+// redacted preview is held in memory only, and dropped on sign-out / switch.
+const PARK_MS = 60_000;
+const MAX_PARKED = 20;
+const parked = new Map<string, { item: DeferredFollowGateEntry; at: number }[]>();
+
+function park(viewer: string, item: DeferredFollowGateEntry): void {
+  const key = viewer.toLowerCase();
+  const list = parked.get(key) ?? [];
+  if (list.length >= MAX_PARKED) list.shift();
+  list.push({ item, at: Date.now() });
+  parked.set(key, list);
+}
+
+onNotificationAudience((owner, audience) => {
+  if (audiencePending(audience)) return;
+  const list = parked.get(owner);
+  if (!list) return;
+  parked.delete(owner);
+  const cutoff = Date.now() - PARK_MS;
+  for (const { item, at } of list) {
+    if (at < cutoff || !item.notify) continue;
+    if (mayAudienceNotify(owner, item.entry, true))
+      fireAudienceNotification(owner, item.entry, item.notify.body);
+  }
+});
+
+/** Sign-out / account switch: nothing parked may outlive its account. */
+export function clearParkedAudienceAlerts(): void {
+  parked.clear();
 }

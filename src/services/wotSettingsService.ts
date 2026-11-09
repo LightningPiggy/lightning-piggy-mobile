@@ -36,7 +36,13 @@ export interface WotSettings {
   /** The user picked this tier (Web of Trust sheet / Settings). Absent for the
    * #627 default and for tiers the legacy migration derived. */
   explicit?: boolean;
+  /** The tier the user last picked, kept when something that isn't a pick
+   * (the Groups "Following" chip) then moves `wotTier`. Only set while
+   * `explicit` is absent. */
+  chosenTier?: WotTier;
 }
+
+const TIER_WIDTH: Record<WotTier, number> = { friends: 0, fof: 1, all: 2 };
 
 /**
  * The tier message NOTIFICATIONS follow. An unchosen tier notifies like
@@ -44,8 +50,29 @@ export interface WotSettings {
  * empty (#627), and must not let strangers notify. Only an explicit pick
  * widens notifications. The Messages list keeps using `wotTier` as stored.
  */
-export const notificationTierFor = (settings: WotSettings): WotTier =>
-  settings.explicit ? settings.wotTier : 'friends';
+export const notificationTierFor = (settings: WotSettings): WotTier => {
+  if (settings.explicit) return settings.wotTier;
+  // The chip moved the tier after a pick: notify by that pick, but never
+  // wider than what the list currently shows.
+  const chosen = settings.chosenTier;
+  if (!chosen) return 'friends';
+  return TIER_WIDTH[chosen] <= TIER_WIDTH[settings.wotTier] ? chosen : settings.wotTier;
+};
+
+/**
+ * The settings after moving to `next`. An explicit pick records itself; any
+ * other change (the "Following" chip, the legacy migration) keeps the last
+ * pick as `chosenTier`, so toggling the chip can't erase or widen it.
+ */
+export const wotSettingsAfter = (
+  prev: WotSettings | null,
+  next: WotTier,
+  explicit: boolean,
+): WotSettings => {
+  if (explicit) return { wotTier: next, explicit: true };
+  const chosen = prev?.explicit ? prev.wotTier : prev?.chosenTier;
+  return chosen ? { wotTier: next, chosenTier: chosen } : { wotTier: next };
+};
 
 const DEFAULTS: WotSettings = { wotTier: 'all' };
 
@@ -63,8 +90,9 @@ const parseWotSettings = (raw: string | null): WotSettings => {
     const parsed = JSON.parse(raw);
     // New shape — wotTier present and valid.
     if (parsed && typeof parsed === 'object' && isWotTier(parsed.wotTier)) {
-      return parsed.explicit === true
-        ? { wotTier: parsed.wotTier, explicit: true }
+      if (parsed.explicit === true) return { wotTier: parsed.wotTier, explicit: true };
+      return isWotTier(parsed.chosenTier)
+        ? { wotTier: parsed.wotTier, chosenTier: parsed.chosenTier }
         : { wotTier: parsed.wotTier };
     }
     // Legacy migration: pre-#535 stored `{ filterEnabled: boolean }`. Map

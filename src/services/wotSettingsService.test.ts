@@ -9,6 +9,7 @@
 import {
   loadWotSettings,
   notificationTierFor,
+  wotSettingsAfter,
   peekWotSettings,
   readStoredNotificationTier,
   saveWotSettings,
@@ -173,5 +174,35 @@ describe('notification tier (#1764): an unchosen tier notifies like Friends', ()
     expect(await readStoredNotificationTier(PK)).toBe('friends');
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ wotTier: 'all', explicit: true }));
     expect(await readStoredNotificationTier(PK)).toBe('all');
+  });
+});
+
+describe('the Following chip keeps the last picked tier (#1764)', () => {
+  it('an explicit All survives the chip being toggled off and on', () => {
+    const picked = wotSettingsAfter(null, 'all', true);
+    const narrowed = wotSettingsAfter(picked, 'friends', false);
+    // Never wider than what the list shows.
+    expect(notificationTierFor(narrowed)).toBe('friends');
+    const widened = wotSettingsAfter(narrowed, 'all', false);
+    expect(widened).toEqual({ wotTier: 'all', chosenTier: 'all' });
+    expect(notificationTierFor(widened)).toBe('all');
+  });
+
+  it('the chip never widens notifications past the pick, or with no pick', () => {
+    const friends = wotSettingsAfter(null, 'friends', true);
+    expect(notificationTierFor(wotSettingsAfter(friends, 'all', false))).toBe('friends');
+    expect(notificationTierFor(wotSettingsAfter({ wotTier: 'all' }, 'all', false))).toBe('friends');
+    expect(notificationTierFor(wotSettingsAfter(null, 'all', false))).toBe('friends');
+  });
+
+  it('round-trips through storage, and a new pick replaces it', async () => {
+    await saveWotSettings({ wotTier: 'all', chosenTier: 'fof' }, PK);
+    const loaded = await loadWotSettings(PK);
+    expect(loaded).toEqual({ wotTier: 'all', chosenTier: 'fof' });
+    expect(notificationTierFor(loaded)).toBe('fof');
+    expect(wotSettingsAfter(loaded, 'friends', true)).toEqual({
+      wotTier: 'friends',
+      explicit: true,
+    });
   });
 });

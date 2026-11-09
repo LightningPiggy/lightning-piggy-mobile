@@ -51,6 +51,22 @@ const live = new Map<string, NotificationAudience>();
 /** TrustGraphProvider: the account's current tier and friends-of-friends set. */
 export function publishNotificationAudience(owner: string, audience: NotificationAudience): void {
   live.set(owner.toLowerCase(), audience);
+  for (const listener of listeners) listener(owner.toLowerCase(), audience);
+}
+
+/** True while the audience can't answer yet: not published, or a
+ * friends-of-friends set that hasn't loaded. */
+export function audiencePending(audience: NotificationAudience | null | undefined): boolean {
+  return !audience || (audience.tier === 'fof' && !audience.fof);
+}
+
+type AudienceListener = (owner: string, audience: NotificationAudience) => void;
+const listeners = new Set<AudienceListener>();
+
+/** Called on every publish (the tier or its friends-of-friends set changed). */
+export function onNotificationAudience(listener: AudienceListener): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 /** Tier unknown again (account switched away / signed out): admit nobody extra. */
