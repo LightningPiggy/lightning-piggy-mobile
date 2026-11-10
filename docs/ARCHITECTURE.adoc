@@ -343,12 +343,12 @@ activity; `plugins/withWidgetPickerStrings.js` translates the picker's name
 and description from `widget.picker` in the locale catalogues.
 
 *Data — a snapshot, never secrets.* The app writes `widget_snapshot_v1` to
-AsyncStorage (`src/services/widgetSnapshot.ts`, written by
-`useWidgetSnapshotSync`, debounced ~1.5 s after balances, connection, price,
-currency or language change — never per relay event). Per wallet it holds
-only: id, display name, wallet type, balance in sats, fiat value + currency,
-when the app last confirmed the balance, carousel order and a connection-OK
-flag — plus the app language, so the headless task speaks it. It never holds
+AsyncStorage (`src/services/widgetSnapshot.ts`; the writer logic is
+`widgetSnapshotWriter.ts`, fed by `useWidgetSnapshotSync`), debounced ~1.5 s
+after balances, connection, price, currency or language change — never per
+relay event. Per wallet it holds only: id, display name, wallet type, balance
+in sats, fiat value + currency, when the balance was fetched, carousel order
+and a connection-OK flag — plus the app language, so the headless task speaks it. It never holds
 a connection string, recovery phrase, xpub, Lightning address, Nostr key or
 any other wallet field: the shaping copies allow-listed fields one by one, and
 a property test pins the key set. A balance hidden in the app is stored as
@@ -367,13 +367,23 @@ wallets the widget shows "Add a wallet in Lightning Piggy" and opens the app.
 (`src/navigation/widgetDeepLinks.ts`). `App.tsx` routes them to Home through
 `navigateToWidgetAction`; Home's `useWidgetLaunch` waits for the wallets on a
 cold start, selects the widget's wallet, then opens the Receive or Send sheet
-(Send on its Scan tab for `scan`). An unknown wallet id falls back to the
+(Send on its Scan tab for `scan`). Each open bumps the sheet's open key, so a
+tap while Receive or Send is already up re-captures the widget's wallet
+instead of keeping the old one. An unknown wallet id falls back to the
 current wallet. A widget never pays by itself: Send still needs the user to
 confirm it in the app. Maestro flow:
 `.maestro/wallets/flow-162-widget-deep-links.yaml`.
 
-*Freshness.* Android redraws a widget at most every 30 minutes; the widget
-says how old its balance is ("≈ $68.81 · 2 min ago").
+*Freshness.* The widget shows when the balance was actually fetched, as an
+absolute time ("≈ $68.81 · 14:32", "yesterday 14:32", else the date). That
+time comes from `src/services/balanceFetchTimes.ts`, which the NWC and
+on-chain balance readers stamp after each successful read — never the write
+time, so a price or language change can't make an old balance look fresh, and
+a cached balance nothing has re-read shows no time. A re-fetch with the same
+amount rewrites at most every 5 minutes. There is no `updatePeriodMillis`:
+the app redraws the widget on every snapshot write, and Android never starts
+the app in the background just to refresh it. If drawing ever fails, the
+widget shows "Open Lightning Piggy" rather than a blank tile.
 
 [[persistence]]
 == Persistence & caching

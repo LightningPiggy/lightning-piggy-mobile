@@ -24,7 +24,8 @@ export interface WidgetWallet {
   balanceSats: number | null;
   fiatValue: number | null;
   currency: string;
-  /** Epoch ms the app last saw this balance on a connected wallet. */
+  /** Epoch ms this balance was last actually fetched from the wallet; null
+   *  when it isn't known (e.g. a cached balance nothing has re-read yet). */
   updatedAt: number | null;
   /** Position in the app's wallet carousel (0 = first). */
   order: number;
@@ -54,9 +55,13 @@ export const WIDGET_WALLET_KEYS = [
 export interface ShapeOptions {
   btcPrice: number | null;
   currency: string;
-  now: number;
-  /** The previous snapshot, to carry a stale wallet's last-confirmed time over. */
+  /** The previous snapshot: a balance nothing has re-read this session keeps
+   *  its fetch time from there, as long as the amount is unchanged. */
   previous?: WidgetSnapshot | null;
+  /** When the balance readers last fetched this wallet's balance this session
+   *  (balanceFetchTimes). Never the write time: a price or language change
+   *  must not make an old balance look fresh. */
+  fetchedAt?: (walletId: string) => number | null;
 }
 
 /** Usable for the widget's purposes: an NWC wallet that's connected and not
@@ -73,7 +78,7 @@ function isWalletUp(wallet: WalletState): boolean {
 export function shapeWidgetWallet(
   wallet: WalletState,
   order: number,
-  { btcPrice, currency, now, previous }: ShapeOptions,
+  { btcPrice, currency, previous, fetchedAt }: ShapeOptions,
 ): WidgetWallet {
   // A balance the user hid in the app never reaches the home screen.
   const balance =
@@ -86,6 +91,10 @@ export function shapeWidgetWallet(
       : null;
   const connected = isWalletUp(wallet);
   const prior = previous?.wallets.find((w) => w.id === wallet.id);
+  // A real fetch this session wins; otherwise the previous snapshot's fetch
+  // time still holds only if the amount hasn't changed since (a different
+  // amount came from somewhere we can't date, so say nothing).
+  const carried = prior && prior.balanceSats === balance ? prior.updatedAt : null;
   return {
     id: wallet.id,
     name: (wallet.alias || '').trim(),
@@ -93,7 +102,7 @@ export function shapeWidgetWallet(
     balanceSats: balance,
     fiatValue,
     currency,
-    updatedAt: connected && balance !== null ? now : (prior?.updatedAt ?? null),
+    updatedAt: fetchedAt?.(wallet.id) ?? carried,
     order,
     connected,
   };
@@ -120,7 +129,7 @@ export function buildWidgetSnapshot(
 }
 
 /** Identity of a snapshot for "did anything the widget shows change?",
- *  ignoring the confirmed-at times (they move on every write). */
+ *  ignoring the fetch times (see `shouldWriteSnapshot`). */
 export function snapshotFingerprint(snapshot: WidgetSnapshot): string {
   return JSON.stringify({
     ...snapshot,

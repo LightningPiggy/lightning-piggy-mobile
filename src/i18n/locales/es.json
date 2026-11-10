@@ -3835,24 +3835,11 @@
     "satsUnit": "sats",
     "unnamedWallet": "Monedero",
     "empty": "Añade un monedero en Lightning Piggy",
+    "openApp": "Abrir Lightning Piggy",
     "fiat": "≈ {{fiat}}",
-    "fiatAndAge": "≈ {{fiat}} · {{age}}",
-    "updated": "Actualizado {{age}}",
-    "age": {
-      "justNow": "ahora mismo",
-      "minutes": {
-        "one": "hace {{count}} min",
-        "other": "hace {{count}} min"
-      },
-      "hours": {
-        "one": "hace {{count}} hora",
-        "other": "hace {{count}} horas"
-      },
-      "days": {
-        "one": "hace {{count}} día",
-        "other": "hace {{count}} días"
-      }
-    },
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "Actualizado {{time}}",
+    "yesterdayAt": "ayer {{time}}",
     "a11y": {
       "balance": "{{name}}: {{amount}} sats",
       "balanceHidden": "{{name}}: saldo oculto",

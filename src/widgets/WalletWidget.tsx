@@ -67,6 +67,9 @@ function NameRow({
   );
 }
 
+// The 2×2 card's padding; the ‹ › tap targets reach into it.
+const LARGE_PADDING = { x: 13, y: 12 };
+
 function LargeWidget({ model }: { model: WalletWidgetModel }) {
   const type = WIDGET_TYPE.large;
   const palette = paletteFor(model);
@@ -76,8 +79,8 @@ function LargeWidget({ model }: { model: WalletWidgetModel }) {
       style={{
         flexDirection: 'column',
         justifyContent: 'space-between',
-        paddingHorizontal: 13,
-        paddingVertical: 12,
+        paddingHorizontal: LARGE_PADDING.x,
+        paddingVertical: LARGE_PADDING.y,
       }}
     >
       <FlexWidget
@@ -89,12 +92,19 @@ function LargeWidget({ model }: { model: WalletWidgetModel }) {
         }}
       >
         {model.canCycle ? (
-          <Chevron model={model} direction="previous" fontSize={type.chevron} />
+          <Chevron
+            model={model}
+            direction="previous"
+            fontSize={type.chevron}
+            inset={LARGE_PADDING}
+          />
         ) : null}
         <FlexWidget style={{ flex: 1, flexDirection: 'row', justifyContent: 'center' }}>
           <NameRow model={model} fontSize={type.name} showNextHint={false} showDot />
         </FlexWidget>
-        {model.canCycle ? <Chevron model={model} direction="next" fontSize={type.chevron} /> : null}
+        {model.canCycle ? (
+          <Chevron model={model} direction="next" fontSize={type.chevron} inset={LARGE_PADDING} />
+        ) : null}
       </FlexWidget>
       <FlexWidget style={{ alignItems: 'center', width: 'match_parent' }}>
         <Balance model={model} amountSize={type.amount} unitSize={type.unit} />

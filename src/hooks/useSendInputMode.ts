@@ -14,6 +14,10 @@ interface Options {
   // writes this ref synchronously and can run ahead of the committed state
   // behind `hasInput`; non-empty text here also blocks the late switch.
   liveInputRef?: RefObject<string>;
+  // A tab this open asked for (the widget's Scan button, #1849). It wins over
+  // the default: the user asked for it, and the Scan tab itself asks for
+  // camera access when it isn't granted.
+  preferredMode?: SendInputMode;
 }
 
 // Send's Scan/Paste/NFC tab selection. The open default is Scan when the camera
@@ -24,24 +28,28 @@ interface Options {
 // resolution is granted, and the user hasn't picked a tab or entered anything,
 // move to Scan — only the tab, never a form reset. Denied/unavailable, an
 // initialAddress, or any user action ends the wait and keeps Paste.
-export function useSendInputMode({ visible, permission, hasInput, liveInputRef }: Options) {
+export function useSendInputMode({
+  visible,
+  permission,
+  hasInput,
+  liveInputRef,
+  preferredMode,
+}: Options) {
   const [inputMode, setInputMode] = useState<SendInputMode>('scan');
   const awaitingPermissionRef = useRef(false);
   const permissionRef = useRef(permission);
   permissionRef.current = permission;
+  const preferredRef = useRef(preferredMode);
+  preferredRef.current = preferredMode;
 
-  // Call from the sheet's open effect (not onChange handlers). An explicit
-  // `preferred` tab (the widget's Scan button, #1849) wins: the user asked for
-  // it, and the Scan tab itself asks for camera access when it isn't granted.
-  const resetInputModeForOpen = useCallback(
-    (initialAddress?: string, preferred?: SendInputMode) => {
-      const current = permissionRef.current;
-      awaitingPermissionRef.current = !preferred && !initialAddress && current == null;
-      if (preferred) setInputMode(preferred);
-      else setInputMode(initialAddress || !current?.granted ? 'paste' : 'scan');
-    },
-    [],
-  );
+  // Call from the sheet's open effect (not onChange handlers).
+  const resetInputModeForOpen = useCallback((initialAddress?: string) => {
+    const current = permissionRef.current;
+    const preferred = preferredRef.current;
+    awaitingPermissionRef.current = !preferred && !initialAddress && current == null;
+    if (preferred) setInputMode(preferred);
+    else setInputMode(initialAddress || !current?.granted ? 'paste' : 'scan');
+  }, []);
 
   // User tab taps and programmatic returns to an editable field.
   const selectInputMode = useCallback((mode: SendInputMode) => {

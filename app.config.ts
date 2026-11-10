@@ -58,8 +58,10 @@ const getAdaptiveIconBackgroundColor = () => {
 // cell formula (70 × cells − 30 dp). `reconfigurable` opens the configuration
 // screen when a widget is added AND from its reconfigure action;
 // `configuration_optional` would skip it on add, but the agreed flow asks
-// which wallet a new widget is for. The 30-minute update only refreshes the
-// "updated N min ago" text — balances come from the app's snapshot. Picker
+// which wallet a new widget is for. No `updatePeriodMillis`: the widget shows
+// an absolute "Updated 14:32", so nothing goes stale between the app's
+// redraws (one per snapshot write), and Android never has to start the app
+// in the background just to redraw it. Picker
 // labels / descriptions come from `widget.picker` in the locale catalogues
 // (plugins/withWidgetPickerStrings.js); `label` here is the build fallback.
 const ANDROID_WIDGETS: WithAndroidWidgetsParams['widgets'] = [
@@ -75,7 +77,6 @@ const ANDROID_WIDGETS: WithAndroidWidgetsParams['widgets'] = [
     resizeMode: 'horizontal|vertical',
     previewImage: './assets/widget-preview/wallet-card.png',
     widgetFeatures: 'reconfigurable',
-    updatePeriodMillis: 30 * 60 * 1000,
   },
   {
     name: 'WalletBarWidget',
@@ -88,7 +89,6 @@ const ANDROID_WIDGETS: WithAndroidWidgetsParams['widgets'] = [
     resizeMode: 'horizontal|vertical',
     previewImage: './assets/widget-preview/wallet-bar.png',
     widgetFeatures: 'reconfigurable',
-    updatePeriodMillis: 30 * 60 * 1000,
   },
   {
     name: 'WalletButtonsWidget',
@@ -101,7 +101,6 @@ const ANDROID_WIDGETS: WithAndroidWidgetsParams['widgets'] = [
     resizeMode: 'horizontal|vertical',
     previewImage: './assets/widget-preview/wallet-buttons.png',
     widgetFeatures: 'reconfigurable',
-    updatePeriodMillis: 30 * 60 * 1000,
   },
 ];
 

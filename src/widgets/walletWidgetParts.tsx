@@ -82,6 +82,36 @@ export function EmptyWidget({ model, fontSize }: { model: WalletWidgetModel; fon
   );
 }
 
+/**
+ * Last-resort widget when drawing the real one failed (e.g. a corrupt
+ * snapshot): never a blank tile — "Open Lightning Piggy", tap opens the app.
+ * Needs no model, so nothing that broke the real widget can break this.
+ */
+export function FallbackWidget({ text }: { text: string }) {
+  const palette = WALLET_WIDGET_PALETTES.piggyPink;
+  return (
+    <FlexWidget
+      clickAction="OPEN_APP"
+      accessibilityLabel={text}
+      style={{
+        height: 'match_parent',
+        width: 'match_parent',
+        borderRadius: WIDGET_RADIUS,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 12,
+        ...palette.background,
+      }}
+    >
+      <TextWidget
+        text={text}
+        maxLines={2}
+        style={{ fontSize: 13, fontWeight: '700', color: palette.text, textAlign: 'center' }}
+      />
+    </FlexWidget>
+  );
+}
+
 export function StatusDot({ connected }: { connected: boolean }) {
   return (
     <FlexWidget
@@ -96,21 +126,38 @@ export function StatusDot({ connected }: { connected: boolean }) {
   );
 }
 
-/** ‹ or › — steps to the previous / next wallet in place. */
+/** Minimum touch target (dp). */
+const HIT = 48;
+
+/**
+ * ‹ or › — steps to the previous / next wallet in place. The tap target is a
+ * full 48×48 dp: negative margins let it reach into the card's padding (out to
+ * the card edge) so the glyph stays where the mock-up puts it and the row
+ * keeps its height. `inset` is the card padding it may reach into.
+ */
 export function Chevron({
   model,
   direction,
   fontSize,
+  inset,
 }: {
   model: WalletWidgetModel;
   direction: 'next' | 'previous';
   fontSize: number;
+  inset: { x: number; y: number };
 }) {
   return (
     <FlexWidget
       clickAction={direction === 'next' ? WIDGET_CLICK_NEXT : WIDGET_CLICK_PREVIOUS}
       accessibilityLabel={model.labels[direction]}
-      style={{ paddingHorizontal: 6, paddingVertical: 2 }}
+      style={{
+        width: HIT,
+        height: HIT,
+        marginVertical: -inset.y,
+        ...(direction === 'next' ? { marginRight: -inset.x } : { marginLeft: -inset.x }),
+        justifyContent: 'center',
+        alignItems: 'center',
+      }}
     >
       <TextWidget
         text={direction === 'next' ? '›' : '‹'}
@@ -161,15 +208,15 @@ export function PageDots({ model }: { model: WalletWidgetModel }) {
   const palette = paletteFor(model);
   return (
     <FlexWidget style={{ flexDirection: 'row', alignItems: 'center' }}>
-      {Array.from({ length: model.pageCount }, (_, i) => (
+      {Array.from({ length: model.dots.count }, (_, i) => (
         <FlexWidget
           key={`dot-${i}`}
           style={{
-            width: i === model.pageIndex ? 12 : 5,
+            width: i === model.dots.active ? 12 : 5,
             height: 5,
             borderRadius: 3,
             marginHorizontal: 2,
-            backgroundColor: i === model.pageIndex ? palette.dotActive : palette.dotInactive,
+            backgroundColor: i === model.dots.active ? palette.dotActive : palette.dotInactive,
           }}
         />
       ))}

@@ -8,6 +8,9 @@ import { buildWidgetDeepLink, type WidgetAction } from '../navigation/widgetDeep
 import { selectWidgetWallet } from './walletCycling';
 import type { WidgetTranslate } from './widgetI18n';
 
+/** Page dots shown at most; more wallets slide the window. */
+export const MAX_PAGE_DOTS = 7;
+
 /** Shown instead of the amount when the balance is hidden. */
 export const HIDDEN_BALANCE = '••••••';
 
@@ -22,12 +25,14 @@ export interface WalletWidgetModel {
   balanceText: string;
   /** "sats" beside the amount; null while the balance is hidden. */
   unitText: string | null;
-  /** "≈ $68.81 · 2 min ago", "Updated 2 min ago", or null. */
+  /** "≈ $68.81 · 14:32", "Updated 14:32", or null. */
   detailText: string | null;
   /** Spoken balance for screen readers. */
   balanceLabel: string;
   pageIndex: number;
   pageCount: number;
+  /** The page dots actually drawn (capped at MAX_PAGE_DOTS). */
+  dots: { count: number; active: number };
   canCycle: boolean;
   links: Record<WidgetAction, string>;
   labels: Record<WidgetAction | 'next' | 'previous', string>;
@@ -39,19 +44,46 @@ export function shouldHideBalance(hideBalance: boolean, balanceSats: number | nu
   return hideBalance || balanceSats === null;
 }
 
-/** "just now" / "5 min ago" / "3 hours ago" / "2 days ago"; null if unknown. */
-export function widgetAgeText(
+function sameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/**
+ * When the balance was fetched, as an absolute time in the user's locale:
+ * "14:32" today, "yesterday 14:32", else the date ("3 Nov"). Absolute, so the
+ * widget never needs a periodic redraw to keep "N min ago" true. A time in the
+ * future (clock skew) reads as today. Null when unknown.
+ */
+export function widgetUpdatedTimeText(
   updatedAt: number | null,
   now: number,
   t: WidgetTranslate,
+  intlLocale: string,
 ): string | null {
   if (updatedAt === null || !Number.isFinite(updatedAt)) return null;
-  const minutes = Math.max(0, Math.floor((now - updatedAt) / 60_000));
-  if (minutes < 1) return t('widget.age.justNow');
-  if (minutes < 60) return t('widget.age.minutes', { count: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return t('widget.age.hours', { count: hours });
-  return t('widget.age.days', { count: Math.floor(hours / 24) });
+  const at = new Date(Math.min(updatedAt, now));
+  const today = new Date(now);
+  const time = at.toLocaleTimeString(intlLocale, { hour: 'numeric', minute: '2-digit' });
+  if (sameLocalDay(at, today)) return time;
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (sameLocalDay(at, yesterday)) return t('widget.yesterdayAt', { time });
+  return at.toLocaleDateString(intlLocale, { day: 'numeric', month: 'short' });
+}
+
+/** At most `max` page dots, sliding so the current wallet's dot stays shown. */
+export function visiblePageDots(
+  pageCount: number,
+  pageIndex: number,
+  max = MAX_PAGE_DOTS,
+): { count: number; active: number } {
+  const count = Math.min(Math.max(pageCount, 0), max);
+  if (pageCount <= max) return { count, active: pageIndex };
+  const start = Math.min(Math.max(pageIndex - Math.floor(max / 2), 0), pageCount - max);
+  return { count, active: pageIndex - start };
 }
 
 function formatFiatSafe(value: number, currency: string, intlLocale: string): string | null {
@@ -82,15 +114,15 @@ export function buildWalletWidgetModel({
   const { wallet, index } = selectWidgetWallet(wallets, settings);
   const walletId = wallet?.id ?? null;
   const hidden = shouldHideBalance(settings.hideBalance, wallet?.balanceSats ?? null);
-  const age = widgetAgeText(wallet?.updatedAt ?? null, now, t);
+  const time = widgetUpdatedTimeText(wallet?.updatedAt ?? null, now, t, intlLocale);
   const fiat =
     !hidden && wallet?.fiatValue != null
       ? formatFiatSafe(wallet.fiatValue, wallet.currency, intlLocale)
       : null;
   let detailText: string | null = null;
-  if (fiat && age) detailText = t('widget.fiatAndAge', { fiat, age });
+  if (fiat && time) detailText = t('widget.fiatAndTime', { fiat, time });
   else if (fiat) detailText = t('widget.fiat', { fiat });
-  else if (age) detailText = t('widget.updated', { age });
+  else if (time) detailText = t('widget.updatedAt', { time });
   const amount = hidden ? null : (wallet?.balanceSats ?? 0).toLocaleString(intlLocale);
   const name = wallet ? wallet.name || t('widget.unnamedWallet') : '';
   return {
@@ -109,6 +141,7 @@ export function buildWalletWidgetModel({
         : t('widget.a11y.balance', { name, amount }),
     pageIndex: index,
     pageCount: wallets.length,
+    dots: visiblePageDots(wallets.length, index),
     canCycle: wallets.length > 1,
     links: {
       receive: buildWidgetDeepLink('receive', walletId),

@@ -34,6 +34,9 @@ import { isStaleReceipt } from '../utils/incomingReceipts';
 interface Props {
   visible: boolean;
   onClose: () => void;
+  // Changes on every open from the Home sheet host. A re-open while already
+  // visible (a widget tap, #1849) re-captures the now-active wallet.
+  openKey?: number;
   // When set, the sheet skips the friend-picker step and DMs the generated
   // invoice (or lightning address) directly to this friend. Used when the
   // sheet is opened from inside a conversation — the friend is implicit.
@@ -68,6 +71,7 @@ type Step = 'main' | 'amount';
 const ReceiveSheet: React.FC<Props> = ({
   visible,
   onClose,
+  openKey,
   presetFriend,
   presetProtocol,
   presetGroup,
@@ -303,9 +307,10 @@ const ReceiveSheet: React.FC<Props> = ({
   // Declared before the open effect; layout effects all run before it.
   useLayoutEffect(() => {
     sessionTokenRef.current += 1;
-  }, [visible]);
+  }, [visible, openKey]);
 
-  // Open/close the sheet — intentionally depends only on `visible`.
+  // Open/close the sheet — intentionally depends only on `visible` (and
+  // `openKey`, so a re-open while visible starts afresh on the active wallet).
   // `balance` and `lightningAddress` are read for initialisation, not as reactive triggers.
   useEffect(() => {
     if (visible) {
@@ -325,7 +330,7 @@ const ReceiveSheet: React.FC<Props> = ({
     // closure (so the user can generate an invoice, close the sheet,
     // navigate elsewhere, and still get the celebration).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+  }, [visible, openKey]);
 
   // Handle Android back button
   useEffect(() => {

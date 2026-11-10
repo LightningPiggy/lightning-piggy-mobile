@@ -36,6 +36,7 @@ import {
   isTerminalLookupError,
   recordFailedLookup,
 } from './nwcFailedLookupCache';
+import { noteBalanceFetched } from './balanceFetchTimes';
 import {
   beginConnectionAttempt,
   clearConnectionAttempt,
@@ -248,6 +249,7 @@ export async function connect(
       });
       balance = b.balance;
       if (isCurrent()) recordRelayOutcome(walletId);
+      if (isCurrent()) noteBalanceFetched(walletId);
     } catch (e) {
       if (isCurrent()) recordRelayOutcome(walletId, e);
       if (__DEV__) console.log('[NWC] Initial getBalance failed, wallet still connected');
@@ -380,6 +382,7 @@ export async function getBalance(
         );
       }
       recordRelayOutcome(walletId);
+      noteBalanceFetched(walletId);
       return b.balance;
     } catch (error) {
       const __dt = performance.now() - __t0;

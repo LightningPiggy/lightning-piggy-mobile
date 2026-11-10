@@ -3835,24 +3835,11 @@
     "satsUnit": "sats",
     "unnamedWallet": "Tárca",
     "empty": "Adj hozzá egy tárcát a Lightning Piggyben",
+    "openApp": "Lightning Piggy megnyitása",
     "fiat": "≈ {{fiat}}",
-    "fiatAndAge": "≈ {{fiat}} · {{age}}",
-    "updated": "Frissítve: {{age}}",
-    "age": {
-      "justNow": "épp most",
-      "minutes": {
-        "one": "{{count}} perce",
-        "other": "{{count}} perce"
-      },
-      "hours": {
-        "one": "{{count}} órája",
-        "other": "{{count}} órája"
-      },
-      "days": {
-        "one": "{{count}} napja",
-        "other": "{{count}} napja"
-      }
-    },
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "Frissítve: {{time}}",
+    "yesterdayAt": "tegnap {{time}}",
     "a11y": {
       "balance": "{{name}}: {{amount}} sats",
       "balanceHidden": "{{name}}: egyenleg elrejtve",

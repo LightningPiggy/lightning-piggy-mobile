@@ -3899,30 +3899,11 @@
     "satsUnit": "sats",
     "unnamedWallet": "Portfel",
     "empty": "Dodaj portfel w Lightning Piggy",
+    "openApp": "Otwórz Lightning Piggy",
     "fiat": "≈ {{fiat}}",
-    "fiatAndAge": "≈ {{fiat}} · {{age}}",
-    "updated": "Zaktualizowano {{age}}",
-    "age": {
-      "justNow": "przed chwilą",
-      "minutes": {
-        "one": "{{count}} min temu",
-        "few": "{{count}} min temu",
-        "many": "{{count}} min temu",
-        "other": "{{count}} min temu"
-      },
-      "hours": {
-        "one": "{{count}} godzinę temu",
-        "few": "{{count}} godziny temu",
-        "many": "{{count}} godzin temu",
-        "other": "{{count}} godziny temu"
-      },
-      "days": {
-        "one": "{{count}} dzień temu",
-        "few": "{{count}} dni temu",
-        "many": "{{count}} dni temu",
-        "other": "{{count}} dnia temu"
-      }
-    },
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "Zaktualizowano {{time}}",
+    "yesterdayAt": "wczoraj {{time}}",
     "a11y": {
       "balance": "{{name}}: {{amount}} sats",
       "balanceHidden": "{{name}}: saldo ukryte",

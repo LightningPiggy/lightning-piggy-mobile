@@ -38,7 +38,8 @@ function wallet(overrides: Partial<WalletState> = {}): WalletState {
   };
 }
 
-const opts = { btcPrice: 74_500, currency: 'USD', now: NOW };
+const fetchedNow = (id: string) => (id === 'w1' ? NOW : null);
+const opts = { btcPrice: 74_500, currency: 'USD', fetchedAt: fetchedNow };
 
 // Values that must never reach the widget, whatever field they hide in.
 const SECRETS = [
@@ -116,28 +117,61 @@ describe('shapeWidgetWallet', () => {
     expect(shapeWidgetWallet(wallet(), 0, { ...opts, btcPrice: null }).fiatValue).toBeNull();
   });
 
-  it('stamps a connected wallet now, and keeps an offline wallet’s last-confirmed time', () => {
-    const previous: WidgetSnapshot = {
+  describe('updatedAt is the real balance fetch time, never the write time', () => {
+    const base = { btcPrice: 74_500, currency: 'USD' };
+    const prev = (updatedAt: number | null, balance = 92_369): WidgetSnapshot => ({
       version: 1,
       locale: 'en',
-      wallets: [shapeWidgetWallet(wallet(), 0, { ...opts, now: NOW - 60_000 })],
-    };
-    const offline = shapeWidgetWallet(wallet({ isConnected: false }), 0, { ...opts, previous });
-    expect(offline.connected).toBe(false);
-    expect(offline.updatedAt).toBe(NOW - 60_000);
-    const degraded = shapeWidgetWallet(wallet({ connectionHealth: 'degraded' }), 0, opts);
-    expect(degraded.connected).toBe(false);
-    expect(degraded.updatedAt).toBeNull();
-  });
+      wallets: [{ ...shapeWidgetWallet(wallet({ balance }), 0, base), updatedAt }],
+    });
 
-  it('treats an on-chain wallet as up', () => {
-    const shaped = shapeWidgetWallet(
-      wallet({ walletType: 'onchain', isConnected: false }),
-      0,
-      opts,
-    );
-    expect(shaped.connected).toBe(true);
-    expect(shaped.updatedAt).toBe(NOW);
+    it('uses the fetch time the balance readers recorded', () => {
+      expect(shapeWidgetWallet(wallet(), 0, { ...base, fetchedAt: () => NOW }).updatedAt).toBe(NOW);
+    });
+
+    it('is unknown for a cached balance nothing has fetched yet (cold start)', () => {
+      // An on-chain wallet last synced days ago, hydrated from cache: not "just now".
+      const onchain = wallet({ walletType: 'onchain', isConnected: false });
+      expect(shapeWidgetWallet(onchain, 0, { ...base, fetchedAt: () => null }).updatedAt).toBe(
+        null,
+      );
+      expect(shapeWidgetWallet(wallet(), 0, base).updatedAt).toBeNull();
+    });
+
+    it('a price change alone never moves it', () => {
+      const previous = prev(NOW - 40 * 60_000);
+      const a = shapeWidgetWallet(wallet(), 0, { ...base, previous, fetchedAt: () => null });
+      const b = shapeWidgetWallet(wallet(), 0, {
+        ...base,
+        btcPrice: 80_000,
+        previous,
+        fetchedAt: () => null,
+      });
+      expect(a.updatedAt).toBe(NOW - 40 * 60_000);
+      expect(b.updatedAt).toBe(NOW - 40 * 60_000);
+      expect(b.fiatValue).not.toBe(a.fiatValue);
+    });
+
+    it('carries the previous fetch time only while the amount is unchanged', () => {
+      const previous = prev(NOW - 60_000, 1_000);
+      expect(
+        shapeWidgetWallet(wallet({ balance: 1_000 }), 0, { ...base, previous }).updatedAt,
+      ).toBe(NOW - 60_000);
+      // A different amount from somewhere we can't date: say nothing.
+      expect(
+        shapeWidgetWallet(wallet({ balance: 2_000 }), 0, { ...base, previous }).updatedAt,
+      ).toBe(null);
+    });
+
+    it('reports connection separately: NWC down or degraded, on-chain always up', () => {
+      expect(shapeWidgetWallet(wallet({ isConnected: false }), 0, base).connected).toBe(false);
+      expect(shapeWidgetWallet(wallet({ connectionHealth: 'degraded' }), 0, base).connected).toBe(
+        false,
+      );
+      expect(
+        shapeWidgetWallet(wallet({ walletType: 'onchain', isConnected: false }), 0, base).connected,
+      ).toBe(true);
+    });
   });
 });
 
@@ -165,9 +199,9 @@ describe('buildWidgetSnapshot', () => {
     expect(sortWalletsForCarousel(list).map((w) => w.id)).toEqual(['z', 'x', 'y']);
   });
 
-  it('fingerprint ignores the confirmed-at time only', () => {
+  it('fingerprint ignores the fetch time only', () => {
     const a = buildWidgetSnapshot([wallet()], 'en', opts);
-    const b = buildWidgetSnapshot([wallet()], 'en', { ...opts, now: NOW + 5000 });
+    const b = buildWidgetSnapshot([wallet()], 'en', { ...opts, fetchedAt: () => NOW + 5000 });
     const c = buildWidgetSnapshot([wallet({ balance: 1 })], 'en', opts);
     expect(snapshotFingerprint(a)).toBe(snapshotFingerprint(b));
     expect(snapshotFingerprint(a)).not.toBe(snapshotFingerprint(c));

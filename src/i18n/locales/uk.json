@@ -3899,30 +3899,11 @@
     "satsUnit": "sats",
     "unnamedWallet": "Гаманець",
     "empty": "Додайте гаманець у Lightning Piggy",
+    "openApp": "Відкрити Lightning Piggy",
     "fiat": "≈ {{fiat}}",
-    "fiatAndAge": "≈ {{fiat}} · {{age}}",
-    "updated": "Оновлено {{age}}",
-    "age": {
-      "justNow": "щойно",
-      "minutes": {
-        "one": "{{count}} хв тому",
-        "few": "{{count}} хв тому",
-        "many": "{{count}} хв тому",
-        "other": "{{count}} хв тому"
-      },
-      "hours": {
-        "one": "{{count}} годину тому",
-        "few": "{{count}} години тому",
-        "many": "{{count}} годин тому",
-        "other": "{{count}} години тому"
-      },
-      "days": {
-        "one": "{{count}} день тому",
-        "few": "{{count}} дні тому",
-        "many": "{{count}} днів тому",
-        "other": "{{count}} дня тому"
-      }
-    },
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "Оновлено {{time}}",
+    "yesterdayAt": "вчора {{time}}",
     "a11y": {
       "balance": "{{name}}: {{amount}} sats",
       "balanceHidden": "{{name}}: баланс приховано",

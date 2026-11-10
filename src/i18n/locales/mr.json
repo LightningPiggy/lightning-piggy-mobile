@@ -3835,24 +3835,11 @@
     "satsUnit": "sats",
     "unnamedWallet": "वॉलेट",
     "empty": "Lightning Piggy मध्ये वॉलेट जोडा",
+    "openApp": "Lightning Piggy उघडा",
     "fiat": "≈ {{fiat}}",
-    "fiatAndAge": "≈ {{fiat}} · {{age}}",
-    "updated": "{{age}} अपडेट केले",
-    "age": {
-      "justNow": "आत्ताच",
-      "minutes": {
-        "one": "{{count}} मिनिटापूर्वी",
-        "other": "{{count}} मिनिटांपूर्वी"
-      },
-      "hours": {
-        "one": "{{count}} तासापूर्वी",
-        "other": "{{count}} तासांपूर्वी"
-      },
-      "days": {
-        "one": "{{count}} दिवसापूर्वी",
-        "other": "{{count}} दिवसांपूर्वी"
-      }
-    },
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "{{time}} ला अपडेट केले",
+    "yesterdayAt": "काल {{time}}",
     "a11y": {
       "balance": "{{name}}: {{amount}} sats",
       "balanceHidden": "{{name}}: बॅलन्स लपवलेला आहे",

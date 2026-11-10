@@ -3835,24 +3835,11 @@
     "satsUnit": "sats",
     "unnamedWallet": "钱包",
     "empty": "请在 Lightning Piggy 中添加钱包",
+    "openApp": "打开 Lightning Piggy",
     "fiat": "≈ {{fiat}}",
-    "fiatAndAge": "≈ {{fiat}} · {{age}}",
-    "updated": "更新于{{age}}",
-    "age": {
-      "justNow": "刚刚",
-      "minutes": {
-        "one": "{{count}} 分钟前",
-        "other": "{{count}} 分钟前"
-      },
-      "hours": {
-        "one": "{{count}} 小时前",
-        "other": "{{count}} 小时前"
-      },
-      "days": {
-        "one": "{{count}} 天前",
-        "other": "{{count}} 天前"
-      }
-    },
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "更新于 {{time}}",
+    "yesterdayAt": "昨天 {{time}}",
     "a11y": {
       "balance": "{{name}}：{{amount}} sats",
       "balanceHidden": "{{name}}：余额已隐藏",

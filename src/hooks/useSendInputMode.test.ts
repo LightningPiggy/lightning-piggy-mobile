@@ -17,9 +17,15 @@ interface Props {
 const liveInputRef = { current: '' };
 
 function useHarness({ visible, permission, hasInput = false, initialAddress, preferred }: Props) {
-  const mode = useSendInputMode({ visible, permission, hasInput, liveInputRef });
+  const mode = useSendInputMode({
+    visible,
+    permission,
+    hasInput,
+    liveInputRef,
+    preferredMode: preferred,
+  });
   useEffect(() => {
-    if (visible) mode.resetInputModeForOpen(initialAddress, preferred);
+    if (visible) mode.resetInputModeForOpen(initialAddress);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   return mode;

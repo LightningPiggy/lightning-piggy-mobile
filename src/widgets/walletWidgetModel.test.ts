@@ -3,12 +3,15 @@ import { DEFAULT_WIDGET_SETTINGS, type WidgetSettings } from '../services/widget
 import {
   HIDDEN_BALANCE,
   buildWalletWidgetModel,
+  MAX_PAGE_DOTS,
   shouldHideBalance,
-  widgetAgeText,
+  visiblePageDots,
+  widgetUpdatedTimeText,
 } from './walletWidgetModel';
 import { resolveWidgetLocale, widgetTranslator } from './widgetI18n';
 
-const NOW = 1_800_000_000_000;
+// Local time, so the today / yesterday split is timezone-proof.
+const NOW = new Date(2026, 10, 10, 14, 32).getTime();
 const MIN = 60_000;
 const en = widgetTranslator('en');
 
@@ -18,7 +21,7 @@ const w = (id: string, patch: Partial<WidgetWallet> = {}): WidgetWallet => ({
   walletType: 'nwc',
   balanceSats: 92_369,
   fiatValue: 68.81,
-  currency: 'USD',
+  currency: 'GBP',
   updatedAt: NOW - 2 * MIN,
   order: 0,
   connected: true,
@@ -35,7 +38,7 @@ const build = (snap: WidgetSnapshot | null, patch: Partial<WidgetSettings> = {})
     settings: { ...DEFAULT_WIDGET_SETTINGS, ...patch },
     now: NOW,
     t: en.t,
-    intlLocale: 'en-US',
+    intlLocale: 'en-GB',
   });
 
 describe('shouldHideBalance', () => {
@@ -49,42 +52,55 @@ describe('shouldHideBalance', () => {
   });
 });
 
-describe('widgetAgeText', () => {
-  it.each([
-    [0, 'just now'],
-    [59_000, 'just now'],
-    [MIN, '1 min ago'],
-    [5 * MIN, '5 min ago'],
-    [59 * MIN, '59 min ago'],
-    [60 * MIN, '1 hour ago'],
-    [5 * 60 * MIN, '5 hours ago'],
-    [24 * 60 * MIN, '1 day ago'],
-    [3 * 24 * 60 * MIN, '3 days ago'],
-  ])('%p ms old → %p', (age, text) => {
-    expect(widgetAgeText(NOW - age, NOW, en.t)).toBe(text);
+describe('widgetUpdatedTimeText', () => {
+  const at = (d: number, h: number, m: number) => new Date(2026, 10, d, h, m).getTime();
+
+  it('is the time today, "yesterday" + time, else the date', () => {
+    expect(widgetUpdatedTimeText(at(10, 9, 5), NOW, en.t, 'en-GB')).toBe('9:05');
+    expect(widgetUpdatedTimeText(at(10, 0, 0), NOW, en.t, 'en-GB')).toBe('0:00');
+    expect(widgetUpdatedTimeText(at(9, 23, 59), NOW, en.t, 'en-GB')).toBe('yesterday 23:59');
+    expect(widgetUpdatedTimeText(at(7, 14, 32), NOW, en.t, 'en-GB')).toBe('7 Nov');
   });
 
-  it('clamps a future time to just now, and is null when unknown', () => {
-    expect(widgetAgeText(NOW + 10 * MIN, NOW, en.t)).toBe('just now');
-    expect(widgetAgeText(null, NOW, en.t)).toBeNull();
+  it('crosses month and year boundaries for "yesterday"', () => {
+    const newYear = new Date(2027, 0, 1, 8, 0).getTime();
+    const nye = new Date(2026, 11, 31, 22, 15).getTime();
+    expect(widgetUpdatedTimeText(nye, newYear, en.t, 'en-GB')).toBe('yesterday 22:15');
   });
 
-  it('speaks the user’s language', () => {
-    expect(widgetAgeText(NOW - 5 * MIN, NOW, widgetTranslator('de').t)).toBe('vor 5 Min.');
+  it('reads a future time (clock skew) as now, and is null when unknown', () => {
+    expect(widgetUpdatedTimeText(NOW + 3 * MIN, NOW, en.t, 'en-GB')).toBe('14:32');
+    expect(widgetUpdatedTimeText(null, NOW, en.t, 'en-GB')).toBeNull();
   });
 
-  it('uses each language’s plural forms with the real number (Ukrainian 21 is "one")', () => {
-    const uk = widgetTranslator('uk').t;
-    const HOUR = 60 * MIN;
-    expect(widgetAgeText(NOW - HOUR, NOW, uk)).toBe('1 годину тому');
-    expect(widgetAgeText(NOW - 21 * HOUR, NOW, uk)).toBe('21 годину тому');
-    expect(widgetAgeText(NOW - 22 * HOUR, NOW, uk)).toBe('22 години тому');
-    expect(widgetAgeText(NOW - 5 * HOUR, NOW, uk)).toBe('5 годин тому');
+  it('speaks the user’s language and time format', () => {
+    const de = widgetTranslator('de');
+    expect(widgetUpdatedTimeText(at(9, 8, 7), NOW, de.t, de.intlLocale)).toMatch(/8:07/);
+  });
+});
+
+describe('visiblePageDots', () => {
+  it('shows every dot up to the cap', () => {
+    expect(visiblePageDots(3, 2)).toEqual({ count: 3, active: 2 });
+    expect(visiblePageDots(7, 6)).toEqual({ count: 7, active: 6 });
+    expect(visiblePageDots(0, 0)).toEqual({ count: 0, active: 0 });
+  });
+
+  it('caps at 7 and keeps the current wallet’s dot visible', () => {
+    for (let index = 0; index < 20; index++) {
+      const dots = visiblePageDots(20, index);
+      expect(dots.count).toBe(MAX_PAGE_DOTS);
+      expect(dots.active).toBeGreaterThanOrEqual(0);
+      expect(dots.active).toBeLessThan(MAX_PAGE_DOTS);
+    }
+    expect(visiblePageDots(20, 0).active).toBe(0);
+    expect(visiblePageDots(20, 10).active).toBe(3);
+    expect(visiblePageDots(20, 19).active).toBe(6);
   });
 });
 
 describe('buildWalletWidgetModel', () => {
-  it('shows the balance, fiat and age by default', () => {
+  it('shows the balance, fiat and fetch time by default', () => {
     const model = build(snapshot([w('a'), w('b')]));
     expect(model).toMatchObject({
       empty: false,
@@ -93,7 +109,8 @@ describe('buildWalletWidgetModel', () => {
       connected: true,
       balanceText: '92,369',
       unitText: 'sats',
-      detailText: '≈ $68.81 · 2 min ago',
+      detailText: '≈ £68.81 · 14:30',
+      dots: { count: 2, active: 0 },
       pageIndex: 0,
       pageCount: 2,
       canCycle: true,
@@ -111,7 +128,7 @@ describe('buildWalletWidgetModel', () => {
     const model = build(snapshot([w('a')]), { hideBalance: true });
     expect(model.balanceText).toBe(HIDDEN_BALANCE);
     expect(model.unitText).toBeNull();
-    expect(model.detailText).toBe('Updated 2 min ago');
+    expect(model.detailText).toBe('Updated 14:30');
     expect(model.balanceLabel).toBe('Piggy a: balance hidden');
     expect(JSON.stringify(model)).not.toContain('92');
     expect(JSON.stringify(model)).not.toContain('68.81');
@@ -129,11 +146,9 @@ describe('buildWalletWidgetModel', () => {
   });
 
   it('drops the fiat line parts it can’t show', () => {
-    expect(build(snapshot([w('a', { fiatValue: null })])).detailText).toBe('Updated 2 min ago');
-    expect(build(snapshot([w('a', { updatedAt: null })])).detailText).toBe('≈ $68.81');
-    expect(build(snapshot([w('a', { currency: 'NOT-A-CODE' })])).detailText).toBe(
-      'Updated 2 min ago',
-    );
+    expect(build(snapshot([w('a', { fiatValue: null })])).detailText).toBe('Updated 14:30');
+    expect(build(snapshot([w('a', { updatedAt: null })])).detailText).toBe('≈ £68.81');
+    expect(build(snapshot([w('a', { currency: 'NOT-A-CODE' })])).detailText).toBe('Updated 14:30');
   });
 
   it('hides wallet switching with a single wallet', () => {
