@@ -395,6 +395,43 @@ describe('nwcService.payInvoice — proof of payment is recorded only when confi
   });
 });
 
+describe('nwcService.payInvoice — onDispatched marks the point of no recall (#1776)', () => {
+  const BOLT11 =
+    'lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdq5xysxxatsy' +
+    'p3k7enxv4jsxqzpuaztrnwngzn3kdzw5hydlzf03qdgm2hdq27cqv3agm2awhz5se903vruatfhq77w3ls4e' +
+    'vs3ch9zw97j25emudupq63nyw24cg27h2rspfj9srp';
+
+  it('fires before the wallet answers, so a Cancel then cannot hide the payment', async () => {
+    const order: string[] = [];
+    const onDispatched = jest.fn(() => order.push('dispatched'));
+    mockSendPaymentImpl = () => {
+      order.push('sent');
+      return new Promise(() => undefined); // the wallet never answers
+    };
+    const controller = new AbortController();
+    const p = payInvoice(WALLET_ID, BOLT11, { signal: controller.signal, onDispatched });
+    const assertion = expect(p).rejects.toMatchObject({ name: 'AbortError' });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(onDispatched).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['dispatched', 'sent']);
+    controller.abort();
+    await assertion;
+  });
+
+  it('does not fire when the send is cancelled before the request goes out', async () => {
+    const onDispatched = jest.fn();
+    const send = jest.fn();
+    mockSendPaymentImpl = send;
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      payInvoice(WALLET_ID, BOLT11, { signal: controller.signal, onDispatched }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(onDispatched).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 it.each([
   ['Piggy', 'Piggy'],
   ['Pi\u202eggy\u200b', 'Piggy'],

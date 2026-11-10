@@ -136,6 +136,11 @@
     "unavailable": "Amber konnte nicht geöffnet werden. Prüfe, ob es installiert ist, und versuche es dann erneut.",
     "failed": "Amber konnte die Anfrage nicht abschließen. Versuche es erneut."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Dein Signierer hat mit einem anderen Konto geantwortet. Wechsle dort zu diesem Konto und versuche es erneut.",
+    "modified": "Dein Signierer hat die Anfrage vor dem Signieren verändert, daher wurde nichts gesendet. Versuche es erneut.",
+    "badSignature": "Die Antwort deines Signierers hatte eine ungültige Signatur, daher wurde nichts gesendet. Versuche es erneut."
+  },
   "alphabetBar": {
     "alphabetIndex": "Alphabet-Index",
     "jumpTo": "Zu {{letter}} springen",
@@ -768,9 +773,14 @@
     "receive": "Empfangen",
     "transfer": "Verschieben",
     "send": "Senden",
+    "watchOnlySend": "Dies ist eine Watch-only-Wallet. Sie kann empfangen, aber nicht senden.",
     "addWallet": "Wallet hinzufügen",
     "addWalletText": "+ Wallet hinzufügen",
     "updatingTransactions": "Transaktionen werden aktualisiert"
+  },
+  "findLogHeader": {
+    "title": "Fundprotokoll ({{total}})",
+    "titleCapped": "Fundprotokoll ({{total}}+)"
   },
   "huntCreateScreen": {
     "ok": "OK",
@@ -1840,6 +1850,9 @@
     "noLightningAddress": "Keine Lightning-Adresse festgelegt",
     "enterAmountForInvoice": "Gib einen Betrag ein, um eine Rechnung zu erstellen",
     "loadingAddress": "Adresse wird geladen…",
+    "addressLoadFailed": "Deine Bitcoin-Adresse konnte nicht geladen werden",
+    "retry": "Erneut versuchen",
+    "retryAddressLabel": "Laden deiner Bitcoin-Adresse erneut versuchen",
     "lightningInvoice": "Lightning-Rechnung",
     "sendTo": "An {{name}} senden",
     "copy": "Kopieren",
@@ -1987,12 +2000,23 @@
     "cameraAccessNeeded": "Zum Scannen von QR-Codes wird der Kamerazugriff benötigt",
     "grantCameraPermission": "Kameraberechtigung erteilen",
     "grantPermission": "Berechtigung erteilen",
+    "openCameraSettings": "Öffne die Einstellungen, um den Kamerazugriff zu erlauben",
     "qrViewfinder": "QR-Code-Sucher"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Berechtigung erforderlich",
+    "photoLibraryMessage": "Erlaube den Zugriff auf deine Fotos, um Bilder zu senden.",
+    "cameraPhotoMessage": "Erlaube den Kamerazugriff, um Fotos aufzunehmen und zu senden.",
+    "ok": "OK",
+    "cancel": "Abbrechen",
+    "openSettings": "Einstellungen öffnen"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "OK",
     "invalidInvoiceTitle": "Ungültige Rechnung",
     "invalidInvoiceBody": "Diese Rechnung ist ungültig oder unvollständig – prüfe sie und versuche es erneut.",
+    "unrecognisedInputTitle": "Das kann nicht bezahlt werden",
+    "unrecognisedInputBody": "Das ist weder eine Lightning-Rechnung noch eine Lightning-Adresse oder Bitcoin-Adresse – prüfe es und versuche es erneut.",
     "offerUnsupportedTitle": "Lightning-Offers werden noch nicht unterstützt",
     "offerUnsupportedBody": "Das ist ein Lightning-Offer (BOLT12), das Lightning Piggy noch nicht bezahlen kann. Bitte stattdessen um eine Lightning-Rechnung oder Lightning-Adresse.",
     "walletFallback": "Wallet",
@@ -2250,8 +2274,6 @@
     "removeWalletTitle": "Wallet entfernen",
     "removeConfirmMessage": "Möchtest du „{{alias}}“ wirklich entfernen?",
     "disconnectConfirmMessage": "Möchtest du „{{alias}}“ wirklich trennen?",
-    "cancel": "Abbrechen",
-    "remove": "Entfernen",
     "copiedTitle": "Kopiert",
     "xpubCopied": "Erweiterter öffentlicher Schlüssel in die Zwischenablage kopiert."
   },
@@ -2267,8 +2289,6 @@
     "hideBalance": "Guthaben von {{alias}} verbergen",
     "removeWalletTitle": "Wallet entfernen",
     "removeWalletMessage": "„{{alias}}“ entfernen? Dadurch wird die Wallet getrennt.",
-    "cancel": "Abbrechen",
-    "remove": "Entfernen",
     "removeWalletA11y": "{{alias}} entfernen",
     "addWalletA11y": "Wallet hinzufügen",
     "addWallet": "Wallet hinzufügen"
@@ -3809,5 +3829,15 @@
     "noRelays": "Zurzeit sind keine geeigneten Relays erreichbar. Versuch es gleich noch einmal.",
     "confirmChangedTitle": "Stattdessen diese Relays veröffentlichen?",
     "confirmChangedBody": "Deine Relays haben sich geändert, seit dieser Vorschlag angezeigt wurde. Beim Veröffentlichen werden diese aufgelistet: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "Damit wird „{{alias}}“ von diesem Handy entfernt, einschließlich der hier gespeicherten Wiederherstellungsphrase. Schreib sie vorher auf – ohne ihre Wiederherstellungsphrase kann das Geld dieser Wallet nicht wiederhergestellt werden.",
+    "withCoinosLogin": "Damit wird „{{alias}}“ von diesem Handy entfernt, einschließlich des hier gespeicherten CoinOS-Benutzernamens, Passworts und der Verbindungsdaten. Speichere sie vorher – ohne sie kann das Geld dieser Wallet nicht wiederhergestellt werden.",
+    "mayHoldRecovery": "Dadurch wird „{{alias}}“ von diesem Handy entfernt, einschließlich aller hier gespeicherten Wiederherstellungsphrasen oder Logins. Wenn du sie nicht gesichert hast, lässt sich das Geld in dieser Wallet möglicherweise nicht wiederherstellen.",
+    "balance": "Sie enthält {{amount}} sats.",
+    "viewRecoveryFirst": "Erst Wiederherstellungsdaten ansehen",
+    "removeAnyway": "Trotzdem entfernen",
+    "remove": "Entfernen",
+    "cancel": "Abbrechen"
   }
 }

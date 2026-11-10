@@ -42,7 +42,9 @@ export type SellerInvoiceErrorCode =
   | 'amountMismatch'
   | 'shopChanged'
   | 'sendFailed'
-  | 'notSignedIn';
+  | 'notSignedIn'
+  /** The signer refused for this account (#1779); `message` is the translated reason. */
+  | 'signerMismatch';
 
 export class SellerInvoiceError extends Error {
   constructor(
@@ -52,6 +54,18 @@ export class SellerInvoiceError extends Error {
     super(message);
     this.name = 'SellerInvoiceError';
   }
+}
+
+/** A failed NIP-17 send as an invoice error, keeping a refused signer's reason. */
+function sendError(e: unknown, { keepNotSignedIn = true } = {}): SellerInvoiceError {
+  const message = (e as Error)?.message ?? 'send failed';
+  if (keepNotSignedIn && e instanceof Nip17SendError && e.code === 'notSignedIn') {
+    return new SellerInvoiceError('notSignedIn', message);
+  }
+  if (e instanceof Nip17SendError && e.code === 'signerMismatch') {
+    return new SellerInvoiceError('signerMismatch', message);
+  }
+  return new SellerInvoiceError('sendFailed', message);
 }
 
 /** Paid-detection cadence for an unpaid invoice while its card is mounted. */
@@ -294,12 +308,7 @@ export function useSellerInvoice(
             try {
               await send(rumor);
             } catch (e) {
-              throw new SellerInvoiceError(
-                e instanceof Nip17SendError && e.code === 'notSignedIn'
-                  ? 'notSignedIn'
-                  : 'sendFailed',
-                (e as Error)?.message ?? 'send failed',
-              );
+              throw sendError(e);
             }
             if (!stillCurrent()) throw new SellerInvoiceError('notSignedIn', 'Account changed');
             await patchSellerInvoice(pubkey, orderId, buyerPubkey, { deliveryPending: false });
@@ -408,7 +417,7 @@ export function useSellerInvoice(
           note: t('orderStatus.paid'),
         }),
       ).catch((e) => {
-        throw new SellerInvoiceError('sendFailed', (e as Error)?.message ?? 'send failed');
+        throw sendError(e, { keepNotSignedIn: false });
       });
       if (recordRef.current) {
         await patchSellerInvoice(pubkey, orderId, buyerPubkey, { confirmedAt: Date.now() });

@@ -136,6 +136,11 @@
     "unavailable": "No se pudo abrir Amber. Comprueba que esté instalado y vuelve a intentarlo.",
     "failed": "Amber no pudo completar la solicitud. Inténtalo de nuevo."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Tu firmante respondió con otra cuenta. Cámbialo a esta cuenta e inténtalo de nuevo.",
+    "modified": "Tu firmante modificó la solicitud antes de firmarla, así que no se envió nada. Inténtalo de nuevo.",
+    "badSignature": "La respuesta de tu firmante tenía una firma no válida, así que no se envió nada. Inténtalo de nuevo."
+  },
   "alphabetBar": {
     "alphabetIndex": "Índice alfabético",
     "jumpTo": "Ir a {{letter}}",
@@ -768,9 +773,14 @@
     "receive": "Recibir",
     "transfer": "Mover",
     "send": "Enviar",
+    "watchOnlySend": "Esta es una cartera de solo lectura. Puede recibir, pero no enviar.",
     "addWallet": "Añadir una cartera",
     "addWalletText": "+ Añadir una cartera",
     "updatingTransactions": "Actualizando transacciones"
+  },
+  "findLogHeader": {
+    "title": "Registro de hallazgos ({{total}})",
+    "titleCapped": "Registro de hallazgos ({{total}}+)"
   },
   "huntCreateScreen": {
     "ok": "OK",
@@ -1840,6 +1850,9 @@
     "noLightningAddress": "No hay dirección Lightning configurada",
     "enterAmountForInvoice": "Introduce un importe para generar la factura",
     "loadingAddress": "Cargando dirección...",
+    "addressLoadFailed": "No se pudo cargar tu dirección de Bitcoin",
+    "retry": "Reintentar",
+    "retryAddressLabel": "Reintentar cargar tu dirección de Bitcoin",
     "lightningInvoice": "Factura Lightning",
     "sendTo": "Enviar a {{name}}",
     "copy": "Copiar",
@@ -1987,12 +2000,23 @@
     "cameraAccessNeeded": "Se necesita acceso a la cámara para escanear códigos QR",
     "grantCameraPermission": "Conceder permiso de cámara",
     "grantPermission": "Conceder permiso",
+    "openCameraSettings": "Abre Ajustes para permitir el acceso a la cámara",
     "qrViewfinder": "Visor de código QR"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Permiso necesario",
+    "photoLibraryMessage": "Permite el acceso a la galería de fotos para enviar imágenes.",
+    "cameraPhotoMessage": "Permite el acceso a la cámara para hacer y enviar fotos.",
+    "ok": "OK",
+    "cancel": "Cancelar",
+    "openSettings": "Abrir Ajustes"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "Aceptar",
     "invalidInvoiceTitle": "Factura no válida",
     "invalidInvoiceBody": "Esta factura no es válida o está incompleta — compruébala e inténtalo de nuevo.",
+    "unrecognisedInputTitle": "No se puede pagar",
+    "unrecognisedInputBody": "Esto no es una factura Lightning, una dirección Lightning ni una dirección de Bitcoin — compruébalo e inténtalo de nuevo.",
     "offerUnsupportedTitle": "Las ofertas Lightning aún no son compatibles",
     "offerUnsupportedBody": "Esto es una oferta Lightning (BOLT12), que Lightning Piggy todavía no puede pagar. Pide una factura Lightning o una dirección Lightning.",
     "walletFallback": "Cartera",
@@ -2250,8 +2274,6 @@
     "removeWalletTitle": "Eliminar cartera",
     "removeConfirmMessage": "¿Seguro que quieres eliminar \"{{alias}}\"?",
     "disconnectConfirmMessage": "¿Seguro que quieres desconectar \"{{alias}}\"?",
-    "cancel": "Cancelar",
-    "remove": "Eliminar",
     "copiedTitle": "Copiado",
     "xpubCopied": "Clave pública extendida copiada al portapapeles."
   },
@@ -2267,8 +2289,6 @@
     "hideBalance": "Ocultar saldo de {{alias}}",
     "removeWalletTitle": "Eliminar cartera",
     "removeWalletMessage": "¿Eliminar \"{{alias}}\"? Esto desconectará la cartera.",
-    "cancel": "Cancelar",
-    "remove": "Eliminar",
     "removeWalletA11y": "Eliminar {{alias}}",
     "addWalletA11y": "Añadir cartera",
     "addWallet": "Añadir cartera"
@@ -3809,5 +3829,15 @@
     "noRelays": "No se puede conectar con ningún relay adecuado en este momento. Inténtalo de nuevo en un momento.",
     "confirmChangedTitle": "¿Publicar estos relays en su lugar?",
     "confirmChangedBody": "Tus relays han cambiado desde que se mostró esta sugerencia. Al publicar, se incluirán: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "Esto elimina \"{{alias}}\" de este teléfono, incluida la frase de recuperación guardada aquí. Asegúrate de tenerla apuntada antes: sin su frase de recuperación, el dinero de esta cartera no se puede recuperar.",
+    "withCoinosLogin": "Esto elimina \"{{alias}}\" de este teléfono, incluidos el usuario, la contraseña y los datos de conexión de CoinOS guardados aquí. Guárdalos antes: sin ellos, el dinero de esta cartera no se puede recuperar.",
+    "mayHoldRecovery": "Esto elimina \"{{alias}}\" de este teléfono, incluida cualquier frase de recuperación o inicio de sesión guardados aquí. Si no los has guardado, puede que no se pueda recuperar el dinero de esta cartera.",
+    "balance": "Contiene {{amount}} sats.",
+    "viewRecoveryFirst": "Ver datos de recuperación antes",
+    "removeAnyway": "Eliminar igualmente",
+    "remove": "Eliminar",
+    "cancel": "Cancelar"
   }
 }

@@ -20,6 +20,8 @@ import { giphyEnvelope, type Gif } from '../services/giphyService';
 import { MARMOT_VOICE_MIME, marmotVoiceFilename, type MarmotImage } from '../services/marmotSend';
 import { sendClearingDraft } from '../utils/composerDraft';
 import type { SharedImage } from '../utils/incomingShare';
+import { ensurePermission } from '../utils/permissionPrompt';
+import { t } from '../i18n';
 
 /**
  * The send-side behaviour that differs between the 1:1 and group composers —
@@ -165,11 +167,12 @@ export function useComposerActions({
   const handlePickAndSendImage = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending || strategy.canSend?.() === false) return;
     closeAttachPanel();
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to send images.');
-      return;
-    }
+    const allowed = await ensurePermission(
+      ImagePicker.requestMediaLibraryPermissionsAsync,
+      t('permissionPrompt.permissionNeeded'),
+      t('permissionPrompt.photoLibraryMessage'),
+    );
+    if (!allowed) return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 1,
@@ -185,11 +188,12 @@ export function useComposerActions({
   const handleTakeAndSendPhoto = useCallback(async () => {
     if (!isLoggedIn || uploadingImage || sending || strategy.canSend?.() === false) return;
     closeAttachPanel();
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow camera access to take and send photos.');
-      return;
-    }
+    const allowed = await ensurePermission(
+      ImagePicker.requestCameraPermissionsAsync,
+      t('permissionPrompt.permissionNeeded'),
+      t('permissionPrompt.cameraPhotoMessage'),
+    );
+    if (!allowed) return;
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images'],
       quality: 1,

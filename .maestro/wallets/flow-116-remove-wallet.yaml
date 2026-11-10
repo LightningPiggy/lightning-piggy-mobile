@@ -21,22 +21,21 @@ name: Remove Wallet Test
 - waitForAnimationToEnd:
     timeout: 3000
 
-# Scroll down in the settings sheet to reveal Remove Wallet
-- swipe:
-    start: 50%, 80%
-    end: 50%, 40%
-    duration: 300
-- waitForAnimationToEnd:
-    timeout: 1000
+# Remove Wallet sits in the settings sheet's fixed footer, so no scrolling
+- extendedWaitUntil:
+    visible:
+      id: 'wallet-settings-remove'
+    timeout: 5000
 
 # Tap Remove Wallet
 - tapOn:
-    text: 'Remove Wallet'
+    id: 'wallet-settings-remove'
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Confirm the removal dialog
+# Confirm the removal dialog ("Remove", or "Remove Anyway" for a wallet
+# holding a recovery phrase / CoinOS login — same testID either way)
 - tapOn:
-    text: 'Remove'
+    id: 'remove-wallet-confirm'
 - waitForAnimationToEnd:
     timeout: 3000

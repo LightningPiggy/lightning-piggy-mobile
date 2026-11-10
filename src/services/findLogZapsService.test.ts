@@ -70,6 +70,20 @@ describe('subscribeFindLogZaps (#1780)', () => {
   });
   afterEach(() => jest.restoreAllMocks());
 
+  it('caps the zap-receipt backfill at 1,000 without a time window (#1789)', () => {
+    subscribeFindLogZaps(new Map([[LOG, FINDER]]), jest.fn(), ['wss://r']);
+    expect(jest.mocked(pool.subscribeMany).mock.calls[0][1]).toEqual({
+      kinds: [9735],
+      '#e': [LOG],
+      limit: 1000,
+    });
+  });
+
+  it('opens nothing for an empty log list', () => {
+    subscribeFindLogZaps(new Map(), jest.fn())();
+    expect(pool.subscribeMany).not.toHaveBeenCalled();
+  });
+
   const settle = () => new Promise((r) => setTimeout(r, 0));
   const subscribe = (onZap: jest.Mock, provider: string | null) =>
     subscribeFindLogZaps(new Map([[LOG, FINDER]]), onZap, ['wss://r'], async () => provider);

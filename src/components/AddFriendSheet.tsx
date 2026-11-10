@@ -1,7 +1,7 @@
 import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, BackHandler, Keyboard, Platform } from 'react-native';
-import { Alert } from './BrandedAlert';
+import { ensurePermission } from '../utils/permissionPrompt';
 import { confirmLinkAction, looksLikeProfileReference } from '../utils/confirmLinkAction';
 import {
   BottomSheetBackdrop,
@@ -142,15 +142,15 @@ const AddFriendSheet: React.FC<Props> = ({ visible, onClose, onAdd }) => {
   };
 
   const handleScanMode = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        Alert.alert(
-          t('addFriendSheet.permissionNeededTitle'),
-          t('addFriendSheet.permissionNeededMessage'),
-        );
-        return;
-      }
+    if (
+      !permission?.granted &&
+      !(await ensurePermission(
+        requestPermission,
+        t('addFriendSheet.permissionNeededTitle'),
+        t('addFriendSheet.permissionNeededMessage'),
+      ))
+    ) {
+      return;
     }
     setMode('scan');
   };

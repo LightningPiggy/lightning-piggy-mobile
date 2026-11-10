@@ -136,6 +136,11 @@
     "unavailable": "Amber खोला नहीं जा सका। जाँचें कि वह इंस्टॉल है, फिर दोबारा कोशिश करें।",
     "failed": "Amber अनुरोध पूरा नहीं कर सका। फिर से कोशिश करें।"
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "आपके साइनर ने किसी दूसरे खाते से जवाब दिया। उसे इस खाते पर बदलें और फिर से कोशिश करें।",
+    "modified": "आपके साइनर ने साइन करने से पहले अनुरोध बदल दिया, इसलिए कुछ नहीं भेजा गया। फिर से कोशिश करें।",
+    "badSignature": "आपके साइनर के जवाब में अमान्य सिग्नेचर था, इसलिए कुछ नहीं भेजा गया। फिर से कोशिश करें।"
+  },
   "alphabetBar": {
     "alphabetIndex": "अक्षरों की सूची",
     "jumpTo": "{{letter}} पर जाएँ",
@@ -768,9 +773,14 @@
     "receive": "प्राप्त करें",
     "transfer": "ट्रांसफ़र",
     "send": "भेजें",
+    "watchOnlySend": "यह केवल देखने वाला वॉलेट है। यह प्राप्त कर सकता है, लेकिन भेज नहीं सकता।",
     "addWallet": "वॉलेट जोड़ें",
     "addWalletText": "+ वॉलेट जोड़ें",
     "updatingTransactions": "लेन-देन अपडेट हो रहे हैं"
+  },
+  "findLogHeader": {
+    "title": "खोज लॉग ({{total}})",
+    "titleCapped": "खोज लॉग ({{total}}+)"
   },
   "huntCreateScreen": {
     "ok": "ठीक है",
@@ -1840,6 +1850,9 @@
     "noLightningAddress": "कोई Lightning ऐड्रेस सेट नहीं है",
     "enterAmountForInvoice": "इनवॉइस बनाने के लिए रकम डालें",
     "loadingAddress": "ऐड्रेस लोड हो रहा है...",
+    "addressLoadFailed": "आपका Bitcoin ऐड्रेस लोड नहीं हो सका",
+    "retry": "फिर कोशिश करें",
+    "retryAddressLabel": "अपना Bitcoin ऐड्रेस फिर से लोड करने की कोशिश करें",
     "lightningInvoice": "Lightning इनवॉइस",
     "sendTo": "{{name}} को भेजें",
     "copy": "कॉपी करें",
@@ -1987,12 +2000,23 @@
     "cameraAccessNeeded": "QR कोड स्कैन करने के लिए कैमरे की अनुमति चाहिए",
     "grantCameraPermission": "कैमरे की अनुमति दें",
     "grantPermission": "अनुमति दें",
+    "openCameraSettings": "कैमरा एक्सेस की अनुमति देने के लिए सेटिंग्स खोलें",
     "qrViewfinder": "QR कोड व्यूफ़ाइंडर"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "अनुमति ज़रूरी है",
+    "photoLibraryMessage": "फ़ोटो भेजने के लिए फ़ोटो लाइब्रेरी एक्सेस की अनुमति दें।",
+    "cameraPhotoMessage": "फ़ोटो लेने और भेजने के लिए कैमरा एक्सेस की अनुमति दें।",
+    "ok": "ठीक है",
+    "cancel": "रद्द करें",
+    "openSettings": "सेटिंग्स खोलें"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "ठीक है",
     "invalidInvoiceTitle": "अमान्य इनवॉइस",
     "invalidInvoiceBody": "यह इनवॉइस मान्य नहीं है या अधूरी है — इसे जाँचें और फिर से कोशिश करें।",
+    "unrecognisedInputTitle": "इसका भुगतान नहीं हो सकता",
+    "unrecognisedInputBody": "यह Lightning इनवॉइस, Lightning ऐड्रेस या Bitcoin ऐड्रेस नहीं है — जाँचें और फिर से कोशिश करें।",
     "offerUnsupportedTitle": "Lightning ऑफ़र अभी सपोर्ट नहीं हैं",
     "offerUnsupportedBody": "यह एक Lightning ऑफ़र (BOLT12) है, जिसका पेमेंट Lightning Piggy अभी नहीं कर सकता। इसकी जगह Lightning इनवॉइस या Lightning ऐड्रेस माँगें।",
     "walletFallback": "वॉलेट",
@@ -2250,8 +2274,6 @@
     "removeWalletTitle": "वॉलेट हटाएँ",
     "removeConfirmMessage": "क्या आप वाकई \"{{alias}}\" हटाना चाहते हैं?",
     "disconnectConfirmMessage": "क्या आप वाकई \"{{alias}}\" डिसकनेक्ट करना चाहते हैं?",
-    "cancel": "रद्द करें",
-    "remove": "हटाएँ",
     "copiedTitle": "कॉपी हो गया",
     "xpubCopied": "एक्सटेंडेड पब्लिक की क्लिपबोर्ड पर कॉपी हो गई।"
   },
@@ -2267,8 +2289,6 @@
     "hideBalance": "{{alias}} का बैलेंस छिपाएँ",
     "removeWalletTitle": "वॉलेट हटाएँ",
     "removeWalletMessage": "\"{{alias}}\" हटाएँ? इससे वॉलेट डिसकनेक्ट हो जाएगा।",
-    "cancel": "रद्द करें",
-    "remove": "हटाएँ",
     "removeWalletA11y": "{{alias}} हटाएँ",
     "addWalletA11y": "वॉलेट जोड़ें",
     "addWallet": "वॉलेट जोड़ें"
@@ -3809,5 +3829,15 @@
     "noRelays": "अभी किसी उपयुक्त रिले से कनेक्ट नहीं हो पा रहा है। थोड़ी देर बाद फिर कोशिश करें।",
     "confirmChangedTitle": "इनकी जगह ये रिले पब्लिश करें?",
     "confirmChangedBody": "यह सुझाव दिखाए जाने के बाद आपके रिले बदल गए हैं। पब्लिश करने पर ये रिले सूची में होंगे: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "इससे \"{{alias}}\" इस फ़ोन से हट जाएगा, साथ ही यहाँ सेव किया गया रिकवरी फ़्रेज़ भी। पहले इसे लिखकर रख लें — रिकवरी फ़्रेज़ के बिना इस वॉलेट का पैसा वापस नहीं पाया जा सकता।",
+    "withCoinosLogin": "इससे \"{{alias}}\" इस फ़ोन से हट जाएगा, साथ ही यहाँ सेव किए गए CoinOS यूज़रनेम, पासवर्ड और कनेक्शन की जानकारी भी। पहले इन्हें सेव कर लें — इनके बिना इस वॉलेट का पैसा वापस नहीं पाया जा सकता।",
+    "mayHoldRecovery": "इससे \"{{alias}}\" इस फ़ोन से हट जाएगा, साथ ही यहाँ सेव किया गया कोई भी रिकवरी फ़्रेज़ या लॉगिन भी हट जाएगा। अगर आपने इन्हें सेव नहीं किया है, तो इस वॉलेट का पैसा शायद वापस न मिल सके।",
+    "balance": "इसमें {{amount}} sats हैं।",
+    "viewRecoveryFirst": "पहले रिकवरी जानकारी देखें",
+    "removeAnyway": "फिर भी हटाएँ",
+    "remove": "हटाएँ",
+    "cancel": "रद्द करें"
   }
 }

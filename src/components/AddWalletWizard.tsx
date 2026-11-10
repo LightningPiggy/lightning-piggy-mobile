@@ -1,7 +1,7 @@
 import BrandedSpinner from './BrandedSpinner';
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, Image } from 'react-native';
-import { Alert } from './BrandedAlert';
+import { ensurePermission } from '../utils/permissionPrompt';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import {
   BottomSheetBackdrop,
@@ -181,15 +181,15 @@ const AddWalletWizard: React.FC<Props> = ({ visible, onClose }) => {
   };
 
   const handleScan = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        Alert.alert(
-          t('addWalletWizard.permissionRequiredTitle'),
-          t('addWalletWizard.cameraPermissionMessage'),
-        );
-        return;
-      }
+    if (
+      !permission?.granted &&
+      !(await ensurePermission(
+        requestPermission,
+        t('addWalletWizard.permissionRequiredTitle'),
+        t('addWalletWizard.cameraPermissionMessage'),
+      ))
+    ) {
+      return;
     }
     setScanning(true);
   };
