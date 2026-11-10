@@ -426,9 +426,11 @@ together. A removed wallet hands over to the one now in its slot, as on
 Android.
 
 *iOS 15–16.* The app's deployment target is iOS 15.1. Those versions get a
-static widget instead: first wallet, Piggy pink, balance shown, no ‹ › (it
-hides itself from the widget gallery on iOS 17+, where the configurable one
-replaces it).
+static widget instead: first wallet, Piggy pink, balance shown, no ‹ ›. Its
+small size has one tap target there (Receive), so it shows only the Receive
+button. It hides itself from the widget gallery on iOS 17+, where the
+configurable one replaces it; a widget placed on iOS 15–16 has to be added
+again after the phone updates to iOS 17.
 
 *One widget per wallet.* No code needed: add a widget per wallet, choose a
 different starting wallet in each, then drag them onto each other to make a
