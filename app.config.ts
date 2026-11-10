@@ -31,6 +31,9 @@ const getIosBundleId = () => {
   return 'com.lightningpiggy.app';
 };
 
+// `group.<bundle id>` — see `ios.entitlements` below.
+const getIosAppGroup = () => `group.${getIosBundleId()}`;
+
 const getAndroidPackage = () => {
   if (IS_DEV) return 'com.lightningpiggy.app.dev';
   if (IS_PREVIEW) return 'com.lightningpiggy.app.preview';
@@ -156,6 +159,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     scheme: ['lightning', 'lnurlw', 'lnurl'],
     supportsTablet: true,
     bundleIdentifier: getIosBundleId(),
+    // App Group shared with the home-screen widget extension (#1849): the app
+    // writes a display-only wallet snapshot there (src/services/widgetAppGroup.ios.ts)
+    // and the widget reads it. One group per variant, so dev / preview /
+    // production installs never see each other's wallets. The widget target
+    // (targets/widget/expo-target.config.js) declares the same group.
+    entitlements: {
+      'com.apple.security.application-groups': [getIosAppGroup()],
+    },
     infoPlist: {
       // The app uses only standard cryptography (secp256k1, SHA-256, BIP-32/39/84,
       // and AES/TLS via system libraries). All of that falls under Apple's
@@ -368,6 +379,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         },
       },
     ],
+    // iPhone home-screen widget (#1849): a WidgetKit extension in Swift under
+    // targets/widget, added to the generated Xcode project as its own target
+    // (bundle id <app>.widget, same App Group as the app). EAS signs it like
+    // the app; see docs/ARCHITECTURE.adoc → "Home-screen widgets" for the one-time
+    // credentials step.
+    // withWidgetWeakFrameworks must come first (see the plugin's header).
+    './plugins/withWidgetWeakFrameworks',
+    '@bacons/apple-targets',
+    // Generates the widget's Localizable.strings(dict) from src/i18n/locales.
+    './plugins/withIosWidgetStrings',
     // Production only: one APK per CPU architecture (arm64-v8a, armeabi-v7a)
     // for the GitHub Release instead of a universal APK. Dev and preview
     // builds stay universal so EAS install links and emulators keep working.

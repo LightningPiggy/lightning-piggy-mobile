@@ -48,6 +48,7 @@ jobs:
               - 'android/**'
               - 'ios/**'
               - 'modules/**'
+              - 'targets/**'
               - 'vendor/**'
               - 'assets/**'
               - 'patches/**'

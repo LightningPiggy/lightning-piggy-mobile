@@ -691,7 +691,7 @@ export default function App() {
                         (#279). Lives here (not in WalletContext) to keep that
                         over-cap file from growing — see #703. */}
                         <PaymentNotifier />
-                        {/* Keeps the Android home-screen widget's balance
+                        {/* Keeps the home-screen widgets' balance
                         snapshot current, and wipes it on sign-out / account
                         switch (#1849). Renders nothing. */}
                         <WidgetSnapshotSync />

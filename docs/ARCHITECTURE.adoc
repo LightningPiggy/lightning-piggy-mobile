@@ -333,7 +333,8 @@ Scan, Send) and a *2×1* with round Receive / Send buttons. Each comes in three
 styles — Piggy pink (default), Clean white and Night glass — picked with the
 starting wallet and a *Hide balance* switch (off by default) on the
 configuration screen Android shows when a widget is added or reconfigured.
-iPhone widgets, card-art styles and lock-screen widgets are later work.
+The iPhone widgets are described in <<home-screen-widgets-ios>>; card-art
+styles and lock-screen widgets are later work.
 
 *How it's built.* `react-native-android-widget` draws the widgets from JSX
 (`src/widgets/`) in a headless JS task, so the widget works with the app
@@ -384,6 +385,64 @@ amount rewrites at most every 5 minutes. There is no `updatePeriodMillis`:
 the app redraws the widget on every snapshot write, and Android never starts
 the app in the background just to refresh it. If drawing ever fails, the
 widget shows "Open Lightning Piggy" rather than a blank tile.
+
+[[home-screen-widgets-ios]]
+=== Home-screen widgets (iPhone)
+
+Two WidgetKit widgets (#1849) with the same behaviour, styles and deep links
+as the Android ones: *small* (wallet name, balance, Receive and Send) and
+*medium* (balance, fiat, "updated N min ago", Receive, Scan and Send).
+Lock-screen accessories and card art are later work.
+
+*How it's built.* A widget extension written in Swift / SwiftUI lives in
+`targets/widget/` and is added to the generated Xcode project at prebuild by
+`@bacons/apple-targets` (nothing under `ios/` is committed). Its bundle id is
+the app's plus `.widget` (`com.lightningpiggy.app[.dev|.preview].widget`).
+Two small config plugins support it: `plugins/withIosWidgetStrings.js`
+generates the extension's `Localizable.strings` / `.stringsdict` for every
+language from the `widget` namespace of `src/i18n/locales/*.json` (the
+generated `*.lproj` folders are gitignored, so the catalogues stay the only
+copy), and `plugins/withWidgetWeakFrameworks.js` weak-links ActivityKit and
+AppIntents so the extension still loads on iOS 15–16.
+
+*Data.* The extension can't read the app's AsyncStorage, so after each
+snapshot write `src/widgets/refreshWalletWidgets.ios.ts` copies the same
+allow-listed JSON into the App Group `group.<app bundle id>` (one group per
+build variant, declared for both the app and the extension) through
+`src/services/widgetAppGroup.ios.ts`, then reloads the widget timelines. A
+wipe (sign-out, account switch, no wallets) removes it there too, along with
+the widget's remembered ‹ › positions. Nothing else is ever written to the
+App Group. The widget asks for a new timeline every 30 minutes and steps
+the "updated N min ago" text every 5 minutes in between.
+
+*Configuration and switching (iOS 17+).* "Edit Widget" offers the starting
+wallet (choices come from the snapshot), the style and *Hide balance* (off by
+default) through an App Intent configuration. ‹ › are interactive buttons
+backed by an App Intent that moves to the previous / next wallet in carousel
+order and redraws the widget without opening the app. WidgetKit gives no
+per-widget id, so the position is remembered per configuration (size,
+starting wallet, style, Hide balance): two identically set-up widgets move
+together. A removed wallet hands over to the one now in its slot, as on
+Android.
+
+*iOS 15–16.* The app's deployment target is iOS 15.1. Those versions get a
+static widget instead: first wallet, Piggy pink, balance shown, no ‹ › (it
+hides itself from the widget gallery on iOS 17+, where the configurable one
+replaces it).
+
+*One widget per wallet.* No code needed: add a widget per wallet, choose a
+different starting wallet in each, then drag them onto each other to make a
+Smart Stack; swipe up and down to move between wallets.
+
+*Signing.* EAS reads the extension from the generated project
+(`extra.eas.build.experimental.ios.appExtensions`, filled in by
+`@bacons/apple-targets`) and signs it like the app. Before the first iOS
+build of each profile with the widget, set up its credentials once,
+interactively: `eas credentials -p ios` (or an interactive
+`eas build -p ios --profile <profile>`), which registers the `.widget`
+bundle id, enables the App Group on both identifiers and creates the
+provisioning profile. The release workflow runs `--non-interactive`, so it
+can't do that step itself.
 
 [[persistence]]
 == Persistence & caching

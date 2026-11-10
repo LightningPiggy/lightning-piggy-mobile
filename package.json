@@ -30,6 +30,7 @@
     "postinstall": "patch-package && node scripts/fetch-nostr-sdk-swift.mjs"
   },
   "dependencies": {
+    "@bacons/apple-targets": "^5.0.0",
     "@bitcoinerlab/secp256k1": "^1.2.0",
     "@getalby/sdk": "^7.0.0",
     "@gorhom/bottom-sheet": "^5.2.8",
