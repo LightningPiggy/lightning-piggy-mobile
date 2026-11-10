@@ -2146,6 +2146,11 @@
     "loadingMore": "正在加载更多交易",
     "noTransactions": "暂无交易"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "这超过了 {{wallet}} 的余额（{{balance}} sats）。",
+    "unknownOutcomeTitle": "转账状态未知",
+    "unknownOutcomeBody": "我们无法确认此次转账。你的 sats 可能已经转出——请先检查两个钱包的余额，再重试。"
+  },
   "unsupportedEntityScreen": {
     "back": "返回",
     "cantOpenTitle": "抱歉——无法打开",

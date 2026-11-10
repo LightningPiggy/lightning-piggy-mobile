@@ -619,11 +619,19 @@ export async function estimateSendFee(
   return result.kind === 'fee' ? result.feeSats : null;
 }
 
+/**
+ * `onBroadcastAttempted` fires just before the first broadcast. From then on
+ * the transaction may already be in the mempool, so a caller must treat ANY
+ * later error (including a lost Electrum reply) as an unknown outcome rather
+ * than a failure (#1778). Errors before it — sync, build, insufficient funds —
+ * mean nothing was sent.
+ */
 export async function sendTransaction(
   walletId: string,
   toAddress: string,
   amountSats: number,
   feeRate: number = DEFAULT_SEND_FEE_RATE,
+  onBroadcastAttempted?: () => void,
 ): Promise<string> {
   console.log(
     `[BDK] sendTransaction enter walletId=${walletId} to=${toAddress} sats=${amountSats}`,
@@ -666,6 +674,7 @@ export async function sendTransaction(
   console.log('[BDK] sendTransaction extracting');
   const tx = await signedPsbt.extractTx();
 
+  onBroadcastAttempted?.();
   try {
     console.log('[BDK] sendTransaction: broadcasting');
     await chain.broadcast(tx);

@@ -2146,6 +2146,11 @@
     "loadingMore": "आणखी व्यवहार लोड होत आहेत",
     "noTransactions": "अजून व्यवहार नाहीत"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "{{wallet}} मध्ये इतके sats नाहीत ({{balance}} sats).",
+    "unknownOutcomeTitle": "ट्रान्सफरची स्थिती माहीत नाही",
+    "unknownOutcomeBody": "ट्रान्सफर झाले की नाही हे आम्ही निश्चित करू शकलो नाही. तुमचे sats कदाचित तरीही हलवले गेले असतील — पुन्हा प्रयत्न करण्यापूर्वी दोन्ही वॉलेटचे बॅलन्स तपासा."
+  },
   "unsupportedEntityScreen": {
     "back": "मागे",
     "cantOpenTitle": "क्षमस्व — हे उघडता येत नाही",

@@ -13,8 +13,10 @@ import {
   completeTransfer,
   failTransfer,
   idleProgress,
+  isTransferStopped,
   startTransfer,
   transferChecklistSteps,
+  unknownTransfer,
 } from './transferPhase';
 
 describe('transferPhase state machine', () => {
@@ -160,5 +162,19 @@ describe('transferChecklistSteps', () => {
 
   it('suppresses the spinner once the background task errored', () => {
     expect(statuses(startTransfer('ln-to-onchain'), true)).toEqual(['pending', 'pending']);
+  });
+
+  // #1778: a lost reply after paying is not a failure — no ✗ on the pay row.
+  it('renders an unknown outcome without a failed row and keeps the view up', () => {
+    const paying = advanceTransfer(startTransfer('ln-to-ln')); // invoice ✓, pay in flight
+    const unknown = unknownTransfer(paying, 'may still have moved');
+    expect(unknown).toMatchObject({ phase: 'unknown', errorMessage: 'may still have moved' });
+    expect(statuses(unknown, false)).toEqual(['complete', 'pending', 'pending']);
+    expect(isTransferStopped(unknown)).toBe(true);
+    expect(isTransferStopped(failTransfer(paying, 'x'))).toBe(true);
+    expect(isTransferStopped(paying)).toBe(false);
+    // Like failTransfer, a late call can't rewrite a finished transfer.
+    const done = completeTransfer(paying);
+    expect(unknownTransfer(done, 'late')).toBe(done);
   });
 });
