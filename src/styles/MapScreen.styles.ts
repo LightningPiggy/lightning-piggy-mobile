@@ -2,7 +2,7 @@ import { StyleSheet } from 'react-native';
 import type { Palette } from './palettes';
 
 // Presentation for the full-screen MapScreen (header, footer, legend,
-// merchant/cache detail sheet, filter sheet). Extracted per the standing
+// cache detail sheet, filter sheet). Extracted per the standing
 // "styles live in their own file" convention (CLAUDE.md → File size and
 // modularity) — keeps the screen under its over-cap baseline while the
 // friends-sharing layer landed.
@@ -196,20 +196,6 @@ export const createMapScreenStyles = (colors: Palette) =>
       fontSize: 11,
       fontWeight: '700',
     },
-    sheetChipFeatured: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.zapYellow,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipFeaturedText: {
-      color: colors.textHeader,
-      fontSize: 11,
-      fontWeight: '700',
-    },
     sheetChipGrey: {
       backgroundColor: colors.divider,
       paddingHorizontal: 10,
@@ -220,22 +206,6 @@ export const createMapScreenStyles = (colors: Palette) =>
       color: colors.textSupplementary,
       fontSize: 11,
       fontWeight: '700',
-    },
-    sheetChipOrange: {
-      backgroundColor: '#F7931A',
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      borderRadius: 100,
-    },
-    sheetChipOrangeText: {
-      color: colors.white,
-      fontSize: 11,
-      fontWeight: '700',
-    },
-    sheetVerify: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      marginTop: 4,
     },
     sheetDescription: {
       fontSize: 13,
@@ -259,53 +229,10 @@ export const createMapScreenStyles = (colors: Palette) =>
       paddingVertical: 12,
       borderRadius: 100,
     },
-    sheetButtonDisabled: {
-      backgroundColor: colors.divider,
-    },
     sheetButtonText: {
       color: colors.white,
       fontSize: 14,
       fontWeight: '700',
-    },
-    sheetButtonSecondary: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
-      backgroundColor: 'transparent',
-      paddingVertical: 12,
-      borderRadius: 100,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    sheetButtonSecondaryText: {
-      color: colors.brandPink,
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    sheetContactRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginBottom: 10,
-    },
-    sheetContactChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.divider,
-    },
-    sheetContactText: {
-      color: colors.textHeader,
-      fontSize: 12,
-      fontWeight: '600',
-      maxWidth: 160,
     },
     sheetTitleRow: {
       flexDirection: 'row',
@@ -320,41 +247,6 @@ export const createMapScreenStyles = (colors: Palette) =>
       backgroundColor: colors.surface,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    sheetBtcMapActionsRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginTop: 12,
-      paddingTop: 10,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.divider,
-    },
-    sheetBtcMapActionButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 5,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: colors.brandPink,
-    },
-    sheetBtcMapActionText: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.brandPink,
-    },
-    sheetMetaRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-      marginTop: 6,
-    },
-    sheetMetaText: {
-      fontSize: 12,
-      color: colors.textSupplementary,
-      flexShrink: 1,
     },
     filterRow: {
       flexDirection: 'row',

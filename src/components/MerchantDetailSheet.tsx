@@ -26,8 +26,17 @@ import { useDismissibleSheet } from '../hooks/useDismissibleSheet';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSheetStyles } from '../styles/sheetStyles';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
+import { placeContactLinks, placeSocialLinks } from '../utils/placeContactLinks';
 import SocialIcon from './SocialIcon';
 import type { Palette } from '../styles/palettes';
+
+const SHEET_NETWORKS = ['facebook', 'x', 'instagram'] as const;
+// Brand names stay untranslated; the accessibility label is localised.
+const SOCIAL_CHIPS = {
+  facebook: { name: 'Facebook', labelKey: 'merchantDetailSheet.openFacebook' },
+  x: { name: 'X', labelKey: 'merchantDetailSheet.openX' },
+  instagram: { name: 'Instagram', labelKey: 'merchantDetailSheet.openInstagram' },
+} as const;
 
 interface Props {
   place: BtcMapPlace;
@@ -51,6 +60,11 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
           ? t('merchantDetailSheet.verifiedOneDayAgo')
           : t('merchantDetailSheet.verifiedDaysAgo', { days });
   const CategoryIcon = btcMapIconComponent(place.icon);
+  // Crowd-sourced OSM values never reach Linking raw: the app builds every
+  // href (http(s) / tel: / mailto:) from validated values (#1785).
+  const contacts = placeContactLinks(place);
+  const socials = placeSocialLinks(place, SHEET_NETWORKS);
+  const openLink = (href: string) => Linking.openURL(href).catch(() => {});
 
   return (
     <View style={styles.sheetBackdrop} testID="merchant-detail-screen">
@@ -108,17 +122,12 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
           </View>
         ) : null}
         {verifyText && <Text style={styles.sheetVerify}>{verifyText}</Text>}
-        {(place.tags['contact:website'] ||
-          place.phone ||
-          place.email ||
-          place.facebookUrl ||
-          place.twitterUrl ||
-          place.instagramUrl) && (
+        {(contacts.website || contacts.phone || contacts.email || socials.length > 0) && (
           <View style={styles.sheetContactRow}>
-            {place.tags['contact:website'] ? (
+            {contacts.website ? (
               <TouchableOpacity
                 style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(place.tags['contact:website']!)}
+                onPress={() => openLink(contacts.website!.href)}
                 testID="merchant-detail-website"
                 accessibilityLabel={t('merchantDetailSheet.openWebsite')}
               >
@@ -128,25 +137,29 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 </Text>
               </TouchableOpacity>
             ) : null}
-            {place.phone ? (
+            {contacts.phone ? (
               <TouchableOpacity
                 style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(`tel:${place.phone!.replace(/\s+/g, '')}`)}
+                onPress={() => openLink(contacts.phone!.href)}
                 testID="merchant-detail-phone"
-                accessibilityLabel={t('merchantDetailSheet.callPhone', { phone: place.phone })}
+                accessibilityLabel={t('merchantDetailSheet.callPhone', {
+                  phone: contacts.phone.value,
+                })}
               >
                 <Phone size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  {place.phone}
+                  {contacts.phone.value}
                 </Text>
               </TouchableOpacity>
             ) : null}
-            {place.email ? (
+            {contacts.email ? (
               <TouchableOpacity
                 style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(`mailto:${place.email!}`)}
+                onPress={() => openLink(contacts.email!.href)}
                 testID="merchant-detail-email"
-                accessibilityLabel={t('merchantDetailSheet.emailContact', { email: place.email })}
+                accessibilityLabel={t('merchantDetailSheet.emailContact', {
+                  email: contacts.email.value,
+                })}
               >
                 <Mail size={13} color={colors.brandPink} strokeWidth={2.5} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
@@ -154,45 +167,20 @@ export const MerchantDetailSheet: React.FC<Props> = ({ place, colors, onClose, o
                 </Text>
               </TouchableOpacity>
             ) : null}
-            {place.facebookUrl ? (
+            {socials.map(({ network, href }) => (
               <TouchableOpacity
+                key={network}
                 style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(place.facebookUrl!).catch(() => {})}
-                testID="merchant-detail-facebook"
-                accessibilityLabel={t('merchantDetailSheet.openFacebook')}
+                onPress={() => openLink(href)}
+                testID={`merchant-detail-${network}`}
+                accessibilityLabel={t(SOCIAL_CHIPS[network].labelKey)}
               >
-                <SocialIcon network="facebook" size={14} />
+                <SocialIcon network={network} size={14} />
                 <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Facebook
+                  {SOCIAL_CHIPS[network].name}
                 </Text>
               </TouchableOpacity>
-            ) : null}
-            {place.twitterUrl ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(place.twitterUrl!).catch(() => {})}
-                testID="merchant-detail-x"
-                accessibilityLabel={t('merchantDetailSheet.openX')}
-              >
-                <SocialIcon network="x" size={14} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  X
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {place.instagramUrl ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(place.instagramUrl!).catch(() => {})}
-                testID="merchant-detail-instagram"
-                accessibilityLabel={t('merchantDetailSheet.openInstagram')}
-              >
-                <SocialIcon network="instagram" size={14} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  Instagram
-                </Text>
-              </TouchableOpacity>
-            ) : null}
+            ))}
           </View>
         )}
         <View style={styles.sheetActions}>

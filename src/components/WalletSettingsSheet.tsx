@@ -34,6 +34,7 @@ import WalletDetailsTab from './WalletDetailsTab';
 import WalletConnectionTab from './WalletConnectionTab';
 import FriendPickerSheet from './FriendPickerSheet';
 import { useWalletShareFromSettings } from '../hooks/useWalletShareFromSettings';
+import { useIsFocused } from '@react-navigation/native';
 import { useRemoveWalletConfirm } from '../hooks/useRemoveWalletConfirm';
 
 export type SettingsTab = 'design' | 'details' | 'connection';
@@ -55,6 +56,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose, initialTab = 
   // send + redaction; adds a recipient-pick step since settings has no open
   // conversation. See useWalletShareFromSettings.
   const { pickerOpen, startShare, closePicker, shareToFriend } = useWalletShareFromSettings(wallet);
+  // Read here, not in the tab: sheet content renders through a portal.
+  const screenFocused = useIsFocused();
   const bottomSheetRef = useRef<BottomSheetModal>(null);
   const { height: windowHeight } = useWindowDimensions();
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -409,6 +412,8 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose, initialTab = 
               colors={colors}
               t={t}
               walletType={wallet.walletType}
+              walletId={walletId}
+              screenFocused={screenFocused}
               xpubDisplay={xpubDisplay}
               onCopyXpub={handleCopyXpub}
               relayUrl={relayUrl}

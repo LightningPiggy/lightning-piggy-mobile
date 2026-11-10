@@ -62,7 +62,7 @@ it.each(['plain', 'contact', 'curated'])(
     const ui = render(<PlaceDetailScreen {...props} />);
     await waitFor(() => expect(ui.getByTestId('place-phone')).toBeTruthy());
     fireEvent.press(ui.getByTestId('place-phone'));
-    expect(Linking.openURL).toHaveBeenCalledWith('tel:+44 123');
+    expect(Linking.openURL).toHaveBeenCalledWith('tel:+44123');
     fireEvent.press(ui.getByTestId('place-website'));
     expect(Linking.openURL).toHaveBeenCalledWith('https://example.com');
   },

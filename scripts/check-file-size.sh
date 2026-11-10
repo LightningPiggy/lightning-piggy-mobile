@@ -19,7 +19,6 @@ declare -A BASELINE=(
   ["src/screens/HuntCreateScreen.tsx"]=2018
   ["src/contexts/WalletContext.tsx"]=1495
   ["src/screens/HuntPiggyDetailScreen.tsx"]=1206
-  ["src/screens/MapScreen.tsx"]=1107
   ["src/components/TransferSheet.tsx"]=1244
 )
 

@@ -16,6 +16,7 @@ import { Alert } from './BrandedAlert';
 import Svg, { Path } from 'react-native-svg';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
+import { canCopySensitiveText, copySensitiveText } from '../services/sensitiveClipboard';
 import {
   BottomSheetBackdrop,
   BottomSheetBackdropProps,
@@ -211,8 +212,14 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
     setCreating(false);
   };
 
+  // Secret clipboard (#1784, part of #1242): marked sensitive, local-only on
+  // iOS and cleared after a short window — never a plain clipboard write.
   const handleCopyNsec = async () => {
-    await Clipboard.setStringAsync(generatedNsec);
+    try {
+      await copySensitiveText(generatedNsec);
+    } catch {
+      return;
+    }
     Alert.alert(t('nostrLoginSheet.copiedTitle'), t('nostrLoginSheet.copiedMessage'));
   };
 
@@ -651,20 +658,21 @@ const NostrLoginSheet: React.FC<Props> = ({ visible, onClose }) => {
 
             <Text style={styles.fieldLabel}>{t('nostrLoginSheet.privateKeyLabel')}</Text>
             <View style={styles.nsecDisplay}>
-              <Text style={styles.nsecText} selectable>
-                {generatedNsec}
-              </Text>
+              {/* Never selectable: long-press Copy would bypass the secret clipboard. */}
+              <Text style={styles.nsecText}>{generatedNsec}</Text>
             </View>
 
-            <TouchableOpacity
-              accessibilityRole="button"
-              style={styles.copyButton}
-              onPress={handleCopyNsec}
-              accessibilityLabel={t('nostrLoginSheet.copyPrivateKey')}
-              testID="copy-nsec"
-            >
-              <Text style={styles.copyButtonText}>{t('nostrLoginSheet.copyToClipboard')}</Text>
-            </TouchableOpacity>
+            {canCopySensitiveText() && (
+              <TouchableOpacity
+                accessibilityRole="button"
+                style={styles.copyButton}
+                onPress={handleCopyNsec}
+                accessibilityLabel={t('nostrLoginSheet.copyPrivateKey')}
+                testID="copy-nsec"
+              >
+                <Text style={styles.copyButtonText}>{t('nostrLoginSheet.copyToClipboard')}</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               accessibilityRole="button"
