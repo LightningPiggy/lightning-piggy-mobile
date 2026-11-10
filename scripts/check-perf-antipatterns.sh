@@ -77,13 +77,14 @@ check_pattern() {
 # run once per <=150 ms flush (or per batch), not per incoming event — the
 # same criterion that exempts useCoalescedMap itself. A file only belongs
 # here if its clones are provably flush-scoped; per-event clones never do.
-# Comment lines (`//`, `/*`, ` *`) are skipped so prose that names the
-# anti-pattern can't use up a file's allowance.
+# Comments can't use up a file's allowance: lines starting with `//` or `*`
+# (JSDoc / block-comment bodies) are skipped, and inline `/* … */` is stripped
+# before matching, so code after a leading block comment still counts.
 map_clones=$(git ls-files 'src/**/*.ts' 'src/**/*.tsx' \
   | grep -v '\.test\.' \
   | grep -v '^src/utils/useCoalescedMap\.ts$' \
   | grep -v '^src/hooks/useFoundLogIngest\.ts$' \
-  | xargs perl -ne 'next if m{^\s*(//|/?\*)}; $c{$ARGV}++ if /new Map\(prev/; END { print "$_:$c{$_}\n" for sort keys %c }' \
+  | xargs perl -ne 'next if m{^\s*(//|\*)}; s{/\*.*?\*/}{}g; $c{$ARGV}++ if /new Map\(prev/; END { print "$_:$c{$_}\n" for sort keys %c }' \
     2>/dev/null || true)
 check_pattern "per-event Map clone" "$map_clones" MAP_CLONE_BASELINE \
   "Batch relay/event ingest with src/utils/useCoalescedMap.ts instead of cloning per event."
