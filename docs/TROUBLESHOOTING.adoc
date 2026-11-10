@@ -1895,3 +1895,25 @@ guarded. A new pool or SDK must be wrapped with `guardPool` too.
 Code that owns a raw `WebSocket` must not just call `close()` on a CONNECTING
 socket either: use `closeSocketNowOrOnOpen` (the relay reachability probe does).
 Release-build NIP-46 signers own their pool, and closing the signer destroys it.
+
+== Expo SDK 58 upgrade checks
+
+*Dependency alignment:* `expo-share-intent@6.1.1` requires Expo 55 and blocks
+`expo install --fix` with `ERESOLVE`. SDK 58 uses version 9; regenerate the
+patch against that version. Its upstream path traversal fix replaces the
+old backport, but the app-specific bounded copies and intent lifecycle
+safeguards remain necessary. Do not bypass the peer conflict with `--force`.
+
+*Jest in a worktree:* `jest-expo` needs the same `expo-modules-core` instance
+as the app. Without a root dependency, Node can resolve an older copy from
+a parent checkout while Expo resolves its nested copy, bypassing native
+module mocks. Keep the SDK-matched transitive core hoisted locally in the lockfile,
+along with the matching `@react-native/jest-preset`. Do not declare core
+as a direct dependency (Expo Doctor rejects it). TypeScript 6 also needs explicit Jest/Node/React
+ambient types in `tsconfig.json`.
+
+*Transparent Android splash:* SDK 58 removes top-level `splash` config.
+The `expo-splash-screen` plugin rebuilds the splash style group; register
+`withTransparentSplashIcon` before it so its mod runs after that rebuild,
+and override the unprefixed AndroidX splash attributes. Inspect generated
+`styles.xml`: a successful prebuild alone does not prove the override survived.
