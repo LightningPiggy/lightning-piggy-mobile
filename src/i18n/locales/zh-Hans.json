@@ -778,6 +778,10 @@
     "addWalletText": "+ 添加钱包",
     "updatingTransactions": "正在更新交易"
   },
+  "findLogHeader": {
+    "title": "发现记录（{{total}}）",
+    "titleCapped": "发现记录（{{total}}+）"
+  },
   "huntCreateScreen": {
     "ok": "好的",
     "cancel": "取消",

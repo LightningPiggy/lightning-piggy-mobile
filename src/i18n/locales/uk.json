@@ -784,6 +784,10 @@
     "addWalletText": "+ Додати гаманець",
     "updatingTransactions": "Оновлення транзакцій"
   },
+  "findLogHeader": {
+    "title": "Журнал знахідок ({{total}})",
+    "titleCapped": "Журнал знахідок ({{total}}+)"
+  },
   "huntCreateScreen": {
     "ok": "OK",
     "cancel": "Скасувати",

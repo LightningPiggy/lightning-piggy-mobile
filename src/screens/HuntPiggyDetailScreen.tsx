@@ -71,6 +71,7 @@ import { stripImageMetadata, uploadImage } from '../services/imageUploadService'
 import { lastClaimForPiggyId } from '../services/claimHistoryService';
 import NfcReadSheet from '../components/NfcReadSheet';
 import { useFoundLogIngest } from '../hooks/useFoundLogIngest';
+import FindLogHeader from '../components/FindLogHeader';
 
 // Composite nav type — needed so we can `navigate('Conversation', …)`
 // when the hider's profile sheet's Message action is tapped. The
@@ -600,7 +601,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
               onPressProfile={openProfileSheet}
             />
 
-            <Text style={styles.sectionLabel}>Find log ({sortedLogs.length})</Text>
+            <FindLogHeader count={sortedLogs.length} style={styles.sectionLabel} />
             {sortedLogs.length === 0 ? (
               <Text style={styles.subtle}>
                 No finds logged yet. {canLog ? 'Be the first to drop a log entry!' : ''}
@@ -710,10 +711,9 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         onViewFullProfile={contactSheet.onViewFullProfile}
       />
 
-      {/* In-app NIP-57 zap on a specific find-log. zapEventId scopes
-          the 9734 to the log so the resulting 9735 receipt's `e` tag
-          feeds back into subscribeFindLogZaps and bumps the row's
-          "N zapped" pill in near-realtime. */}
+      {/* In-app NIP-57 zap on a specific find-log. zapEventId scopes the 9734
+          to the log so the 9735 receipt's `e` tag feeds back into
+          subscribeFindLogZaps and bumps the row's "N zapped" pill live. */}
       <SendSheet
         visible={zapTarget !== null}
         onClose={() => setZapTarget(null)}

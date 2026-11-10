@@ -195,4 +195,26 @@ describe('useCoalescedMap', () => {
     expect(result.current.map.has('a')).toBe(false);
     expect([...result.current.map.keys()]).toEqual(['b', 'c']);
   });
+
+  it('evictBy keeps the highest-ranked entries, not the latest to arrive (#1789)', () => {
+    // Two relays answering newest-first, interleaved: today's finds from the
+    // first must survive older ones that arrive later.
+    const { result } = renderHook(() =>
+      useCoalescedMap<{ createdAt: number }>({
+        maxSize: 2,
+        evictBy: (v) => v.createdAt,
+      }),
+    );
+    act(() => {
+      result.current.enqueue('new1', { createdAt: 300 });
+      result.current.enqueue('new2', { createdAt: 200 });
+      result.current.flush();
+    });
+    act(() => {
+      result.current.enqueue('old1', { createdAt: 50 });
+      result.current.enqueue('mid', { createdAt: 250 });
+      result.current.flush();
+    });
+    expect([...result.current.map.keys()].sort()).toEqual(['mid', 'new1']);
+  });
 });

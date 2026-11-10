@@ -15,6 +15,7 @@ import {
   type ParsedFoundLog,
 } from './nostrPlacesService';
 import { isDevLeftover } from './devEventDenylist';
+import { reqLabel } from './relayReqBudget';
 import { notifyOwnCachesChanged } from './ownCachesBus';
 
 /** Structural shape of an event as returned by NostrContext.signEvent —
@@ -241,42 +242,139 @@ export const subscribeRecentFoundLogs = (
   return () => sub.close();
 };
 
+// Backfill caps for the per-cache and per-author subscriptions below (#1789).
+// Sized well above a real cache or finder so normal data is unchanged; they
+// stop a busy (or hostile) relay from streaming an unbounded history that
+// the client then verifies and parses event by event. Relays return the
+// newest events first, so anything cut is the oldest.
+export const CACHE_LOG_LIMIT = 500;
+export const AUTHOR_LOG_LIMIT = 500;
+// Largest `authors` array sent in one REQ. The friends-of-friends trust set
+// runs to 2,000 pubkeys (~134 KB as one REQ), over nos.lol's advertised
+// 128 KB `max_message_length`; 500 hex pubkeys is ~34 KB.
+export const AUTHORS_PER_REQ = 500;
+// Relays accept events dated a little ahead of their clock; anything further
+// out is a bad clock or a deliberate attempt to sort first.
+const MAX_FUTURE_SKEW_SECS = 15 * 60;
+
+/** True when a `created_at` (seconds) is more than 15 minutes in the future. */
+export const isFutureDated = (createdAt: number, nowMs: number = Date.now()): boolean =>
+  createdAt > Math.floor(nowMs / 1000) + MAX_FUTURE_SKEW_SECS;
+
+// No `since` on the per-cache and per-author filters: a cache's detail screen
+// shows its whole log history and My Piglets shows a person's whole find
+// history, however old, so a time window would hide real finds.
 export const subscribeFoundLogs = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
   relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
+  limit: number = CACHE_LOG_LIMIT,
 ): (() => void) => {
-  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], '#a': [cacheCoord] };
+  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], '#a': [cacheCoord], limit };
   const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
   });
   return () => sub.close();
 };
 
-// Subscribe to every kind 7516 found-log published by a given author
-// (set). MyPigletsScreen uses this twice: once with `[myPubkey]` for
-// the "Found" section and once with the WoT-trusted set (minus me) for
-// "Friends' finds". Empty list short-circuits — relays reject empty
-// `authors` filters as a free-firehose request.
+// Subscribe (live) to every kind 7516 found-log published by a small author
+// set — MyPigletsScreen's "Found" section passes `[myPubkey]`. Large sets
+// (the trust set) go through `fetchFoundLogsByAuthors` instead. Empty list
+// short-circuits — relays reject empty `authors` filters as a free-firehose
+// request.
 export const subscribeFoundLogsByAuthors = (
   authors: string[],
   onEvent: (event: VerifiedEvent) => void,
   relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
+  limit: number = AUTHOR_LOG_LIMIT,
 ): (() => void) => {
   if (authors.length === 0) return () => {};
-  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], authors };
+  const filter: Filter = { kinds: [GC_FOUND_LOG_KIND], authors, limit };
   const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
   });
   return () => sub.close();
+};
+
+/**
+ * One-shot fetch of the newest `limit` found-logs by a possibly large author
+ * set (My Piglets' "Friends' finds", up to 2,000 friends of friends). #1789:
+ *
+ * - **One-shot**: each relay's REQ-budget slot is released at EOSE, so a list
+ *   section never holds live slots that the inbox, group and cache-notification
+ *   subscriptions need (see TROUBLESHOOTING.adoc, #1399).
+ * - **Sequential chunks** of AUTHORS_PER_REQ authors, so no REQ exceeds a
+ *   relay's message-size cap, and each relay holds at most ONE slot for this
+ *   fetch at any moment.
+ * - **Tightening `since`**: once `limit` logs are in hand, later chunks only
+ *   ask for logs at or after the `limit`-th newest so far — anything older
+ *   can't make the cut. For ≤ AUTHORS_PER_REQ authors this is one REQ per
+ *   relay returning at most `limit` events.
+ *
+ * Returns a closer; it cancels the chunk in flight and any not yet sent.
+ */
+export const fetchFoundLogsByAuthors = (
+  authors: string[],
+  onEvent: (event: VerifiedEvent) => void,
+  relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
+  limit: number = AUTHOR_LOG_LIMIT,
+): (() => void) => {
+  const targets = withGcRelays(relays);
+  const seenCreatedAt: number[] = [];
+  let current: { close: () => void } | null = null;
+  let cancelled = false;
+  const runChunk = (start: number): void => {
+    if (cancelled || start >= authors.length) return;
+    const floor =
+      seenCreatedAt.length >= limit
+        ? [...seenCreatedAt].sort((a, b) => b - a)[limit - 1]
+        : undefined;
+    const filter: Filter = {
+      kinds: [GC_FOUND_LOG_KIND],
+      authors: authors.slice(start, start + AUTHORS_PER_REQ),
+      limit,
+      ...(floor !== undefined ? { since: floor } : {}),
+    };
+    let done = false;
+    const handle = pool.subscribeMap(
+      targets.map((url) => ({ url, filter })),
+      {
+        reqOptions: { mode: 'oneshot', label: reqLabel([filter], 'oneshot') },
+        onevent: (e: NostrEvent) => {
+          if (cancelled) return;
+          // A future-dated log must not push the floor forward and blank the
+          // later chunks, so it doesn't count toward it (it's still delivered).
+          if (!isFutureDated(e.created_at)) seenCreatedAt.push(e.created_at);
+          onEvent(e as VerifiedEvent);
+        },
+        // Fires once every relay has reached EOSE, failed or timed out.
+        onclose: () => {
+          if (done) return;
+          done = true;
+          current = null;
+          runChunk(start + AUTHORS_PER_REQ);
+        },
+      },
+    );
+    // The pool can close synchronously inside subscribeMap (budget disposed,
+    // or the REQ failed to start), having already started the next chunk —
+    // don't overwrite that chunk's handle with this dead one.
+    if (!done) current = handle;
+  };
+  runChunk(0);
+  return () => {
+    cancelled = true;
+    current?.close();
+  };
 };
 
 export const subscribeComments = (
   cacheCoord: string,
   onEvent: (event: VerifiedEvent) => void,
   relays: string[] = enabledAppRelays('geocache', GC_RELAYS),
+  limit: number = CACHE_LOG_LIMIT,
 ): (() => void) => {
-  const filter: Filter = { kinds: [GC_COMMENT_KIND], '#A': [cacheCoord] };
+  const filter: Filter = { kinds: [GC_COMMENT_KIND], '#A': [cacheCoord], limit };
   const sub = pool.subscribeMany(withGcRelays(relays), filter, {
     onevent: (e: NostrEvent) => onEvent(e as VerifiedEvent),
   });
