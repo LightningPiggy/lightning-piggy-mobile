@@ -19,6 +19,8 @@ import type { Palette } from '../styles/palettes';
 import type { WalletType } from '../types/wallet';
 import type { CoinosRecoveryInfo } from '../services/walletStorageService';
 import { hostFromBaseUrl } from '../services/coinosService';
+import { canCopySensitiveText } from '../services/sensitiveClipboard';
+import { useWalletSecretGate } from '../hooks/useWalletSecretGate';
 import type { WalletSettingsSheetStyles } from '../styles/WalletSettingsSheet.styles';
 
 interface Props {
@@ -26,6 +28,11 @@ interface Props {
   colors: Palette;
   t: ReturnType<typeof useTranslation>;
   walletType: WalletType;
+  // Scopes the secret unlock to this wallet (#1784).
+  walletId: string;
+  // False while the screen behind the sheet is unfocused (e.g. after Share
+  // navigates to a conversation): secrets re-lock and capture is released.
+  screenFocused: boolean;
   // On-chain. `undefined` = still loading, `null` = loaded but absent, `string` = ready.
   xpubDisplay: string | null | undefined;
   onCopyXpub: () => void;
@@ -51,13 +58,17 @@ interface Props {
  * relay URL, the full NWC connection string (masked, with QR + copy),
  * the CoinOS managed-wallet recovery credentials, the migrate-to-self-
  * custody affordance, and (for on-chain wallets) the extended public key.
- * Pure presentation: all secret-bearing state lives in the parent sheet.
+ * The parent sheet holds the secrets and the reveal toggles; this tab gates
+ * every reveal / QR / copy of a secret behind device authentication and
+ * blocks screen capture while it's mounted (`useWalletSecretGate`, #1784).
  */
 const WalletConnectionTab: React.FC<Props> = ({
   styles,
   colors,
   t,
   walletType,
+  walletId,
+  screenFocused,
   xpubDisplay,
   onCopyXpub,
   relayUrl,
@@ -85,8 +96,29 @@ const WalletConnectionTab: React.FC<Props> = ({
   const hasContent =
     (walletType === 'onchain' && (xpubLoading || !!xpubDisplay)) || walletType === 'nwc';
 
+  const showsNwc = walletType === 'nwc' && !!nwcConnection;
+  const gate = useWalletSecretGate(screenFocused && (showsNwc || !!coinosRecovery), walletId);
+  // A toggle the parent left on still shows nothing until this visit is unlocked.
+  const nwcShown = nwcRevealed && gate.unlocked;
+  const qrShown = nwcQrShown && gate.unlocked;
+  const passwordShown = passwordRevealed && gate.unlocked;
+  const canCopySecret = canCopySensitiveText();
+
+  const toggleSecret = async (shown: boolean, flag: boolean, onToggle: () => void) => {
+    if (shown) return onToggle();
+    if ((await gate.reveal()) && !flag) onToggle();
+  };
+  const copySecret = async (secret: string, copiedMessage: string) => {
+    if (await gate.copy(secret)) Alert.alert(t('walletSettingsSheet.copiedTitle'), copiedMessage);
+  };
+
   return (
     <View style={styles.tabContent}>
+      {gate.authFailed && (
+        <Text style={styles.recoveryErrorText} testID="wallet-secret-auth-failed">
+          {t('walletSettingsSheet.secretAuthFailed')}
+        </Text>
+      )}
       {/* CoinOS managed-wallet recovery callout (#287). Visually prominent
           block — pink-bordered surface with shield-alert badge — so the
           recovery credentials read as a "save this now" affordance. */}
@@ -136,13 +168,17 @@ const WalletConnectionTab: React.FC<Props> = ({
             testID="wallet-recovery-password-row"
           />
           <View style={styles.credentialRow}>
-            <Text style={styles.credentialText} selectable={passwordRevealed}>
-              {passwordRevealed ? coinosRecovery.password : '••••••••••••'}
+            {/* Never selectable: long-press Copy would bypass the secret clipboard. */}
+            <Text style={styles.credentialText}>
+              {passwordShown ? coinosRecovery.password : '••••••••••••'}
             </Text>
             <TouchableOpacity
-              onPress={onTogglePasswordRevealed}
+              onPress={() =>
+                toggleSecret(passwordShown, passwordRevealed, onTogglePasswordRevealed)
+              }
+              disabled={gate.busy}
               accessibilityLabel={
-                passwordRevealed
+                passwordShown
                   ? t('walletSettingsSheet.hideCoinosPassword')
                   : t('walletSettingsSheet.revealCoinosPassword')
               }
@@ -150,27 +186,26 @@ const WalletConnectionTab: React.FC<Props> = ({
               style={styles.credentialAction}
               hitSlop={8}
             >
-              {passwordRevealed ? (
+              {passwordShown ? (
                 <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
               ) : (
                 <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
               )}
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={async () => {
-                await Clipboard.setStringAsync(coinosRecovery.password);
-                Alert.alert(
-                  t('walletSettingsSheet.copiedTitle'),
-                  t('walletSettingsSheet.coinosPasswordCopied'),
-                );
-              }}
-              accessibilityLabel={t('walletSettingsSheet.copyCoinosPassword')}
-              testID="settings-coinos-copy-password"
-              style={styles.credentialAction}
-              hitSlop={8}
-            >
-              <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
-            </TouchableOpacity>
+            {canCopySecret && (
+              <TouchableOpacity
+                onPress={() =>
+                  copySecret(coinosRecovery.password, t('walletSettingsSheet.coinosPasswordCopied'))
+                }
+                disabled={gate.busy}
+                accessibilityLabel={t('walletSettingsSheet.copyCoinosPassword')}
+                testID="settings-coinos-copy-password"
+                style={styles.credentialAction}
+                hitSlop={8}
+              >
+                <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* NWC connection isn't repeated inside the CoinOS callout — the
@@ -200,7 +235,8 @@ const WalletConnectionTab: React.FC<Props> = ({
           toggle by default — the secret in the URL grants wallet access.
           Copy and QR are separate affordances so paste into a password
           manager / scan from another device both work without needing to
-          reveal the secret first. Applies to every NWC wallet. */}
+          reveal the secret first. Applies to every NWC wallet. All three
+          pass the device-auth gate first (#1784). */}
       {walletType === 'nwc' && nwcConnection && (
         <>
           <SettingsRow
@@ -212,17 +248,15 @@ const WalletConnectionTab: React.FC<Props> = ({
             details={t('walletSettingsSheet.nwcConnectionHint')}
           />
           <View style={styles.nwcRow}>
-            <Text
-              style={styles.nwcRowText}
-              selectable={nwcRevealed}
-              numberOfLines={nwcRevealed ? undefined : 1}
-            >
-              {nwcRevealed ? nwcConnection : '••••••••••••'}
+            {/* Never selectable: long-press Copy would bypass the secret clipboard. */}
+            <Text style={styles.nwcRowText} numberOfLines={nwcShown ? undefined : 1}>
+              {nwcShown ? nwcConnection : '••••••••••••'}
             </Text>
             <TouchableOpacity
-              onPress={onToggleNwcRevealed}
+              onPress={() => toggleSecret(nwcShown, nwcRevealed, onToggleNwcRevealed)}
+              disabled={gate.busy}
               accessibilityLabel={
-                nwcRevealed
+                nwcShown
                   ? t('walletSettingsSheet.hideNwcConnection')
                   : t('walletSettingsSheet.revealNwcConnection')
               }
@@ -230,16 +264,17 @@ const WalletConnectionTab: React.FC<Props> = ({
               style={styles.credentialAction}
               hitSlop={8}
             >
-              {nwcRevealed ? (
+              {nwcShown ? (
                 <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
               ) : (
                 <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
               )}
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={onToggleNwcQr}
+              onPress={() => toggleSecret(qrShown, nwcQrShown, onToggleNwcQr)}
+              disabled={gate.busy}
               accessibilityLabel={
-                nwcQrShown ? t('walletSettingsSheet.hideNwcQr') : t('walletSettingsSheet.showNwcQr')
+                qrShown ? t('walletSettingsSheet.hideNwcQr') : t('walletSettingsSheet.showNwcQr')
               }
               testID="settings-nwc-qr"
               style={styles.credentialAction}
@@ -247,24 +282,23 @@ const WalletConnectionTab: React.FC<Props> = ({
             >
               <QrCodeIcon size={18} color={colors.textSupplementary} strokeWidth={2} />
             </TouchableOpacity>
-            <TouchableOpacity
-              onPress={async () => {
-                await Clipboard.setStringAsync(nwcConnection);
-                Alert.alert(
-                  t('walletSettingsSheet.copiedTitle'),
-                  t('walletSettingsSheet.nwcConnectionCopied'),
-                );
-              }}
-              accessibilityLabel={t('walletSettingsSheet.copyNwcConnection')}
-              testID="settings-nwc-copy"
-              style={styles.credentialAction}
-              hitSlop={8}
-            >
-              <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
-            </TouchableOpacity>
+            {canCopySecret && (
+              <TouchableOpacity
+                onPress={() =>
+                  copySecret(nwcConnection, t('walletSettingsSheet.nwcConnectionCopied'))
+                }
+                disabled={gate.busy}
+                accessibilityLabel={t('walletSettingsSheet.copyNwcConnection')}
+                testID="settings-nwc-copy"
+                style={styles.credentialAction}
+                hitSlop={8}
+              >
+                <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+              </TouchableOpacity>
+            )}
           </View>
           <Text style={styles.hintText}>{t('settingsPages.connectionWarning')}</Text>
-          {nwcQrShown && (
+          {qrShown && (
             <View style={styles.qrPanel} testID="settings-nwc-qr-panel">
               <QRCode
                 value={nwcConnection}

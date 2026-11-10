@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import * as Clipboard from 'expo-clipboard';
@@ -7,6 +7,9 @@ import { Copy, Eye, EyeOff, ShieldAlert } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
+import { createCoinosRecoverySheetStyles } from '../styles/CoinosRecoverySheet.styles';
+import { canCopySensitiveText, copySensitiveText } from '../services/sensitiveClipboard';
+import { useScreenCaptureBlock } from '../hooks/useScreenCaptureBlock';
 
 export interface CoinosRecoveryDetails {
   baseUrl: string;
@@ -51,7 +54,7 @@ const CoinosRecoverySheet: React.FC<Props> = ({
 }) => {
   const colors = useThemeColors();
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createCoinosRecoverySheetStyles(colors), [colors]);
   const ref = useRef<BottomSheetModal>(null);
   // Content-height only — matches the rest of the app's sheet pattern.
   const [copyHint, setCopyHint] = useState<string | null>(null);
@@ -60,6 +63,10 @@ const CoinosRecoverySheet: React.FC<Props> = ({
   // setState after unmount and React warns. Lives in a ref so
   // copyToClipboard can read/write the same handle across calls.
   const copyHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The password and NWC string are on this sheet: block screenshots /
+  // recording / the recents thumbnail for as long as it's showing (#1784).
+  useScreenCaptureBlock('coinos-recovery', visible && !!details);
+  const canCopySecret = canCopySensitiveText();
 
   useEffect(() => {
     if (visible && details) ref.current?.present();
@@ -97,8 +104,15 @@ const CoinosRecoverySheet: React.FC<Props> = ({
     [requireAcknowledge],
   );
 
-  const copyToClipboard = useCallback(async (label: string, value: string) => {
-    await Clipboard.setStringAsync(value);
+  // Secrets (password, NWC string) go through the secret clipboard: marked
+  // sensitive, local-only on iOS and cleared after a short window (#1784).
+  const copyToClipboard = useCallback(async (label: string, value: string, secret = false) => {
+    try {
+      if (secret) await copySensitiveText(value);
+      else await Clipboard.setStringAsync(value);
+    } catch {
+      return;
+    }
     setCopyHint(label);
     if (copyHintTimerRef.current) clearTimeout(copyHintTimerRef.current);
     copyHintTimerRef.current = setTimeout(() => {
@@ -155,7 +169,12 @@ const CoinosRecoverySheet: React.FC<Props> = ({
         <RecoveryRow
           label={t('coinosRecoverySheet.passwordLabel')}
           value={details.password}
-          onCopy={() => copyToClipboard(t('coinosRecoverySheet.passwordLabel'), details.password)}
+          onCopy={
+            canCopySecret
+              ? () =>
+                  copyToClipboard(t('coinosRecoverySheet.passwordLabel'), details.password, true)
+              : undefined
+          }
           colors={colors}
           monospace
           maskable
@@ -164,7 +183,11 @@ const CoinosRecoverySheet: React.FC<Props> = ({
         <RecoveryRow
           label={t('coinosRecoverySheet.nwcLabel')}
           value={details.nwc}
-          onCopy={() => copyToClipboard(t('coinosRecoverySheet.nwcCopyLabel'), details.nwc)}
+          onCopy={
+            canCopySecret
+              ? () => copyToClipboard(t('coinosRecoverySheet.nwcCopyLabel'), details.nwc, true)
+              : undefined
+          }
           colors={colors}
           monospace
           // The NWC URL is long; the row stretches and wraps but copy
@@ -218,7 +241,8 @@ const CoinosRecoverySheet: React.FC<Props> = ({
 const RecoveryRow: React.FC<{
   label: string;
   value: string;
-  onCopy: () => void;
+  /** Omitted for a secret on a build without the secret clipboard. */
+  onCopy?: () => void;
   colors: Palette;
   monospace?: boolean;
   truncate?: boolean;
@@ -229,7 +253,7 @@ const RecoveryRow: React.FC<{
   testID?: string;
 }> = ({ label, value, onCopy, colors, monospace, truncate, maskable, testID }) => {
   const t = useTranslation();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useMemo(() => createCoinosRecoverySheetStyles(colors), [colors]);
   const [revealed, setRevealed] = useState(false);
   const shown = maskable && !revealed ? '••••••••••••' : value;
   return (
@@ -262,109 +286,20 @@ const RecoveryRow: React.FC<{
             )}
           </TouchableOpacity>
         )}
-        <TouchableOpacity
-          onPress={onCopy}
-          style={styles.copyButton}
-          accessibilityLabel={t('coinosRecoverySheet.copyField', { label })}
-          testID={testID ? `${testID}-copy` : undefined}
-          hitSlop={8}
-        >
-          <Copy size={18} color={colors.brandPink} strokeWidth={2.5} />
-        </TouchableOpacity>
+        {onCopy && (
+          <TouchableOpacity
+            onPress={onCopy}
+            style={styles.copyButton}
+            accessibilityLabel={t('coinosRecoverySheet.copyField', { label })}
+            testID={testID ? `${testID}-copy` : undefined}
+            hitSlop={8}
+          >
+            <Copy size={18} color={colors.brandPink} strokeWidth={2.5} />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
 };
-
-const createStyles = (colors: Palette) =>
-  StyleSheet.create({
-    sheetBackground: {
-      backgroundColor: colors.surface,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
-    },
-    handle: {
-      backgroundColor: colors.divider,
-      width: 40,
-    },
-    content: {
-      padding: 24,
-      paddingBottom: 40,
-      gap: 14,
-      alignItems: 'stretch',
-    },
-    iconBubble: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: colors.brandPink,
-      alignItems: 'center',
-      justifyContent: 'center',
-      alignSelf: 'center',
-      marginBottom: 4,
-    },
-    title: {
-      fontSize: 22,
-      fontWeight: '700',
-      color: colors.textHeader,
-      textAlign: 'center',
-    },
-    subtitle: {
-      fontSize: 14,
-      color: colors.textSupplementary,
-      lineHeight: 20,
-      textAlign: 'center',
-      marginBottom: 8,
-    },
-    row: {
-      backgroundColor: colors.background,
-      borderRadius: 12,
-      padding: 14,
-      gap: 6,
-    },
-    rowLabel: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: colors.textSupplementary,
-      letterSpacing: 0.5,
-      textTransform: 'uppercase',
-    },
-    rowValueWrap: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 12,
-    },
-    rowValue: {
-      flex: 1,
-      fontSize: 14,
-      color: colors.textBody,
-    },
-    mono: {
-      fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-      fontSize: 12,
-    },
-    copyButton: {
-      paddingTop: 2,
-    },
-    copyConfirm: {
-      fontSize: 13,
-      color: colors.green,
-      textAlign: 'center',
-      fontWeight: '600',
-    },
-    primaryButton: {
-      marginTop: 16,
-      backgroundColor: colors.brandPink,
-      height: 52,
-      borderRadius: 12,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    primaryButtonText: {
-      color: colors.white,
-      fontSize: 16,
-      fontWeight: '700',
-    },
-  });
 
 export default CoinosRecoverySheet;
