@@ -1993,6 +1993,8 @@
     "invalidInvoiceDismiss": "ठीक है",
     "invalidInvoiceTitle": "अमान्य इनवॉइस",
     "invalidInvoiceBody": "यह इनवॉइस मान्य नहीं है या अधूरी है — इसे जाँचें और फिर से कोशिश करें।",
+    "unrecognisedInputTitle": "इसका भुगतान नहीं हो सकता",
+    "unrecognisedInputBody": "यह Lightning इनवॉइस, Lightning ऐड्रेस या Bitcoin ऐड्रेस नहीं है — जाँचें और फिर से कोशिश करें।",
     "offerUnsupportedTitle": "Lightning ऑफ़र अभी सपोर्ट नहीं हैं",
     "offerUnsupportedBody": "यह एक Lightning ऑफ़र (BOLT12) है, जिसका पेमेंट Lightning Piggy अभी नहीं कर सकता। इसकी जगह Lightning इनवॉइस या Lightning ऐड्रेस माँगें।",
     "walletFallback": "वॉलेट",

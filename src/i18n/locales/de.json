@@ -1993,6 +1993,8 @@
     "invalidInvoiceDismiss": "OK",
     "invalidInvoiceTitle": "Ungültige Rechnung",
     "invalidInvoiceBody": "Diese Rechnung ist ungültig oder unvollständig – prüfe sie und versuche es erneut.",
+    "unrecognisedInputTitle": "Das kann nicht bezahlt werden",
+    "unrecognisedInputBody": "Das ist weder eine Lightning-Rechnung noch eine Lightning-Adresse oder Bitcoin-Adresse – prüfe es und versuche es erneut.",
     "offerUnsupportedTitle": "Lightning-Offers werden noch nicht unterstützt",
     "offerUnsupportedBody": "Das ist ein Lightning-Offer (BOLT12), das Lightning Piggy noch nicht bezahlen kann. Bitte stattdessen um eine Lightning-Rechnung oder Lightning-Adresse.",
     "walletFallback": "Wallet",

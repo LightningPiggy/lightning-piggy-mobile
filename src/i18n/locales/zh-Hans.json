@@ -1993,6 +1993,8 @@
     "invalidInvoiceDismiss": "好的",
     "invalidInvoiceTitle": "发票无效",
     "invalidInvoiceBody": "此发票无效或不完整——请检查后重试。",
+    "unrecognisedInputTitle": "无法支付",
+    "unrecognisedInputBody": "这不是Lightning发票、Lightning地址或Bitcoin地址——请检查后重试。",
     "offerUnsupportedTitle": "暂不支持Lightning收款提议",
     "offerUnsupportedBody": "这是一个Lightning收款提议（BOLT12），Lightning Piggy暂时无法支付。请改为索取Lightning发票或Lightning地址。",
     "walletFallback": "钱包",
