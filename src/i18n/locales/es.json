@@ -768,6 +768,7 @@
     "receive": "Recibir",
     "transfer": "Mover",
     "send": "Enviar",
+    "watchOnlySend": "Esta es una cartera de solo lectura. Puede recibir, pero no enviar.",
     "addWallet": "Añadir una cartera",
     "addWalletText": "+ Añadir una cartera",
     "updatingTransactions": "Actualizando transacciones"

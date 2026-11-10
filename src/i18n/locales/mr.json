@@ -768,6 +768,7 @@
     "receive": "मिळवा",
     "transfer": "ट्रान्सफर",
     "send": "पाठवा",
+    "watchOnlySend": "हे वॉच-ओन्ली वॉलेट आहे. ते प्राप्त करू शकते, पण पाठवू शकत नाही.",
     "addWallet": "वॉलेट जोडा",
     "addWalletText": "+ वॉलेट जोडा",
     "updatingTransactions": "व्यवहार अपडेट करत आहे"
