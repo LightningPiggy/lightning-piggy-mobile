@@ -29,6 +29,10 @@ export type GroupRouteResult =
   // OS notification (#279). Only live deliveries notify — see nostrLiveDmSub.
   | { kind: 'routed'; group: Group; message: GroupMessage }
   | { kind: 'group-no-match' } // group-shaped but no matching local group
+  // A stranger's rumor would start a room the viewer isn't in (#1830). Never
+  // a DM fallthrough: the live caller holds it while follows load (and
+  // re-routes it if the sender turns out to be followed), else drops it.
+  | { kind: 'group-held'; senderPubkey: string }
   | { kind: 'not-group'; deferredGroupRumor?: DecodedRumor }; // DM fallthrough, or pending trust
 
 /**
@@ -70,6 +74,13 @@ export async function tryRouteGroupRumor(
       kind: 'not-group',
       deferredGroupRumor: rumor,
     };
+  }
+  // The same gate for a larger room: only someone the viewer follows (or the
+  // viewer, from another device) starts one. A known room needs no check —
+  // its members keep reaching the viewer whatever the tier.
+  const sender = rumor.pubkey.toLowerCase();
+  if (!group && !isTwoParty && !cls.fromMe && !passesFollowGate(sender)) {
+    return { kind: 'group-held', senderPubkey: sender };
   }
   if (shouldAbort()) return { kind: 'group-no-match' };
   // Always run the synthetic-reconcile path when the matched group is

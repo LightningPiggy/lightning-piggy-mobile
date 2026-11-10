@@ -55,6 +55,7 @@ import { useNip171Groups } from './useNip171Groups';
 import { useMarmotGroups } from './useMarmotGroups';
 import { isRemoteSigner } from '../utils/marmotInviteNotice';
 import { useStableRelayList } from '../hooks/useStableRelayList';
+import { useGroupCreatorGate } from './heldGroupStates';
 
 const FOLLOWING_ONLY_KEY_BASE = 'groups_following_only';
 // One-shot migration marker keyed off the legacy followingOnly → wotTier
@@ -333,6 +334,8 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // deprecated `followingOnly` derivation below) don't all need
   // changing this turn; it now simply mirrors `wotTier`.
   const effectiveWotTier: WotTier = wotTier;
+  // Who may start a group the viewer isn't in yet (#1830).
+  const creatorGate = useGroupCreatorGate(pubkey, contacts, effectiveWotTier);
 
   // Deprecated boolean view of the tier — see the interface docstring.
   // Kept for any out-of-tree consumer; in-tree consumers should read
@@ -781,16 +784,15 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       await persist((curr) => {
         const idx = curr.findIndex((g) => g.id === input.groupId);
         if (idx === -1) {
-          // New group: persist regardless of friend-graph here. Anti-spam
-          // is enforced at *render time* by the `visibleGroups` filter
-          // (which requires at least one OTHER member to be followed).
-          // Doing the check at render time means we don't have to race
-          // the contact-list refresh — kind:30200 events frequently land
-          // BEFORE the kind:3 fetch that populates `followPubkeys`, so a
-          // strict drop here loses real groups to a transient empty
-          // follow set. Storage cost is bounded by the relay subscription
-          // (`#p`-tagged at the viewer) so a spammer can only inflate
-          // disk if they specifically address the viewer.
+          // New group: only from a creator the follow gate admits (#1830).
+          // kind:30200 often lands BEFORE the kind:3 that fills the follow
+          // set, so an untrusted creator is held (never persisted) and
+          // re-tried as follows load — see heldGroupStates. `visibleGroups`
+          // still hides a group with no trusted member.
+          if (!creatorGate.admits(senderLc)) {
+            creatorGate.held.hold(input);
+            return curr;
+          }
           const group: Group = {
             id: input.groupId,
             name: input.name,
@@ -834,13 +836,16 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       return applied;
     },
-    [persist, pubkey],
+    [persist, pubkey, creatorGate],
   );
 
-  // Keep the reconciler ref pointing at the latest closure.
+  // Keep the reconciler ref pointing at the latest closure, and re-try held
+  // new-group events whose creator the (newly loaded) follows now admit.
   useEffect(() => {
     reconcilerRef.current = reconcileFromGroupStateEvent;
-  }, [reconcileFromGroupStateEvent]);
+    for (const input of creatorGate.held.release(creatorGate.admits))
+      void reconcileFromGroupStateEvent(input).catch(() => undefined);
+  }, [reconcileFromGroupStateEvent, creatorGate]);
 
   // Subscribe to inbound kind-30200 events that p-tag the current viewer
   // so that groups created by other members appear automatically. Filters

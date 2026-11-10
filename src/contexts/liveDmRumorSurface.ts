@@ -191,6 +191,29 @@ export function createLiveRumorSurfacer(
       abandon();
       return;
     }
+    if (routeResult.kind === 'group-held') {
+      // A stranger starting a room (#1830): nothing stored, no alert. While
+      // follows load, hold it like a two-party room chat; the replay re-routes
+      // it once the sender is confirmed followed, and the alert fires then.
+      if (isFollowHydrated()) nothingToSee();
+      else {
+        followGateBuffer.defer({
+          partnerPubkey: routeResult.senderPubkey,
+          groupRumor: rumor,
+          entry: {
+            id: wrapId,
+            partnerPubkey: routeResult.senderPubkey,
+            fromMe: false,
+            createdAt: rumor.created_at,
+            text: dmRowPreview(textForRumor(rumor), rumor.kind, getAppFormatLocale()),
+            wireKind: rumor.kind,
+          },
+          onEvict: () => releaseWrapClaim(wrapId),
+        });
+        if (placeholder) noteContentlessWrapAlert(wrapId);
+      }
+      return;
+    }
     if (routeResult.kind !== 'not-group') {
       // OS notification (#279) — fired HERE (live path) not inside
       // tryRouteGroupRumor (which also runs on batch refresh). Only for
