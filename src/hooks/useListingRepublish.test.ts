@@ -5,6 +5,7 @@ import { Alert } from '../components/BrandedAlert';
 import { Toast } from '../components/BrandedToast';
 
 let mockFocused = true;
+let clock: jest.SpyInstance | undefined;
 
 jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (effect: () => void | (() => void)) =>
@@ -34,6 +35,10 @@ beforeEach(() => {
     .mocked(jest.requireMock('../services/listingRepublish').newestSignedListing)
     .mockReturnValue(null);
   mockFocused = true;
+});
+afterEach(() => {
+  clock?.mockRestore();
+  clock = undefined;
 });
 
 it('waits for confirmation then passes the complete stored event to re-signing', async () => {
@@ -136,6 +141,10 @@ it('opens the progress sheet before relays answer, then fills in results', async
         finish = () => resolve([{ url: 'wss://example.com', status: 'accepted' }]);
       }),
   );
+  // run() yields a frame (requestAnimationFrame, a real timer) once 4 ms of
+  // performance.now() has passed since the run started. On a slow runner that
+  // left `finished` false after act() (#1824), so freeze the work clock.
+  clock = jest.spyOn(performance, 'now').mockReturnValue(1_000);
   const { result } = renderHook(() => useListingRepublish([listing], jest.fn()));
   await act(async () => {});
   act(() => result.current.republishAll());
