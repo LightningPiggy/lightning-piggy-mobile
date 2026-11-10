@@ -21,6 +21,8 @@ describe('native CI input coverage', () => {
     'scripts/check-elf-alignment.sh',
     'scripts/check-elf-alignment.test.mjs',
     'vendor/native-sdk.tgz',
+    'targets/widget/WalletWidget.swift',
+    'targets/widget/expo-target.config.js',
     'assets/icon.png',
     'google-services.json',
     '.npmrc',

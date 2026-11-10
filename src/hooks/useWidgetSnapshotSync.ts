@@ -13,15 +13,16 @@ import { createWidgetSnapshotWriter } from '../services/widgetSnapshotWriter';
 import { refreshWalletWidgets } from '../widgets/refreshWalletWidgets';
 
 /**
- * Keeps the Android home-screen widget's snapshot (#1849) in step with the
+ * Keeps the home-screen widget's snapshot (#1849) in step with the
  * wallets: a debounced write whenever balances, connection, price, currency or
  * language change (or a balance re-fetch moves "Updated 14:32"), then a redraw
  * of any placed widget. Wipes the snapshot at once on sign-out and account
- * switch. Android only; no AppState handler and no per-event state — the
+ * switch. Android and iPhone (refreshWalletWidgets.ios.ts copies the snapshot
+ * into the App Group); no AppState handler and no per-event state — the
  * logic lives in services/widgetSnapshotWriter.ts.
  */
 export function useWidgetSnapshotSync(): void {
-  const enabled = Platform.OS === 'android';
+  const enabled = Platform.OS === 'android' || Platform.OS === 'ios';
   const { wallets, walletsHydrated, currency } = useWallet();
   const { btcPrice } = useWalletLive();
   const { locale } = useLocale();
