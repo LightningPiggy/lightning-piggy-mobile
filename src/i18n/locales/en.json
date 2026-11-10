@@ -3827,5 +3827,48 @@
     "removeAnyway": "Remove Anyway",
     "remove": "Remove",
     "cancel": "Cancel"
+  },
+  "widget": {
+    "receive": "Receive",
+    "send": "Send",
+    "scan": "Scan",
+    "satsUnit": "sats",
+    "unnamedWallet": "Wallet",
+    "empty": "Add a wallet in Lightning Piggy",
+    "openApp": "Open Lightning Piggy",
+    "fiat": "≈ {{fiat}}",
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "Updated {{time}}",
+    "yesterdayAt": "yesterday {{time}}",
+    "a11y": {
+      "balance": "{{name}}: {{amount}} sats",
+      "balanceHidden": "{{name}}: balance hidden",
+      "nextWallet": "Next wallet",
+      "previousWallet": "Previous wallet"
+    },
+    "picker": {
+      "cardLabel": "Wallet balance",
+      "cardDescription": "A wallet's balance, with Receive and Send",
+      "barLabel": "Wallet bar",
+      "barDescription": "A wallet's balance, with Receive, Scan and Send",
+      "buttonsLabel": "Wallet buttons",
+      "buttonsDescription": "A wallet's balance, with round Receive and Send buttons"
+    },
+    "config": {
+      "title": "Set up your widget",
+      "subtitle": "Choose the wallet it starts on and how it looks. Tap › on the widget to move to your next wallet.",
+      "walletSection": "Starting wallet",
+      "typeLightning": "Lightning",
+      "typeOnchain": "On-chain",
+      "noWallets": "Add a wallet in Lightning Piggy first. The widget will show it as soon as you do.",
+      "styleSection": "Style",
+      "stylePiggyPink": "Piggy pink",
+      "styleCleanWhite": "Clean white",
+      "styleNightGlass": "Night glass",
+      "hideBalance": "Hide balance",
+      "hideBalanceHint": "Shows dots instead of the amount",
+      "cancel": "Cancel",
+      "save": "Save"
+    }
   }
 }

@@ -3891,5 +3891,48 @@
     "removeAnyway": "Усе одно видалити",
     "remove": "Видалити",
     "cancel": "Скасувати"
+  },
+  "widget": {
+    "receive": "Отримати",
+    "send": "Надіслати",
+    "scan": "Сканувати",
+    "satsUnit": "sats",
+    "unnamedWallet": "Гаманець",
+    "empty": "Додайте гаманець у Lightning Piggy",
+    "openApp": "Відкрити Lightning Piggy",
+    "fiat": "≈ {{fiat}}",
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "Оновлено {{time}}",
+    "yesterdayAt": "вчора {{time}}",
+    "a11y": {
+      "balance": "{{name}}: {{amount}} sats",
+      "balanceHidden": "{{name}}: баланс приховано",
+      "nextWallet": "Наступний гаманець",
+      "previousWallet": "Попередній гаманець"
+    },
+    "picker": {
+      "cardLabel": "Баланс гаманця",
+      "cardDescription": "Баланс гаманця з кнопками «Отримати» та «Надіслати»",
+      "barLabel": "Панель гаманця",
+      "barDescription": "Баланс гаманця з кнопками «Отримати», «Сканувати» та «Надіслати»",
+      "buttonsLabel": "Кнопки гаманця",
+      "buttonsDescription": "Баланс гаманця з круглими кнопками «Отримати» та «Надіслати»"
+    },
+    "config": {
+      "title": "Налаштуйте віджет",
+      "subtitle": "Виберіть, з якого гаманця віджет починає і як він виглядає. Торкніться › на віджеті, щоб перейти до наступного гаманця.",
+      "walletSection": "Початковий гаманець",
+      "typeLightning": "Lightning",
+      "typeOnchain": "Ончейн",
+      "noWallets": "Спершу додайте гаманець у Lightning Piggy. Віджет покаже його, щойно ви це зробите.",
+      "styleSection": "Стиль",
+      "stylePiggyPink": "Рожевий Piggy",
+      "styleCleanWhite": "Чистий білий",
+      "styleNightGlass": "Нічне скло",
+      "hideBalance": "Приховати баланс",
+      "hideBalanceHint": "Показує крапки замість суми",
+      "cancel": "Скасувати",
+      "save": "Зберегти"
+    }
   }
 }

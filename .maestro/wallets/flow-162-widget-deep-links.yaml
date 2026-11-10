@@ -1,0 +1,56 @@
+appId: ${APP_ID || 'com.lightningpiggy.app.dev'}
+name: Home-screen widget deep links open Receive, Send and Scan (#1849)
+---
+# The Android widget's buttons open the app with
+#   lightningpiggy://receive|send|scan?wallet=<id>
+# This drives those links directly (no widget needed) and checks each lands on
+# Home with the right sheet open — Send on its Scan tab for `scan`.
+#
+# Requires a signed-in account with at least one Lightning wallet. A wallet id
+# is a random internal id, so by default the flow passes one that doesn't
+# exist, which must fall back to the current wallet. To check a real id, pass
+# it in:
+#   maestro test .maestro/wallets/flow-162-widget-deep-links.yaml -e WALLET_ID=<id>
+# Links only OPEN a screen: nothing is paid, and Send still needs the user.
+- launchApp:
+    permissions:
+      camera: allow
+- waitForAnimationToEnd:
+    timeout: 10000
+- runFlow: ../common/close-sheets.yaml
+
+# Receive
+- openLink: 'lightningpiggy://receive?wallet=${WALLET_ID || "not-a-wallet"}'
+- extendedWaitUntil:
+    visible: { id: 'receive-sheet' }
+    timeout: 15000
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Send (camera allowed, so it opens on Scan by default; either tab is fine)
+- openLink: 'lightningpiggy://send?wallet=${WALLET_ID || "not-a-wallet"}'
+- extendedWaitUntil:
+    visible: { id: 'send-tab-input' }
+    timeout: 15000
+- assertVisible: { id: 'send-tab-scan' }
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Scan: Send on its Scan tab
+- openLink: 'lightningpiggy://scan?wallet=${WALLET_ID || "not-a-wallet"}'
+- extendedWaitUntil:
+    visible: { id: 'send-tab-scan', selected: true }
+    timeout: 15000
+- back
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Cold start: the same link with the app closed still lands on Receive.
+- stopApp
+- openLink: 'lightningpiggy://receive?wallet=${WALLET_ID || "not-a-wallet"}'
+- extendedWaitUntil:
+    visible: { id: 'receive-sheet' }
+    timeout: 30000
+- back

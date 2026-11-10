@@ -26,10 +26,13 @@ import AppNavigator, {
   navigateToContactProfile,
   navigateToUnsupportedEntity,
   navigateToSend,
+  navigateToWidgetAction,
   navigateFromNotification,
   dismissNotificationsForFocusedRoute,
 } from './src/navigation/AppNavigator';
 import { openLnurlWithdrawSheet, LnurlWithdrawHost } from './src/components/LnurlWithdrawSheet';
+import { parseWidgetDeepLink } from './src/navigation/widgetDeepLinks';
+import WidgetSnapshotSync from './src/components/WidgetSnapshotSync';
 import { fetchProfile, decodeProfileReference } from './src/services/nostrService';
 import {
   isProfileReferenceUri,
@@ -313,6 +316,22 @@ export default function App() {
       // line limit but keep enough head + tail to identify them.
       const peek = trimmed.length > 96 ? trimmed.slice(0, 60) + '…' + trimmed.slice(-20) : trimmed;
       console.log(`[Link] received: ${peek}`);
+
+      // Home-screen widget buttons (#1849): `lightningpiggy://receive|send|scan
+      // ?wallet=<id>` open Home on that wallet with the sheet up. They only
+      // open a screen (no consent needed: nothing is fetched or paid). A cold
+      // start from the widget is the common case, so retry for up to ~10 s
+      // while the navigator mounts.
+      const widgetLink = parseWidgetDeepLink(trimmed);
+      if (widgetLink) {
+        const tryNav = (attempt: number) => {
+          if (navigateToWidgetAction(widgetLink.action, widgetLink.walletId)) return;
+          if (attempt >= 50 || cancelled) return;
+          setTimeout(() => tryNav(attempt + 1), 200);
+        };
+        tryNav(0);
+        return;
+      }
 
       // `https://www.lightningpiggy.com/hunt/<coord>` (the canonical
       // form written as record 1 of an NFC tag) OR the legacy custom
@@ -672,6 +691,10 @@ export default function App() {
                         (#279). Lives here (not in WalletContext) to keep that
                         over-cap file from growing — see #703. */}
                         <PaymentNotifier />
+                        {/* Keeps the Android home-screen widget's balance
+                        snapshot current, and wipes it on sign-out / account
+                        switch (#1849). Renders nothing. */}
+                        <WidgetSnapshotSync />
                         {/* BrandedAlertHost: portal target for the on-brand
                       BrandedAlert dialog. Sits at the root so any sheet /
                       screen that calls `Alert.alert(...)` (the BrandedAlert

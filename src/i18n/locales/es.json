@@ -3827,5 +3827,48 @@
     "removeAnyway": "Eliminar igualmente",
     "remove": "Eliminar",
     "cancel": "Cancelar"
+  },
+  "widget": {
+    "receive": "Recibir",
+    "send": "Enviar",
+    "scan": "Escanear",
+    "satsUnit": "sats",
+    "unnamedWallet": "Monedero",
+    "empty": "Añade un monedero en Lightning Piggy",
+    "openApp": "Abrir Lightning Piggy",
+    "fiat": "≈ {{fiat}}",
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "Actualizado {{time}}",
+    "yesterdayAt": "ayer {{time}}",
+    "a11y": {
+      "balance": "{{name}}: {{amount}} sats",
+      "balanceHidden": "{{name}}: saldo oculto",
+      "nextWallet": "Monedero siguiente",
+      "previousWallet": "Monedero anterior"
+    },
+    "picker": {
+      "cardLabel": "Saldo del monedero",
+      "cardDescription": "El saldo de un monedero, con Recibir y Enviar",
+      "barLabel": "Barra del monedero",
+      "barDescription": "El saldo de un monedero, con Recibir, Escanear y Enviar",
+      "buttonsLabel": "Botones del monedero",
+      "buttonsDescription": "El saldo de un monedero, con botones redondos de Recibir y Enviar"
+    },
+    "config": {
+      "title": "Configura tu widget",
+      "subtitle": "Elige el monedero con el que empieza y su aspecto. Toca › en el widget para pasar a tu siguiente monedero.",
+      "walletSection": "Monedero inicial",
+      "typeLightning": "Lightning",
+      "typeOnchain": "On-chain",
+      "noWallets": "Primero añade un monedero en Lightning Piggy. El widget lo mostrará en cuanto lo hagas.",
+      "styleSection": "Estilo",
+      "stylePiggyPink": "Rosa Piggy",
+      "styleCleanWhite": "Blanco limpio",
+      "styleNightGlass": "Cristal nocturno",
+      "hideBalance": "Ocultar saldo",
+      "hideBalanceHint": "Muestra puntos en lugar de la cantidad",
+      "cancel": "Cancelar",
+      "save": "Guardar"
+    }
   }
 }

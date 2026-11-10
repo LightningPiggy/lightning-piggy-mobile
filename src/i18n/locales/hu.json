@@ -3827,5 +3827,48 @@
     "removeAnyway": "Mégis eltávolítom",
     "remove": "Eltávolítás",
     "cancel": "Mégse"
+  },
+  "widget": {
+    "receive": "Fogadás",
+    "send": "Küldés",
+    "scan": "Beolvasás",
+    "satsUnit": "sats",
+    "unnamedWallet": "Tárca",
+    "empty": "Adj hozzá egy tárcát a Lightning Piggyben",
+    "openApp": "Lightning Piggy megnyitása",
+    "fiat": "≈ {{fiat}}",
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "Frissítve: {{time}}",
+    "yesterdayAt": "tegnap {{time}}",
+    "a11y": {
+      "balance": "{{name}}: {{amount}} sats",
+      "balanceHidden": "{{name}}: egyenleg elrejtve",
+      "nextWallet": "Következő tárca",
+      "previousWallet": "Előző tárca"
+    },
+    "picker": {
+      "cardLabel": "Tárca egyenlege",
+      "cardDescription": "Egy tárca egyenlege Fogadás és Küldés gombbal",
+      "barLabel": "Tárcasáv",
+      "barDescription": "Egy tárca egyenlege Fogadás, Beolvasás és Küldés gombbal",
+      "buttonsLabel": "Tárcagombok",
+      "buttonsDescription": "Egy tárca egyenlege kerek Fogadás és Küldés gombokkal"
+    },
+    "config": {
+      "title": "Állítsd be a widgetet",
+      "subtitle": "Válaszd ki, melyik tárcával induljon, és hogyan nézzen ki. Koppints a › jelre a widgeten, hogy a következő tárcádra válts.",
+      "walletSection": "Kezdő tárca",
+      "typeLightning": "Lightning",
+      "typeOnchain": "On-chain",
+      "noWallets": "Előbb adj hozzá egy tárcát a Lightning Piggyben. A widget azonnal megjeleníti, amint megteszed.",
+      "styleSection": "Stílus",
+      "stylePiggyPink": "Piggy rózsaszín",
+      "styleCleanWhite": "Tiszta fehér",
+      "styleNightGlass": "Éjszakai üveg",
+      "hideBalance": "Egyenleg elrejtése",
+      "hideBalanceHint": "Az összeg helyett pontokat mutat",
+      "cancel": "Mégse",
+      "save": "Mentés"
+    }
   }
 }

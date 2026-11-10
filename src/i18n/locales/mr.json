@@ -3827,5 +3827,48 @@
     "removeAnyway": "तरीही काढा",
     "remove": "काढा",
     "cancel": "रद्द करा"
+  },
+  "widget": {
+    "receive": "मिळवा",
+    "send": "पाठवा",
+    "scan": "स्कॅन करा",
+    "satsUnit": "sats",
+    "unnamedWallet": "वॉलेट",
+    "empty": "Lightning Piggy मध्ये वॉलेट जोडा",
+    "openApp": "Lightning Piggy उघडा",
+    "fiat": "≈ {{fiat}}",
+    "fiatAndTime": "≈ {{fiat}} · {{time}}",
+    "updatedAt": "{{time}} ला अपडेट केले",
+    "yesterdayAt": "काल {{time}}",
+    "a11y": {
+      "balance": "{{name}}: {{amount}} sats",
+      "balanceHidden": "{{name}}: बॅलन्स लपवलेला आहे",
+      "nextWallet": "पुढील वॉलेट",
+      "previousWallet": "मागील वॉलेट"
+    },
+    "picker": {
+      "cardLabel": "वॉलेट बॅलन्स",
+      "cardDescription": "मिळवा आणि पाठवा बटणांसह वॉलेटचा बॅलन्स",
+      "barLabel": "वॉलेट बार",
+      "barDescription": "मिळवा, स्कॅन आणि पाठवा बटणांसह वॉलेटचा बॅलन्स",
+      "buttonsLabel": "वॉलेट बटणे",
+      "buttonsDescription": "गोल मिळवा आणि पाठवा बटणांसह वॉलेटचा बॅलन्स"
+    },
+    "config": {
+      "title": "तुमचे विजेट सेट करा",
+      "subtitle": "विजेट कोणत्या वॉलेटपासून सुरू होईल आणि ते कसे दिसेल ते निवडा. पुढील वॉलेटवर जाण्यासाठी विजेटवरील › वर टॅप करा.",
+      "walletSection": "सुरुवातीचे वॉलेट",
+      "typeLightning": "Lightning",
+      "typeOnchain": "ऑन-चेन",
+      "noWallets": "आधी Lightning Piggy मध्ये वॉलेट जोडा. तुम्ही ते जोडताच विजेट ते दाखवेल.",
+      "styleSection": "स्टाइल",
+      "stylePiggyPink": "Piggy गुलाबी",
+      "styleCleanWhite": "स्वच्छ पांढरा",
+      "styleNightGlass": "नाइट ग्लास",
+      "hideBalance": "बॅलन्स लपवा",
+      "hideBalanceHint": "रकमेऐवजी ठिपके दाखवते",
+      "cancel": "रद्द करा",
+      "save": "सेव्ह करा"
+    }
   }
 }

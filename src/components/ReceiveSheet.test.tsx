@@ -442,3 +442,23 @@ describe('received checkmark vs catch-up receipts', () => {
     expect(screen.getByText('\u2713')).toBeTruthy();
   });
 });
+
+// #1849: a home-screen widget tap re-opens Receive while it's already up on
+// another wallet. The new openKey must re-capture the now-active wallet, and
+// the old wallet's late address must never show.
+it('re-captures the active wallet when re-opened while visible (widget tap)', async () => {
+  const view = render(<ReceiveSheet visible openKey={1} onClose={onClose} />);
+  mockActiveWalletId = 'B';
+  view.rerender(<ReceiveSheet visible openKey={2} onClose={onClose} />);
+  expect(mockGetReceiveAddress.mock.calls).toEqual([['A'], ['B']]);
+  await resolveFor('B', 'bc1qbravo000000');
+  await resolveFor('A', 'bc1qalpha000000');
+  expect(qrValue()).toBe('bitcoin:bc1qbravo000000');
+});
+
+it('an unrelated re-render with the same openKey keeps the captured wallet', async () => {
+  const view = render(<ReceiveSheet visible openKey={1} onClose={onClose} />);
+  mockActiveWalletId = 'B';
+  view.rerender(<ReceiveSheet visible openKey={1} onClose={onClose} />);
+  expect(mockGetReceiveAddress.mock.calls).toEqual([['A']]);
+});

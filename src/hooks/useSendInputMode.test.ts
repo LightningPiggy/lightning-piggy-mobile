@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { act, renderHook } from '@testing-library/react-native';
 import { useSendInputMode } from './useSendInputMode';
+import type { SendInputMode } from '../components/SendModeTabs';
 
 type Permission = { granted: boolean } | null;
 interface Props {
@@ -8,14 +9,21 @@ interface Props {
   permission: Permission;
   hasInput?: boolean;
   initialAddress?: string;
+  preferred?: SendInputMode;
 }
 
 // Mirrors SendSheet: the hook is called first, then the open effect keyed on
 // `visible` applies the open default (same effect ordering as the sheet).
 const liveInputRef = { current: '' };
 
-function useHarness({ visible, permission, hasInput = false, initialAddress }: Props) {
-  const mode = useSendInputMode({ visible, permission, hasInput, liveInputRef });
+function useHarness({ visible, permission, hasInput = false, initialAddress, preferred }: Props) {
+  const mode = useSendInputMode({
+    visible,
+    permission,
+    hasInput,
+    liveInputRef,
+    preferredMode: preferred,
+  });
   useEffect(() => {
     if (visible) mode.resetInputModeForOpen(initialAddress);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,4 +117,14 @@ it('only reacts to the first resolution after an open (no flip-flop on later cha
   rerender({ visible: true, permission: denied });
   rerender({ visible: true, permission: granted });
   expect(result.current.inputMode).toBe('paste');
+});
+
+it('opens on an explicitly preferred tab (widget Scan button) whatever the permission', () => {
+  for (const permission of [null, denied, granted]) {
+    const { result, rerender } = setup({ visible: true, permission, preferred: 'scan' });
+    expect(result.current.inputMode).toBe('scan');
+    // A later resolution doesn't move it off the requested tab.
+    rerender({ visible: true, permission: denied, preferred: 'scan' });
+    expect(result.current.inputMode).toBe('scan');
+  }
 });
