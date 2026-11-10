@@ -2,10 +2,11 @@ import SwiftUI
 import WidgetKit
 
 /// Small: wallet name, balance, Receive and Send.
-/// Medium: wallet name, balance, fiat + "Updated N min ago", Receive, Scan, Send.
+/// Medium: wallet name, balance, fiat + "Updated 14:32", Receive, Scan, Send.
 /// Buttons are deep links into the app (the same ones the Android widget
 /// uses); the app then shows its normal Receive / Send screens, app lock and
-/// payment confirmation included. A widget never pays.
+/// payment confirmation included. A widget never pays. What the text says is
+/// decided in WidgetDisplay.swift.
 struct WalletWidgetView: View {
   let entry: WalletEntry
   @Environment(\.widgetFamily) private var family
@@ -39,46 +40,6 @@ struct WalletWidgetView: View {
   }
 }
 
-// MARK: What to show (mirrors buildWalletWidgetModel in src/widgets/walletWidgetModel.ts)
-
-struct WalletDisplay {
-  let walletId: String
-  let name: String
-  let connected: Bool
-  /// The amount, or dots when hidden.
-  let balanceText: String
-  /// "sats" beside the amount; nil while hidden.
-  let unitText: String?
-  /// "≈ $68.81 · 2 min ago", "Updated 2 min ago", or nil.
-  let detailText: String?
-  let balanceLabel: String
-
-  static let hiddenBalance = "••••••"
-
-  init(wallet: WidgetWallet, hideBalance: Bool, now: Date) {
-    walletId = wallet.id
-    let displayName = wallet.name.isEmpty ? L10n.string("widget.unnamedWallet") : wallet.name
-    name = displayName
-    connected = wallet.connected ?? false
-    // Hidden by the widget's switch, or no amount to show (unknown, or hidden
-    // for this wallet in the app).
-    let amount = hideBalance ? nil : wallet.balanceSats.map(BalanceText.sats)
-    balanceText = amount ?? Self.hiddenBalance
-    unitText = amount == nil ? nil : L10n.string("widget.satsUnit")
-    let fiat = amount == nil ? nil : BalanceText.fiat(wallet.fiatValue, currency: wallet.currency)
-    let age = wallet.updatedDate.map { AgeText.make(since: $0, now: now) }
-    switch (fiat, age) {
-    case let (fiat?, age?): detailText = L10n.format("widget.fiatAndAge", fiat, age)
-    case let (fiat?, nil): detailText = L10n.format("widget.fiat", fiat)
-    case let (nil, age?): detailText = L10n.format("widget.updated", age)
-    default: detailText = nil
-    }
-    balanceLabel =
-      amount.map { L10n.format("widget.a11y.balance", displayName, $0) }
-      ?? L10n.format("widget.a11y.balanceHidden", displayName)
-  }
-}
-
 // MARK: Sizes
 
 private struct SmallWalletView: View {
@@ -95,14 +56,17 @@ private struct SmallWalletView: View {
       BalanceView(display: display, palette: palette, size: 24, centred: true)
       DetailView(display: display, palette: palette, size: 10.5)
       Spacer(minLength: 4)
+      // Apple lists systemSmall among the families with room for several
+      // `Link` targets ("Linking to specific app scenes from your widget"),
+      // and from iOS 17 small widgets are interactive. Before iOS 17 a small
+      // widget has one tap target (its widgetURL, Receive), so only that
+      // button is shown.
       if #available(iOS 17.0, *) {
         HStack(spacing: 6) {
           ActionLink(action: .receive, walletId: display.walletId, palette: palette, primary: true)
           ActionLink(action: .send, walletId: display.walletId, palette: palette, primary: false)
         }
       } else {
-        // Before iOS 17 a small widget has a single tap target (its
-        // widgetURL, Receive), so it shows only that button.
         ActionPill(action: .receive, palette: palette, primary: true)
       }
       PageDots(index: index, count: count, color: palette.text)
@@ -212,6 +176,10 @@ private struct BalanceView: View {
       }
     }
     .frame(maxWidth: centred ? .infinity : nil, alignment: centred ? .center : .leading)
+    // Redacted where iOS hides private data (locked phone, StandBy, Today
+    // View with "Allow access when locked" off); shown on the home screen.
+    .privacySensitive()
+    .accentedWhenTinted()
     .accessibilityElement(children: .ignore)
     .accessibilityLabel(display.balanceLabel)
   }
@@ -230,6 +198,7 @@ private struct DetailView: View {
         .lineLimit(1)
         .minimumScaleFactor(0.7)
         .padding(.top, 2)
+        .privacySensitive()
     }
   }
 }
@@ -268,11 +237,41 @@ private struct ActionPill: View {
     .foregroundColor(primary ? palette.primaryButtonText : palette.secondaryButtonText)
     .frame(maxWidth: action == .scan ? 30 : .infinity, minHeight: 30, maxHeight: 30)
     .padding(.horizontal, action == .scan ? 0 : 8)
-    .background(Capsule().fill(primary ? palette.primaryButton : palette.secondaryButton))
+    .background(PillBackground(fill: primary ? palette.primaryButton : palette.secondaryButton))
   }
 }
 
-/// Decorative: one dot per wallet (VoiceOver users switch with ‹ ›).
+/// A filled capsule in full colour. In the tinted / clear home-screen modes
+/// (iOS 18+) the system draws every opaque shape in one tint, so a filled
+/// capsule would swallow its label: there it becomes an outline instead.
+private struct PillBackground: View {
+  let fill: AnyShapeStyle
+
+  var body: some View {
+    if #available(iOS 16.0, *) {
+      RenderingModeAwarePill(fill: fill)
+    } else {
+      Capsule().fill(fill)
+    }
+  }
+}
+
+@available(iOS 16.0, *)
+private struct RenderingModeAwarePill: View {
+  let fill: AnyShapeStyle
+  @Environment(\.widgetRenderingMode) private var renderingMode
+
+  var body: some View {
+    if renderingMode == .fullColor {
+      Capsule().fill(fill)
+    } else {
+      Capsule().strokeBorder(Color.primary.opacity(0.6), lineWidth: 1.5)
+    }
+  }
+}
+
+/// Decorative: one dot per wallet (VoiceOver users switch with ‹ ›). At most
+/// seven, sliding so the current wallet's dot stays shown (as on Android).
 private struct PageDots: View {
   let index: Int
   let count: Int
@@ -280,10 +279,10 @@ private struct PageDots: View {
 
   var body: some View {
     if count > 1 {
+      let window = PageDotsWindow.visible(pageCount: count, pageIndex: index)
       HStack(spacing: 4) {
-        // At most 7 dots; beyond that the current one stays highlighted at the end.
-        ForEach(0..<min(count, 7), id: \.self) { dot in
-          let current = dot == min(index, 6)
+        ForEach(0..<window.count, id: \.self) { dot in
+          let current = dot == window.active
           Capsule()
             .fill(color.opacity(current ? 1 : 0.35))
             .frame(width: current ? 12 : 5, height: 5)
@@ -312,73 +311,21 @@ private struct MessageView: View {
   }
 }
 
-// MARK: Text
-
-enum BalanceText {
-  static func sats(_ value: Double) -> String {
-    guard value.isFinite else { return "–" }
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .decimal
-    formatter.maximumFractionDigits = 0
-    formatter.locale = L10n.locale
-    return formatter.string(from: NSNumber(value: value.rounded(.down))) ?? "\(Int64(value))"
-  }
-
-  /// nil for an unknown or missing currency (the line is then left out).
-  static func fiat(_ value: Double?, currency: String?) -> String? {
-    guard let value, value.isFinite, let currency, !currency.isEmpty else { return nil }
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .currency
-    formatter.currencyCode = currency
-    formatter.locale = L10n.locale
-    return formatter.string(from: NSNumber(value: value))
-  }
-}
-
-/// "just now" / "5 min ago" / "3 hours ago" / "2 days ago" (widgetAgeText).
-enum AgeText {
-  static func make(since updated: Date, now: Date) -> String {
-    let minutes = max(0, Int(now.timeIntervalSince(updated) / 60))
-    if minutes < 1 { return L10n.string("widget.age.justNow") }
-    if minutes < 60 { return L10n.plural("widget.age.minutes", count: minutes) }
-    let hours = minutes / 60
-    if hours < 24 { return L10n.plural("widget.age.hours", count: hours) }
-    return L10n.plural("widget.age.days", count: hours / 24)
-  }
-}
-
-// MARK: Deep links (src/navigation/widgetDeepLinks.ts)
-
-enum DeepLink {
-  enum Action: String {
-    case receive
-    case send
-    case scan
-
-    var symbol: String {
-      switch self {
-      case .receive: return "arrow.down"
-      case .send: return "arrow.up"
-      case .scan: return "qrcode.viewfinder"
-      }
-    }
-
-    var labelKey: String { "widget.\(rawValue)" }
-  }
-
-  /// lightningpiggy://receive?wallet=<id>
-  static func url(_ action: Action, walletId: String) -> URL {
-    var components = URLComponents()
-    components.scheme = "lightningpiggy"
-    components.host = action.rawValue
-    components.queryItems = [URLQueryItem(name: "wallet", value: walletId)]
-    return components.url ?? URL(string: "lightningpiggy://\(action.rawValue)")!
-  }
-}
-
-// MARK: Background (containerBackground on iOS 17+)
+// MARK: Rendering modes and background
 
 extension View {
+  /// The balance takes the accent tint in the tinted home-screen mode, so it
+  /// stands out from the rest of the (single-colour) widget.
+  @ViewBuilder func accentedWhenTinted() -> some View {
+    if #available(iOS 16.0, *) {
+      self.widgetAccentable()
+    } else {
+      self
+    }
+  }
+
+  /// containerBackground on iOS 17+ (the system removes it in the tinted and
+  /// clear modes); a plain background before.
   @ViewBuilder func widgetBackground(_ palette: WidgetPalette) -> some View {
     if #available(iOS 17.0, *) {
       self.containerBackground(for: .widget) {

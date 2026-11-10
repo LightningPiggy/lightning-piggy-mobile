@@ -13,7 +13,10 @@ struct WalletEntity: AppEntity {
   let id: String
   let name: String
 
-  var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
+  var displayRepresentation: DisplayRepresentation {
+    // Same fallback as the widget itself for a wallet without a name.
+    DisplayRepresentation(title: "\(name.isEmpty ? L10n.string("widget.unnamedWallet") : name)")
+  }
 }
 
 /// Wallet choices come from the snapshot the app shares through the App Group.

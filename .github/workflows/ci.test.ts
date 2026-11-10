@@ -23,6 +23,8 @@ describe('native CI input coverage', () => {
     'vendor/native-sdk.tgz',
     'targets/widget/WalletWidget.swift',
     'targets/widget/expo-target.config.js',
+    'src/widgets/walletSelectionCases.json',
+    'scripts/ios-tests/WidgetLogicTests.swift',
     'assets/icon.png',
     'google-services.json',
     '.npmrc',

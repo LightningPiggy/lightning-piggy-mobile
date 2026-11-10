@@ -49,6 +49,7 @@ jobs:
               - 'ios/**'
               - 'modules/**'
               - 'targets/**'
+              - 'src/widgets/walletSelectionCases.json'
               - 'vendor/**'
               - 'assets/**'
               - 'patches/**'
@@ -234,6 +235,33 @@ jobs:
           -o "$RUNNER_TEMP/nostr-engine-lifecycle"
       - name: Exercise disposal and restart races
         run: '"$RUNNER_TEMP/nostr-engine-lifecycle"'
+
+  # The iPhone widget's display logic is plain Foundation Swift (targets/widget:
+  # Snapshot, Strings, WidgetDisplay). Compile it on macOS and run the same
+  # wallet-selection cases as the Jest tests, plus the ported display rules.
+  ios-widget-logic:
+    name: iOS widget logic
+    needs: changes
+    if: >-
+      needs.changes.outputs.native == 'true' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))) ||
+      github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile the widget logic with its tests
+        run: >-
+          swiftc -swift-version 5 -parse-as-library
+          targets/widget/Snapshot.swift
+          targets/widget/Strings.swift
+          targets/widget/WidgetDisplay.swift
+          scripts/ios-tests/WidgetLogicTests.swift
+          -o "$RUNNER_TEMP/widget-logic"
+      - name: Run the shared cases and display checks
+        run: '"$RUNNER_TEMP/widget-logic" src/widgets/walletSelectionCases.json'
 
   # The lifecycle job above compiles against hand-written SDK doubles; this
   # one compiles modules/nostr-native against the real checksum-pinned

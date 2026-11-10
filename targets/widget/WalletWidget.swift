@@ -36,13 +36,20 @@ struct WalletEntry: TimelineEntry {
   let cursorKey: String
   let startingWalletId: String?
 
+  /// Identifies a widget configuration (see `WidgetStore.Cursor`).
+  static func cursorKey(
+    family: WidgetFamily, startingWalletId: String?, style: WidgetStyleKind, hideBalance: Bool
+  ) -> String {
+    [String(describing: family), startingWalletId ?? "-", style.rawValue, hideBalance ? "h" : "v"]
+      .joined(separator: "|")
+  }
+
   static func make(
     date: Date, snapshot: WidgetSnapshot?, family: WidgetFamily, startingWalletId: String?,
     style: WidgetStyleKind, hideBalance: Bool, canSwitch: Bool
   ) -> WalletEntry {
-    let cursorKey = [
-      String(describing: family), startingWalletId ?? "-", style.rawValue, hideBalance ? "h" : "v",
-    ].joined(separator: "|")
+    let cursorKey = cursorKey(
+      family: family, startingWalletId: startingWalletId, style: style, hideBalance: hideBalance)
     let wallets = snapshot?.orderedWallets ?? []
     let content: Content
     if let index = WalletSelection.resolve(
@@ -58,7 +65,9 @@ struct WalletEntry: TimelineEntry {
       cursorKey: cursorKey, startingWalletId: startingWalletId)
   }
 
-  /// Shown in the widget gallery before the app has shared anything.
+  /// Only for the widget gallery before the app has shared anything (and the
+  /// redacted placeholder); a placed widget with no snapshot shows "Add a
+  /// wallet in Lightning Piggy" instead.
   static func sample(style: WidgetStyleKind = .default) -> WalletEntry {
     let wallet = WidgetWallet(
       id: "sample", name: "Lightning Piggy", balanceSats: 21_000, fiatValue: nil, currency: nil,
@@ -69,13 +78,12 @@ struct WalletEntry: TimelineEntry {
   }
 }
 
-/// One entry now and one every 5 minutes so "Updated N min ago" keeps
-/// counting; after 30 minutes WidgetKit asks again. The app also reloads
-/// every timeline whenever it writes a new snapshot.
-func walletTimeline(_ makeEntry: (Date) -> WalletEntry) -> Timeline<WalletEntry> {
-  let now = Date()
-  let entries = (0...6).map { step in makeEntry(now.addingTimeInterval(TimeInterval(step * 5 * 60))) }
-  return Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60)))
+/// One entry. The "Updated 14:32" text is absolute, so it only needs a new
+/// timeline when it rolls over at local midnight ("yesterday 14:32"); every
+/// snapshot the app writes reloads the timelines too.
+func walletTimeline(_ entry: WalletEntry) -> Timeline<WalletEntry> {
+  Timeline(
+    entries: [entry], policy: .after(UpdatedTimeText.nextChange(after: entry.date, calendar: .current)))
 }
 
 // MARK: iOS 17+ — configurable and interactive
@@ -85,23 +93,50 @@ struct WalletIntentProvider: AppIntentTimelineProvider {
   func placeholder(in context: Context) -> WalletEntry { .sample() }
 
   func snapshot(for configuration: WalletWidgetConfigurationIntent, in context: Context) async -> WalletEntry {
-    guard WidgetStore.loadSnapshot() != nil else { return .sample(style: configuration.style.kind) }
-    return entry(for: configuration, in: context, at: Date())
+    if context.isPreview && WidgetStore.loadSnapshot() == nil {
+      return .sample(style: configuration.style.kind)
+    }
+    return entry(for: configuration, in: context)
   }
 
   func timeline(for configuration: WalletWidgetConfigurationIntent, in context: Context) async -> Timeline<
     WalletEntry
   > {
-    walletTimeline { date in entry(for: configuration, in: context, at: date) }
+    let entry = entry(for: configuration, in: context)
+    // Remember what this configuration shows, so a removed wallet hands over
+    // to the next one, then forget configurations no widget uses any more.
+    if case let .wallet(wallet, index, _) = entry.content {
+      WidgetStore.setCursor(WidgetStore.Cursor(walletId: wallet.id, index: index), for: entry.cursorKey)
+    }
+    await pruneUnusedCursors(current: entry.cursorKey)
+    return walletTimeline(entry)
   }
 
-  private func entry(for configuration: WalletWidgetConfigurationIntent, in context: Context, at date: Date)
-    -> WalletEntry
-  {
+  private func entry(for configuration: WalletWidgetConfigurationIntent, in context: Context) -> WalletEntry {
     WalletEntry.make(
-      date: date, snapshot: WidgetStore.loadSnapshot(), family: context.family,
+      date: Date(), snapshot: WidgetStore.loadSnapshot(), family: context.family,
       startingWalletId: configuration.wallet?.id, style: configuration.style.kind,
       hideBalance: configuration.hideBalance, canSwitch: true)
+  }
+
+  private func pruneUnusedCursors(current: String) async {
+    let infos: [WidgetInfo] = await withCheckedContinuation { continuation in
+      WidgetCenter.shared.getCurrentConfigurations { result in
+        continuation.resume(returning: (try? result.get()) ?? [])
+      }
+    }
+    let keys = Set(
+      infos.filter { $0.kind == walletWidgetKind }.compactMap { info -> String? in
+        guard let intent = info.widgetConfigurationIntent(of: WalletWidgetConfigurationIntent.self) else {
+          return nil
+        }
+        return WalletEntry.cursorKey(
+          family: info.family, startingWalletId: intent.wallet?.id, style: intent.style.kind,
+          hideBalance: intent.hideBalance)
+      })
+    // Only trust a list that includes the widget being drawn right now.
+    guard keys.contains(current) else { return }
+    WidgetStore.pruneCursors(keeping: keys)
   }
 }
 
@@ -126,17 +161,17 @@ struct LegacyWalletProvider: TimelineProvider {
   func placeholder(in context: Context) -> WalletEntry { .sample() }
 
   func getSnapshot(in context: Context, completion: @escaping (WalletEntry) -> Void) {
-    guard WidgetStore.loadSnapshot() != nil else { return completion(.sample()) }
-    completion(entry(in: context, at: Date()))
+    if context.isPreview && WidgetStore.loadSnapshot() == nil { return completion(.sample()) }
+    completion(entry(in: context))
   }
 
   func getTimeline(in context: Context, completion: @escaping (Timeline<WalletEntry>) -> Void) {
-    completion(walletTimeline { date in entry(in: context, at: date) })
+    completion(walletTimeline(entry(in: context)))
   }
 
-  private func entry(in context: Context, at date: Date) -> WalletEntry {
+  private func entry(in context: Context) -> WalletEntry {
     WalletEntry.make(
-      date: date, snapshot: WidgetStore.loadSnapshot(), family: context.family, startingWalletId: nil,
+      date: Date(), snapshot: WidgetStore.loadSnapshot(), family: context.family, startingWalletId: nil,
       style: .default, hideBalance: false, canSwitch: false)
   }
 }
