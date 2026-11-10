@@ -131,6 +131,11 @@ describe('useFoundLogIngest — coord changes', () => {
     // The logIdsKey effect has now (re)subscribed to zaps for log1 — deliver
     // + flush a zap receipt against it.
     expect(zapsHandlers.length).toBeGreaterThan(0);
+    // Each log is passed with its finder, which receipts are validated against.
+    expect(mockedSubscribeFindLogZaps).toHaveBeenLastCalledWith(
+      new Map([['log1', 'p'.repeat(64)]]),
+      expect.any(Function),
+    );
     act(() => {
       zapsHandlers[zapsHandlers.length - 1]({ receiptId: 'r1', logId: 'log1', sats: 21 });
       jest.advanceTimersByTime(150);

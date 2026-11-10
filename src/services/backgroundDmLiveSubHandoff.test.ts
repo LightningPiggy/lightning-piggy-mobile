@@ -27,7 +27,16 @@ jest.mock('react-native', () => ({ Platform: { OS: 'android' } }));
 jest.mock('nostr-tools/nip44', () => ({}));
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
-  default: { getItem: jest.fn().mockResolvedValue(null) },
+  // The watch's contacts cache follows the sender ('b'…): with none it fails closed.
+  default: {
+    getItem: jest.fn((key: string) =>
+      Promise.resolve(
+        key.startsWith('nostr_contacts_cache')
+          ? JSON.stringify([{ pubkey: 'b'.repeat(64) }])
+          : null,
+      ),
+    ),
+  },
 }));
 jest.mock('./identitiesStore', () => ({ loadIdentities: () => mockLoadIdentities() }));
 jest.mock('./nostrRelayStorage', () => ({

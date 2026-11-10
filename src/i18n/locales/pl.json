@@ -136,6 +136,11 @@
     "unavailable": "Nie udało się otworzyć Amber. Sprawdź, czy jest zainstalowany, i spróbuj ponownie.",
     "failed": "Amber nie mógł zrealizować prośby. Spróbuj ponownie."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Twój podpisujący odpowiedział z innego konta. Przełącz go na to konto i spróbuj ponownie.",
+    "modified": "Twój podpisujący zmienił prośbę przed podpisaniem, więc nic nie zostało wysłane. Spróbuj ponownie.",
+    "badSignature": "Odpowiedź twojego podpisującego miała nieprawidłowy podpis, więc nic nie zostało wysłane. Spróbuj ponownie."
+  },
   "alphabetBar": {
     "alphabetIndex": "Indeks alfabetyczny",
     "jumpTo": "Przejdź do: {{letter}}",
@@ -774,9 +779,14 @@
     "receive": "Odbierz",
     "transfer": "Przenieś",
     "send": "Wyślij",
+    "watchOnlySend": "To portfel tylko do podglądu. Może odbierać, ale nie może wysyłać.",
     "addWallet": "Dodaj portfel",
     "addWalletText": "+ Dodaj portfel",
     "updatingTransactions": "Aktualizowanie transakcji"
+  },
+  "findLogHeader": {
+    "title": "Dziennik znalezisk ({{total}})",
+    "titleCapped": "Dziennik znalezisk ({{total}}+)"
   },
   "huntCreateScreen": {
     "ok": "OK",
@@ -1846,6 +1856,9 @@
     "noLightningAddress": "Nie ustawiono adresu Lightning",
     "enterAmountForInvoice": "Wpisz kwotę, aby wygenerować fakturę",
     "loadingAddress": "Wczytuję adres...",
+    "addressLoadFailed": "Nie udało się wczytać Twojego adresu Bitcoin",
+    "retry": "Ponów",
+    "retryAddressLabel": "Ponów wczytywanie adresu Bitcoin",
     "lightningInvoice": "Faktura Lightning",
     "sendTo": "Wyślij — odbiorca: {{name}}",
     "copy": "Kopiuj",
@@ -1993,12 +2006,23 @@
     "cameraAccessNeeded": "Do skanowania kodów QR potrzebny jest dostęp do aparatu",
     "grantCameraPermission": "Zezwól na dostęp do aparatu",
     "grantPermission": "Zezwól",
+    "openCameraSettings": "Otwórz Ustawienia, aby zezwolić na dostęp do aparatu",
     "qrViewfinder": "Wizjer kodu QR"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Wymagane uprawnienie",
+    "photoLibraryMessage": "Zezwól na dostęp do galerii zdjęć, aby wysyłać obrazy.",
+    "cameraPhotoMessage": "Zezwól na dostęp do aparatu, aby robić i wysyłać zdjęcia.",
+    "ok": "OK",
+    "cancel": "Anuluj",
+    "openSettings": "Otwórz Ustawienia"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "OK",
     "invalidInvoiceTitle": "Nieprawidłowa faktura",
     "invalidInvoiceBody": "Ta faktura jest nieprawidłowa lub niepełna — sprawdź ją i spróbuj ponownie.",
+    "unrecognisedInputTitle": "Nie można tego zapłacić",
+    "unrecognisedInputBody": "To nie jest faktura Lightning, adres Lightning ani adres Bitcoin — sprawdź i spróbuj ponownie.",
     "offerUnsupportedTitle": "Oferty Lightning nie są jeszcze obsługiwane",
     "offerUnsupportedBody": "To oferta Lightning (BOLT12), za którą Lightning Piggy jeszcze nie zapłaci. Poproś zamiast tego o fakturę Lightning lub adres Lightning.",
     "walletFallback": "Portfel",
@@ -2257,8 +2281,6 @@
     "removeWalletTitle": "Usuń portfel",
     "removeConfirmMessage": "Na pewno usunąć portfel „{{alias}}”?",
     "disconnectConfirmMessage": "Na pewno rozłączyć portfel „{{alias}}”?",
-    "cancel": "Anuluj",
-    "remove": "Usuń",
     "copiedTitle": "Skopiowano",
     "xpubCopied": "Rozszerzony klucz publiczny skopiowany do schowka."
   },
@@ -2274,8 +2296,6 @@
     "hideBalance": "Ukryj saldo: {{alias}}",
     "removeWalletTitle": "Usuń portfel",
     "removeWalletMessage": "Usunąć portfel „{{alias}}”? Zostanie on rozłączony.",
-    "cancel": "Anuluj",
-    "remove": "Usuń",
     "removeWalletA11y": "Usuń: {{alias}}",
     "addWalletA11y": "Dodaj portfel",
     "addWallet": "Dodaj portfel"
@@ -2287,7 +2307,7 @@
     "friendsTitle": "Znajomi",
     "friendsSubtitle": "Tylko osoby, które obserwujesz.",
     "fofTitle": "Znajomi znajomych",
-    "fofSubtitle": "Osoby, które obserwujesz, oraz osoby obserwowane przez największą liczbę tych osób. Lista powstaje po wybraniu tej opcji — za pierwszym razem zajmie to chwilę.",
+    "fofSubtitle": "Osoby, które obserwujesz, oraz osoby obserwowane przez największą liczbę tych osób. O ich wiadomościach też możesz dostawać powiadomienia. Lista powstaje po wybraniu tej opcji — za pierwszym razem zajmie to chwilę.",
     "fofProgressStarting": "Sprawdzanie, kogo obserwują twoi znajomi…",
     "fofProgress": "Sprawdzanie, kogo obserwują twoi znajomi… {{done}} z {{total}}",
     "fofCancel": "Anuluj",
@@ -2300,7 +2320,7 @@
       "other": "{{count}} znajomego znajomych w twoim grafie zaufania"
     },
     "allTitle": "Wszyscy",
-    "allSubtitle": "Wszystko ze wszystkich przekaźników. Ustawienie domyślne, dopóki twój graf zaufania nie będzie gotowy — przełącz na Znajomych, aby zaostrzyć filtr.",
+    "allSubtitle": "Wszystko ze wszystkich przekaźników. Gdy to wybierzesz, możesz też dostawać powiadomienia o wiadomościach od każdego. Ustawienie domyślne, dopóki twój graf zaufania nie będzie gotowy — przełącz na Znajomych, aby zaostrzyć filtr.",
     "gateHint": "Opcja Znajomi znajomych obejmuje {{max}} osób obserwowanych przez największą liczbę twoich znajomych i odświeża listę raz dziennie. Znajomi to najbezpieczniejszy strumień; Wszyscy to najszerszy.",
     "done": "Gotowe"
   },
@@ -3347,7 +3367,7 @@
   "messageSettingsScreen": {
     "title": "Wiadomości",
     "trustTitle": "Kogo widzisz",
-    "trustHint": "Ten filtr sieci zaufania decyduje też o tym, co widzisz na mapie, w wydarzeniach i w grupach.",
+    "trustHint": "Ten filtr sieci zaufania decyduje też o tym, co widzisz na mapie, w wydarzeniach i w grupach. Gdy wybierzesz filtr, decyduje on też o tym, o których wiadomościach dostajesz powiadomienia; do tego czasu tylko o wiadomościach od osób, które obserwujesz.",
     "trustRowA11y": "Kogo widzisz: {{tier}}"
   },
   "hermesProfiler": {
@@ -3872,5 +3892,15 @@
     "noRelays": "Żaden odpowiedni przekaźnik nie jest teraz dostępny. Spróbuj ponownie za chwilę.",
     "confirmChangedTitle": "Opublikować te przekaźniki zamiast poprzednich?",
     "confirmChangedBody": "Twoje przekaźniki zmieniły się od wyświetlenia tej sugestii. Po opublikowaniu lista będzie zawierać: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "To usunie „{{alias}}” z tego telefonu, łącznie z zapisaną tu frazą odzyskiwania. Najpierw upewnij się, że masz ją zapisaną — bez frazy odzyskiwania nie da się odzyskać pieniędzy z tego portfela.",
+    "withCoinosLogin": "To usunie „{{alias}}” z tego telefonu, łącznie z zapisaną tu nazwą użytkownika CoinOS, hasłem i danymi połączenia. Najpierw je zachowaj — bez nich nie da się odzyskać pieniędzy z tego portfela.",
+    "mayHoldRecovery": "To usunie „{{alias}}” z tego telefonu, w tym każdą frazę odzyskiwania lub dane logowania tu zapisane. Jeśli nie masz ich kopii, pieniędzy z tego portfela może nie dać się odzyskać.",
+    "balance": "Jest w nim {{amount}} sats.",
+    "viewRecoveryFirst": "Najpierw zobacz dane odzyskiwania",
+    "removeAnyway": "Usuń mimo to",
+    "remove": "Usuń",
+    "cancel": "Anuluj"
   }
 }

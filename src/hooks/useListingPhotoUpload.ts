@@ -4,6 +4,7 @@ import { useNostr } from '../contexts/NostrContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { Alert } from '../components/BrandedAlert';
 import { stripImageMetadata, uploadImage } from '../services/imageUploadService';
+import { ensurePermission } from '../utils/permissionPrompt';
 
 /**
  * Pick a photo from the library, strip its metadata (EXIF / GPS) and upload
@@ -17,15 +18,12 @@ export function useListingPhotoUpload() {
   const [uploading, setUploading] = useState(false);
 
   const pickAndUpload = useCallback(async (): Promise<string | null> => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert(
-        t('market.sell.editor.permissionNeeded'),
-        t('market.sell.editor.libraryPermission'),
-        [{ text: t('market.sell.editor.ok') }],
-      );
-      return null;
-    }
+    const allowed = await ensurePermission(
+      ImagePicker.requestMediaLibraryPermissionsAsync,
+      t('market.sell.editor.permissionNeeded'),
+      t('market.sell.editor.libraryPermission'),
+    );
+    if (!allowed) return null;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 1,

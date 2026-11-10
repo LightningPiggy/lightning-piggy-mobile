@@ -5,10 +5,13 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import { createSendScanPaneStyles } from '../styles/SendScanPane.styles';
+import { useScanPermissionButton } from '../hooks/useScanPermissionButton';
+import type { RequestPermission } from '../utils/permissionPrompt';
 
 interface Props {
   permissionGranted: boolean;
-  onRequestPermission: () => void;
+  /** The parent's camera-permission request, so its `permissionGranted` updates. */
+  onRequestPermission: RequestPermission;
   onBarcodeScanned: (event: { data: string }) => void;
 }
 
@@ -30,6 +33,10 @@ const SendScanPane: React.FC<Props> = ({
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createSendScanPaneStyles(colors), [colors]);
+  const { blocked, onPress: handlePermissionPress } = useScanPermissionButton(
+    permissionGranted,
+    onRequestPermission,
+  );
   const [zoom, setZoom] = useState(0);
   // Gesture callbacks close over the first render — track the live zoom
   // (and the value at pinch-start) in refs so each pinch accumulates
@@ -71,11 +78,15 @@ const SendScanPane: React.FC<Props> = ({
           <TouchableOpacity
             accessibilityRole="button"
             style={styles.permissionButton}
-            onPress={onRequestPermission}
-            accessibilityLabel={t('sendScanPane.grantCameraPermission')}
+            onPress={handlePermissionPress}
+            accessibilityLabel={t(
+              blocked ? 'sendScanPane.openCameraSettings' : 'sendScanPane.grantCameraPermission',
+            )}
             testID="send-scan-grant-permission"
           >
-            <Text style={styles.permissionButtonText}>{t('sendScanPane.grantPermission')}</Text>
+            <Text style={styles.permissionButtonText}>
+              {t(blocked ? 'permissionPrompt.openSettings' : 'sendScanPane.grantPermission')}
+            </Text>
           </TouchableOpacity>
         </View>
       ) : (

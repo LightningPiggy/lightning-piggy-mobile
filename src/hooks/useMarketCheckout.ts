@@ -38,8 +38,20 @@ class CheckoutError extends Error {
 /** Map the shared NIP-17 send failure onto the checkout's copy keys. */
 function checkoutCode(e: unknown): CheckoutErrorCode {
   if (e instanceof CheckoutError) return e.code;
-  if (e instanceof Nip17SendError) return e.code === 'noRecipient' ? 'noSellerIdentity' : e.code;
+  if (e instanceof Nip17SendError) {
+    if (e.code === 'noRecipient') return 'noSellerIdentity';
+    // Handled by checkoutErrorText; never reaches the key lookup.
+    if (e.code === 'signerMismatch') return 'generic';
+    return e.code;
+  }
   return 'generic';
+}
+
+/** Localised copy for a failed order. A refused signer answer (#1779) already
+ *  carries its translated reason, which says what to fix. */
+function checkoutErrorText(e: unknown, t: (key: string) => string): string {
+  if (e instanceof Nip17SendError && e.code === 'signerMismatch') return e.message;
+  return t(`market.checkout.errors.${checkoutCode(e)}`);
 }
 
 // In-app Market checkout orchestration (#market). The PURE order-building lives
@@ -156,7 +168,7 @@ export function useMarketCheckout(): UseMarketCheckout {
         // Keep the raw Error for diagnostics/logs; show localized copy in the UI.
         if (__DEV__) console.warn('[market] place order failed:', e);
         setStatus('error');
-        setError(t(`market.checkout.errors.${checkoutCode(e)}`));
+        setError(checkoutErrorText(e, t));
         throw e instanceof Error ? e : new Error('Failed to place order');
       }
     },

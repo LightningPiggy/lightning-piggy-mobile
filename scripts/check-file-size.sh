@@ -17,11 +17,10 @@ LIMIT=1000
 declare -A BASELINE=(
   ["src/contexts/NostrContext.tsx"]=1386
   ["src/screens/HuntCreateScreen.tsx"]=2018
-  ["src/contexts/WalletContext.tsx"]=1557
+  ["src/contexts/WalletContext.tsx"]=1495
   ["src/screens/HuntPiggyDetailScreen.tsx"]=1206
   ["src/screens/MapScreen.tsx"]=1107
   ["src/components/TransferSheet.tsx"]=1277
-  ["src/components/SendSheet.tsx"]=1008
 )
 
 # GitHub Actions error annotation when running in CI; plain echo locally.

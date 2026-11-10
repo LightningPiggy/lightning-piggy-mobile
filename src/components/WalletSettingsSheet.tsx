@@ -35,15 +35,18 @@ import WalletConnectionTab from './WalletConnectionTab';
 import FriendPickerSheet from './FriendPickerSheet';
 import { useWalletShareFromSettings } from '../hooks/useWalletShareFromSettings';
 import { useIsFocused } from '@react-navigation/native';
+import { useRemoveWalletConfirm } from '../hooks/useRemoveWalletConfirm';
+
+export type SettingsTab = 'design' | 'details' | 'connection';
 
 interface Props {
   walletId: string | null;
   onClose: () => void;
+  /** Tab to open on (default Design). */
+  initialTab?: SettingsTab;
 }
 
-type SettingsTab = 'design' | 'details' | 'connection';
-
-const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
+const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose, initialTab = 'design' }) => {
   const colors = useThemeColors();
   const t = useTranslation();
   const styles = useMemo(() => createWalletSettingsSheetStyles(colors), [colors]);
@@ -88,7 +91,7 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
 
   // Active tab of the segmented control. Defaults to Design — the
   // cover-flow card picker is the showcase surface of this redesign.
-  const [activeTab, setActiveTab] = useState<SettingsTab>('design');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
   // Canonical keyboard-height tracking — mirrors SendSheet / NostrLoginSheet.
   // Rule 5 of docs/TROUBLESHOOTING.adoc "Bottom sheet doesn't slide up…".
@@ -140,11 +143,12 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
   // polls, NWC reconnect pings, etc.), each time stomping the user's in-
   // progress edits with the stored value — symptom: typing into Lightning
   // Address makes characters disappear.
-  // Reset to the Design tab when the sheet opens for a different wallet — keyed
+  // Reset to the opening tab when the sheet opens for a different wallet — keyed
   // ONLY on walletId (not `wallet?.id`), so it fires once per open and can't
   // re-fire when the wallet hydrates a moment later and stomp a fast tab tap.
   useEffect(() => {
-    setActiveTab('design');
+    setActiveTab(initialTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletId]);
 
   useEffect(() => {
@@ -211,10 +215,14 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
         // a masked password row. The password is never logged or
         // serialised — it only travels from SecureStore → state →
         // Clipboard.setStringAsync when the user explicitly taps copy.
-        getCoinosRecovery(walletId).then((rec) => {
-          if (cancelled) return;
-          setCoinosRecovery(rec);
-        });
+        getCoinosRecovery(walletId)
+          .then((rec) => {
+            if (cancelled) return;
+            setCoinosRecovery(rec);
+          })
+          // A failed read leaves the callout hidden (state was cleared above)
+          // rather than surfacing as an unhandled rejection.
+          .catch(() => {});
       } else {
         setXpubDisplay(null);
       }
@@ -271,25 +279,6 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
     onClose();
   }, [walletId, wallet, alias, selectedTheme, lnAddress, updateWalletSettings, onClose]);
 
-  const handleDisconnect = useCallback(() => {
-    if (!walletId || !wallet) return;
-    const message =
-      wallet.walletType === 'onchain'
-        ? t('walletSettingsSheet.removeConfirmMessage', { alias: wallet.alias })
-        : t('walletSettingsSheet.disconnectConfirmMessage', { alias: wallet.alias });
-    Alert.alert(t('walletSettingsSheet.removeWalletTitle'), message, [
-      { text: t('walletSettingsSheet.cancel'), style: 'cancel' },
-      {
-        text: t('walletSettingsSheet.remove'),
-        style: 'destructive',
-        onPress: async () => {
-          await removeWallet(walletId);
-          onClose();
-        },
-      },
-    ]);
-  }, [walletId, wallet, t, removeWallet, onClose]);
-
   const handleCopyXpub = useCallback(async () => {
     if (xpubDisplay) {
       await Clipboard.setStringAsync(xpubDisplay);
@@ -311,6 +300,25 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose }) => {
       return tab;
     });
   }, []);
+
+  const confirmRemoveWallet = useRemoveWalletConfirm();
+  const handleDisconnect = useCallback(() => {
+    if (!walletId || !wallet) return;
+    void confirmRemoveWallet({
+      wallet,
+      title: t('walletSettingsSheet.removeWalletTitle'),
+      fallbackMessage:
+        wallet.walletType === 'onchain'
+          ? t('walletSettingsSheet.removeConfirmMessage', { alias: wallet.alias })
+          : t('walletSettingsSheet.disconnectConfirmMessage', { alias: wallet.alias }),
+      onConfirm: async () => {
+        await removeWallet(walletId);
+        onClose();
+      },
+      // The CoinOS login is shown on the Connection tab of this sheet.
+      onViewRecovery: () => selectTab('connection'),
+    });
+  }, [walletId, wallet, t, removeWallet, onClose, confirmRemoveWallet, selectTab]);
 
   if (!walletId || !wallet) return null;
 

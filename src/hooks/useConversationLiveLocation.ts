@@ -6,6 +6,7 @@ import type { SharedLocation } from '../services/locationService';
 import type { Item } from '../utils/conversationItems';
 import type { RelayConfig } from '../types/nostr';
 import { liveKey } from '../services/liveLocationUpdateStore';
+import { nextLiveShareExpiry } from '../utils/liveShareExpiry';
 import {
   useLiveUpdateRelaySubscriptions,
   useLiveUpdates,
@@ -64,8 +65,14 @@ export function useLiveLocationThread(params: {
   // Subscriptions + the 1 Hz tick only run while this thread is on screen.
   const focused = useIsFocused();
 
-  // 1 Hz tick — included in the Date.now()-dependent memos below so countdown / "x ago" labels stay live and expired sessions actually drop between updates.
+  // 1 Hz tick — re-reads `now` below so countdown / "x ago" labels stay live and expired sessions actually drop between updates.
   const [secondTick, setSecondTick] = useState(0);
+  // ONE clock read per tick / marker change / focus change, shared by every
+  // wall-clock decision below (watched, status, remaining, the tick gate) so
+  // they can never disagree about whether a share has expired (#1792). Focus
+  // is a dep so a share that expired while blurred shows ended on refocus.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the deps are the moments the clock must be re-read
+  const now = useMemo(() => Date.now(), [secondTick, markers, focused]);
 
   // A session is (sender, sessionId): another group member re-using a session
   // id can't move or end someone else's share. Records are keyed `sender:id`;
@@ -91,7 +98,6 @@ export function useLiveLocationThread(params: {
   // Inbound shares still running: a start from someone else, no end from its
   // sender yet, and inside its wall-clock window.
   const watched = useMemo<WatchedShare[]>(() => {
-    const now = Date.now();
     const out: WatchedShare[] = [];
     for (const m of markers) {
       if (m.fromMe || m.marker.phase !== 'start') continue;
@@ -108,8 +114,7 @@ export function useLiveLocationThread(params: {
       });
     }
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() expiry filter each second so expired shares drop
-  }, [markers, endedKeys, marmot, secondTick]);
+  }, [markers, endedKeys, marmot, now]);
 
   useLiveUpdateRelaySubscriptions({
     shares: watched,
@@ -163,16 +168,15 @@ export function useLiveLocationThread(params: {
         continue;
       }
       const expiresAt = m.marker.startedAt + m.marker.durationMs;
-      out[key] = Date.now() >= expiresAt ? 'ended' : 'active';
+      out[key] = now >= expiresAt ? 'ended' : 'active';
     }
     return aliasOwners(out);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() wall-clock status each second
-  }, [markers, endedKeys, ownerOf, sessionsByRecipient, threadKey, secondTick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- aliasOwners only reads ownerOf
+  }, [markers, endedKeys, ownerOf, sessionsByRecipient, threadKey, now]);
   const liveLocationBubbleStatus = useStableRecord(liveLocationBubbleStatusRaw);
 
   const liveLocationBubbleRemainingRaw = useMemo<Record<string, number | undefined>>(() => {
     const out: Record<string, number | undefined> = {};
-    const now = Date.now();
     for (const m of markers) {
       if (m.marker.phase !== 'start') continue;
       // Sender path: the context's remaining-ms matches the tracker's clock.
@@ -181,14 +185,18 @@ export function useLiveLocationThread(params: {
         fromCtx !== null ? fromCtx : Math.max(0, m.marker.startedAt + m.marker.durationMs - now);
     }
     return aliasOwners(out);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- secondTick re-runs the Date.now() remaining-time countdown each second
-  }, [markers, ownerOf, remainingMsForSession, secondTick]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- aliasOwners only reads ownerOf
+  }, [markers, ownerOf, remainingMsForSession, now]);
   // NOTE: remaining-ms DOES change each second for an active share, so the
   // countdown bubble's own row still re-renders every tick (#778).
   const liveLocationBubbleRemaining = useStableRecord(liveLocationBubbleRemainingRaw);
 
-  // Drive the 1 Hz tick only while focused with a live-location bubble.
-  const tick = markers.length > 0 && focused;
+  // Drive the 1 Hz tick only while focused AND some share is still running
+  // (#1792) — ended / expired bubbles alone never tick. Re-evaluated on every
+  // tick, so the tick that crosses the last expiry also stops it; a new start
+  // marker changes `markers` and restarts it.
+  const anyRunning = useMemo(() => nextLiveShareExpiry(markers, now) !== null, [markers, now]);
+  const tick = anyRunning && focused;
   useEffect(() => {
     if (!tick) return;
     const id = setInterval(() => setSecondTick((n) => (n + 1) % 1000), 1000);

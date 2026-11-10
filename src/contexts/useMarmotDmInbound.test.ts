@@ -1,6 +1,11 @@
 import { act, renderHook } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { mayNotifyFrom, useMarmotDmInbound } from './useMarmotDmInbound';
+import { __resetRepliedPartnersForTests } from '../services/dmRepliedPartners';
+import {
+  __resetNotificationAudiences,
+  publishNotificationAudience,
+} from '../services/notificationAudience';
 import {
   applyMarmotEdits,
   deleteMarmotMessages,
@@ -41,7 +46,11 @@ jest.mock('../services/dmDb', () => ({
   deleteMarmotRowsOfKinds: jest.fn().mockResolvedValue(undefined),
   getConversationMessages: jest.fn(),
   upsertDmMessages: jest.fn().mockResolvedValue(undefined),
+  selectRepliedConversations: jest.fn(async () => mockReplied),
+  subscribeDmStorage: jest.fn(() => () => {}),
+  REPLY_WIRE_KINDS: [14, 15],
 }));
+let mockReplied: string[] = [];
 jest.mock('../services/notificationService', () => ({
   retractMarmotMessageNotifications: jest.fn().mockResolvedValue(0),
   fireMessageNotification: jest.fn(),
@@ -289,15 +298,28 @@ it('applies a burst of edits with one inbox update and one thread reload per pee
 
 describe('mayNotifyFrom (WoT phantoms)', () => {
   const PEER = 'b'.repeat(64);
-  it('alerts only for a followed peer once the follow list is known', () => {
-    expect(mayNotifyFrom(PEER, new Set([PEER]))).toBe(true);
-    expect(mayNotifyFrom(PEER.toUpperCase(), new Set([PEER]))).toBe(true);
-    expect(mayNotifyFrom(PEER, new Set(['c'.repeat(64)]))).toBe(false);
+  it('alerts for a followed peer', () => {
+    expect(mayNotifyFrom(PEER, new Set([PEER]), false)).toBe(true);
+    expect(mayNotifyFrom(PEER.toUpperCase(), new Set([PEER]), false)).toBe(true);
+    expect(mayNotifyFrom(PEER, new Set(['c'.repeat(64)]), false)).toBe(false);
   });
 
-  it('fails open while the follow list is still loading', () => {
-    expect(mayNotifyFrom(PEER, new Set())).toBe(true);
-    expect(mayNotifyFrom(PEER, undefined)).toBe(true);
+  it('with no follows known and an unchosen tier: a stranger stays silent, a replied partner alerts (#1764)', () => {
+    const unchosen = { tier: 'friends' as const, fof: null };
+    for (const follows of [new Set<string>(), undefined]) {
+      expect(mayNotifyFrom(PEER, follows, false, unchosen)).toBe(false);
+      expect(mayNotifyFrom(PEER, follows, false, null)).toBe(false);
+      expect(mayNotifyFrom(PEER, follows, true, unchosen)).toBe(true);
+    }
+  });
+
+  it('widens to the chosen Web of Trust tier: friends of friends, or All', () => {
+    const follows = new Set(['c'.repeat(64)]);
+    expect(mayNotifyFrom(PEER, follows, false, { tier: 'friends', fof: null })).toBe(false);
+    expect(mayNotifyFrom(PEER, follows, false, { tier: 'fof', fof: new Set([PEER]) })).toBe(true);
+    expect(mayNotifyFrom(PEER, follows, false, { tier: 'fof', fof: null })).toBe(false);
+    expect(mayNotifyFrom(PEER, follows, false, { tier: 'all', fof: null })).toBe(true);
+    expect(mayNotifyFrom(PEER, new Set(), false, { tier: 'all', fof: null })).toBe(true);
   });
 });
 
@@ -333,11 +355,133 @@ describe('our own Marmot messages never alert (any device)', () => {
   });
 
   it("still alerts for the peer's message (control)", async () => {
-    renderHook(() => useMarmotDmInbound('alice', jest.fn()));
+    renderHook(() => useMarmotDmInbound('alice', jest.fn(), new Set(['bob'])));
     await act(async () => {
       mockOnMessage(chat('bob', 'c'.repeat(64)));
       await jest.advanceTimersByTimeAsync(150);
+      // The alert waits for who we've replied to (an async, once-per-account load).
+      await jest.advanceTimersByTimeAsync(0);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
     });
     expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+  });
+
+  describe('follow list still loading at cold start', () => {
+    beforeEach(() => {
+      __resetRepliedPartnersForTests();
+      __resetNotificationAudiences();
+      mockReplied = [];
+    });
+    // The alert first waits for who we've replied to (an async load).
+    const settle = async (ms: number) => {
+      await jest.advanceTimersByTimeAsync(ms);
+      await jest.advanceTimersByTimeAsync(0);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    };
+
+    it("holds a friend's alert until the follows are known, instead of dropping it", async () => {
+      const setter = jest.fn(); // stable: a new one would re-arm the hook
+      const { rerender } = renderHook(
+        ({ follows, hydrated }: { follows: Set<string>; hydrated: boolean }) =>
+          useMarmotDmInbound('alice', setter, follows, hydrated),
+        { initialProps: { follows: new Set<string>(), hydrated: false } },
+      );
+      await act(async () => {
+        mockOnMessage(chat('bob', 'd'.repeat(64)));
+        await settle(150);
+      });
+      expect(fireMessageNotification).not.toHaveBeenCalled();
+      await act(async () => {
+        rerender({ follows: new Set(['bob']), hydrated: true });
+        await settle(0);
+      });
+      expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it('a stranger still stays silent once the wait runs out', async () => {
+      renderHook(() => useMarmotDmInbound('alice', jest.fn(), new Set(), false));
+      await act(async () => {
+        mockOnMessage(chat('bob', '2'.repeat(64)));
+        await settle(150);
+        await settle(10_000);
+      });
+      expect(fireMessageNotification).not.toHaveBeenCalled();
+    });
+
+    it('decides with what it has after 10 s, and drops held alerts on unmount', async () => {
+      const { unmount } = renderHook(() =>
+        useMarmotDmInbound('alice', jest.fn(), new Set(['bob']), false),
+      );
+      await act(async () => {
+        mockOnMessage(chat('bob', 'e'.repeat(64)));
+        await settle(150);
+      });
+      expect(fireMessageNotification).not.toHaveBeenCalled();
+      await act(async () => {
+        await settle(10_000);
+      });
+      expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        mockOnMessage(chat('bob', '1'.repeat(64)));
+        await settle(150);
+      });
+      // Its own act: the cleanup must have run before the wait elapses.
+      await act(async () => unmount());
+      await act(async () => {
+        await settle(10_000);
+      });
+      expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('no follows known yet, unchosen tier (#1764)', () => {
+    beforeEach(() => {
+      __resetRepliedPartnersForTests();
+      __resetNotificationAudiences();
+      mockReplied = [];
+    });
+    afterAll(() => {
+      __resetRepliedPartnersForTests();
+      mockReplied = [];
+    });
+
+    it('a stranger in an existing 1:1 stays silent', async () => {
+      renderHook(() => useMarmotDmInbound('alice', jest.fn(), new Set()));
+      await act(async () => {
+        mockOnMessage(chat('bob', 'd'.repeat(64)));
+        await jest.advanceTimersByTimeAsync(150);
+        // The alert waits for who we've replied to (an async, once-per-account load).
+        await jest.advanceTimersByTimeAsync(0);
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+      });
+      expect(upsertDmMessages).toHaveBeenCalled(); // still stored
+      expect(fireMessageNotification).not.toHaveBeenCalled();
+    });
+
+    it('a partner we have replied to alerts', async () => {
+      mockReplied = ['bob'];
+      renderHook(() => useMarmotDmInbound('alice', jest.fn(), new Set()));
+      await act(async () => {
+        mockOnMessage(chat('bob', 'e'.repeat(64)));
+        await jest.advanceTimersByTimeAsync(150);
+        // The alert waits for who we've replied to (an async, once-per-account load).
+        await jest.advanceTimersByTimeAsync(0);
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+      });
+      expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it('an explicitly chosen All lets anyone alert', async () => {
+      publishNotificationAudience('alice', { tier: 'all', fof: null });
+      renderHook(() => useMarmotDmInbound('alice', jest.fn(), new Set()));
+      await act(async () => {
+        mockOnMessage(chat('bob', 'f'.repeat(64)));
+        await jest.advanceTimersByTimeAsync(150);
+        // The alert waits for who we've replied to (an async, once-per-account load).
+        await jest.advanceTimersByTimeAsync(0);
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+      });
+      expect(fireMessageNotification).toHaveBeenCalledTimes(1);
+    });
   });
 });
