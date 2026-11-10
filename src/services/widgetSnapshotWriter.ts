@@ -76,8 +76,7 @@ export function createWidgetSnapshotWriter(deps: WriterDeps) {
     }
     if (current.wallets.length === 0) {
       if (last.fingerprint === EMPTY) return;
-      last = { snapshot: null, fingerprint: EMPTY };
-      await deps.wipe();
+      await commit({ snapshot: null, fingerprint: EMPTY }, deps.wipe);
       if (gen === generation) await deps.refresh(null);
       return;
     }
@@ -88,11 +87,26 @@ export function createWidgetSnapshotWriter(deps: WriterDeps) {
       fetchedAt: deps.fetchedAt,
     });
     if (!shouldWriteSnapshot(last, snapshot)) return;
-    last = { snapshot, fingerprint: snapshotFingerprint(snapshot) };
     // Same tick as the generation check above: a wipe can't slip in between,
     // and a wipe issued after this is queued behind the write (widgetSnapshot).
-    await deps.write(snapshot);
+    await commit({ snapshot, fingerprint: snapshotFingerprint(snapshot) }, () =>
+      deps.write(snapshot),
+    );
     if (gen === generation) await deps.refresh(snapshot);
+  }
+
+  /** Record `next` as written, then store it. If storing fails, forget it
+   *  again (unless something newer replaced it), so the next run retries
+   *  instead of believing the disk already holds it. */
+  async function commit(next: Written, store: () => Promise<void>): Promise<void> {
+    const before = last;
+    last = next;
+    try {
+      await store();
+    } catch (e) {
+      if (last === next) last = before;
+      throw e;
+    }
   }
 
   function schedule(): void {
@@ -119,6 +133,9 @@ export function createWidgetSnapshotWriter(deps: WriterDeps) {
     accountChanged(wiped: Promise<void>): Promise<void> {
       generation += 1;
       cancel();
+      // Forget the old account's wallets too: a balance fetch still in flight
+      // for it may nudge() before the new account's state arrives.
+      input = null;
       last = { snapshot: null, fingerprint: EMPTY };
       return wiped.then(() => deps.refresh(null));
     },

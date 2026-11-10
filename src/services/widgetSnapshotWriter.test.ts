@@ -178,6 +178,37 @@ describe('createWidgetSnapshotWriter', () => {
     expect(deps.write.mock.calls[0][0].wallets.map((w) => w.id)).toEqual(['other']);
   });
 
+  it('a nudge after an account change never writes the previous account’s wallets', async () => {
+    const { writer, deps } = setup();
+    writer.update(input());
+    await writer.accountChanged(deps.wipe());
+    writer.nudge(); // a fetch for the old account landing late
+    await settle();
+    expect(deps.write).not.toHaveBeenCalled();
+  });
+
+  it('retries a write that failed instead of treating it as stored', async () => {
+    const { writer, deps } = setup();
+    deps.write.mockRejectedValueOnce(new Error('disk full'));
+    writer.update(input());
+    await settle();
+    writer.nudge(); // same data
+    await settle();
+    expect(deps.write).toHaveBeenCalledTimes(2);
+    expect(deps.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a wipe that failed for an account with no wallets', async () => {
+    const stored = buildWidgetSnapshot([wallet()], 'en', { btcPrice: 1, currency: 'USD' });
+    const { writer, deps } = setup(stored);
+    deps.wipe.mockRejectedValueOnce(new Error('io'));
+    writer.update(input({ wallets: [] }));
+    await settle();
+    writer.update(input({ wallets: [], btcPrice: 2 }));
+    await settle();
+    expect(deps.wipe).toHaveBeenCalledTimes(2);
+  });
+
   it('stops after dispose', async () => {
     const { writer, deps } = setup();
     writer.update(input());
