@@ -1,5 +1,6 @@
+import type { ListViewToken as ViewToken } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FlatList, ViewToken } from 'react-native';
+import type { FlatList } from 'react-native';
 import type { WalletState } from '../types/wallet';
 import { CAROUSEL_INTERVAL } from '../styles/WalletCarousel.styles';
 import { markWalletSwipeSettled, markWalletSwitchRequested } from '../utils/walletSwipeTiming';

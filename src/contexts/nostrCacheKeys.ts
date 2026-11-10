@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 
 import { perAccountKey } from '../services/perAccountStorage';
 import type { NostrProfile } from '../types/nostr';
@@ -68,7 +68,7 @@ export async function readCachedWithTtl<T>(
 /**
  * Merge freshly-fetched profiles on top of the profile cache (so contacts we
  * didn't refetch keep their known profile) and bump the cache timestamp.
- * Deferred behind InteractionManager so the writes don't compete with an
+ * Deferred behind idleScheduler so the writes don't compete with an
  * in-progress render/gesture.
  *
  * `existing` is the caller's snapshot of the cache from when its fetch began.
@@ -136,7 +136,7 @@ async function persistMergedProfileCacheNow(
 ): Promise<void> {
   const retired = () => (persistEpochs.get(pk) ?? 0) !== epoch;
   if (retired()) return;
-  await new Promise<void>((resolve) => InteractionManager.runAfterInteractions(() => resolve()));
+  await new Promise<void>((resolve) => idleScheduler.runWhenIdle(() => resolve()));
   let base: Record<string, NostrProfile> = existing;
   try {
     const onDisk = await AsyncStorage.getItem(perAccountKey(PROFILES_CACHE_KEY_BASE, pk));

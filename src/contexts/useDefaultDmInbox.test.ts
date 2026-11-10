@@ -1,5 +1,5 @@
 import { renderHook } from '@testing-library/react-native';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import {
   DEFAULT_DM_INBOX_DELAY_MS,
   useDefaultDmInbox,
@@ -30,11 +30,9 @@ beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
   setCurrentUserPubkey(PK);
-  jest.spyOn(InteractionManager, 'runAfterInteractions').mockImplementation((task?: unknown) => {
+  jest.spyOn(idleScheduler, 'runWhenIdle').mockImplementation((task?: unknown) => {
     (task as () => void)();
-    return { cancel: jest.fn() } as unknown as ReturnType<
-      typeof InteractionManager.runAfterInteractions
-    >;
+    return { cancel: jest.fn() } as unknown as ReturnType<typeof idleScheduler.runWhenIdle>;
   });
 });
 afterEach(() => {

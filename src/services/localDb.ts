@@ -205,6 +205,10 @@ async function openLocalDbAttempt(): Promise<DB> {
       `${SQLCIPHER_MISSING} — refusing to open a plaintext DB (cipher_version empty)`,
     );
   }
+  // Preserve the SQLCipher 4 format used by op-sqlite 16 (4096-byte pages,
+  // 256000 PBKDF2-HMAC-SHA512 iterations). Set after keying but before the
+  // first page read, including the schema fast path; never migrate/rekey here.
+  await db.execute('PRAGMA cipher_compatibility = 4;');
   // Fast path: already migrated to this exact schema, so skip the DDL and
   // column checks (two table_info reads + ~10 statements on every launch).
   // Reading user_version is also the first real page read, so a wrong key

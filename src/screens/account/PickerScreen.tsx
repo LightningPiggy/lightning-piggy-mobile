@@ -84,7 +84,7 @@ export default function PickerScreen({
                 testID={`${testID}-search`}
                 autoCorrect={false}
               />
-            ) : null
+            ) : undefined
           }
           ListEmptyComponent={<Text style={styles.empty}>{t('settingsKit.noResults')}</Text>}
         />

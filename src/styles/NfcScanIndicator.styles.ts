@@ -9,7 +9,7 @@ export const createNfcScanIndicatorStyles = (colors: Palette) =>
       justifyContent: 'center',
     },
     ring: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       alignItems: 'center',
       justifyContent: 'center',
     },

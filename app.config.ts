@@ -68,15 +68,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // three installs stay instantly distinguishable on the home screen.
   icon: getIconPath(),
   userInterfaceStyle: 'automatic',
-  // Splash screen: the pig + brand wordmark on brand-pink. Same asset
-  // IntroScreen uses so first-time users get a continuous pig → Home
-  // transition without the pink-spinner gap. `contain` leaves padding
-  // around the image so different device aspect ratios render cleanly.
-  splash: {
-    image: './assets/images/lightning-piggy-intro.png',
-    resizeMode: 'contain',
-    backgroundColor: '#e91e63',
-  },
   // `lightningpiggy://` — LP's own deep-link scheme. Cross-platform.
   // The Lightning payment schemes (`lightning:`, `lnurlw://`, `lnurl://`)
   // are registered per platform: `ios.scheme` below for iOS, and the
@@ -144,6 +135,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // Android 12+ launch screen: brand pink with no icon, so a cold start
     // doesn't flash the launcher icon before BootSplash's graffiti pig.
     './plugins/withTransparentSplashIcon',
+    // Splash screen: the pig + brand wordmark on brand-pink. Same asset
+    // IntroScreen uses so first-time users get a continuous pig → Home
+    // transition without the pink-spinner gap. `contain` leaves padding
+    // around the image so different device aspect ratios render cleanly.
+    // Keep the transparent-icon plugin before this plugin: mods run in reverse order.
+    [
+      'expo-splash-screen',
+      {
+        image: './assets/images/lightning-piggy-intro.png',
+        resizeMode: 'contain',
+        enableFullScreenImage_legacy: true,
+        backgroundColor: '#e91e63',
+      },
+    ],
     // MapLibre Native — replaces the Leaflet-in-WebView map stack.
     // The library auto-links on iOS via CocoaPods and on Android via
     // Gradle; the Expo plugin (shipped with the package) wires the
@@ -263,7 +268,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // (ACTION_SEND text/plain) and photos (ACTION_SEND / SEND_MULTIPLE image/*).
     // Lands in the chosen chat's composer — never auto-sent. Only `text/plain`,
     // not `text/*`, so HTML and other text types aren't read as files. The
-    // patched native module (patches/expo-share-intent+6.1.1.patch) copies only
+    // patched native module (patches/expo-share-intent+9.0.0.patch) copies only
     // other apps' `content://` images into cache/lp-share/ under generated
     // names, capped in count and size. iOS is off for now: a Share Extension
     // needs its own signed target, App Group and bundle id per build variant.

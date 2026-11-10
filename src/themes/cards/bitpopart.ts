@@ -12,7 +12,7 @@ import { StyleSheet } from 'react-native';
 // keeps the white card text readable over the brightest parts of the art.
 export const bgStyle = StyleSheet.create({
   full: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.9,
   },
 });

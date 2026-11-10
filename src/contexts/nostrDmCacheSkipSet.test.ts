@@ -16,14 +16,14 @@
  *     the front (oldest-inserted) before writing.
  *
  * expo-file-system is mocked so the tests run in Jest without a native
- * runtime. The mock captures the last `write()` call so round-trip tests
+ * runtime. The mock captures the last `writeSync()` call so round-trip tests
  * can inspect what would have been persisted.
  */
 
 // --- expo-file-system mock -------------------------------------------
 //
 // `nostrDmCache.ts` constructs `new File(Paths.document, filename)` and
-// calls `f.exists`, `f.text()`, `f.delete()`, `f.create()`, `f.write()`.
+// calls `f.exists`, `f.text()`, `f.delete()`, `f.create()`, `f.writeSync()`.
 // We provide a per-test in-memory store so each test starts clean.
 //
 // The mock is hoisted before the import so jest.mock(...) evaluates
@@ -47,9 +47,9 @@ jest.mock('expo-file-system', () => {
       delete fileStore[this.path];
     }
     create(): void {
-      // no-op — write() will populate
+      // no-op — writeSync() will populate
     }
-    write(data: string): void {
+    writeSync(data: string): void {
       fileStore[this.path] = data;
     }
   };

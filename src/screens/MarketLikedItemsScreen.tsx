@@ -94,7 +94,7 @@ const MarketLikedItemsScreen: React.FC<Props> = ({ navigation }) => {
                 {t('market.liked.loadFailed')}
               </Text>
             </View>
-          ) : null
+          ) : undefined
         }
         ListEmptyComponent={
           <View style={styles.emptyWrap} testID="liked-items-empty">

@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, FlatList, Image, InteractionManager } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, Image } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { Alert } from '../components/BrandedAlert';
 import Svg, { Path } from 'react-native-svg';
 import { Users } from 'lucide-react-native';
@@ -70,7 +71,7 @@ const GroupsScreen: React.FC = () => {
   // On focus, refresh the DM inbox so any new kind-1059 wraps get pulled
   // and the NIP-17 decrypt loop can route group rumors into the local
   // group store. Mirrors MessagesScreen's pattern (deferred via
-  // InteractionManager so the tab transition stays smooth).
+  // idleScheduler so the tab transition stays smooth).
   //
   // AbortSignal so an in-flight NIP-17 unwrap loop releases the JS
   // thread when the user navigates AWAY from Groups — pre-fix the
@@ -98,7 +99,7 @@ const GroupsScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
-      const handle = InteractionManager.runAfterInteractions(() => {
+      const handle = idleScheduler.runWhenIdle(() => {
         // Skip entirely if the inbox was refreshed within the TTL window —
         // tab-bouncing into Groups no longer re-runs the full relay fetch.
         if (Date.now() - dmInboxLastRefreshAt.current < DM_INBOX_REFRESH_TTL_MS) return;

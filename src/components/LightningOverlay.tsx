@@ -71,12 +71,12 @@ function makeBoltPath(width: number, height: number): SkPath {
   });
   // Merge trunk + forks into one SkPath so a single stroke pass draws the
   // whole tree — cheaper than one Path node per branch.
-  const combined = Skia.Path.Make();
+  const combined = Skia.PathBuilder.Make();
   branches.forEach((b) => {
     const sub = Skia.Path.MakeFromSVGString(boltToSvgPath(b.points));
     if (sub) combined.addPath(sub);
   });
-  return combined;
+  return combined.detach();
 }
 
 interface BoltLayerProps {

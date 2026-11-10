@@ -7,8 +7,8 @@ import {
   Animated,
   PanResponder,
   Dimensions,
-  InteractionManager,
 } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import * as Location from 'expo-location';
 import { ChevronLeft, MapPin, PiggyBank, SlidersHorizontal } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -86,7 +86,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
       setFriendsEnabled(false);
       return;
     }
-    const task = InteractionManager.runAfterInteractions(() => setFriendsEnabled(true));
+    const task = idleScheduler.runWhenIdle(() => setFriendsEnabled(true));
     return () => task.cancel();
   }, [isFocused]);
   const friends = useFriendsLiveLocations({ enabled: friendsEnabled });

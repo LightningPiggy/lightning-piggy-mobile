@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { useNostrDmInbox } from '../contexts/NostrContext';
 import { useGroups } from '../contexts/GroupsContext';
 
@@ -33,7 +33,7 @@ export function useDmCatchUpOnOpen(isLoggedIn: boolean): void {
       const controller = new AbortController();
       let timer: ReturnType<typeof setTimeout> | null = null;
       // After the open animation and first paint, like the Messages tab (#731).
-      const handle = InteractionManager.runAfterInteractions(() => {
+      const handle = idleScheduler.runWhenIdle(() => {
         timer = setTimeout(() => {
           const { refreshDmInbox: refresh, includeNonFollows } = latest.current;
           void refresh({ includeNonFollows, signal: controller.signal }).catch(() => {});

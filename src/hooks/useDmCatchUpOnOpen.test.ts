@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react-native';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { useDmCatchUpOnOpen } from './useDmCatchUpOnOpen';
 
 const mockArm = jest.fn();
@@ -22,11 +22,9 @@ jest.mock('../contexts/GroupsContext', () => ({
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
-  jest.spyOn(InteractionManager, 'runAfterInteractions').mockImplementation((task?: unknown) => {
+  jest.spyOn(idleScheduler, 'runWhenIdle').mockImplementation((task?: unknown) => {
     queueMicrotask(() => (task as () => void)());
-    return { cancel: jest.fn() } as unknown as ReturnType<
-      typeof InteractionManager.runAfterInteractions
-    >;
+    return { cancel: jest.fn() } as unknown as ReturnType<typeof idleScheduler.runWhenIdle>;
   });
 });
 afterEach(() => jest.useRealTimers());

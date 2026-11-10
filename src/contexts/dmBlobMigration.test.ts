@@ -28,7 +28,7 @@ jest.mock('expo-file-system', () => {
     create(): void {
       fileStore[this.path] = '';
     }
-    write(content: string): void {
+    writeSync(content: string): void {
       fileStore[this.path] = content;
     }
   };

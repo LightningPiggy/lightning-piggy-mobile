@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import {
   cacheExplorePins,
   loadExploreCamera,
@@ -39,7 +39,7 @@ export function useExploreMapState(nextPins: ExplorePins) {
 
   useEffect(() => {
     if (!mounted) return;
-    const task = InteractionManager.runAfterInteractions(() => {
+    const task = idleScheduler.runWhenIdle(() => {
       // Keep cached pins while mount-time hydration/fetch is still empty.
       // After the first fresh set, an empty update can intentionally clear it.
       if (

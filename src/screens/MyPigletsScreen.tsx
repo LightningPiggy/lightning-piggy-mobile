@@ -585,7 +585,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
             <View style={styles.center}>
               <BrandedSpinner />
             </View>
-          ) : null
+          ) : undefined
         }
       />
     </View>

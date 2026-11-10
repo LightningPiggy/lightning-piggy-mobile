@@ -21,8 +21,7 @@ import * as Location from 'expo-location';
 // so we mix the two: class API for the cache copy, legacy for the SAF
 // "save to Files" flow on Android.
 import { StorageAccessFramework as SAF, readAsStringAsync } from 'expo-file-system/legacy';
-import { Asset } from 'expo-asset';
-import { File, Paths } from 'expo-file-system';
+import { stageStlInCache } from '../services/stageStlInCache';
 import * as Sharing from 'expo-sharing';
 import {
   Camera,
@@ -657,23 +656,6 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
   // Framework (SAF) alongside the share-to-app fallback. One button, prompt
   // on tap, no extra UI bloat.
 
-  const stageStlInCache = useCallback(async (): Promise<File> => {
-    // Materialise the bundled asset to a real file URI, then copy into the
-    // cache dir with a friendly name so OS pickers don't show the
-    // require()-mangled asset filename.
-    const asset = Asset.fromModule(
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../assets/3d/piggy-bag-charm.stl'),
-    );
-    await asset.downloadAsync();
-    if (!asset.localUri) throw new Error('STL asset has no localUri after download');
-    const target = new File(Paths.cache, 'piggy-bag-charm.stl');
-    if (target.exists) target.delete();
-    const source = new File(asset.localUri);
-    source.copy(target);
-    return target;
-  }, []);
-
   const shareStl = useCallback(async () => {
     const target = await stageStlInCache();
     if (await Sharing.isAvailableAsync()) {
@@ -683,7 +665,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
         UTI: 'public.standard-tesselated-geometry-format',
       });
     }
-  }, [stageStlInCache, t]);
+  }, [t]);
 
   const saveStlToFiles = useCallback(async () => {
     // SAF has no file:// copy primitive: pick a directory, create the STL,
@@ -702,7 +684,7 @@ const HuntCreateScreen: React.FC<Props> = ({ navigation, route }) => {
     const base64 = await readAsStringAsync(target.uri, { encoding: 'base64' });
     await SAF.writeAsStringAsync(destUri, base64, { encoding: 'base64' });
     Toast.show({ type: 'success', text1: t('huntCreateScreen.savedStl') });
-  }, [stageStlInCache, t]);
+  }, [t]);
 
   const handleSaveStl = useCallback(async () => {
     try {

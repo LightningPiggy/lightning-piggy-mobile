@@ -1,5 +1,6 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, InteractionManager, Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { useShareIntent } from 'expo-share-intent';
 import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
@@ -66,9 +67,7 @@ const ShareIntentHost: React.FC = () => {
   // of a share that is still open or staged are kept (see `sharedFiles`).
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    const handle = InteractionManager.runAfterInteractions(() =>
-      sweepStaleSharedFiles(PENDING_SHARE_TTL_MS),
-    );
+    const handle = idleScheduler.runWhenIdle(() => sweepStaleSharedFiles(PENDING_SHARE_TTL_MS));
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'background') sweepStaleSharedFiles(PENDING_SHARE_TTL_MS);
     });

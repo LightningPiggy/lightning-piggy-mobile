@@ -5,7 +5,7 @@ import { StyleSheet } from 'react-native';
 export const createLightningOverlayStyles = () =>
   StyleSheet.create({
     canvas: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
     },
   });
 

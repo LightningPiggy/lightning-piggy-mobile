@@ -480,7 +480,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
                   colors={colors}
                   styles={styles}
                 />
-              ) : null
+              ) : undefined
             }
             keyExtractor={({ event }) => event.coord}
             contentContainerStyle={styles.listContent}
@@ -504,7 +504,7 @@ const EventsScreen: React.FC<Props> = ({ navigation }) => {
                 <Text style={styles.emptySearchText}>
                   {t('eventsScreen.noSearchMatches', { query: searchQuery.trim() })}
                 </Text>
-              ) : null
+              ) : undefined
             }
           />
         </>

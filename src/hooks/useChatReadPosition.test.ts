@@ -1,6 +1,7 @@
+import type { ListViewToken as ViewToken } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { act, renderHook, waitFor } from '@testing-library/react-native';
-import { AppState, type ViewToken } from 'react-native';
+import { AppState } from 'react-native';
 import { useChatReadPosition } from './useChatReadPosition';
 import {
   CHAT_READ_POSITIONS_KEY_BASE,

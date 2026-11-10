@@ -18,7 +18,7 @@ import React, {
   useMemo,
   startTransition,
 } from 'react';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nostrService from '../services/nostrService';
@@ -814,7 +814,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         // Eagerly hydrate dmInbox from disk cache so Messages tab paints
         // on first focus instead of staying blank for the relay round-trip.
         await hydrateDmInboxFromCache(pk);
-        InteractionManager.runAfterInteractions(async () => {
+        idleScheduler.runWhenIdle(async () => {
           try {
             const readRelays = await loadRelays(pk);
             await loadProfile(pk, readRelays);
@@ -885,7 +885,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // Eagerly hydrate dmInbox from disk cache so Messages tab paints
       // on first focus instead of staying blank for the relay round-trip.
       await hydrateDmInboxFromCache(pk);
-      InteractionManager.runAfterInteractions(async () => {
+      idleScheduler.runWhenIdle(async () => {
         try {
           const readRelays = await loadRelays(pk);
           await loadProfile(pk, readRelays);
@@ -1098,7 +1098,7 @@ export const NostrProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       await loadContactsFromCache(target.pubkey);
       await hydrateDmInboxFromCache(target.pubkey);
       // Defer the relay refresh — keeps the switch animation smooth.
-      InteractionManager.runAfterInteractions(async () => {
+      idleScheduler.runWhenIdle(async () => {
         try {
           const readRelays = await loadRelays(target.pubkey);
           await loadProfile(target.pubkey, readRelays);

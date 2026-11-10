@@ -382,7 +382,7 @@ const HuntScreen: React.FC<Props> = ({ navigation }) => {
           empty array is enough. */}
       <FlatList
         data={EMPTY_DATA}
-        renderItem={null}
+        renderItem={undefined}
         contentContainerStyle={styles.scrollContent}
         testID="hunt-screen-scroll"
         keyboardShouldPersistTaps="handled"

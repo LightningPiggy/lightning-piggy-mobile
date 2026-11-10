@@ -7,8 +7,8 @@ import {
   BackHandler,
   Keyboard,
   Platform,
-  InteractionManager,
 } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { Image } from 'expo-image';
 import { UserRound, UsersRound } from 'lucide-react-native';
 import {
@@ -126,23 +126,16 @@ const FriendPickerSheet: React.FC<Props> = ({
     }
   }, [visible]);
 
-  // Defer the BottomSheetFlatList mount until JS thread + native
-  // interactions are idle. `InteractionManager.runAfterInteractions`
-  // doesn't strictly wait for the bottom-sheet open animation to
-  // finish (Reanimated worklets run on the UI thread, outside its
-  // tracking) — but it does defer past JS-side work + ongoing native
-  // touch interactions, which empirically delays the list mount until
-  // the sheet has visibly settled. The user sees a brief blank area
-  // (~250 ms) before the list snaps in, instead of the JS thread
-  // building 50 PickedFriend objects + queuing avatar Image decodes
-  // during the animation.
+  // Defer list construction and avatar decodes until JS is idle. Native
+  // Reanimated transitions are independent of this idle callback, so they
+  // may still be running when the list mounts.
   const [listReady, setListReady] = useState(false);
   useEffect(() => {
     if (!visible) {
       setListReady(false);
       return;
     }
-    const handle = InteractionManager.runAfterInteractions(() => setListReady(true));
+    const handle = idleScheduler.runWhenIdle(() => setListReady(true));
     return () => handle.cancel();
   }, [visible]);
 
@@ -265,7 +258,7 @@ const FriendPickerSheet: React.FC<Props> = ({
           {item.picture && isSupportedImageUrl(item.picture) ? (
             <Image
               source={{ uri: item.picture }}
-              style={[StyleSheet.absoluteFillObject, styles.avatarImage]}
+              style={[StyleSheet.absoluteFill, styles.avatarImage]}
               // Canonical avatar caching policy — see issue #245.
               cachePolicy="memory-disk"
               recyclingKey={item.picture}
@@ -340,7 +333,7 @@ const FriendPickerSheet: React.FC<Props> = ({
           />
         </View>
         <View style={styles.listWithBar}>
-          {/* `listReady` flips true via InteractionManager once JS work +
+          {/* `listReady` flips true via idleScheduler once JS work +
               touch interactions are idle (which empirically lines up
               with the sheet open animation finishing). Until then this
               area is intentionally blank — nothing for the JS thread
