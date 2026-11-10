@@ -44,7 +44,7 @@ import {
 import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
 import { loadOrDeriveMediaKeys, rememberMediaKeys } from './marmotMediaKeyStore';
 import { historyNamespace, replayGroupHistory } from './marmotHistoryReplay';
-import { GROUP_STATE_NAMESPACE, MarmotStateSaves } from './marmotStateSaves';
+import * as stateSaveNs from './marmotStateSaves';
 import {
   advertisesMediaV2,
   ensureKeyPackageSlot,
@@ -212,7 +212,7 @@ export class MarmotSession {
   readonly devices: MarmotDeviceTracker;
   /** Adds devices installed since a 1:1 began (#1559). */
   private readonly dmDevices: MarmotDmDeviceSync;
-  readonly stateSaves: MarmotStateSaves; // confirmed commits whose save failed (#1754)
+  readonly stateSaves: stateSaveNs.MarmotStateSaves; // confirmed commits whose save failed (#1754)
   private readonly discovery: ReturnType<typeof keyPackageDiscovery>;
   private markReady!: () => void;
   /** Resolves once stored groups are loaded — joins must not race loadAll. */
@@ -225,7 +225,7 @@ export class MarmotSession {
     this.pubkey = opts.pubkey;
     const backend = opts.backend ?? createSqliteMarmotBackend(opts.pubkey);
     this.backend = fence.fenceBackend(backend, this.gate); // drops writes after a wipe
-    this.stateSaves = new MarmotStateSaves({
+    this.stateSaves = new stateSaveNs.MarmotStateSaves({
       owner: opts.pubkey,
       backend: this.backend,
       stopped: () => this.gate.stopped,
@@ -305,12 +305,12 @@ export class MarmotSession {
         const slot = await this.installationSlot();
         return this.gate.guard(getInstallationSignatureKeyPair(this.pubkey, slot, ciphersuite));
       },
-      groupStateStore: store(GROUP_STATE_NAMESPACE),
+      groupStateStore: store(stateSaveNs.GROUP_STATE_NAMESPACE),
       keyPackageStore: store('keyPackages'),
       inviteStore: store('invites'),
       lifecycleStore: store('lifecycle'),
       ingestStateStore: store('ingest'),
-      rewindStore: store('rewind'),
+      rewindStore: store(stateSaveNs.GROUP_HISTORY_TREE_NAMESPACE),
       removedMarkerStore: store('removed'),
       // Durable per-group message history: the safety net that makes delivery
       // survive the app dying between MLS processing and our own store write.
@@ -600,7 +600,9 @@ export class MarmotSession {
       return { ...this.summarise(group), ...outcome };
     } catch (e) {
       // Only an Add that never committed gets here: undo it, leaving no empty group.
-      await this.client.groups.destroy(group.id).catch(() => undefined);
+      await this.stateSaves
+        .whileRemoving(group.idStr, () => this.client.groups.destroy(group.id))
+        .catch(() => undefined);
       await this.welcomePayloads.drop(group.idStr, { outbox: true }).catch(() => undefined);
       this.emitGroupsChanged();
       throw e;
@@ -753,7 +755,8 @@ export class MarmotSession {
   }
 
   async leave(appGroupId: string): Promise<void> {
-    await this.client.groups.leave(toMlsGroupId(appGroupId));
+    const mlsId = toMlsGroupId(appGroupId); // no save retry may write it back (#1754)
+    await this.stateSaves.whileRemoving(mlsId, () => this.client.groups.leave(mlsId));
     this.emitGroupsChanged();
   }
 

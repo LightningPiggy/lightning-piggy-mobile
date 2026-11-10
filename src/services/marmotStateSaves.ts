@@ -28,6 +28,8 @@ export const STATE_SAVE_RETRY_MS: readonly number[] = [1_000, 4_000, 15_000];
 const NAMESPACE = 'unsavedState';
 /** The KV namespace marmot-ts keeps each group's serialized state in. */
 export const GROUP_STATE_NAMESPACE = 'groups';
+/** The KV namespace of marmot-ts's fork-history tree (`rewindStore`), keyed `<gid>/…`. */
+export const GROUP_HISTORY_TREE_NAMESPACE = 'rewind';
 
 /** The bit of a MarmotGroup this needs. */
 export interface SavableGroup {
@@ -59,36 +61,71 @@ export class MarmotStateSaves {
   private readonly sleeps = new Map<string, () => void>();
   /** Groups left / destroyed mid-retry: never write their state back. */
   private readonly gone = new Set<string>();
+  /** The group each running retry loop saves (to re-arm it after a pause). */
+  private readonly retrying = new Map<string, SavableGroup>();
+  /** Groups being left / destroyed (whileRemoving): no retry runs meanwhile.
+   * The value is the group to re-arm if the removal fails, if any. */
+  private readonly paused = new Map<string, SavableGroup | null>();
   private halted = false;
 
   constructor(private readonly deps: MarmotStateSavesDeps) {}
 
   private stopped(mlsId?: string): boolean {
-    return this.halted || this.deps.stopped() || (!!mlsId && this.gone.has(mlsId));
+    if (this.halted || this.deps.stopped()) return true;
+    return !!mlsId && (this.gone.has(mlsId) || this.paused.has(mlsId));
   }
 
   /** Inspect one publish's results; a failed save is retried in the background. */
   check(group: SavableGroup, results: readonly Pick<GroupPublishResult, 'persistence'>[]): void {
     const failed = results.find((r) => r.persistence.kind === 'failed')?.persistence;
-    if (failed?.kind !== 'failed' || this.stopped()) return;
-    if (__DEV__)
-      console.warn(`[PerfBlock] marmot state save failed ${short(group.idStr)}: ${failed.error}`);
+    if (failed?.kind !== 'failed') return;
     // Durable mark now, not after the retries: if the app dies (or the account
     // switches) before one lands, the next start still knows this epoch never
     // reached storage. A successful retry, or load() finding storage caught
-    // up, removes it. Best effort — the same storage just failed.
+    // up, removes it. Best effort — the same storage just failed. Written
+    // even once stopped: a publish in flight can't be cancelled, and this is
+    // the account's own store (a wipe's fenced backend drops it anyway).
     void this.persistMark(group);
+    if (this.stopped()) return; // no retry, no UI
+    if (__DEV__)
+      console.warn(`[PerfBlock] marmot state save failed ${short(group.idStr)}: ${failed.error}`);
+    if (this.paused.has(group.idStr)) return void this.paused.set(group.idStr, group);
     // One retry loop per group: every try writes the group's CURRENT state.
     // A failure landing while that loop's save is already in flight may be
     // for a newer state than the one being written — the loop goes again.
     if (this.retries.has(group.idStr)) return void this.rerun.add(group.idStr);
+    this.start(group);
+  }
+
+  private start(group: SavableGroup): void {
     this.gone.delete(group.idStr); // it's live again (e.g. re-joined)
+    this.retrying.set(group.idStr, group);
     const run = this.retry(group).finally(() => {
       this.retries.delete(group.idStr);
+      this.retrying.delete(group.idStr);
       this.rerun.delete(group.idStr);
       this.gone.delete(group.idStr);
     });
     this.retries.set(group.idStr, run);
+  }
+
+  /** Leave / destroy a group with its save retry held: a retry writing after
+   * marmot-ts wiped the group's state would bring it back on the next start.
+   * Waits out a save in flight first; re-arms the retry if `remove` throws. */
+  async whileRemoving<T>(mlsId: string, remove: () => Promise<T>): Promise<T> {
+    this.paused.set(mlsId, this.retrying.get(mlsId) ?? null);
+    this.sleeps.get(mlsId)?.();
+    await this.settled(mlsId);
+    try {
+      return await remove();
+    } catch (e) {
+      const group = this.paused.get(mlsId);
+      this.paused.delete(mlsId);
+      if (group && !this.stopped()) this.start(group);
+      throw e;
+    } finally {
+      this.paused.delete(mlsId);
+    }
   }
 
   /** Resolves once `mlsId` has no retry in flight. */
@@ -103,6 +140,9 @@ export class MarmotStateSaves {
   /** Clear the mark once the group saves at (or past) the unsaved epoch. */
   watch(group: SavableGroup): void {
     group.on('stateSaved', () => {
+      // A running retry owns the mark: it may hold a newer failure's epoch
+      // than the state this save wrote, and the loop clears it rerun-aware.
+      if (this.retries.has(group.idStr)) return;
       const epoch = this.unsaved.get(group.idStr);
       if (epoch !== undefined && epochOf(group) >= epoch) void this.clear(group.idStr);
     });
@@ -226,10 +266,15 @@ export class MarmotStateSaves {
     return this.deps.backend.set(NAMESPACE, group.idStr, epoch).catch(() => undefined);
   }
 
-  /** Remove a forgotten group's state row (and any mark) a save just wrote back. */
+  /** Remove what a save just wrote back for a forgotten group: its state row,
+   * the fork-history tree rows save(true) flushed, and any mark. */
   private async dropState(mlsId: string): Promise<void> {
     if (__DEV__) console.warn(`[PerfBlock] marmot state save after leave ${short(mlsId)}: dropped`);
-    await this.deps.backend.remove(GROUP_STATE_NAMESPACE, mlsId).catch(() => undefined);
+    const { backend } = this.deps;
+    await backend.remove(GROUP_STATE_NAMESPACE, mlsId).catch(() => undefined);
+    const tree = await backend.keys(GROUP_HISTORY_TREE_NAMESPACE).catch(() => []);
+    for (const key of tree.filter((k) => k.startsWith(`${mlsId}/`)))
+      await backend.remove(GROUP_HISTORY_TREE_NAMESPACE, key).catch(() => undefined);
     await this.clear(mlsId);
   }
 
