@@ -2155,6 +2155,11 @@
     "loadingMore": "Завантаження додаткових транзакцій",
     "noTransactions": "Транзакцій ще немає"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "Це більше, ніж є в гаманці {{wallet}} ({{balance}} sats).",
+    "unknownOutcomeTitle": "Статус переказу невідомий",
+    "unknownOutcomeBody": "Не вдалося підтвердити переказ. Ваші sats могли все ж переміститися — перевірте баланси обох гаманців, перш ніж спробувати ще раз."
+  },
   "unsupportedEntityScreen": {
     "back": "Назад",
     "cantOpenTitle": "Вибачте — не вдається це відкрити",

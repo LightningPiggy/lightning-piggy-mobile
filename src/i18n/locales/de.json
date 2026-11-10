@@ -2147,6 +2147,11 @@
     "loadingMore": "Weitere Transaktionen werden geladen",
     "noTransactions": "Noch keine Transaktionen"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "Das ist mehr, als {{wallet}} enthält ({{balance}} sats).",
+    "unknownOutcomeTitle": "Status der Verschiebung unbekannt",
+    "unknownOutcomeBody": "Wir konnten die Verschiebung nicht bestätigen. Deine sats wurden vielleicht trotzdem verschoben – prüfe die Guthaben beider Wallets, bevor du es noch einmal versuchst."
+  },
   "unsupportedEntityScreen": {
     "back": "Zurück",
     "cantOpenTitle": "Das lässt sich leider nicht öffnen",

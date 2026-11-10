@@ -2147,6 +2147,11 @@
     "loadingMore": "További tranzakciók betöltése",
     "noTransactions": "Még nincs tranzakció"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "Ez több, mint amennyi a(z) {{wallet}} tárcában van ({{balance}} sats).",
+    "unknownOutcomeTitle": "Az áthelyezés állapota ismeretlen",
+    "unknownOutcomeBody": "Nem tudtuk megerősíteni az áthelyezést. Lehet, hogy a sats mégis átkerült — mielőtt újra próbálod, ellenőrizd mindkét tárca egyenlegét."
+  },
   "unsupportedEntityScreen": {
     "back": "Vissza",
     "cantOpenTitle": "Sajnos ezt nem lehet megnyitni",

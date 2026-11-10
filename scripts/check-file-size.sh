@@ -19,7 +19,7 @@ declare -A BASELINE=(
   ["src/screens/HuntCreateScreen.tsx"]=2016
   ["src/contexts/WalletContext.tsx"]=1495
   ["src/screens/HuntPiggyDetailScreen.tsx"]=1206
-  ["src/components/TransferSheet.tsx"]=1277
+  ["src/components/TransferSheet.tsx"]=1244
 )
 
 # GitHub Actions error annotation when running in CI; plain echo locally.

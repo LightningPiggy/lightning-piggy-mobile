@@ -2147,6 +2147,11 @@
     "loadingMore": "Loading more transactions",
     "noTransactions": "No transactions yet"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "That's more than {{wallet}} holds ({{balance}} sats).",
+    "unknownOutcomeTitle": "Move status unknown",
+    "unknownOutcomeBody": "We couldn't confirm the move. Your sats may still have moved — check both wallets' balances before trying again."
+  },
   "unsupportedEntityScreen": {
     "back": "Back",
     "cantOpenTitle": "Sorry — can't open this",

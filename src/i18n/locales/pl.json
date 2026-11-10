@@ -2155,6 +2155,11 @@
     "loadingMore": "Wczytywanie kolejnych transakcji",
     "noTransactions": "Brak transakcji"
   },
+  "transferSheet": {
+    "amountExceedsBalance": "To więcej, niż ma {{wallet}} ({{balance}} sats).",
+    "unknownOutcomeTitle": "Nieznany stan przeniesienia",
+    "unknownOutcomeBody": "Nie udało nam się potwierdzić przeniesienia. Twoje sats mogły już zostać przeniesione. Sprawdź salda obu portfeli, zanim spróbujesz ponownie."
+  },
   "unsupportedEntityScreen": {
     "back": "Wstecz",
     "cantOpenTitle": "Przepraszamy — nie da się tego otworzyć",

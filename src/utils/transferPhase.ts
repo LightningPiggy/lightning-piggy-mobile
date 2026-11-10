@@ -24,7 +24,12 @@ import type { ChecklistStep } from '../components/StepChecklist';
 
 export type TransferType = 'ln-to-ln' | 'ln-to-onchain' | 'onchain-to-ln' | 'onchain-to-onchain';
 
-export type TransferPhase = 'idle' | 'in-progress' | 'done' | 'failed';
+/**
+ * `unknown`: the payment / broadcast went out but its result never came back,
+ * so the sats may or may not have moved (#1778). Distinct from `failed` so the
+ * checklist doesn't claim a failure.
+ */
+export type TransferPhase = 'idle' | 'in-progress' | 'done' | 'failed' | 'unknown';
 
 export interface TransferStep {
   id: string;
@@ -42,7 +47,7 @@ export interface TransferProgress {
    * On `failed`, the row at activeIndex is the one that errored.
    */
   activeIndex: number;
-  /** Populated when `phase === 'failed'`. */
+  /** Populated when `phase` is `'failed'` or `'unknown'`. */
   errorMessage?: string;
 }
 
@@ -144,6 +149,19 @@ export const failTransfer = (
     errorMessage,
   };
 };
+
+/**
+ * Like {@link failTransfer}, but the outcome is unknown rather than failed:
+ * the row that was in flight renders as not-yet-done (○), never ✗ (#1778).
+ */
+export const unknownTransfer = (progress: TransferProgress, message: string): TransferProgress => {
+  if (progress.phase !== 'in-progress') return progress;
+  return { ...progress, phase: 'unknown', errorMessage: message };
+};
+
+/** The transfer stopped without succeeding — keep the progress view up. */
+export const isTransferStopped = (progress: TransferProgress): boolean =>
+  progress.phase === 'failed' || progress.phase === 'unknown';
 
 /**
  * The checklist rows for `progress`: rows before `activeIndex` (or every row
