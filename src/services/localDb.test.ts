@@ -38,9 +38,10 @@ describe('localDb', () => {
   it('opens the DB with the keystore encryption key', async () => {
     const { getLocalDb: freshGetLocalDb } = require('./localDb');
     await freshGetLocalDb();
-    expect(mockOpen).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'lightningpiggy.db', encryptionKey: 'a'.repeat(64) }),
-    );
+    expect(mockOpen).toHaveBeenCalledWith({
+      name: 'lightningpiggy.db',
+      encryptionKey: 'a'.repeat(64),
+    });
   });
 
   it('runs the schema (owner-scoped dm_messages table + index) on open', async () => {
@@ -191,8 +192,11 @@ describe('localDb', () => {
     await g();
     expect(mockExecute.mock.calls.map((c) => c[0])).toEqual([
       'PRAGMA cipher_version;',
+      'PRAGMA cipher_compatibility = 4;',
       'PRAGMA user_version;',
     ]);
+    expect(mockDelete).not.toHaveBeenCalled();
+    expect(mockClearKey).not.toHaveBeenCalled();
   });
 
   // clearLocalDb is module-private (the only safe public wipe is

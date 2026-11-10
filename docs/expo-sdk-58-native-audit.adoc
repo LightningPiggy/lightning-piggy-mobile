@@ -1,0 +1,258 @@
+= Expo SDK 58 native dependency audit
+
+Audited on 2026-11-10 for PR #1848, React Native 0.88.1.
+This is a source audit, not proof of native compilation or an on-device upgrade.
+
+== Dependency changes
+
+* `@maplibre/maplibre-react-native`: 11.2.1 -> 11.5.1 (newest published 11.x).
+  https://github.com/maplibre/maplibre-react-native/blob/main/CHANGELOG.md[11.3.4 changelog]
+  documents the Android `getReactTag` fix for RN >= 0.87.
+  In 11.5.1, `android/src/main/java/org/maplibre/reactnative/components/mapview/MLRNMapViewManager.kt:265`
+  calls `getReactTag()` explicitly. The RN peer is >= 0.80.0.
+  The android/ios scan finds only that call and the supported `RCTBridgeModule.h` import.
+* `@op-engineering/op-sqlite`: 16.1.1 -> 19.0.5 (newest published stable).
+  `ios/OPSQLite.mm:15` declares `OPSQLiteRuntimeProvider`; lines 59-85 obtain the runtime
+  through that protocol instead of casting to the removed `RCTCxxBridge`.
+  RN 0.88.1's `React/Base/RCTBridgeProxy.mm:99` implements this accessor.
+* A reproducible patch for op-sqlite 19.0.5 changes Android's
+  `context.catalystInstance.jsCallInvokerHolder` to `context.jsCallInvokerHolder`.
+  The latest package still uses CatalystInstance. RN's
+  `ReactAndroid/src/main/java/com/facebook/react/runtime/BridgelessReactContext.kt:82`
+  can throw on that accessor when legacy architecture minification is enabled;
+  its direct `getJSCallInvokerHolder()` at line 186 is supported.
+  This patch changes no database path, key, or flags.
+* MapLibre's transitive dependencies change: style-spec 24.8.5 -> 26.4.4,
+  jsonlint-lines-primitives 2.0.2 -> 2.0.3, unitbezier 0.0.1 -> 1.0.0,
+  and Turf distance/helpers/invariant/length/meta/nearest-point-on-line 7.3.5 -> 7.4.0.
+
+== op-sqlite major-version review
+
+Reviewed the upstream https://github.com/OP-Engineering/op-sqlite/releases[release history]
+for every stable 17.x, 18.x and 19.x entry returned by GitHub, plus the published 19.0.5
+source (GitHub's release list stopped at 19.0.4 when queried).
+
+[cols="1,4,3",options="header"]
+|===
+|Major |Breaking or behavior changes |App impact
+|17
+|`executeRaw` / `executeRawSync` return a `RawQueryResult` object with `rawRows`,
+`columnNames`, `rowsAffected` and optional `insertId`, instead of the row array
+(https://github.com/OP-Engineering/op-sqlite/pull/420[PR 420]).
+17.1 adds optional `readOnly`; 17.2 adds optional `failOnCreate`.
+|No raw-query calls in app source. Both new open options default to false.
+|18
+|Bundled crsqlite support is removed
+(https://github.com/OP-Engineering/op-sqlite/pull/440[PR 440]).
+Async work, hooks and reactive queries are scoped to runtime generations;
+18.1.2 changes the internal database representation from HostObject to NativeState;
+18.2.3 awaits transaction commit and preserves finalized handles.
+18.2.5 updates bundled SQLite/SQLCipher.
+|The app enables only SQLCipher, not crsqlite. Public `execute`, `transaction`,
+`close` and `delete` remain available. Awaited app transactions retain their API.
+|19
+|Batch transaction boundaries move into native code, off the JS thread;
+rollback handling preserves the original failure and avoids rolling back an
+already rolled-back transaction
+(https://github.com/OP-Engineering/op-sqlite/pull/465[PR 465]).
+SQLite errors expose `code` and `extendedCode`; message formatting changes
+(https://github.com/OP-Engineering/op-sqlite/pull/463[PR 463]).
+Tokenizer generation moves from Ruby to shared JavaScript.
+19.0.1 joins the worker thread on close.
+|No batch or custom-tokenizer calls/config. The existing wrong-key matcher
+is a substring regex, so the retained SQLite message remains recognizable.
+Although the 19.0.0 release notes mention `executeBatchSync`, PR 465 removes
+that intermediate API again; it is absent from the published 19.0.5 types.
+|===
+
+No app API rewrite is required for the methods actually used. The updated regression
+tests check the existing-name/key open and SQLCipher format setup before the schema
+fast path. Node SQLite-backed tests exercise schema/transaction behavior, not encryption.
+
+== Existing encrypted database compatibility
+
+`package.json` continues to enable only `"op-sqlite": { "sqlcipher": true }`.
+There are no custom `sqliteFlags`, cipher settings, app-group override, or location override.
+`src/services/localDb.ts` opens `lightningpiggy.db` using the existing SecureStore key.
+The key is neither rotated nor converted to a hex-literal/raw-key representation.
+
+Source paths below are relative to each published op-sqlite package.
+
+[cols="2,3,3",options="header"]
+|===
+|Property |16.1.1 |19.0.5
+|Bundled SQLCipher
+|4.14.0, `cpp/sqlcipher/sqlite3.c:109519`
+|4.19.0, `cpp/sqlcipher/sqlite3.c:110884` (same major)
+|KDF iterations
+|256000, `sqlite3.c:109531,109681`
+|256000, `sqlite3.c:110896,111082`
+|Cipher page size
+|4096, `sqlite3.c:109682`
+|4096, `sqlite3.c:111083`
+|HMAC / KDF algorithms
+|SHA512 / PBKDF2-HMAC-SHA512, `sqlite3.c:109684,109685`
+|SHA512 / PBKDF2-HMAC-SHA512, `sqlite3.c:111085,111086`
+|Plaintext header
+|0, `sqlite3.c:109683`
+|0, `sqlite3.c:111084`
+|iOS default directory
+|NSLibraryDirectory, `ios/OPSQLite.mm:71`
+|NSLibraryDirectory, `ios/OPSQLite.mm:110`
+|Android default directory
+|`context.getDatabasePath("defaultDatabase")` parent, `android/src/main/java/com/op/sqlite/OPSQLiteBridge.kt:22`
+|Same database directory, `OPSQLiteBridge.kt:27` (not `filesDir`; that is only an exported constant)
+|Open flags
+|READWRITE + CREATE + FULLMUTEX, `cpp/bridge.cpp:95`
+|Same defaults, `cpp/OPBridge.cpp:146`; optional readOnly/failOnCreate default false in `cpp/OPSqlite.cpp:69`
+|Key application
+|`sqlite3_key_v2(db, "main", key.data(), key.size())`, `cpp/bridge.cpp:114`
+|Same API and key bytes, `cpp/OPBridge.cpp:174`
+|===
+
+The evidence supports in-place readability: no file-format, filename, default-location,
+key-encoding or default-open-flag change was found. The app now explicitly executes
+`PRAGMA cipher_compatibility = 4` after keying and cipher availability verification,
+before `PRAGMA user_version` (the first actual page read), including already-migrated
+files. This pins the existing settings; it does not migrate, rekey, or rewrite the DB.
+The native open performs no page-reading query before returning to JS.
+
+The existing wrong-key self-heal deletes an unreadable database and its key. That behavior
+predates this upgrade; preserving cipher settings before the first page read is therefore
+particularly important. No encrypted production file, native compile, or device was used
+in this audit. A real 16.1.1 -> 19.0.5 encrypted-file reopen remains unverified.
+
+== Complete native scan inventory
+
+Enumerated installed packages, including nested packages and examples, with android/ or ios/
+directories. Excluded React Native core and expo-* packages from dependency matching;
+also inspected Apple and C++ source outside those directories and all modules/ sources.
+Patterns included RCTCxxBridge, bridge.runtime, RCTBridgeModule, getReactTag(),
+getCatalystInstance / Kotlin catalystInstance, CatalystInstance, UIManagerModule,
+LegacyArchitecture, and bridge-based JSI/call-invoker access.
+
+A name match alone does not mean RN removed the API. The installed RN 0.88.1 still
+ships RCTBridgeModule, CatalystInstance, NativeModule.onCatalystInstanceDestroy,
+UIManagerModule.CustomEventNamesResolver and setViewLocalData (the latter is a no-op).
+
+[cols="2,4,3",options="header"]
+|===
+|Package@version before upgrade |Hits / assessment |Newer release / action
+|@maplibre/maplibre-react-native@11.2.1
+|Kotlin inherited reactTag property at MLRNMapViewManager.kt:265 fails; iOS RCTBridgeModule header is supported.
+|11.5.1 includes the 11.3.4 fix; upgraded.
+|@op-engineering/op-sqlite@16.1.1
+|OPSQLite.mm:36/41 RCTCxxBridge/runtime; OPSQLite.h module declaration;
+OPSQLiteBridge.kt:19 Catalyst instance JSI call-invoker access.
+|19.0.5 fixes iOS; Android direct call-invoker patch added (upstream latest still uses Catalyst).
+|react-native-reanimated@4.7.1
+|NodesManager.kt:13/38/57/243 and EventHandler.kt:7/15 use retained CustomEventNamesResolver.
+Apple ReanimatedModule.mm:171/172 uses bridge.runtime, explicitly declared at :22.
+Android NativeProxy.kt:124/127 uses direct context call-invoker/runtime access.
+|Already latest stable; accessor declaration supports bridge proxy. No upgrade required.
+|react-native-worklets@0.13.0
+|Apple WorkletsModule.mm:90/94/145/147 uses bridge.runtime, explicitly declared at :25;
+WorkletsModule.h module import. Android uses direct context access. C++ CallInvoker is supported.
+|0.13.1 exists; SDK-pinned 0.13.0 already declares the accessor. No removed-API fix needed.
+|react-native-screens@4.30.1
+|RNSModule.mm:127/129 old cast/runtime is guarded by RNS_USE_CXXBRIDGE;
+podspec enables it only with explicit environment value 1. Android uses direct context runtime.
+|Already latest stable; obsolete path disabled. No upgrade required.
+|react-native-safe-area-context@5.11.1
+|RNCSafeAreaContext.h:1/5 module declaration; SafeAreaView.kt:12/55 UIManagerModule
+fallback (Fabric state-wrapper path is used). Referenced type/method still exist.
+|Already latest stable. No removed-API fix needed.
+|@react-native-community/netinfo@12.0.1
+|Six onCatalystInstanceDestroy matches across oldarch/newarch module and implementation;
+callback remains in RN NativeModule.java:67. No CatalystInstance lookup.
+|Already latest stable. No removed-API fix needed.
+|react-native-webview@14.0.1
+|RNCWebView.java:27 unused CatalystInstance import; retained RN type.
+Apple RNCWebViewModule.h:8/16 supported module declaration.
+|Latest stable 14.0.1 (next tag 17.1.0); no removed-API fix needed.
+|react-native-gesture-handler@3.3.0
+|EventDispatcher.kt:213 UIManagerModule comment only; Apple manager header imports RCTBridgeModule.
+|3.5.0 exists; these are not removed-API usages. Keep SDK-matched version.
+|react-native-keyboard-controller@1.22.7
+|KeyboardControllerModule.mm:9 RCTBridgeModule import only.
+|1.23.0 exists; no removed-API usage to fix.
+|react-native-tcp-socket@6.4.1
+|TcpSocketClient.h:2 RCTBridgeModule import only.
+|6.4.3 exists; no removed-API usage to fix.
+|@react-native-async-storage/async-storage@2.2.0
+|RNCAsyncStorage.h:10/37 RCTBridgeModule import/conformance, no bridge JSI install.
+|3.1.1 exists; module interop remains supported, no removed-API usage to fix.
+|react-native-nfc-manager@3.17.2
+|NfcManager.h:1/2/4/5/7/16 conditional imports and RCTBridgeModule conformance; no bridge JSI.
+|4.2.0 exists; module interop remains supported, no removed-API usage to fix.
+|react-native-get-random-values@1.11.0
+|RNGetRandomValues.h:1/3 RCTBridgeModule import/conformance; no bridge JSI.
+|2.1.0 exists; no removed-API usage to fix.
+|bdk-rn@0.30.0 (fork commit 40bb7fe)
+|BdkRnModule.m:6 and bridging header:5 RCTBridgeModule imports; no bridge JSI.
+|Keep pinned fork; no removed-API usage to fix. No newer fork release evaluated.
+|react-native-svg@15.16.0
+|Apple RNSVGRenderableModule.h:19 and RNSVGSvgViewModule.h:19 supported module conformance.
+|15.16.1 exists; no removed-API usage to fix.
+|@shopify/react-native-skia@2.14.0
+|Apple platform-context and screenshot-service headers import RCTBridgeModule;
+JSI receives a CallInvoker directly, Android SkiaManager.java:26 uses getJSCallInvokerHolder.
+|Already latest stable; no removed-API usage to fix.
+|@expo/log-box@58.0.15 (nested under expo)
+|ExpoRedBoxSwap.mm:4 supported RCTBridgeModule header.
+|Expo-managed; no fix needed.
+|@react-native-community/slider@5.2.1
+|No requested API matches.
+|No change.
+|react-native-edge-to-edge@1.8.1
+|No requested API matches.
+|No change.
+|react-native-color-matrix-image-filters@8.0.2
+|No requested API matches.
+|No change.
+|jest-expo@58.0.14
+|No requested API matches.
+|No change.
+|@expo/dom-webview@58.0.2
+|No requested API matches.
+|No change.
+|unimodules-app-loader@58.0.2
+|No requested API matches.
+|No change.
+|Example@0.0.1 (edge-to-edge example)
+|No requested API matches; not an autolinked app dependency.
+|No change.
+|Local modules: amber-signer, background-dm-service, document-metadata, nostr-native, secure-clipboard
+|No requested API matches. Expo Modules APIs, no legacy bridge JSI installation.
+|No source changes required.
+|===
+
+== Verification results
+
+[cols="3,4",options="header"]
+|===
+|Command |Result
+|`npm ci` |Pass; both patch-package patches apply, including op-sqlite 19.0.5.
+|`npx tsc --noEmit` |Pass.
+|`npx eslint .` |Pass: 0 errors, 216 warnings.
+|`npx prettier --check .` |Pass.
+|`npx jest` |Pass: 965 suites, 10,576 tests passed, 2 skipped.
+Worker teardown warning remains (a worker was force-exited); command exits 0.
+|`npx expo export --platform android --output-dir /tmp/claude-1000/expo58-export --max-workers 2`
+|Pass; generated output deleted.
+|`npx expo export --platform ios --output-dir /tmp/claude-1000/expo58-export --max-workers 2`
+|Pass; generated output deleted.
+|`bash scripts/check-file-size.sh` |Pass.
+|`bash scripts/check-perf-antipatterns.sh` |Pass.
+|`git diff --check` |Pass.
+|===
+
+Jest used `JEST_MAX_WORKERS=2`. Exports used CI mode, disabled telemetry/dotenv,
+and redirected Expo/npm/Metro caches into /tmp/claude-1000. Both exports emitted
+transitive Noble package-exports fallback warnings. npm reported 32 audit findings
+(1 low, 30 moderate, 1 high); no unrelated dependency remediation was attempted.
+The first Jest run found two fast-path assertions expecting the old PRAGMA sequence;
+after updating those assertions, the entire suite passed.
+
+No native compilation, device/emulator testing, push, or real encrypted-file reopen
+was performed. Source compatibility and JS exports do not replace those checks.
