@@ -78,40 +78,55 @@ enum WidgetStore {
 
   // MARK: Wallet cursors (per widget configuration)
 
-  /// WidgetKit gives an extension no per-widget id, so the wallet a widget
-  /// has switched to is remembered per configuration (size, starting wallet,
-  /// style, Hide balance). Two identically configured widgets switch together.
-  struct Cursor: Codable {
+  /// The wallet a widget last showed, and where it was in the carousel.
+  /// WidgetKit gives an extension no per-widget id, so this is kept per
+  /// configuration (size, starting wallet, style, Hide balance; see
+  /// `WalletEntry.cursorKey`): two identically configured widgets move
+  /// together. Recording what was SHOWN (not only what ‹ › picked) is what
+  /// lets a removed wallet hand over to the next one, as on Android.
+  struct Cursor: Codable, Equatable {
     let walletId: String
     let index: Int
   }
 
-  static func cursor(for key: String) -> Cursor? {
+  private static func allCursors() -> [String: Cursor] {
     guard let data = defaults?.data(forKey: cursorsKey),
       let all = try? JSONDecoder().decode([String: Cursor].self, from: data)
-    else { return nil }
-    return all[key]
+    else { return [:] }
+    return all
   }
 
+  private static func saveCursors(_ all: [String: Cursor]) {
+    if let data = try? JSONEncoder().encode(all) { defaults?.set(data, forKey: cursorsKey) }
+  }
+
+  static func cursor(for key: String) -> Cursor? { allCursors()[key] }
+
   static func setCursor(_ cursor: Cursor, for key: String) {
-    var all: [String: Cursor] = [:]
-    if let data = defaults?.data(forKey: cursorsKey),
-      let decoded = try? JSONDecoder().decode([String: Cursor].self, from: data)
-    {
-      all = decoded
-    }
+    var all = allCursors()
+    guard all[key] != cursor else { return }
     all[key] = cursor
-    if let data = try? JSONEncoder().encode(all) {
-      defaults?.set(data, forKey: cursorsKey)
-    }
+    saveCursors(all)
+  }
+
+  /// Forgets cursors of configurations no placed widget uses any more, so
+  /// editing a widget A → C → A starts again at A instead of resurrecting
+  /// where the old A configuration had switched to.
+  static func pruneCursors(keeping keys: Set<String>) {
+    let all = allCursors()
+    let kept = all.filter { keys.contains($0.key) }
+    if kept.count != all.count { saveCursors(kept) }
   }
 }
 
-/// Which wallet a widget shows, and how ‹ › move through the list.
+/// Which wallet a widget shows, and how ‹ › move through the list. A port of
+/// selectWidgetWallet / cycleWidgetWallet (src/widgets/walletCycling.ts);
+/// both run the cases in src/widgets/walletSelectionCases.json.
 enum WalletSelection {
   /// The wallet to show: the cursor's wallet if it still exists, else the one
-  /// now at the cursor's position (a removed wallet hands over to the next),
-  /// else the configured starting wallet, else the first. nil = no wallets.
+  /// now in the cursor's slot (a removed wallet hands over to the next),
+  /// clamped to the last; with no cursor yet, the starting wallet, else the
+  /// first. nil = no wallets.
   static func resolve(wallets: [WidgetWallet], startingWalletId: String?, cursor: WidgetStore.Cursor?)
     -> Int?
   {

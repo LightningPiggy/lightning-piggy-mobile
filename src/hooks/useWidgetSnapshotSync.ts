@@ -5,10 +5,10 @@ import { useLocale } from '../contexts/LocaleContext';
 import { balanceFetchedAt, subscribeBalanceFetches } from '../services/balanceFetchTimes';
 import {
   readWidgetSnapshot,
-  wipeWidgetSnapshot,
   wipeWidgetSnapshotOnAccountChange,
   writeWidgetSnapshot,
 } from '../services/widgetSnapshot';
+import { handleWidgetAccountChange, wipeAllWidgetSnapshots } from '../services/widgetWipe';
 import { createWidgetSnapshotWriter } from '../services/widgetSnapshotWriter';
 import { refreshWalletWidgets } from '../widgets/refreshWalletWidgets';
 
@@ -30,7 +30,7 @@ export function useWidgetSnapshotSync(): void {
     createWidgetSnapshotWriter({
       read: readWidgetSnapshot,
       write: writeWidgetSnapshot,
-      wipe: wipeWidgetSnapshot,
+      wipe: wipeAllWidgetSnapshots,
       refresh: refreshWalletWidgets,
       fetchedAt: balanceFetchedAt,
     }),
@@ -39,7 +39,7 @@ export function useWidgetSnapshotSync(): void {
   useEffect(() => {
     if (!enabled) return;
     const stopWipe = wipeWidgetSnapshotOnAccountChange((wiped) => {
-      void writer.accountChanged(wiped).catch(() => undefined);
+      void handleWidgetAccountChange(writer, wiped).catch(() => undefined);
     });
     const stopFetches = subscribeBalanceFetches(() => writer.nudge());
     return () => {

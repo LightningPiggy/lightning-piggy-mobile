@@ -384,8 +384,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // (bundle id <app>.widget, same App Group as the app). EAS signs it like
     // the app; see docs/ARCHITECTURE.adoc → "Home-screen widgets" for the one-time
     // credentials step.
-    // withWidgetWeakFrameworks must come first (see the plugin's header).
-    './plugins/withWidgetWeakFrameworks',
+    // withWidgetTargetSettings must come first (see the plugin's header).
+    './plugins/withWidgetTargetSettings',
     '@bacons/apple-targets',
     // Generates the widget's Localizable.strings(dict) from src/i18n/locales.
     './plugins/withIosWidgetStrings',
