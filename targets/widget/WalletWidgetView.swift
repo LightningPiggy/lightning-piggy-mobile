@@ -95,9 +95,15 @@ private struct SmallWalletView: View {
       BalanceView(display: display, palette: palette, size: 24, centred: true)
       DetailView(display: display, palette: palette, size: 10.5)
       Spacer(minLength: 4)
-      HStack(spacing: 6) {
-        ActionLink(action: .receive, walletId: display.walletId, palette: palette, primary: true)
-        ActionLink(action: .send, walletId: display.walletId, palette: palette, primary: false)
+      if #available(iOS 17.0, *) {
+        HStack(spacing: 6) {
+          ActionLink(action: .receive, walletId: display.walletId, palette: palette, primary: true)
+          ActionLink(action: .send, walletId: display.walletId, palette: palette, primary: false)
+        }
+      } else {
+        // Before iOS 17 a small widget has a single tap target (its
+        // widgetURL, Receive), so it shows only that button.
+        ActionPill(action: .receive, palette: palette, primary: true)
       }
       PageDots(index: index, count: count, color: palette.text)
         .padding(.top, 6)
@@ -236,22 +242,33 @@ private struct ActionLink: View {
 
   var body: some View {
     Link(destination: DeepLink.url(action, walletId: walletId)) {
-      HStack(spacing: 4) {
-        Image(systemName: action.symbol)
-          .font(.system(size: 11, weight: .bold))
-        if action != .scan {
-          Text(L10n.string(action.labelKey))
-            .font(.system(size: 12, weight: .bold))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-        }
-      }
-      .foregroundColor(primary ? palette.primaryButtonText : palette.secondaryButtonText)
-      .frame(maxWidth: action == .scan ? 30 : .infinity, minHeight: 30, maxHeight: 30)
-      .padding(.horizontal, action == .scan ? 0 : 8)
-      .background(Capsule().fill(primary ? palette.primaryButton : palette.secondaryButton))
+      ActionPill(action: action, palette: palette, primary: primary)
     }
     .accessibilityLabel(L10n.string(action.labelKey))
+  }
+}
+
+/// The look of a Receive / Scan / Send button.
+private struct ActionPill: View {
+  let action: DeepLink.Action
+  let palette: WidgetPalette
+  let primary: Bool
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Image(systemName: action.symbol)
+        .font(.system(size: 11, weight: .bold))
+      if action != .scan {
+        Text(L10n.string(action.labelKey))
+          .font(.system(size: 12, weight: .bold))
+          .lineLimit(1)
+          .minimumScaleFactor(0.7)
+      }
+    }
+    .foregroundColor(primary ? palette.primaryButtonText : palette.secondaryButtonText)
+    .frame(maxWidth: action == .scan ? 30 : .infinity, minHeight: 30, maxHeight: 30)
+    .padding(.horizontal, action == .scan ? 0 : 8)
+    .background(Capsule().fill(primary ? palette.primaryButton : palette.secondaryButton))
   }
 }
 

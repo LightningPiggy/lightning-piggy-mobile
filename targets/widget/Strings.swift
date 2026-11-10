@@ -32,8 +32,15 @@ enum L10n {
   }
 
   /// Plural strings live in Localizable.stringsdict (one entry per CLDR form).
+  /// A count of exactly 1 first tries `<key>.=1`: the generator puts a `one`
+  /// form there when the language's `one` also covers other numbers (Ukrainian
+  /// 21, 31…) and the text doesn't show the number, as the app does.
   static func plural(_ key: String, count: Int) -> String {
-    String(format: string(key), locale: locale, count)
+    if count == 1 {
+      let exactlyOne = bundle.localizedString(forKey: "\(key).=1", value: missing, table: nil)
+      if exactlyOne != missing { return exactlyOne }
+    }
+    return String(format: string(key), locale: locale, count)
   }
 
   // MARK: Bundles

@@ -6,10 +6,47 @@
 // stay the only copy of the text. Pure functions, unit-tested in
 // iosWidgetStrings.test.ts.
 
+const cardinals = require('make-plural/cardinals');
+
 const PLURAL_FORMS = ['zero', 'one', 'two', 'few', 'many', 'other'];
-// i18n-js's exact-one form; Apple has no equivalent, `one` covers it.
-const IGNORED_PLURAL_KEYS = ['=1'];
+// i18n-js's exact-one form. Apple's stringsdict has no equivalent, so it is
+// written as a plain `<key>.=1` string that L10n.plural uses for a count of 1.
+const EXACTLY_ONE = '=1';
+const IGNORED_PLURAL_KEYS = [EXACTLY_ONE];
 const PLACEHOLDER = /\{\{\s*(\w+)\s*\}\}|%\{(\w+)\}/g;
+const COUNT_PLACEHOLDER = /\{\{\s*count\s*\}\}|%\{\s*count\s*\}/g;
+
+/** True when CLDR `one` in `locale` covers a whole number other than 1
+ *  (Ukrainian 21, 31…; Hindi 0). Mirrors src/i18n/plurals.ts. */
+function oneCoversOtherNumbers(locale) {
+  const rule = cardinals[locale] ?? cardinals[String(locale).split('-')[0]];
+  if (!rule) return false;
+  for (let n = 0; n <= 200; n++) if (n !== 1 && rule(n) === 'one') return true;
+  return false;
+}
+
+/**
+ * The app's pinCountlessSingulars (src/i18n/plurals.ts), for Apple: where
+ * `one` also covers 21, 31… a `one` form that doesn't show the number
+ * ("1 хв тому") must only be used for exactly 1, so it moves to `=1` and
+ * every other `one` count falls through to `other`, as it does in the app.
+ * Returns { forms, exactlyOne }.
+ */
+function pinExactlyOne(node, locale) {
+  const forms = { ...node };
+  let exactlyOne = forms[EXACTLY_ONE];
+  delete forms[EXACTLY_ONE];
+  if (
+    exactlyOne === undefined &&
+    typeof forms.one === 'string' &&
+    !forms.one.match(COUNT_PLACEHOLDER) &&
+    oneCoversOtherNumbers(locale)
+  ) {
+    exactlyOne = forms.one;
+    delete forms.one;
+  }
+  return { forms, exactlyOne };
+}
 
 function isPluralNode(node) {
   if (!node || typeof node !== 'object' || Array.isArray(node)) return false;
@@ -89,25 +126,31 @@ function escapeXml(text) {
  * can't be expressed (a plural with a placeholder other than `count`).
  * @param {Record<string, string | Record<string, string>>} entries
  * @param {Record<string, string | Record<string, string>>} englishEntries
+ * @param {string} locale catalogue code (`uk`, `zh-Hans`, …)
  * @returns {{ strings: string, stringsdict: string, skipped: string[] }}
  */
-function buildAppleStrings(entries, englishEntries) {
+function buildAppleStrings(entries, englishEntries, locale) {
   const lines = [];
   const plurals = [];
   const skipped = [];
   for (const key of Object.keys(entries).sort()) {
-    const value = entries[key];
-    const reference = englishEntries[key] ?? value;
-    if (typeof value === 'string') {
-      const order = placeholderNames(typeof reference === 'string' ? reference : value);
-      lines.push(`"${escapeStrings(key)}" = "${escapeStrings(toFormat(value, order))}";`);
+    const raw = entries[key];
+    const reference = englishEntries[key] ?? raw;
+    if (typeof raw === 'string') {
+      const order = placeholderNames(typeof reference === 'string' ? reference : raw);
+      lines.push(`"${escapeStrings(key)}" = "${escapeStrings(toFormat(raw, order))}";`);
       continue;
     }
+    const { forms: value, exactlyOne } = pinExactlyOne(raw, locale);
     const forms = PLURAL_FORMS.filter((form) => typeof value[form] === 'string');
     const names = [...new Set(forms.flatMap((form) => placeholderNames(value[form])))];
     if (names.some((name) => name !== 'count')) {
       skipped.push(key);
       continue;
+    }
+    if (exactlyOne !== undefined) {
+      const text = exactlyOne.replace(COUNT_PLACEHOLDER, '1');
+      lines.push(`"${escapeStrings(`${key}.${EXACTLY_ONE}`)}" = "${escapeStrings(text)}";`);
     }
     const formXml = forms
       .map((form) => {
@@ -150,4 +193,11 @@ function buildAppleStrings(entries, englishEntries) {
   return { strings, stringsdict, skipped };
 }
 
-module.exports = { collectEntries, buildAppleStrings, toFormat, placeholderNames, isPluralNode };
+module.exports = {
+  collectEntries,
+  buildAppleStrings,
+  toFormat,
+  placeholderNames,
+  isPluralNode,
+  oneCoversOtherNumbers,
+};

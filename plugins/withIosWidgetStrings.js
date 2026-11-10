@@ -32,7 +32,7 @@ function writeWidgetStrings(projectRoot, { targetDir, prefixes }) {
     .map((file) => file.replace(/\.json$/, ''));
   for (const locale of locales) {
     const entries = collectEntries(read(`${locale}.json`), prefixes);
-    const { strings, stringsdict, skipped } = buildAppleStrings(entries, englishEntries);
+    const { strings, stringsdict, skipped } = buildAppleStrings(entries, englishEntries, locale);
     if (skipped.length > 0) {
       console.warn(
         `[withIosWidgetStrings] ${locale}: skipped plural strings with placeholders other than {{count}}: ${skipped.join(', ')}`,
