@@ -51,8 +51,11 @@ export function classifyTransferError(
   if (dispatch === 'lightning' && isUnansweredError(error)) return 'unknown-outcome';
   const message = error instanceof Error ? error.message : '';
   // react-native's HMRClient throws this when Metro drops the dev-client
-  // connection — nothing was signed or broadcast.
-  if (/reload.*of undefined|DevSettings/i.test(message)) return 'dev-reload';
+  // connection. Before dispatch nothing was signed or broadcast; after a
+  // Lightning payment was sent the outcome is unknown, like any lost reply.
+  if (/reload.*of undefined|DevSettings/i.test(message)) {
+    return dispatch === 'none' ? 'dev-reload' : 'unknown-outcome';
+  }
   return 'failed';
 }
 

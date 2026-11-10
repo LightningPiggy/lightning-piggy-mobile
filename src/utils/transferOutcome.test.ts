@@ -74,6 +74,13 @@ describe('classifyTransferError (#1778)', () => {
     expect(
       classifyTransferError(new TypeError("Cannot read property 'reload' of undefined"), 'none'),
     ).toBe('dev-reload');
+    // After a Lightning payment was sent, a reload must not claim nothing moved.
+    expect(
+      classifyTransferError(
+        new TypeError("Cannot read property 'reload' of undefined"),
+        'lightning',
+      ),
+    ).toBe('unknown-outcome');
   });
 });
 
