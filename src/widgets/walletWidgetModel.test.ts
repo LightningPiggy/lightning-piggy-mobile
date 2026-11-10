@@ -72,6 +72,15 @@ describe('widgetAgeText', () => {
   it('speaks the user’s language', () => {
     expect(widgetAgeText(NOW - 5 * MIN, NOW, widgetTranslator('de').t)).toBe('vor 5 Min.');
   });
+
+  it('uses each language’s plural forms with the real number (Ukrainian 21 is "one")', () => {
+    const uk = widgetTranslator('uk').t;
+    const HOUR = 60 * MIN;
+    expect(widgetAgeText(NOW - HOUR, NOW, uk)).toBe('1 годину тому');
+    expect(widgetAgeText(NOW - 21 * HOUR, NOW, uk)).toBe('21 годину тому');
+    expect(widgetAgeText(NOW - 22 * HOUR, NOW, uk)).toBe('22 години тому');
+    expect(widgetAgeText(NOW - 5 * HOUR, NOW, uk)).toBe('5 годин тому');
+  });
 });
 
 describe('buildWalletWidgetModel', () => {

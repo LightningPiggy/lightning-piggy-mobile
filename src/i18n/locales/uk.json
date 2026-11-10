@@ -3905,19 +3905,19 @@
     "age": {
       "justNow": "щойно",
       "minutes": {
-        "one": "1 хв тому",
+        "one": "{{count}} хв тому",
         "few": "{{count}} хв тому",
         "many": "{{count}} хв тому",
         "other": "{{count}} хв тому"
       },
       "hours": {
-        "one": "1 годину тому",
+        "one": "{{count}} годину тому",
         "few": "{{count}} години тому",
         "many": "{{count}} годин тому",
         "other": "{{count}} години тому"
       },
       "days": {
-        "one": "1 день тому",
+        "one": "{{count}} день тому",
         "few": "{{count}} дні тому",
         "many": "{{count}} днів тому",
         "other": "{{count}} дня тому"

@@ -3841,15 +3841,15 @@
     "age": {
       "justNow": "épp most",
       "minutes": {
-        "one": "1 perce",
+        "one": "{{count}} perce",
         "other": "{{count}} perce"
       },
       "hours": {
-        "one": "1 órája",
+        "one": "{{count}} órája",
         "other": "{{count}} órája"
       },
       "days": {
-        "one": "1 napja",
+        "one": "{{count}} napja",
         "other": "{{count}} napja"
       }
     },

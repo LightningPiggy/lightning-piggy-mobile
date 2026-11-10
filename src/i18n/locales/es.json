@@ -3841,15 +3841,15 @@
     "age": {
       "justNow": "ahora mismo",
       "minutes": {
-        "one": "hace 1 min",
+        "one": "hace {{count}} min",
         "other": "hace {{count}} min"
       },
       "hours": {
-        "one": "hace 1 hora",
+        "one": "hace {{count}} hora",
         "other": "hace {{count}} horas"
       },
       "days": {
-        "one": "hace 1 día",
+        "one": "hace {{count}} día",
         "other": "hace {{count}} días"
       }
     },

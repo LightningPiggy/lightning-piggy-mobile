@@ -3841,15 +3841,15 @@
     "age": {
       "justNow": "just now",
       "minutes": {
-        "one": "1 min ago",
+        "one": "{{count}} min ago",
         "other": "{{count}} min ago"
       },
       "hours": {
-        "one": "1 hour ago",
+        "one": "{{count}} hour ago",
         "other": "{{count}} hours ago"
       },
       "days": {
-        "one": "1 day ago",
+        "one": "{{count}} day ago",
         "other": "{{count}} days ago"
       }
     },

@@ -3841,15 +3841,15 @@
     "age": {
       "justNow": "刚刚",
       "minutes": {
-        "one": "1 分钟前",
+        "one": "{{count}} 分钟前",
         "other": "{{count}} 分钟前"
       },
       "hours": {
-        "one": "1 小时前",
+        "one": "{{count}} 小时前",
         "other": "{{count}} 小时前"
       },
       "days": {
-        "one": "1 天前",
+        "one": "{{count}} 天前",
         "other": "{{count}} 天前"
       }
     },
