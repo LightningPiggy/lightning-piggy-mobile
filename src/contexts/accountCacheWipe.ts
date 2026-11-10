@@ -1,5 +1,6 @@
 import { APP_RELAY_PREFS_KEY, forgetAppRelayPrefs } from '../services/appRelayPrefs';
 import { wipeCheckoutAddress } from '../services/checkoutAddressStorage';
+import { deletePiggiesForOwner } from '../services/piggyStorageService';
 import { cancelSellerActivity } from '../services/sellerActivityService';
 import { drainSellerReceiveWalletWrites } from '../services/sellerReceiveWallet';
 import { drainBuyerOrderTitleWrites } from '../services/buyerOrderTitles';
@@ -98,6 +99,8 @@ export async function wipeAccountCaches(loggedOutPubkey: string | null): Promise
   retireBuyerOrderTitles(loggedOutPubkey);
   // Never let a SecureStore failure abort the rest of the per-account wipe.
   await wipeCheckoutAddress(loggedOutPubkey).catch(() => undefined);
+  // Hidden Piglets: LNURL-withdraw bearer links and NFC tag PINs (#1781).
+  await deletePiggiesForOwner(loggedOutPubkey).catch(() => undefined);
   await cancelNotificationDefaults(loggedOutPubkey);
   await cancelSellerActivity(loggedOutPubkey);
   // Its weekly "Back up your key" reminder goes with it (#1546).

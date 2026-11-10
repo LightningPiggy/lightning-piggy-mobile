@@ -2,6 +2,7 @@ import { loadAppRelayPrefs } from '../services/appRelayPrefs';
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { reviveBuyerOrderTitles } from '../services/buyerOrderTitles';
 import { setCurrentUserPubkey } from '../services/nostrActiveAccount';
+import { claimLegacyPiggies, revivePiggyOwner } from '../services/piggyStorageService';
 import { bumpSessionGeneration } from '../services/sessionGeneration';
 import { setActivePubkeyForWalletStorage } from '../services/walletStorageService';
 
@@ -14,6 +15,10 @@ export function useActiveNostrAccount(onRelayPrefsRecovered?: (pk: string) => Pr
     bumpSessionGeneration();
     if (pk) {
       reviveBuyerOrderTitles(pk);
+      // Piglets may be saved again after a sign-out; pre-#1781 device-wide
+      // ones go to the first account active on this build.
+      revivePiggyOwner(pk);
+      void claimLegacyPiggies(pk);
       void loadAppRelayPrefs(pk).catch(() => {
         /* App defaults stay disabled if preferences cannot be read. */
       });

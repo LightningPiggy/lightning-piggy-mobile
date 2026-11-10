@@ -797,6 +797,7 @@
     "couldNotResolveLnurl": "Az LNURL-t nem sikerült feloldani: {{message}}",
     "notAWithdrawLink": "Ez nem kifizetési link",
     "couldNotSavePiggy": "A Piggyt nem sikerült menteni",
+    "closedOnAccountSwitch": "A Piglet elrejtése bezárult, mert fiókot váltottál. Semmi sem lett mentve.",
     "piggyUpdated": "Piggy frissítve 🐷",
     "piggyHidden": "Piggy elrejtve 🐷",
     "savedLocallyDropPin": "Helyben mentve – tűzz ki egy jelölőt a közzétételhez",
@@ -3055,6 +3056,10 @@
     "groupStateError": "Hiba a biztonságos csevegésben, ezért semmi sem ment el. Ha ismétlődik, használd a „Biztonságos csevegés javítása” lehetőséget a csevegés adatainál.",
     "sendFailed": "Nem sikerült elküldeni az üzenetet. Próbáld újra."
   },
+  "piggyStorage": {
+    "signedOutNotSaved": "Ez a fiók kijelentkezett, ezért a Piglet nem lett mentve ezen a telefonon.",
+    "signInToSave": "Jelentkezz be, hogy Pigleteket ments ezen a telefonon."
+  },
   "signOutPrompt": {
     "walletsRemoved": "A fiókhoz csatlakoztatott pénztárcák, az itt tárolt helyreállító kifejezésekkel együtt, szintén el lesznek távolítva erről a telefonról. Kijelentkezés előtt külön mentsd el a helyreállító kifejezéseiket és a kapcsolati adataikat.",
     "walletsConnected": "A fiókhoz csatlakoztatott pénztárcák szintén el lesznek távolítva erről a telefonról. A kapcsolati adataikra szükséged lesz, ha újra hozzá akarod adni őket.",
@@ -3064,6 +3069,7 @@
     "nsecBacked": "Ez eltávolítja {{name}} titkos kulcsát erről a telefonról. Megjelölted mentettként – a visszajelentkezéshez szükséged lesz arra a másolatra.",
     "amber": "A fiókkulcsod az Amberben marad. Az Ambert használhatod a visszajelentkezéshez.",
     "nip46": "A fiókkulcsod az aláíró alkalmazásodban marad. Azt az alkalmazást használhatod a visszajelentkezéshez.",
+    "hiddenPiglets": "A rejtett Pigletjeid, a hozzájuk tartozó pénzfelvételi linkek és a címkék PIN-kódjai is törlődnek erről a telefonról. Egy címke PIN-kódja nélkül nem tudod feloldani vagy újraírni.",
     "otherAccountOne": "A telefonon lévő másik fiókod bejelentkezve marad.",
     "otherAccountsMany": "A telefonon lévő másik {{count}} fiókod bejelentkezve marad.",
     "backUpFirst": "Előbb kulcs mentése",

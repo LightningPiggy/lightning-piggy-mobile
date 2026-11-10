@@ -797,6 +797,7 @@
     "couldNotResolveLnurl": "Could not resolve LNURL: {{message}}",
     "notAWithdrawLink": "That's not a withdraw link",
     "couldNotSavePiggy": "Could not save Piggy",
+    "closedOnAccountSwitch": "Hide a Piglet closed because you switched accounts. Nothing was saved.",
     "piggyUpdated": "Piggy updated 🐷",
     "piggyHidden": "Piggy hidden 🐷",
     "savedLocallyDropPin": "Saved locally — drop a pin to publish",
@@ -3055,6 +3056,10 @@
     "groupStateError": "Secure chat error, so nothing was sent. If this keeps happening, use Repair secure chat in the chat info.",
     "sendFailed": "Could not send the message. Please try again."
   },
+  "piggyStorage": {
+    "signedOutNotSaved": "This account was signed out, so the Piglet wasn't saved on this phone.",
+    "signInToSave": "Sign in to save Piglets on this phone."
+  },
   "signOutPrompt": {
     "walletsRemoved": "Any wallets connected to this account, including recovery phrases stored here, will also be removed from this phone. Save their recovery phrases and connection details separately before signing out.",
     "walletsConnected": "Wallets connected to this account will also be removed from this phone. You'll need their connection details to add them again.",
@@ -3064,6 +3069,7 @@
     "nsecBacked": "This removes {{name}}'s secret key from this phone. You've marked it as backed up — you'll need that copy to sign back in.",
     "amber": "Your account key stays in Amber. You can use Amber to sign back in.",
     "nip46": "Your account key stays in your signer app. You can use that app to sign back in.",
+    "hiddenPiglets": "Your hidden Piglets, their withdraw links and tag PINs will also be removed from this phone. Without a tag's PIN you can't unlock or rewrite it.",
     "otherAccountOne": "Your other account on this phone stays signed in.",
     "otherAccountsMany": "Your {{count}} other accounts on this phone stay signed in.",
     "backUpFirst": "Back Up Key First",

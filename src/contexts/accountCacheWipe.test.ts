@@ -6,6 +6,7 @@ import {
 } from '../services/appRelayPrefs';
 import * as SecureStore from 'expo-secure-store';
 import { checkoutAddressKey } from '../services/checkoutAddressStorage';
+import { piggyStorageKey } from '../services/piggyStorageService';
 import {
   loadBuyerOrderTitles,
   recordBuyerOrderTitles,
@@ -395,6 +396,15 @@ it('deletes the saved delivery address from SecureStore on sign-out', async () =
   await wipeAccountCaches(PK);
   expect(remove).toHaveBeenCalledWith(checkoutAddressKey(PK));
   expect(remove).not.toHaveBeenCalledWith(checkoutAddressKey(OTHER_PK));
+  remove.mockRestore();
+});
+
+it("deletes the account's hidden Piglets (bearer links, tag PINs) on sign-out (#1781)", async () => {
+  const remove = jest.spyOn(SecureStore, 'deleteItemAsync');
+  remove.mockClear();
+  await wipeAccountCaches(PK);
+  expect(remove).toHaveBeenCalledWith(piggyStorageKey(PK));
+  expect(remove).not.toHaveBeenCalledWith(piggyStorageKey(OTHER_PK));
   remove.mockRestore();
 });
 

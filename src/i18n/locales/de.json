@@ -797,6 +797,7 @@
     "couldNotResolveLnurl": "LNURL konnte nicht aufgelöst werden: {{message}}",
     "notAWithdrawLink": "Das ist kein Auszahlungslink",
     "couldNotSavePiggy": "Piggy konnte nicht gespeichert werden",
+    "closedOnAccountSwitch": "„Ein Piglet verstecken“ wurde geschlossen, weil du das Konto gewechselt hast. Es wurde nichts gespeichert.",
     "piggyUpdated": "Piggy aktualisiert 🐷",
     "piggyHidden": "Piggy versteckt 🐷",
     "savedLocallyDropPin": "Lokal gespeichert – setze einen Pin zum Veröffentlichen",
@@ -3055,6 +3056,10 @@
     "groupStateError": "Fehler im sicheren Chat, daher wurde nichts gesendet. Wenn das wieder passiert, nutze „Sicheren Chat reparieren“ in den Chat-Infos.",
     "sendFailed": "Die Nachricht konnte nicht gesendet werden. Bitte versuche es erneut."
   },
+  "piggyStorage": {
+    "signedOutNotSaved": "Dieses Konto wurde abgemeldet, daher wurde das Piglet nicht auf diesem Handy gespeichert.",
+    "signInToSave": "Melde dich an, um Piglets auf diesem Handy zu speichern."
+  },
   "signOutPrompt": {
     "walletsRemoved": "Alle mit diesem Konto verbundenen Wallets, einschließlich hier gespeicherter Wiederherstellungsphrasen, werden ebenfalls von diesem Handy entfernt. Sichere ihre Wiederherstellungsphrasen und Verbindungsdaten separat, bevor du dich abmeldest.",
     "walletsConnected": "Mit diesem Konto verbundene Wallets werden ebenfalls von diesem Handy entfernt. Du brauchst ihre Verbindungsdaten, um sie erneut hinzuzufügen.",
@@ -3064,6 +3069,7 @@
     "nsecBacked": "Dadurch wird der geheime Schlüssel von {{name}} von diesem Handy entfernt. Du hast ihn als gesichert markiert – du brauchst diese Kopie, um dich wieder anzumelden.",
     "amber": "Dein Kontoschlüssel bleibt in Amber. Du kannst dich mit Amber wieder anmelden.",
     "nip46": "Dein Kontoschlüssel bleibt in deiner Signer-App. Du kannst dich mit dieser App wieder anmelden.",
+    "hiddenPiglets": "Deine versteckten Piglets, ihre Auszahlungslinks und die PINs ihrer Tags werden ebenfalls von diesem Handy entfernt. Ohne die PIN eines Tags kannst du ihn nicht entsperren oder neu beschreiben.",
     "otherAccountOne": "Dein anderes Konto auf diesem Handy bleibt angemeldet.",
     "otherAccountsMany": "Deine {{count}} anderen Konten auf diesem Handy bleiben angemeldet.",
     "backUpFirst": "Zuerst Schlüssel sichern",

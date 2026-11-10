@@ -36,6 +36,11 @@ export interface SignOutPromptInput {
    * `undefined` = couldn't be read, so fall back to a generic warning.
    */
   wallets?: SignOutWallet[];
+  /**
+   * The account has hidden Piglets stored here. Sign-out deletes their
+   * withdraw links and tag PINs, and a PIN exists nowhere else (#1781).
+   */
+  hasHiddenPiglets?: boolean;
 }
 
 export interface I18nRef {
@@ -99,6 +104,8 @@ export function buildSignOutPrompt(input: SignOutPromptInput): SignOutPrompt {
         : { key: 'signOutPrompt.walletsConnected' },
     );
   }
+
+  if (input.hasHiddenPiglets) paragraphs.push({ key: 'signOutPrompt.hiddenPiglets' });
 
   if (input.otherAccountCount > 0) {
     paragraphs.push({

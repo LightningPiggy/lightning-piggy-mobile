@@ -48,7 +48,7 @@ function changeLocale(locale: 'en' | 'es') {
 
 function setup(
   initialProps: {
-    editingId: string;
+    editingId: string | null;
     fallbackCache: HuntCacheFallback | null;
     pubkey: string | null;
   } = { editingId: 'piggy', fallbackCache: null, pubkey: 'author' },
@@ -182,5 +182,33 @@ it('still waits for signer identity before hydrating the cross-device event', as
     h.rerender({ editingId: 'piggy', fallbackCache, pubkey: 'author' });
   });
   expect(h.result.current.name).toBe('Cross-device draft');
-  expect(load).toHaveBeenCalledTimes(2);
+  // No signer, no owner: records are only read once the account is known (#1781).
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(load).toHaveBeenCalledWith('author');
+});
+
+it('does not report a local draft missing before the signer resolves', async () => {
+  load.mockResolvedValue([piggy]);
+  const h = setup({ editingId: 'piggy', fallbackCache: null, pubkey: null });
+  await act(async () => {});
+  expect(load).not.toHaveBeenCalled();
+  expect(Toast.show).not.toHaveBeenCalled();
+  expect(navigation.goBack).not.toHaveBeenCalled();
+  await act(async () => h.rerender({ editingId: 'piggy', fallbackCache: null, pubkey: 'author' }));
+  expect(load).toHaveBeenCalledWith('author');
+  expect(h.result.current.name).toBe('Saved name');
+});
+
+it("closes a create wizard holding one account's LNURL when the account switches (#1781)", async () => {
+  const h = setup({ editingId: null, fallbackCache: null, pubkey: null });
+  await act(async () => h.rerender({ editingId: null, fallbackCache: null, pubkey: 'author' }));
+  expect(navigation.goBack).not.toHaveBeenCalled();
+  await act(async () => h.rerender({ editingId: null, fallbackCache: null, pubkey: 'other' }));
+  expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  expect(Toast.show).toHaveBeenCalledWith({
+    type: 'info',
+    text1: 'Hide a Piglet closed because you switched accounts. Nothing was saved.',
+  });
+  await act(async () => h.rerender({ editingId: null, fallbackCache: null, pubkey: 'third' }));
+  expect(navigation.goBack).toHaveBeenCalledTimes(1);
 });

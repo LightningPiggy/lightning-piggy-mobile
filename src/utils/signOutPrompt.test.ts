@@ -102,3 +102,27 @@ describe('wallet paragraph', () => {
     expect(keys(undefined)[1]).toEqual({ key: 'signOutPrompt.walletsRemoved' });
   });
 });
+
+describe('hidden Piglets paragraph (#1781)', () => {
+  const paragraphKeys = (hasHiddenPiglets?: boolean) =>
+    buildSignOutPrompt({
+      ...base,
+      signerType: 'amber',
+      wallets: [],
+      otherAccountCount: 1,
+      hasHiddenPiglets,
+    }).paragraphs.map((p) => p.key);
+
+  it('warns that withdraw links and tag PINs go when the account has Piglets', () => {
+    expect(paragraphKeys(true)).toEqual([
+      'signOutPrompt.amber',
+      'signOutPrompt.hiddenPiglets',
+      'signOutPrompt.otherAccountOne',
+    ]);
+  });
+
+  it('is dropped when the account has none', () => {
+    expect(paragraphKeys(false)).not.toContain('signOutPrompt.hiddenPiglets');
+    expect(paragraphKeys(undefined)).not.toContain('signOutPrompt.hiddenPiglets');
+  });
+});

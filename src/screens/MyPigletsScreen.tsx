@@ -33,7 +33,8 @@ import {
   subscribeFoundLogsByAuthors,
 } from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
-import { loadPiggies, removePiggy, type HiddenPiggy } from '../services/piggyStorageService';
+import { removePiggy } from '../services/piggyStorageService';
+import { useOwnedPiggies } from '../hooks/useOwnedPiggies';
 import { mergeHiddenWithDrafts, type HiddenRow } from '../utils/piggyToParsedCache';
 import { republishPiggy } from '../services/republishPiggyService';
 import { deletePiggy } from '../services/deletePiggyService';
@@ -104,20 +105,9 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   // Local-only `HiddenPiggy` records (LNURL bearer + original expiry
   // window). Needed by the Republish action — relays don't carry the
   // LNURL so we can't reconstruct it from a ParsedCache. Keyed by
-  // `piggy.id` which equals the cache's `d` tag at publish time.
-  const [piggiesById, setPiggiesById] = useState<Map<string, HiddenPiggy>>(new Map());
-  useEffect(() => {
-    let cancelled = false;
-    loadPiggies().then((list) => {
-      if (cancelled) return;
-      const m = new Map<string, HiddenPiggy>();
-      for (const p of list) m.set(p.id, p);
-      setPiggiesById(m);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // `piggy.id` which equals the cache's `d` tag at publish time. Only
+  // ever the active account's records (#1781).
+  const { piggiesById, reloadPiggies, upsertPiggy, dropPiggy } = useOwnedPiggies(pubkey);
 
   // Tracks which row is currently mid-republish so we can render a
   // spinner in place of the badge and ignore double-taps. Keyed by
@@ -194,8 +184,8 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
     setFriendFindsRefresh((n) => n + 1);
     try {
       const readRelays = relays.filter((r) => r.read).map((r) => r.url);
-      const [piggies, caches, mine] = await Promise.all([
-        loadPiggies(),
+      const [, caches, mine] = await Promise.all([
+        reloadPiggies(),
         loadCachedCaches(),
         pubkey
           ? fetchCachesByAuthor(pubkey, readRelays.length > 0 ? readRelays : undefined).catch(
@@ -203,14 +193,11 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
             )
           : Promise.resolve([] as ParsedCache[]),
       ]);
-      const m = new Map<string, HiddenPiggy>();
-      for (const p of piggies) m.set(p.id, p);
-      setPiggiesById(m);
       mergeCaches([...caches, ...mine]);
     } finally {
       setRefreshing(false);
     }
-  }, [mergeCaches, pubkey, relays]);
+  }, [mergeCaches, pubkey, relays, reloadPiggies]);
 
   // Map for finds → cache lookup. Built once per allCaches change.
   const cacheByCoord = useMemo(() => {
@@ -365,7 +352,8 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const handleRepublish = useCallback(
     (cache: ParsedCache) => {
       const piggy = piggiesById.get(cache.d);
-      if (!piggy) {
+      // A local record implies `pubkey` (the list is gated to its owner).
+      if (!piggy || !pubkey) {
         Toast.show({
           type: 'error',
           text1: t('myPigletsScreen.cantRepublish'),
@@ -382,7 +370,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
             setRepublishingCoord(cache.coord);
             try {
               const writeRelays = relays.filter((r) => r.write).map((r) => r.url);
-              const { newExpiresAt } = await republishPiggy(piggy, signEvent, writeRelays);
+              const { newExpiresAt } = await republishPiggy(pubkey, piggy, signEvent, writeRelays);
               // Optimistic local patch so the badge clears before
               // the relay round-trip lands. The kind 37516 we just
               // emitted will overwrite this entry naturally next
@@ -394,11 +382,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
                     : c,
                 ),
               );
-              setPiggiesById((prev) => {
-                const next = new Map(prev);
-                next.set(piggy.id, { ...piggy, expiresAt: newExpiresAt });
-                return next;
-              });
+              upsertPiggy(pubkey, { ...piggy, expiresAt: newExpiresAt });
               Toast.show({ type: 'success', text1: t('myPigletsScreen.piggyRepublished') });
             } catch (e) {
               Toast.show({
@@ -413,7 +397,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
         },
       ]);
     },
-    [piggiesById, relays, republishingCoord, signEvent, t],
+    [piggiesById, pubkey, relays, republishingCoord, signEvent, t, upsertPiggy],
   );
 
   // Delete a Piglet the user owns. Belt-and-suspenders (#777): step 1
@@ -427,6 +411,9 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   // only; the relay steps are skipped.
   const handleDelete = useCallback(
     (cache: ParsedCache, isDraft: boolean) => {
+      // Hidden rows only exist while signed in; act on the account shown.
+      const owner = pubkey;
+      if (!owner) return;
       const piggy = piggiesById.get(cache.d);
       // Match the copy to what will actually run: a draft is a local-only
       // removal; a published row WITH its local record gets the full
@@ -453,15 +440,11 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
               }
               // Drop the local bearer record so a stale copy can't be
               // re-published or resurface as a draft row.
-              await removePiggy(cache.d);
+              await removePiggy(owner, cache.d);
               // Optimistic local removal from both mirrors so the row
               // disappears before any relay round-trip lands.
               setAllCaches((prev) => prev.filter((c) => c.coord !== cache.coord));
-              setPiggiesById((prev) => {
-                const next = new Map(prev);
-                next.delete(cache.d);
-                return next;
-              });
+              dropPiggy(owner, cache.d);
               // Honest toast copy: a draft is a genuine local-only removal
               // (it IS gone), but a published Piglet's delete is a NIP-09
               // kind-5 *request* relays may ignore (+ local expire-now) — so
@@ -488,7 +471,7 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
         },
       ]);
     },
-    [piggiesById, relays, deletingCoord, signEvent, t],
+    [piggiesById, pubkey, relays, deletingCoord, signEvent, t, dropPiggy],
   );
 
   return (

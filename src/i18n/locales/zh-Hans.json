@@ -797,6 +797,7 @@
     "couldNotResolveLnurl": "无法解析LNURL：{{message}}",
     "notAWithdrawLink": "这不是提款链接",
     "couldNotSavePiggy": "无法保存Piggy",
+    "closedOnAccountSwitch": "由于你切换了账户，「藏一个Piglet」已关闭。未保存任何内容。",
     "piggyUpdated": "Piggy已更新 🐷",
     "piggyHidden": "Piggy已隐藏 🐷",
     "savedLocallyDropPin": "已保存到本地——放置定位针即可发布",
@@ -3055,6 +3056,10 @@
     "groupStateError": "安全聊天出错，因此没有发送任何内容。如果反复出现，请在聊天信息中使用“修复安全聊天”。",
     "sendFailed": "无法发送消息。请重试。"
   },
+  "piggyStorage": {
+    "signedOutNotSaved": "此账户已退出登录，因此该 Piglet 未保存到这部手机上。",
+    "signInToSave": "登录后即可在这部手机上保存 Piglet。"
+  },
   "signOutPrompt": {
     "walletsRemoved": "与此账户相连的所有钱包，包括保存在这里的助记词，也会从这部手机上移除。退出登录前，请另外保存好它们的助记词和连接信息。",
     "walletsConnected": "与此账户相连的钱包也会从这部手机上移除。你需要它们的连接信息才能重新添加。",
@@ -3064,6 +3069,7 @@
     "nsecBacked": "这会从这部手机上移除{{name}}的私钥。你已标记为已备份——重新登录时需要用到那份副本。",
     "amber": "你的账户密钥仍保存在Amber中。你可以使用Amber重新登录。",
     "nip46": "你的账户密钥仍保存在你的签名器应用中。你可以使用该应用重新登录。",
+    "hiddenPiglets": "你隐藏的 Piglets、它们的提现链接和标签 PIN 也会从这部手机上删除。没有标签的 PIN，你就无法解锁或重写该标签。",
     "otherAccountOne": "这部手机上的另一个账户仍保持登录。",
     "otherAccountsMany": "这部手机上的其他{{count}}个账户仍保持登录。",
     "backUpFirst": "先备份私钥",

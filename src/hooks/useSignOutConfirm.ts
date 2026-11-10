@@ -6,6 +6,7 @@ import { Alert, type BrandedAlertButton } from '../components/BrandedAlert';
 import { useTranslation } from '../contexts/LocaleContext';
 import { isKeyBackedUp } from '../services/keyBackupStatus';
 import { getWalletListForPubkey } from '../services/crossProfileWalletService';
+import { hasStoredPiggies } from '../services/piggyStorageService';
 import { buildSignOutPrompt, type SignOutWallet } from '../utils/signOutPrompt';
 import type { SignerType } from '../types/nostr';
 
@@ -37,6 +38,7 @@ export function useSignOutConfirm(): (req: SignOutConfirmRequest) => Promise<voi
         backedUp,
         otherAccountCount: req.otherAccountCount,
         wallets,
+        hasHiddenPiglets: await hasStoredPiggies(req.pubkey),
       });
       const cancel: BrandedAlertButton = {
         text: t('signOutPrompt.cancel'),

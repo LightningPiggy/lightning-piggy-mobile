@@ -797,6 +797,7 @@
     "couldNotResolveLnurl": "No se pudo resolver el LNURL: {{message}}",
     "notAWithdrawLink": "Ese no es un enlace de retiro",
     "couldNotSavePiggy": "No se pudo guardar el Piggy",
+    "closedOnAccountSwitch": "Se cerró «Esconder un Piglet» porque cambiaste de cuenta. No se guardó nada.",
     "piggyUpdated": "Piggy actualizado 🐷",
     "piggyHidden": "Piggy escondido 🐷",
     "savedLocallyDropPin": "Guardado localmente: coloca un pin para publicar",
@@ -3055,6 +3056,10 @@
     "groupStateError": "Error del chat seguro, así que no se envió nada. Si sigue pasando, usa «Reparar chat seguro» en la información del chat.",
     "sendFailed": "No se pudo enviar el mensaje. Inténtalo de nuevo."
   },
+  "piggyStorage": {
+    "signedOutNotSaved": "Se cerró la sesión de esta cuenta, así que el Piglet no se guardó en este teléfono.",
+    "signInToSave": "Inicia sesión para guardar Piglets en este teléfono."
+  },
   "signOutPrompt": {
     "walletsRemoved": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta, incluidas las frases de recuperación guardadas aquí. Guarda sus frases de recuperación y datos de conexión por separado antes de cerrar sesión.",
     "walletsConnected": "También se eliminarán de este teléfono las carteras conectadas a esta cuenta. Necesitarás sus datos de conexión para volver a añadirlas.",
@@ -3064,6 +3069,7 @@
     "nsecBacked": "Esto elimina la clave secreta de {{name}} de este teléfono. La marcaste como respaldada: necesitarás esa copia para volver a iniciar sesión.",
     "amber": "La clave de tu cuenta permanece en Amber. Puedes usar Amber para volver a iniciar sesión.",
     "nip46": "La clave de tu cuenta permanece en tu app de firma. Puedes usarla para volver a iniciar sesión.",
+    "hiddenPiglets": "Tus Piglets escondidos, sus enlaces de retiro y los PIN de sus etiquetas también se eliminarán de este teléfono. Sin el PIN de una etiqueta, no podrás desbloquearla ni reescribirla.",
     "otherAccountOne": "Tu otra cuenta en este teléfono sigue con la sesión iniciada.",
     "otherAccountsMany": "Tus otras {{count}} cuentas en este teléfono siguen con la sesión iniciada.",
     "backUpFirst": "Respaldar la clave primero",

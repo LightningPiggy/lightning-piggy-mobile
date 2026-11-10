@@ -803,6 +803,7 @@
     "couldNotResolveLnurl": "Nie udało się rozpoznać LNURL: {{message}}",
     "notAWithdrawLink": "To nie jest link do wypłaty",
     "couldNotSavePiggy": "Nie udało się zapisać Piggy",
+    "closedOnAccountSwitch": "Okno „Ukryj Piglet” zamknięto po przełączeniu konta. Nic nie zostało zapisane.",
     "piggyUpdated": "Piggy zaktualizowany 🐷",
     "piggyHidden": "Piggy ukryty 🐷",
     "savedLocallyDropPin": "Zapisano lokalnie — dodaj pinezkę, aby opublikować",
@@ -3085,6 +3086,10 @@
     "groupStateError": "Błąd bezpiecznego czatu, więc nic nie wysłano. Jeśli to się powtarza, użyj „Napraw bezpieczny czat” w informacjach o czacie.",
     "sendFailed": "Nie udało się wysłać wiadomości. Spróbuj ponownie."
   },
+  "piggyStorage": {
+    "signedOutNotSaved": "To konto zostało wylogowane, więc Piglet nie został zapisany na tym telefonie.",
+    "signInToSave": "Zaloguj się, aby zapisywać Piglety na tym telefonie."
+  },
   "signOutPrompt": {
     "walletsRemoved": "Wszystkie portfele połączone z tym kontem, w tym zapisane tu frazy odzyskiwania, również zostaną usunięte z tego telefonu. Przed wylogowaniem zapisz osobno ich frazy odzyskiwania i dane połączenia.",
     "walletsConnected": "Portfele połączone z tym kontem również zostaną usunięte z tego telefonu. Aby dodać je ponownie, będziesz potrzebować danych połączenia.",
@@ -3094,6 +3099,7 @@
     "nsecBacked": "To usunie klucz prywatny konta {{name}} z tego telefonu. Oznaczono go jako zapisany w kopii zapasowej — będziesz potrzebować tej kopii, aby zalogować się ponownie.",
     "amber": "Klucz twojego konta pozostaje w Amber. Możesz użyć Amber, aby zalogować się ponownie.",
     "nip46": "Klucz twojego konta pozostaje w aplikacji podpisującej. Możesz użyć tej aplikacji, aby zalogować się ponownie.",
+    "hiddenPiglets": "Twoje ukryte Piglets, ich linki do wypłaty i kody PIN tagów również zostaną usunięte z tego telefonu. Bez kodu PIN tagu nie odblokujesz go ani nie zapiszesz ponownie.",
     "otherAccountOne": "Twoje drugie konto na tym telefonie pozostaje zalogowane.",
     "otherAccountsMany": "Twoje pozostałe konta na tym telefonie ({{count}}) pozostają zalogowane.",
     "backUpFirst": "Najpierw zrób kopię klucza",

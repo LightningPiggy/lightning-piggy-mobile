@@ -55,6 +55,7 @@ export interface RepublishResult {
  * unit test in `nostrPlacesService.test.ts` asserts the absence.
  */
 export const republishPiggy = async (
+  owner: string,
   piggy: HiddenPiggy,
   signEvent: (template: {
     kind: number;
@@ -67,7 +68,7 @@ export const republishPiggy = async (
 ): Promise<RepublishResult> => {
   const newExpiresAt = computeNextExpiresAt(piggy, nowSec);
   const refreshed: HiddenPiggy = { ...piggy, expiresAt: newExpiresAt };
-  await savePiggy(refreshed);
+  await savePiggy(owner, refreshed);
   const unsigned = buildCacheListing(refreshed);
   const signed = await signEvent(unsigned);
   if (!signed) {
