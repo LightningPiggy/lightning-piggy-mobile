@@ -136,6 +136,11 @@
     "unavailable": "Nie udało się otworzyć Amber. Sprawdź, czy jest zainstalowany, i spróbuj ponownie.",
     "failed": "Amber nie mógł zrealizować prośby. Spróbuj ponownie."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Twój podpisujący odpowiedział z innego konta. Przełącz go na to konto i spróbuj ponownie.",
+    "modified": "Twój podpisujący zmienił prośbę przed podpisaniem, więc nic nie zostało wysłane. Spróbuj ponownie.",
+    "badSignature": "Odpowiedź twojego podpisującego miała nieprawidłowy podpis, więc nic nie zostało wysłane. Spróbuj ponownie."
+  },
   "alphabetBar": {
     "alphabetIndex": "Indeks alfabetyczny",
     "jumpTo": "Przejdź do: {{letter}}",

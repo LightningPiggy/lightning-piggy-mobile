@@ -136,6 +136,11 @@
     "unavailable": "无法打开Amber。请确认已安装，然后重试。",
     "failed": "Amber无法完成该请求，请重试。"
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "你的签名器使用了另一个账户进行回应。请将其切换到此账户后重试。",
+    "modified": "你的签名器在签名前修改了请求，因此未发送任何内容。请重试。",
+    "badSignature": "你的签名器返回的签名无效，因此未发送任何内容。请重试。"
+  },
   "alphabetBar": {
     "alphabetIndex": "字母索引",
     "jumpTo": "跳到{{letter}}",

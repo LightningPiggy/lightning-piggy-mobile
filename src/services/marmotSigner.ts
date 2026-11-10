@@ -23,6 +23,7 @@ import { markDmSetup } from './marmotDmSetupTrace';
 import { nip44DecryptFrom, nip44EncryptForRecipient } from './nostrCrypto';
 import * as nostrConnectService from './nostrConnectService';
 import * as nostrService from './nostrService';
+import { parseRemoteSignedEvent } from './remoteSignedEvent';
 
 type Draft = Parameters<EventSigner['signEvent']>[0];
 type Signed = Awaited<ReturnType<EventSigner['signEvent']>>;
@@ -180,9 +181,16 @@ export function createMarmotSigner(
       });
     });
   };
-  const parseSigned = (json: string | null | undefined, who: string): Signed => {
+  // Only the requested draft, signed by this account, may reach MLS or the
+  // relays (#1779). Pubkey + template, no schnorr check: Welcome seals are
+  // signed per invitee, and relays and recipients verify what they receive.
+  const parseSigned = (
+    json: string | null | undefined,
+    template: ReturnType<typeof toTemplate>,
+    who: string,
+  ): Signed => {
     if (!json) throw new Error(`marmot signer: ${who} returned no signed event`);
-    return JSON.parse(json) as Signed;
+    return parseRemoteSignedEvent(json, template, pubkey, { verifySignature: false }) as Signed;
   };
 
   const signEvent = (draft: Draft): Promise<Signed> =>
@@ -199,7 +207,7 @@ export function createMarmotSigner(
             '',
             pubkey,
           );
-          return parseSigned(event, 'Amber');
+          return parseSigned(event, template, 'Amber');
         }
         case 'nip46': {
           const { event } = await nostrConnectService.requestEventSignature(
@@ -207,7 +215,7 @@ export function createMarmotSigner(
             '',
             pubkey,
           );
-          return parseSigned(event, 'NIP-46 signer');
+          return parseSigned(event, template, 'NIP-46 signer');
         }
       }
     }, `sign:${draft.kind}`);

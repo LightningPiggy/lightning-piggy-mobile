@@ -136,6 +136,11 @@
     "unavailable": "Couldn't open Amber. Check that it's installed, then try again.",
     "failed": "Amber couldn't complete the request. Try again."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Your signer answered with a different account. Switch it to this account and try again.",
+    "modified": "Your signer changed the request before signing it, so nothing was sent. Try again.",
+    "badSignature": "Your signer's answer had an invalid signature, so nothing was sent. Try again."
+  },
   "alphabetBar": {
     "alphabetIndex": "Alphabet index",
     "jumpTo": "Jump to {{letter}}",

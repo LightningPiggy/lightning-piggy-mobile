@@ -7,7 +7,8 @@ import { useSellerInvoice } from './useSellerInvoice';
 import { useNostr } from '../contexts/NostrContext';
 import { useWallet } from '../contexts/WalletContext';
 import { lookupInvoice } from '../services/nwcService';
-import { sendNip17Rumor } from '../services/nip17RumorSend';
+import { Nip17SendError, sendNip17Rumor } from '../services/nip17RumorSend';
+import { RemoteSignerMismatchError } from '../services/remoteSignedEvent';
 import { loadSellerInvoices, recordSellerInvoice } from '../services/sellerInvoiceStore';
 import { loadSellerReceiveWallet } from '../services/sellerReceiveWallet';
 import { extractInvoice } from '../utils/messageContent';
@@ -565,3 +566,35 @@ it.each([undefined, 'other-invoice', BOLT11])(
     expect(makeInvoiceForWallet).toHaveBeenCalledTimes(allowUnknownInvoice === BOLT11 ? 1 : 0);
   },
 );
+
+describe('a refused signer answer (#1779)', () => {
+  const refusal = () =>
+    new Nip17SendError('signerMismatch', new RemoteSignerMismatchError('wrong-account').message);
+  // The invoice is recorded before the send, which arms the paid-poll's listener.
+  beforeEach(() => {
+    jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() });
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('sending an invoice reports signerMismatch with the translated reason', async () => {
+    (sendNip17Rumor as jest.Mock).mockRejectedValue(refusal());
+    const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+    await act(async () => {
+      await expect(
+        result.current.sendInvoice({ walletId: 'shop-wallet', amountSats: 4200, remember: false }),
+      ).rejects.toMatchObject({
+        code: 'signerMismatch',
+        message:
+          'Your signer answered with a different account. Switch it to this account and try again.',
+      });
+    });
+  });
+
+  it('marking paid reports signerMismatch too', async () => {
+    (sendNip17Rumor as jest.Mock).mockRejectedValue(refusal());
+    const { result } = renderHook(() => useSellerInvoice(BUYER, 'order-1'));
+    await act(async () => {
+      await expect(result.current.markPaid()).rejects.toMatchObject({ code: 'signerMismatch' });
+    });
+  });
+});

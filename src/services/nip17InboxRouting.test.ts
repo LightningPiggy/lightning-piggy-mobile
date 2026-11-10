@@ -137,11 +137,12 @@ it('1:1: the recipient wrap goes to their 10050, the self-copy to my own 10050',
 });
 
 it('remote signer: routes the same signed wraps, with no extra signing', async () => {
-  const me = getPublicKey(generateSecretKey());
-  const peer = getPublicKey(generateSecretKey());
+  // The remote signer holds the sender's key (a seal by any other key is refused, #1779).
   const sealKey = generateSecretKey();
+  const me = getPublicKey(sealKey);
+  const peer = getPublicKey(generateSecretKey());
   published({ [peer]: { inbox: ['wss://peer-inbox.example.com'] } });
-  const signSeal = jest.fn(async (seal) => finalizeEvent(seal, sealKey));
+  const signSeal = jest.fn(async (seal) => finalizeEvent({ ...seal }, sealKey));
   await sendNip17ToManyWithSigner({
     senderPubkey: me,
     rumor: { ...rumor, pubkey: me },

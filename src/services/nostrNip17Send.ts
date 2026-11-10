@@ -11,6 +11,7 @@ import { nip44EncryptForRecipient, nostrFinalizeEvent, nostrGetEventHash } from 
 import { yieldToEventLoop } from '../contexts/nostrDecryptPacing';
 import { deliverToPeerRelays, type PeerRoutingOptions } from './peerOutboxDelivery';
 import { getManyPeerRelayLists } from './peerRelayLists';
+import { assertRemoteSignedEvent } from './remoteSignedEvent';
 
 /**
  * Outbox routing (#1570): each wrap ALSO goes to its recipient's kind-10050
@@ -132,7 +133,7 @@ export async function sendNip17ToManyWithSigner(input: {
   /** Also wrap to the sender (default); see sendNip17ToManyWithNsec. */
   includeSelf?: boolean;
   peerRouting?: PeerRouting;
-}): Promise<DmSendResult> {
+}): Promise<DmSendResult & { signerError?: unknown }> {
   const relays = [...lockRelays(input.relays, input.senderPubkey)];
   trackRelays(relays);
 
@@ -163,6 +164,7 @@ export async function sendNip17ToManyWithSigner(input: {
 
   const errors: string[] = [];
   const signedWraps: VerifiedEvent[] = [];
+  let signerError: unknown;
 
   // SEQUENTIAL — Amber's BUSY guard rejects parallel intents, and
   // alternating "seal sign" / "nip44 encrypt" prompts share that guard.
@@ -176,7 +178,15 @@ export async function sendNip17ToManyWithSigner(input: {
         content: sealCiphertext,
         pubkey: input.senderPubkey,
       };
-      const signedSeal = await input.signerSignSeal(unsignedSeal);
+      // A seal signed by another of the signer's accounts would send the
+      // message as that identity (#1779). Pubkey + template only: this runs
+      // per recipient per message, and receivers verify the seal signature.
+      const signedSeal = assertRemoteSignedEvent(
+        await input.signerSignSeal(unsignedSeal),
+        unsignedSeal,
+        input.senderPubkey,
+        { verifySignature: false },
+      );
 
       // The wrap uses an ephemeral key — never the user's key — so we
       // can finalize it locally without any signer round-trip. The wrap's
@@ -196,6 +206,9 @@ export async function sendNip17ToManyWithSigner(input: {
       );
       signedWraps.push(wrap);
     } catch (e) {
+      // Kept as the object too, so a caller can tell a refused answer (#1779)
+      // from a relay failure.
+      signerError = e;
       errors.push((e as Error)?.message ?? 'signer step failed');
       // First failure is almost certainly user-cancellation in Amber or
       // a permission denial; bail rather than firing N more dialogs.
@@ -216,5 +229,6 @@ export async function sendNip17ToManyWithSigner(input: {
   return {
     ...publishResult,
     errors: [...errors, ...publishResult.errors],
+    ...(signerError !== undefined && { signerError }),
   };
 }
