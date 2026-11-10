@@ -66,7 +66,10 @@ function SellerOrderPanel({ order, thread, buyerPubkey, id }: Props): React.Reac
 
   const errorText = useCallback(
     (e: unknown) =>
-      t(`sellerOrders.errors.${e instanceof SellerInvoiceError ? e.code : 'sendFailed'}`),
+      // A refused signer answer (#1779) already carries its translated reason.
+      e instanceof SellerInvoiceError && e.code === 'signerMismatch'
+        ? e.message
+        : t(`sellerOrders.errors.${e instanceof SellerInvoiceError ? e.code : 'sendFailed'}`),
     [t],
   );
   const onConfirm = useCallback(

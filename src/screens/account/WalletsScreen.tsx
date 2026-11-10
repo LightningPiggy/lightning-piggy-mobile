@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Text } from 'react-native';
 import { Plus } from 'lucide-react-native';
 import ManagedWalletRow from '../../components/ManagedWalletRow';
 import AccountScreenLayout from './AccountScreenLayout';
 import SettingsRow from '../../components/SettingsRow';
 import SettingsSection from '../../components/SettingsSection';
-import WalletSettingsSheet from '../../components/WalletSettingsSheet';
+import WalletSettingsSheet, { type SettingsTab } from '../../components/WalletSettingsSheet';
 import AddWalletWizard from '../../components/AddWalletWizard';
 import DefaultOnchainWalletSection from '../../components/DefaultOnchainWalletSection';
 import { useWallet } from '../../contexts/WalletContext';
@@ -20,6 +20,11 @@ const WalletsScreen: React.FC = () => {
   const styles = useMemo(() => createWalletsScreenStyles(colors), [colors]);
   const { wallets, removeWallet, updateWalletSettings, reorderWallet } = useWallet();
   const [settingsWalletId, setSettingsWalletId] = useState<string | null>(null);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('design');
+  const openSettings = useCallback((walletId: string, tab: SettingsTab = 'design') => {
+    setSettingsTab(tab);
+    setSettingsWalletId(walletId);
+  }, []);
   const [wizardOpen, setWizardOpen] = useState(false);
   // Count what the status dots show as green, so "Checking…" wallets aren't
   // claimed as connected before they've answered (#1768).
@@ -39,7 +44,7 @@ const WalletsScreen: React.FC = () => {
             wallet={wallet}
             index={index}
             walletCount={wallets.length}
-            onOpenSettings={setSettingsWalletId}
+            onOpenSettings={openSettings}
             onRemove={removeWallet}
             onReorder={reorderWallet}
             onUpdateSettings={updateWalletSettings}
@@ -55,7 +60,11 @@ const WalletsScreen: React.FC = () => {
         />
         <DefaultOnchainWalletSection />
       </SettingsSection>
-      <WalletSettingsSheet walletId={settingsWalletId} onClose={() => setSettingsWalletId(null)} />
+      <WalletSettingsSheet
+        walletId={settingsWalletId}
+        initialTab={settingsTab}
+        onClose={() => setSettingsWalletId(null)}
+      />
       <AddWalletWizard visible={wizardOpen} onClose={() => setWizardOpen(false)} />
     </AccountScreenLayout>
   );

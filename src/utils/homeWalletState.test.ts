@@ -51,15 +51,34 @@ it('never dims the actions while a single wallet card is visible', () => {
   });
 });
 
-it('preserves watch-only signing restrictions without fading visible-wallet actions', () => {
+it('keeps Send pressable on a watch-only wallet so the tap can explain why (#1799)', () => {
   const watchOnly = wallet('watch', { walletType: 'onchain', onchainImportMethod: 'xpub' });
   expect(selectHomeWalletState([watchOnly, wallet('b')], 'watch', true)).toMatchObject({
     activeWallet: watchOnly,
     isReceiveDisabled: false,
-    isSendDisabled: true,
+    isSendDisabled: false,
+    isSendWatchOnly: true,
     isTransferDisabled: false,
     dimActions: false,
   });
+});
+
+it.each([undefined, 'generated' as const])(
+  'does not call an on-chain wallet watch-only when its import method is %p',
+  (onchainImportMethod) => {
+    const unknown = wallet('chain', { walletType: 'onchain', onchainImportMethod });
+    expect(selectHomeWalletState([unknown], 'chain', true)).toMatchObject({
+      isSendDisabled: true,
+      isSendWatchOnly: false,
+      dimActions: false,
+    });
+  },
+);
+
+it('does not flag a signing wallet as watch-only', () => {
+  const mnemonic = wallet('seed', { walletType: 'onchain', onchainImportMethod: 'mnemonic' });
+  expect(selectHomeWalletState([mnemonic], 'seed', true).isSendWatchOnly).toBe(false);
+  expect(selectHomeWalletState([wallet('a')], 'a', true).isSendWatchOnly).toBe(false);
 });
 
 it('uses only the current carousel list when the selected id belongs to an old identity', () => {
@@ -89,6 +108,7 @@ it('shows the welcome prompt and disabled actions only after confirmed empty hyd
     showWelcome: true,
     isReceiveDisabled: true,
     isSendDisabled: true,
+    isSendWatchOnly: false,
     isTransferDisabled: true,
     dimActions: true,
   });

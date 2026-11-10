@@ -25,7 +25,13 @@ import { useNostr } from '../contexts/NostrContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import { type ParsedCache, parseCacheCoord } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
-import { fetchCachesByAuthor, subscribeFoundLogsByAuthors } from '../services/nostrPlacesPublisher';
+import { useTrustedAuthors } from '../hooks/useTrustedAuthors';
+import {
+  fetchCachesByAuthor,
+  fetchFoundLogsByAuthors,
+  isFutureDated,
+  subscribeFoundLogsByAuthors,
+} from '../services/nostrPlacesPublisher';
 import { loadCachedCaches, peekCachedCachesSync } from '../services/nostrPlacesStorage';
 import { loadPiggies, removePiggy, type HiddenPiggy } from '../services/piggyStorageService';
 import { mergeHiddenWithDrafts, type HiddenRow } from '../utils/piggyToParsedCache';
@@ -83,6 +89,9 @@ type SectionRow =
   | { kind: 'hidden'; cache: ParsedCache; isDraft: boolean }
   | { kind: 'found'; entry: FoundEntry }
   | { kind: 'friend-found'; entry: FoundEntry };
+
+// Friends' finds keeps (and backfills per REQ) the newest 200; 50 are shown.
+const FRIEND_FINDS_LIMIT = 200;
 
 const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   const t = useTranslation();
@@ -178,8 +187,11 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   // are sub-100 ms on a warm device; the brief refresh spinner is
   // the user-visible signal that the page is re-syncing.
   const [refreshing, setRefreshing] = useState(false);
+  // Bumped on pull-to-refresh to re-run the one-shot Friends' finds fetch.
+  const [friendFindsRefresh, setFriendFindsRefresh] = useState(0);
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    setFriendFindsRefresh((n) => n + 1);
     try {
       const readRelays = relays.filter((r) => r.read).map((r) => r.url);
       const [piggies, caches, mine] = await Promise.all([
@@ -243,41 +255,50 @@ const MyPigletsScreen: React.FC<Props> = ({ navigation }) => {
   );
 
   // Friends' finds — kind 7516 authored by anyone in the trust set,
-  // excluding me. `trustSet` includes the user per TrustGraphContext
-  // docs, so we explicitly filter pubkey out.
-  const trustedAuthors = useMemo(() => {
-    if (!pubkey) return [];
-    const lower = pubkey.toLowerCase();
-    return Array.from(trustSet).filter((p) => p.toLowerCase() !== lower);
-  }, [trustSet, pubkey]);
+  // excluding me. Content-stable, so a trust-set rebuild with the same
+  // members doesn't re-send the (up to 2,000-author) REQ.
+  const trustedAuthors = useTrustedAuthors(trustSet, pubkey);
 
   // Friends' finds — batched with CoalescedMap so a burst of kind 7516
   // events doesn't clone the friend-finds Map N times. Keyed by event id
-  // (never replaced) so the key space is unbounded — and the subscription
-  // sets no `limit` of its own, so this cap is what bounds growth: it stops
-  // relay history over a long session from ballooning the Map (and the
-  // sort-then-slice-50 in `friendList`). 200 keeps a comfortable buffer above
-  // the 50 shown.
+  // (never replaced). Several relays (and author chunks) answer at once, so
+  // the cap keeps the newest 200 BY DATE rather than by arrival; 200 keeps a
+  // comfortable buffer above the 50 shown, and matches the fetch `limit`.
   const friendFinds = useCoalescedMap<FoundEntry>({
     // Keyed by event id per the social-feed convention — never replace.
     shouldReplace: () => false,
-    maxSize: 200,
+    maxSize: FRIEND_FINDS_LIMIT,
+    // Future-dated finds (>15 min ahead) rank lowest, so they're evicted
+    // first instead of crowding out real recent ones.
+    evictBy: (entry) => (isFutureDated(entry.createdAt) ? -Infinity : entry.createdAt),
   });
+  // A list section, so a one-shot fetch (on focus and on pull-to-refresh)
+  // rather than a live subscription holding a relay slot per chunk (#1789).
+  // The list is only cleared when the authors or relays change, so a refetch
+  // of the same set doesn't flash the section empty.
+  const friendFindsFor = useRef<{ authors: string[]; scope: unknown } | null>(null);
   useFocusEffect(
     useCallback(() => {
-      friendFinds.reset();
+      const last = friendFindsFor.current;
+      if (last?.authors !== trustedAuthors || last.scope !== relayScope) friendFinds.reset();
+      friendFindsFor.current = { authors: trustedAuthors, scope: relayScope };
       if (trustedAuthors.length === 0) return undefined;
-      const close = subscribeFoundLogsByAuthors(trustedAuthors, (e) => {
-        const entry = parseFoundEvent(e);
-        friendFinds.enqueue(entry.id, entry);
-      });
+      const close = fetchFoundLogsByAuthors(
+        trustedAuthors,
+        (e) => {
+          const entry = parseFoundEvent(e);
+          friendFinds.enqueue(entry.id, entry);
+        },
+        undefined,
+        FRIEND_FINDS_LIMIT,
+      );
       return () => {
         close();
         friendFinds.flush();
       };
       // friendFinds.reset / enqueue / flush are stable callbacks.
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [trustedAuthors, relayScope]),
+    }, [trustedAuthors, relayScope, friendFindsRefresh]),
   );
 
   const foundList = useMemo(

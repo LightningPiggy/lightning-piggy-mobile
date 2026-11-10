@@ -4,9 +4,16 @@ import * as amberService from './amberService';
 import { nip46Sign } from '../contexts/nip46DmDecrypt';
 import { NSEC_KEY } from '../contexts/nostrAuthKeys';
 import { assertSigningKey } from '../utils/sellerSigning';
+import { parseRemoteSignedEvent } from './remoteSignedEvent';
+import { noticeRemoteSignerMismatch } from './remoteSignerMismatchNotice';
 import type { Event as SignedEvent, EventTemplate } from 'nostr-tools';
 
-/** Sign using the identity captured by the initiating context callback. */
+/**
+ * Sign using the identity captured by the initiating context callback. A remote
+ * signer's answer is only returned if it is this template (any `created_at`),
+ * signed by `pubkey` with a valid signature (#1779); anything else resolves to
+ * null, with one branded toast explaining a refused answer.
+ */
 export async function signAccountEvent(
   event: EventTemplate,
   account: { pubkey: string | null; isLoggedIn: boolean; signerType: string | null },
@@ -27,15 +34,18 @@ export async function signAccountEvent(
         pubkey,
       );
       if (!signedEventJson) return null;
-      return JSON.parse(signedEventJson) as SignedEvent;
+      return parseRemoteSignedEvent(signedEventJson, event, pubkey);
     } else if (signerType === 'nip46') {
       const signedEventJson = await nip46Sign(event, pubkey);
       if (!signedEventJson) return null;
-      return JSON.parse(signedEventJson) as SignedEvent;
+      return parseRemoteSignedEvent(signedEventJson, event, pubkey);
     }
     return null;
   } catch (error) {
     if (__DEV__ && event.kind !== 22242) console.warn('[Nostr] signEvent failed:', error);
+    // Callers only see null, so say why when the signer answered for the wrong
+    // account (rate-limited: a burst of refusals shows one message).
+    noticeRemoteSignerMismatch(error, pubkey);
     return null;
   }
 }

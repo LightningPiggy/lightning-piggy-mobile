@@ -136,6 +136,11 @@
     "unavailable": "Nem sikerült megnyitni az Ambert. Ellenőrizd, hogy telepítve van-e, majd próbáld újra.",
     "failed": "Az Amber nem tudta teljesíteni a kérést. Próbáld újra."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Az aláíród egy másik fiókkal válaszolt. Válts át benne erre a fiókra, és próbáld újra.",
+    "modified": "Az aláíród aláírás előtt megváltoztatta a kérést, ezért semmi sem lett elküldve. Próbáld újra.",
+    "badSignature": "Az aláíród válaszában érvénytelen aláírás volt, ezért semmi sem lett elküldve. Próbáld újra."
+  },
   "alphabetBar": {
     "alphabetIndex": "Betűmutató",
     "jumpTo": "Ugrás ide: {{letter}}",
@@ -768,9 +773,14 @@
     "receive": "Fogadás",
     "transfer": "Áthelyezés",
     "send": "Küldés",
+    "watchOnlySend": "Ez egy figyelő pénztárca. Fogadni tud, küldeni nem.",
     "addWallet": "Pénztárca hozzáadása",
     "addWalletText": "+ Pénztárca hozzáadása",
     "updatingTransactions": "Tranzakciók frissítése"
+  },
+  "findLogHeader": {
+    "title": "Találati napló ({{total}})",
+    "titleCapped": "Találati napló ({{total}}+)"
   },
   "huntCreateScreen": {
     "ok": "OK",
@@ -1816,6 +1826,9 @@
     "noLightningAddress": "Nincs Lightning-cím beállítva",
     "enterAmountForInvoice": "Add meg az összeget a számla létrehozásához",
     "loadingAddress": "Cím betöltése...",
+    "addressLoadFailed": "Nem sikerült betölteni a Bitcoin-címedet",
+    "retry": "Újra",
+    "retryAddressLabel": "A Bitcoin-cím betöltésének újrapróbálása",
     "lightningInvoice": "Lightning-számla",
     "sendTo": "Küldés neki: {{name}}",
     "copy": "Másolás",
@@ -1963,12 +1976,23 @@
     "cameraAccessNeeded": "A QR-kódok beolvasásához kamera-hozzáférés kell",
     "grantCameraPermission": "Kameraengedély megadása",
     "grantPermission": "Engedély megadása",
+    "openCameraSettings": "Nyisd meg a Beállításokat, és engedélyezd a kamerát",
     "qrViewfinder": "QR-kód keresője"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Engedély szükséges",
+    "photoLibraryMessage": "Engedélyezd a fotótár elérését a képek küldéséhez.",
+    "cameraPhotoMessage": "Engedélyezd a kamera elérését a fotók készítéséhez és küldéséhez.",
+    "ok": "OK",
+    "cancel": "Mégse",
+    "openSettings": "Beállítások megnyitása"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "OK",
     "invalidInvoiceTitle": "Érvénytelen számla",
     "invalidInvoiceBody": "Ez a számla érvénytelen vagy hiányos – ellenőrizd, és próbáld újra.",
+    "unrecognisedInputTitle": "Ez nem fizethető ki",
+    "unrecognisedInputBody": "Ez nem Lightning-számla, Lightning-cím vagy Bitcoin-cím – ellenőrizd, és próbáld újra.",
     "offerUnsupportedTitle": "A Lightning-ajánlatok még nem támogatottak",
     "offerUnsupportedBody": "Ez egy Lightning-ajánlat (BOLT12), amelyet a Lightning Piggy még nem tud kifizetni. Kérj helyette Lightning-számlát vagy Lightning-címet.",
     "walletFallback": "Pénztárca",
@@ -2221,8 +2245,6 @@
     "removeWalletTitle": "Pénztárca eltávolítása",
     "removeConfirmMessage": "Biztosan eltávolítod ezt: „{{alias}}”?",
     "disconnectConfirmMessage": "Biztosan leválasztod ezt: „{{alias}}”?",
-    "cancel": "Mégse",
-    "remove": "Eltávolítás",
     "copiedTitle": "Kimásolva",
     "xpubCopied": "Kiterjesztett nyilvános kulcs a vágólapra másolva."
   },
@@ -2238,8 +2260,6 @@
     "hideBalance": "{{alias}} egyenlegének elrejtése",
     "removeWalletTitle": "Pénztárca eltávolítása",
     "removeWalletMessage": "Eltávolítod ezt: „{{alias}}”? A pénztárca le lesz választva.",
-    "cancel": "Mégse",
-    "remove": "Eltávolítás",
     "removeWalletA11y": "Eltávolítás: {{alias}}",
     "addWalletA11y": "Pénztárca hozzáadása",
     "addWallet": "Pénztárca hozzáadása"
@@ -3780,5 +3800,15 @@
     "noRelays": "Jelenleg nem érhetők el megfelelő relék. Próbáld újra egy kis idő múlva.",
     "confirmChangedTitle": "Inkább ezeket a reléket teszed közzé?",
     "confirmChangedBody": "A reléid megváltoztak a javaslat megjelenítése óta. Közzétételkor ezek kerülnek a listára: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "Ezzel eltávolítod a(z) „{{alias}}” tárcát erről a telefonról, az itt tárolt helyreállítási kifejezéssel együtt. Előbb mindenképp írd le — a helyreállítási kifejezés nélkül ennek a tárcának a pénze nem állítható vissza.",
+    "withCoinosLogin": "Ezzel eltávolítod a(z) „{{alias}}” tárcát erről a telefonról, az itt tárolt CoinOS felhasználónévvel, jelszóval és kapcsolódási adatokkal együtt. Előbb mentsd el őket — nélkülük ennek a tárcának a pénze nem állítható vissza.",
+    "mayHoldRecovery": "Ezzel eltávolítod erről a telefonról a(z) „{{alias}}” tárcát, az itt tárolt helyreállítási kifejezéssel vagy bejelentkezési adatokkal együtt. Ha nem mentetted el őket, előfordulhat, hogy a tárcában lévő pénzt nem lehet visszaállítani.",
+    "balance": "{{amount}} sats van rajta.",
+    "viewRecoveryFirst": "Előbb a helyreállítási adatok megtekintése",
+    "removeAnyway": "Mégis eltávolítom",
+    "remove": "Eltávolítás",
+    "cancel": "Mégse"
   }
 }
