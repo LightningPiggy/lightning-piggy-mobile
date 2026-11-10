@@ -244,7 +244,7 @@ describe('MarmotStateSaves (#1754)', () => {
     });
     const group = fakeGroup(Infinity);
     saves.check(group, [FAILED]);
-    await saves.forget(ID); // left: marmot-ts just deleted its state
+    await saves.forget(ID, { wiped: true }); // left: marmot-ts just deleted its state
     await saves.settled(ID); // the backoff ended at once
     expect(group.save).not.toHaveBeenCalled();
     expect(saves.isUnsaved(ID)).toBe(false);
@@ -340,7 +340,7 @@ describe('MarmotStateSaves (#1754)', () => {
     const leaving = saves.whileRemoving(ID, async () => {
       await wipeGroup(backend); // group.destroy()
       await saves.settled(ID); // any late retry write lands here
-      await saves.forget(ID); // then marmot-ts emits `left`
+      await saves.forget(ID, { wiped: true }); // then marmot-ts emits `left`
     });
     save.release();
     await leaving;
@@ -349,22 +349,87 @@ describe('MarmotStateSaves (#1754)', () => {
     expect(await backend.keys('unsavedState')).toEqual([]);
   });
 
-  it('removes the state and history rows a retry wrote back for a group removed mid-save', async () => {
-    const { saves, backend } = makeSaves();
-    await backend.set(TREE, 'c'.repeat(64) + '/meta', 'other'); // another group's tree
-    const group = fakeGroup(0);
-    const save = slowSave(backend);
-    group.save.mockImplementationOnce(save.run);
+  it.each(['removed', 'disbanded'])(
+    'keeps the state and history rows when the group is %s mid-save',
+    async () => {
+      const { saves, backend } = makeSaves();
+      const group = fakeGroup(0);
+      const save = slowSave(backend);
+      group.save.mockImplementationOnce(save.run);
+      saves.check(group, [FAILED]);
+      await tick(); // the retry's save is in flight
+      // marmot-ts keeps the group stored (removed marker / tombstone only)
+      await saves.forget(ID, { wiped: false });
+      save.release();
+      await saves.settled(ID);
+      expect(await backend.keys(GROUP_STATE_NAMESPACE)).toEqual([ID]);
+      expect((await backend.keys(TREE)).sort()).toEqual([`${ID}/edge/t1`, `${ID}/meta`]);
+      expect(await backend.keys('unsavedState')).toEqual([]);
+      expect(group.save).toHaveBeenCalledTimes(1); // and the retry ended
+    },
+  );
+
+  it.each(['left', 'destroyed'])(
+    'removes the state and history rows a retry wrote back after the group was %s',
+    async () => {
+      const { saves, backend } = makeSaves();
+      await backend.set(TREE, 'c'.repeat(64) + '/meta', 'other'); // another group's tree
+      const group = fakeGroup(0);
+      const save = slowSave(backend);
+      group.save.mockImplementationOnce(save.run);
+      saves.check(group, [FAILED]);
+      await tick(); // the retry's save is in flight
+      await wipeGroup(backend); // group.destroy()...
+      await saves.forget(ID, { wiped: true }); // ...then `left` / `destroyed`
+      save.release(); // the save's writes land afterwards
+      await saves.settled(ID);
+      expect(await backend.keys(GROUP_STATE_NAMESPACE)).toEqual([]);
+      expect(await backend.keys(TREE)).toEqual(['c'.repeat(64) + '/meta']);
+      expect(await backend.keys('unsavedState')).toEqual([]);
+    },
+  );
+
+  it('a leave during a failing in-flight save returns without waiting out a backoff', async () => {
+    const backend = createMemoryMarmotBackend();
+    const saves = new MarmotStateSaves({
+      owner: OWNER,
+      backend,
+      stopped: () => false,
+      retryMs: [1, 60_000, 60_000],
+    });
+    const group = fakeGroup(Infinity);
+    let fail!: () => void;
+    group.save.mockImplementationOnce(
+      () => new Promise<void>((_, reject) => (fail = () => reject(new Error('disk full')))),
+    );
     saves.check(group, [FAILED]);
     await tick(); // the retry's save is in flight
-    await wipeGroup(backend); // removed by an inbound commit: marmot-ts wipes it...
-    await saves.forget(ID); // ...and emits `removed`
-    save.release(); // the save's writes land afterwards
+    const leaving = saves.whileRemoving(ID, async () => 'left');
+    fail(); // the save fails: the loop must not start a 60 s backoff first
+    const t0 = Date.now();
+    await expect(leaving).resolves.toBe('left');
+    expect(Date.now() - t0).toBeLessThan(1_000);
+  });
+
+  it('keeps the retry held until the last of two overlapping removals ends', async () => {
+    const { saves } = makeSaves();
+    const group = fakeGroup(0);
+    saves.check(group, [FAILED]);
+    let finishSecond!: () => void;
+    const second = saves.whileRemoving(
+      ID,
+      () => new Promise<void>((resolve) => (finishSecond = resolve)),
+    );
+    const first = saves.whileRemoving(ID, async () => {
+      throw new Error('no relay acknowledged');
+    });
+    await expect(first).rejects.toThrow();
+    await tick();
+    expect(group.save).not.toHaveBeenCalled(); // still held by the second
+    finishSecond(); // the second removal succeeded: the group is gone
+    await second;
     await saves.settled(ID);
-    expect(await backend.keys(GROUP_STATE_NAMESPACE)).toEqual([]);
-    expect(await backend.keys(TREE)).toEqual(['c'.repeat(64) + '/meta']);
-    expect(await backend.keys('unsavedState')).toEqual([]);
-    expect(group.save).toHaveBeenCalledTimes(1);
+    expect(group.save).not.toHaveBeenCalled(); // never re-armed
   });
 
   it('re-arms the retry when the leave fails', async () => {
@@ -397,7 +462,7 @@ describe('MarmotStateSaves (#1754)', () => {
     const group = fakeGroup(Infinity);
     saves.check(group, [FAILED]);
     await saves.settled(ID);
-    await saves.forget(ID);
+    await saves.forget(ID, { wiped: true });
     expect(uiFlag()).toBe(false);
     expect(await backend.keys('unsavedState')).toEqual([]);
   });

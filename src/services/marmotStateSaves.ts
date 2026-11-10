@@ -47,6 +47,15 @@ export interface MarmotStateSavesDeps {
   retryMs?: readonly number[];
 }
 
+/** Removals in progress for one group; the pause lifts when the last ends. */
+interface Pause {
+  count: number;
+  /** The group to re-arm if no removal succeeded. */
+  group: SavableGroup | null;
+  failed: boolean;
+  succeeded: boolean;
+}
+
 const epochOf = (g: SavableGroup) => g.state.groupContext.epoch;
 const short = (id: string) => id.slice(0, 8);
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -59,13 +68,15 @@ export class MarmotStateSaves {
   private readonly rerun = new Set<string>();
   /** Each retry loop's pending backoff, woken early by stop() / forget(). */
   private readonly sleeps = new Map<string, () => void>();
-  /** Groups left / destroyed mid-retry: never write their state back. */
+  /** Groups that stopped being ours mid-retry: the retry ends. */
   private readonly gone = new Set<string>();
+  /** ...of which marmot-ts wiped the stored state (left / destroyed): never
+   * write it back. A removed or disbanded group keeps its state on disk. */
+  private readonly wiped = new Set<string>();
   /** The group each running retry loop saves (to re-arm it after a pause). */
   private readonly retrying = new Map<string, SavableGroup>();
-  /** Groups being left / destroyed (whileRemoving): no retry runs meanwhile.
-   * The value is the group to re-arm if the removal fails, if any. */
-  private readonly paused = new Map<string, SavableGroup | null>();
+  /** Groups being left / destroyed (whileRemoving): no retry runs meanwhile. */
+  private readonly paused = new Map<string, Pause>();
   private halted = false;
 
   constructor(private readonly deps: MarmotStateSavesDeps) {}
@@ -89,7 +100,8 @@ export class MarmotStateSaves {
     if (this.stopped()) return; // no retry, no UI
     if (__DEV__)
       console.warn(`[PerfBlock] marmot state save failed ${short(group.idStr)}: ${failed.error}`);
-    if (this.paused.has(group.idStr)) return void this.paused.set(group.idStr, group);
+    const pause = this.paused.get(group.idStr);
+    if (pause) return void (pause.group = group);
     // One retry loop per group: every try writes the group's CURRENT state.
     // A failure landing while that loop's save is already in flight may be
     // for a newer state than the one being written — the loop goes again.
@@ -99,12 +111,14 @@ export class MarmotStateSaves {
 
   private start(group: SavableGroup): void {
     this.gone.delete(group.idStr); // it's live again (e.g. re-joined)
+    this.wiped.delete(group.idStr);
     this.retrying.set(group.idStr, group);
     const run = this.retry(group).finally(() => {
       this.retries.delete(group.idStr);
       this.retrying.delete(group.idStr);
       this.rerun.delete(group.idStr);
       this.gone.delete(group.idStr);
+      this.wiped.delete(group.idStr);
     });
     this.retries.set(group.idStr, run);
   }
@@ -113,18 +127,30 @@ export class MarmotStateSaves {
    * marmot-ts wiped the group's state would bring it back on the next start.
    * Waits out a save in flight first; re-arms the retry if `remove` throws. */
   async whileRemoving<T>(mlsId: string, remove: () => Promise<T>): Promise<T> {
-    this.paused.set(mlsId, this.retrying.get(mlsId) ?? null);
+    const pause = this.paused.get(mlsId) ?? {
+      count: 0,
+      group: this.retrying.get(mlsId) ?? null,
+      failed: false,
+      succeeded: false,
+    };
+    pause.count++;
+    this.paused.set(mlsId, pause);
     this.sleeps.get(mlsId)?.();
-    await this.settled(mlsId);
     try {
-      return await remove();
+      await this.settled(mlsId);
+      const result = await remove();
+      pause.succeeded = true;
+      return result;
     } catch (e) {
-      const group = this.paused.get(mlsId);
-      this.paused.delete(mlsId);
-      if (group && !this.stopped()) this.start(group);
+      pause.failed = true;
       throw e;
     } finally {
-      this.paused.delete(mlsId);
+      if (--pause.count === 0) {
+        this.paused.delete(mlsId);
+        // Still ours only if every removal failed: carry on retrying.
+        if (pause.failed && !pause.succeeded && pause.group && !this.stopped())
+          this.start(pause.group);
+      }
     }
   }
 
@@ -172,11 +198,15 @@ export class MarmotStateSaves {
     await this.clear(mlsId);
   }
 
-  /** The group is gone from this device (left / removed / destroyed): drop
-   * its mark and end any retry — writing its state back would resurrect a
-   * group that was just deleted. */
-  async forget(mlsId: string): Promise<void> {
-    if (this.retries.has(mlsId)) this.gone.add(mlsId);
+  /** The group stopped being ours here: drop its mark and end any retry.
+   * `wiped` (left / destroyed: marmot-ts deleted its stored state) also undoes
+   * a save in flight that writes it back — it would resurrect the group.
+   * Removed / disbanded groups keep their state, so nothing is deleted. */
+  async forget(mlsId: string, opts: { wiped: boolean }): Promise<void> {
+    if (this.retries.has(mlsId)) {
+      this.gone.add(mlsId);
+      if (opts.wiped) this.wiped.add(mlsId);
+    }
     this.sleeps.get(mlsId)?.();
     await this.clear(mlsId);
   }
@@ -197,6 +227,8 @@ export class MarmotStateSaves {
   }
 
   private sleep(mlsId: string, ms: number): Promise<void> {
+    // Paused / forgotten / stopped: the loop is about to end, don't wait first.
+    if (this.stopped(mlsId)) return Promise.resolve();
     return new Promise((resolve) => {
       const wake = () => {
         clearTimeout(timer);
@@ -220,7 +252,7 @@ export class MarmotStateSaves {
       try {
         await group.save(true);
         // Left / destroyed while this save was writing: undo the write-back.
-        if (this.gone.has(group.idStr)) {
+        if (this.wiped.has(group.idStr)) {
           await this.dropState(group.idStr);
           return false;
         }
@@ -234,7 +266,7 @@ export class MarmotStateSaves {
         if (!this.rerun.has(group.idStr)) await this.clear(group.idStr);
         return true;
       } catch (e) {
-        if (this.gone.has(group.idStr)) {
+        if (this.wiped.has(group.idStr)) {
           await this.dropState(group.idStr); // a partial write may have landed
           return false;
         }

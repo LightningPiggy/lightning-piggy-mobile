@@ -41,7 +41,7 @@ import {
   allAttachments,
   type MarmotMediaKeys,
 } from './marmotMedia';
-import { forgetMarmotDeletionsForGroup } from './marmotDeletionStore';
+import { handleGroupExits } from './marmotGroupExit';
 import { loadOrDeriveMediaKeys, rememberMediaKeys } from './marmotMediaKeyStore';
 import { historyNamespace, replayGroupHistory } from './marmotHistoryReplay';
 import * as stateSaveNs from './marmotStateSaves';
@@ -351,19 +351,13 @@ export class MarmotSession {
         this.emitGroupsChanged();
       });
     }
-    for (const evt of ['left', 'removed', 'destroyed', 'disbanded'] as const) {
-      groups.on(evt, (id: Uint8Array, ..._rest: unknown[]) => {
-        // We're out of it: forget what we published there (MIP-05 state)
-        // and its "delete for everyone" tombstones.
-        this.pushRegistration.forgetGroup(bytesToHex(id));
-        void this.stateSaves.forget(bytesToHex(id));
-        void this.welcomePayloads.drop(bytesToHex(id), { outbox: true }).catch(() => undefined);
-        void forgetMarmotDeletionsForGroup(this.pubkey, toAppGroupId(bytesToHex(id))).catch(
-          () => undefined,
-        );
-        this.emitGroupsChanged();
-      });
-    }
+    handleGroupExits(groups, {
+      pubkey: this.pubkey,
+      pushRegistration: this.pushRegistration,
+      stateSaves: this.stateSaves,
+      welcomePayloads: this.welcomePayloads,
+      changed: () => this.emitGroupsChanged(),
+    });
     groups.on('unloaded', () => this.emitGroupsChanged());
     try {
       // Inside the try: a store failure must still open the `ready` gate, or
