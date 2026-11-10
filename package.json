@@ -1,6 +1,6 @@
 {
   "name": "lightning-piggy-app",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "license": "MIT",
   "main": "index.ts",
   "engines": {
