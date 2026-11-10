@@ -1994,7 +1994,16 @@
     "cameraAccessNeeded": "Do skanowania kodów QR potrzebny jest dostęp do aparatu",
     "grantCameraPermission": "Zezwól na dostęp do aparatu",
     "grantPermission": "Zezwól",
+    "openCameraSettings": "Otwórz Ustawienia, aby zezwolić na dostęp do aparatu",
     "qrViewfinder": "Wizjer kodu QR"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Wymagane uprawnienie",
+    "photoLibraryMessage": "Zezwól na dostęp do galerii zdjęć, aby wysyłać obrazy.",
+    "cameraPhotoMessage": "Zezwól na dostęp do aparatu, aby robić i wysyłać zdjęcia.",
+    "ok": "OK",
+    "cancel": "Anuluj",
+    "openSettings": "Otwórz Ustawienia"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "OK",

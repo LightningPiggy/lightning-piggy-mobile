@@ -1988,7 +1988,16 @@
     "cameraAccessNeeded": "Camera access needed to scan QR codes",
     "grantCameraPermission": "Grant camera permission",
     "grantPermission": "Grant Permission",
+    "openCameraSettings": "Open Settings to allow camera access",
     "qrViewfinder": "QR code viewfinder"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Permission needed",
+    "photoLibraryMessage": "Allow photo library access to send images.",
+    "cameraPhotoMessage": "Allow camera access to take and send photos.",
+    "ok": "OK",
+    "cancel": "Cancel",
+    "openSettings": "Open Settings"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "OK",

@@ -1988,7 +1988,16 @@
     "cameraAccessNeeded": "A QR-kódok beolvasásához kamera-hozzáférés kell",
     "grantCameraPermission": "Kameraengedély megadása",
     "grantPermission": "Engedély megadása",
+    "openCameraSettings": "Nyisd meg a Beállításokat, és engedélyezd a kamerát",
     "qrViewfinder": "QR-kód keresője"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Engedély szükséges",
+    "photoLibraryMessage": "Engedélyezd a fotótár elérését a képek küldéséhez.",
+    "cameraPhotoMessage": "Engedélyezd a kamera elérését a fotók készítéséhez és küldéséhez.",
+    "ok": "OK",
+    "cancel": "Mégse",
+    "openSettings": "Beállítások megnyitása"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "OK",

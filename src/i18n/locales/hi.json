@@ -1988,7 +1988,16 @@
     "cameraAccessNeeded": "QR कोड स्कैन करने के लिए कैमरे की अनुमति चाहिए",
     "grantCameraPermission": "कैमरे की अनुमति दें",
     "grantPermission": "अनुमति दें",
+    "openCameraSettings": "कैमरा एक्सेस की अनुमति देने के लिए सेटिंग्स खोलें",
     "qrViewfinder": "QR कोड व्यूफ़ाइंडर"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "अनुमति ज़रूरी है",
+    "photoLibraryMessage": "फ़ोटो भेजने के लिए फ़ोटो लाइब्रेरी एक्सेस की अनुमति दें।",
+    "cameraPhotoMessage": "फ़ोटो लेने और भेजने के लिए कैमरा एक्सेस की अनुमति दें।",
+    "ok": "ठीक है",
+    "cancel": "रद्द करें",
+    "openSettings": "सेटिंग्स खोलें"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "ठीक है",
