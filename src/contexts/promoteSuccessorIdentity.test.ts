@@ -14,9 +14,9 @@ jest.mock('./persistActiveIdentityKeys', () => ({
 }));
 
 let deferred: (() => void) | null = null;
-jest.mock('react-native', () => ({
-  InteractionManager: {
-    runAfterInteractions: (fn: () => void) => {
+jest.mock('../utils/idleScheduler', () => ({
+  idleScheduler: {
+    runWhenIdle: (fn: () => void) => {
       deferred = fn;
     },
   },

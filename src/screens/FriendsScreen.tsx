@@ -1,3 +1,4 @@
+import type { TextInputInstance } from 'react-native';
 import { openDirectChat } from '../utils/openDirectChat';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import React, {
@@ -10,7 +11,7 @@ import React, {
   Profiler,
 } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { Alert } from '../components/BrandedAlert';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
@@ -173,7 +174,7 @@ const FriendsScreen: React.FC = () => {
   // (see #243). Issue #245.
   const deferredSearch = useDeferredValue(search);
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [phoneContacts, setPhoneContacts] = useState<PhoneContact[]>([]);
   const [selectedContact, setSelectedContact] = useState<ListItem | null>(null);
@@ -252,7 +253,7 @@ const FriendsScreen: React.FC = () => {
   // profile icon picks up external renames (e.g. via Amber or another
   // client) without waiting for the 24h cache to expire. See #148.
   //
-  // Deferred via InteractionManager so the tab-transition animation
+  // Deferred via idleScheduler so the tab-transition animation
   // and first-paint of the Friends list finish *before* the (3-5 s)
   // refresh kicks off — otherwise the JS thread's busy on the refresh
   // while React is trying to render, and navigating away then feels
@@ -260,7 +261,7 @@ const FriendsScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
-      const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
+      const handle = idleScheduler.runWhenIdle(() => refreshProfile());
       return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
   );
@@ -273,7 +274,7 @@ const FriendsScreen: React.FC = () => {
       // Deferred like refreshProfile above: the Contacts API merge competes
       // with the tab-transition animation for JS-thread time, so let the
       // transition + first paint finish before it runs.
-      const handle = InteractionManager.runAfterInteractions(() => {
+      const handle = idleScheduler.runWhenIdle(() => {
         fetchPhoneContacts()
           .then(setPhoneContacts)
           .catch(() => {});

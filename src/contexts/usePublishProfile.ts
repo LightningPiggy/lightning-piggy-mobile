@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as nip19 from 'nostr-tools/nip19';
@@ -89,7 +89,7 @@ export function usePublishProfile({
           nip05: nullIfEmpty(profileData.nip05),
         };
         setProfile(updatedProfile);
-        InteractionManager.runAfterInteractions(() => {
+        idleScheduler.runWhenIdle(() => {
           AsyncStorage.setItem(
             perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pubkey),
             JSON.stringify(updatedProfile),

@@ -30,12 +30,12 @@ export const createCourseDetailScreenStyles = (colors: Palette) =>
       justifyContent: 'flex-end',
     },
     headerImage: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       width: '100%',
       height: '100%',
     },
     headerGradient: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
     },
     headerContent: {
       paddingHorizontal: 20,

@@ -164,7 +164,7 @@ const MarketShopListingsScreen: React.FC<Props> = ({ navigation }) => {
         renderItem={renderItem}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
-          status === 'loading' ? null : (
+          status === 'loading' ? undefined : (
             <Text style={[styles.muted, styles.emptyText]} testID="my-shop-no-listings">
               {t('market.sell.noListings')}
             </Text>

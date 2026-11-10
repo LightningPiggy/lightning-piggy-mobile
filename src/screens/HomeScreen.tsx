@@ -1,14 +1,8 @@
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import BrandedSpinner from '../components/BrandedSpinner';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Pressable,
-  ScrollView,
-  InteractionManager,
-} from 'react-native';
+import { View, Text, TouchableOpacity, Pressable, ScrollView } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
@@ -110,7 +104,7 @@ const HomeScreen: React.FC = () => {
       // thread briefly while it walks the profile cache and (on miss)
       // hits a relay, and running it during the focus callback
       // synchronously makes the tab feel laggy.
-      const handle = InteractionManager.runAfterInteractions(() => refreshProfile());
+      const handle = idleScheduler.runWhenIdle(() => refreshProfile());
       return () => handle.cancel();
     }, [isLoggedIn, refreshProfile]),
   );

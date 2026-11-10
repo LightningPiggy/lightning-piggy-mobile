@@ -33,7 +33,7 @@ jest.mock('expo-file-system', () => {
     }
     open() {
       const bytes = mockFs.get(this.uri)!.bytes;
-      return { readBytes: (n: number) => bytes.slice(0, n), close: () => undefined };
+      return { readBytesSync: (n: number) => bytes.slice(0, n), close: () => undefined };
     }
     rename(name: string) {
       const next = this.uri.slice(0, this.uri.lastIndexOf('/') + 1) + name;

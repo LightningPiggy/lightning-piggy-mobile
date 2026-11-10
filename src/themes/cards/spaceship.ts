@@ -11,7 +11,7 @@ import { StyleSheet } from 'react-native';
 // Slightly under full opacity softens the brightest nebula patches under text.
 export const bgStyle = StyleSheet.create({
   full: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.9,
   },
 });

@@ -15,7 +15,8 @@
  * doesn't intercept touch events.
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Image, StyleSheet } from 'react-native';
+import { Animated, Easing, Image } from 'react-native';
+import { createBootSplashStyles } from '../styles/BootSplash.styles';
 import { lightPalette } from '../styles/palettes';
 
 // BootSplash is brand-fixed (only ever shows over the native pink splash
@@ -23,7 +24,7 @@ import { lightPalette } from '../styles/palettes';
 // palette directly rather than via `useThemeColors()`. brandPink is
 // identical in both palettes; this keeps the legacy `colors` import
 // out of the file.
-const colors = lightPalette;
+const styles = createBootSplashStyles(lightPalette);
 
 interface Props {
   /** When true, fade out over 250ms and unmount. */
@@ -78,29 +79,3 @@ const BootSplash: React.FC<Props> = ({ done }) => {
 };
 
 export default BootSplash;
-
-const styles = StyleSheet.create({
-  root: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.brandPink,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-  },
-  pig: {
-    width: '80%',
-    height: '50%',
-  },
-  logo: {
-    // The logo PNG (177×86 native, ~2:1) is the wordmark — yellow
-    // lightning bolt + white "Lightning Piggy" text baked in. Render
-    // it at a readable size (60% of the splash width) instead of the
-    // previous 32×32 squished icon. accessibilityLabel preserves the
-    // brand announcement for screen readers; the previous separate
-    // <Text>LIGHTNING PIGGY</Text> was duplicating what the image
-    // already says (#215).
-    width: '60%',
-    aspectRatio: 177 / 86,
-    marginTop: 24,
-  },
-});

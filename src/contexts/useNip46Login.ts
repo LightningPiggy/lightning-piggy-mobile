@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import * as SecureStore from 'expo-secure-store';
 import * as nostrConnectService from '../services/nostrConnectService';
 import { migrateToPerAccountStorage } from '../services/migrateToPerAccountStorage';
@@ -142,7 +142,7 @@ export function useNip46Login(deps: UseNip46LoginDeps) {
 
         await loadContactsFromCache(pk);
         await hydrateDmInboxFromCache(pk);
-        InteractionManager.runAfterInteractions(async () => {
+        idleScheduler.runWhenIdle(async () => {
           try {
             const readRelays = await loadRelays(pk);
             await loadProfile(pk, readRelays);

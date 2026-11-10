@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native';
-import { AppState, InteractionManager } from 'react-native';
+import { AppState } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import {
   reconcileKeyBackupReminders,
   shouldShowKeyBackupBanner,
@@ -43,7 +44,7 @@ beforeEach(() => {
     resume = handler;
     return { remove: jest.fn() };
   });
-  jest.spyOn(InteractionManager, 'runAfterInteractions').mockImplementation(() => ({
+  jest.spyOn(idleScheduler, 'runWhenIdle').mockImplementation(() => ({
     cancel: jest.fn(),
     then: jest.fn(),
     done: jest.fn(),

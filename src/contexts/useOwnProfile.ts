@@ -1,5 +1,5 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { NostrProfile } from '../types/nostr';
 import * as nostrService from '../services/nostrService';
@@ -59,7 +59,7 @@ export function useOwnProfile(
       if (__DEV__) console.log(`[Nostr] fetchProfile: ${Date.now() - t0}ms`);
       if (fetchedProfile) {
         setProfile((prev) => (sameProfile(prev, fetchedProfile) ? prev : fetchedProfile));
-        InteractionManager.runAfterInteractions(() => {
+        idleScheduler.runWhenIdle(() => {
           AsyncStorage.setItem(
             perAccountKey(OWN_PROFILE_CACHE_KEY_BASE, pk),
             JSON.stringify(fetchedProfile),

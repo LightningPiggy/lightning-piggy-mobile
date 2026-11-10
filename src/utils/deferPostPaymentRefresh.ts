@@ -1,4 +1,4 @@
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from './idleScheduler';
 
 // Why this exists (#859, #828): when a payment lands (send-success or
 // receive), the success/receive overlay paints, but the post-payment
@@ -9,16 +9,16 @@ import { InteractionManager } from 'react-native';
 // snaps closed (same class as the cold-start DM freeze, #846).
 //
 // The dismiss must NEVER be gated behind the refresh. We push the refresh
-// past the interaction frame with InteractionManager.runAfterInteractions:
+// to an idle JS turn with idleScheduler.runWhenIdle:
 // React paints the overlay and any queued touch (the OK tap) is serviced
 // first, THEN the refresh runs and the balance / tx list / zaps catch up
 // underneath. The user-facing guarantee: the moment the card is up, OK
 // works instantly.
 
-// The slice of InteractionManager we depend on — narrowed so tests can
+// The slice of idleScheduler we depend on — narrowed so tests can
 // pass a fake scheduler without dragging in the whole RN module.
 export interface InteractionScheduler {
-  runAfterInteractions(task: () => void): { cancel: () => void };
+  runWhenIdle(task: () => void): { cancel: () => void };
 }
 
 export interface DeferredRefreshHandle {
@@ -26,8 +26,7 @@ export interface DeferredRefreshHandle {
   cancel(): void;
 }
 
-// Schedule `refresh` to run AFTER the current interaction/animation frame
-// settles, so it never blocks the overlay's dismiss tap. Returns a handle
+// Schedule `refresh` for an idle JS turn without blocking the current tap. Returns a handle
 // whose cancel() drops the task if it hasn't run yet.
 //
 // `refresh` is invoked fire-and-forget; if it returns a promise its
@@ -35,9 +34,9 @@ export interface DeferredRefreshHandle {
 // app — the next organic refresh picks the data up).
 export function deferPostPaymentRefresh(
   refresh: () => void | Promise<unknown>,
-  scheduler: InteractionScheduler = InteractionManager,
+  scheduler: InteractionScheduler = idleScheduler,
 ): DeferredRefreshHandle {
-  const handle = scheduler.runAfterInteractions(() => {
+  const handle = scheduler.runWhenIdle(() => {
     try {
       const maybePromise = refresh();
       if (maybePromise && typeof maybePromise.then === 'function') {
