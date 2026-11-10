@@ -30,12 +30,18 @@ export function useSendInputMode({ visible, permission, hasInput, liveInputRef }
   const permissionRef = useRef(permission);
   permissionRef.current = permission;
 
-  // Call from the sheet's open effect (not onChange handlers).
-  const resetInputModeForOpen = useCallback((initialAddress?: string) => {
-    const current = permissionRef.current;
-    awaitingPermissionRef.current = !initialAddress && current == null;
-    setInputMode(initialAddress || !current?.granted ? 'paste' : 'scan');
-  }, []);
+  // Call from the sheet's open effect (not onChange handlers). An explicit
+  // `preferred` tab (the widget's Scan button, #1849) wins: the user asked for
+  // it, and the Scan tab itself asks for camera access when it isn't granted.
+  const resetInputModeForOpen = useCallback(
+    (initialAddress?: string, preferred?: SendInputMode) => {
+      const current = permissionRef.current;
+      awaitingPermissionRef.current = !preferred && !initialAddress && current == null;
+      if (preferred) setInputMode(preferred);
+      else setInputMode(initialAddress || !current?.granted ? 'paste' : 'scan');
+    },
+    [],
+  );
 
   // User tab taps and programmatic returns to an editable field.
   const selectInputMode = useCallback((mode: SendInputMode) => {

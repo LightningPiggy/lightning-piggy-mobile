@@ -94,6 +94,7 @@
     "nostr-tools": "^2.23.3",
     "react": "19.2.0",
     "react-native": "0.83.6",
+    "react-native-android-widget": "^0.26.0",
     "react-native-color-matrix-image-filters": "^8.0.2",
     "react-native-edge-to-edge": "^1.8.1",
     "react-native-gesture-handler": "^2.30.1",

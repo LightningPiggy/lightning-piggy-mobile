@@ -3827,5 +3827,61 @@
     "removeAnyway": "Trotzdem entfernen",
     "remove": "Entfernen",
     "cancel": "Abbrechen"
+  },
+  "widget": {
+    "receive": "Empfangen",
+    "send": "Senden",
+    "scan": "Scannen",
+    "satsUnit": "sats",
+    "unnamedWallet": "Wallet",
+    "empty": "Füge eine Wallet in Lightning Piggy hinzu",
+    "fiat": "≈ {{fiat}}",
+    "fiatAndAge": "≈ {{fiat}} · {{age}}",
+    "updated": "Aktualisiert {{age}}",
+    "age": {
+      "justNow": "gerade eben",
+      "minutes": {
+        "one": "vor 1 Min.",
+        "other": "vor {{count}} Min."
+      },
+      "hours": {
+        "one": "vor 1 Stunde",
+        "other": "vor {{count}} Stunden"
+      },
+      "days": {
+        "one": "vor 1 Tag",
+        "other": "vor {{count}} Tagen"
+      }
+    },
+    "a11y": {
+      "balance": "{{name}}: {{amount}} sats",
+      "balanceHidden": "{{name}}: Guthaben ausgeblendet",
+      "nextWallet": "Nächste Wallet",
+      "previousWallet": "Vorherige Wallet"
+    },
+    "picker": {
+      "cardLabel": "Wallet-Guthaben",
+      "cardDescription": "Das Guthaben einer Wallet, mit Empfangen und Senden",
+      "barLabel": "Wallet-Leiste",
+      "barDescription": "Das Guthaben einer Wallet, mit Empfangen, Scannen und Senden",
+      "buttonsLabel": "Wallet-Tasten",
+      "buttonsDescription": "Das Guthaben einer Wallet, mit runden Tasten für Empfangen und Senden"
+    },
+    "config": {
+      "title": "Richte dein Widget ein",
+      "subtitle": "Wähle, mit welcher Wallet es startet und wie es aussieht. Tippe im Widget auf ›, um zu deiner nächsten Wallet zu wechseln.",
+      "walletSection": "Start-Wallet",
+      "typeLightning": "Lightning",
+      "typeOnchain": "On-Chain",
+      "noWallets": "Füge zuerst eine Wallet in Lightning Piggy hinzu. Das Widget zeigt sie an, sobald du das getan hast.",
+      "styleSection": "Stil",
+      "stylePiggyPink": "Piggy-Pink",
+      "styleCleanWhite": "Schlichtes Weiß",
+      "styleNightGlass": "Nachtglas",
+      "hideBalance": "Guthaben ausblenden",
+      "hideBalanceHint": "Zeigt Punkte statt des Betrags",
+      "cancel": "Abbrechen",
+      "save": "Speichern"
+    }
   }
 }

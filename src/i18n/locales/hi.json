@@ -3827,5 +3827,61 @@
     "removeAnyway": "फिर भी हटाएँ",
     "remove": "हटाएँ",
     "cancel": "रद्द करें"
+  },
+  "widget": {
+    "receive": "प्राप्त करें",
+    "send": "भेजें",
+    "scan": "स्कैन करें",
+    "satsUnit": "sats",
+    "unnamedWallet": "वॉलेट",
+    "empty": "Lightning Piggy में वॉलेट जोड़ें",
+    "fiat": "≈ {{fiat}}",
+    "fiatAndAge": "≈ {{fiat}} · {{age}}",
+    "updated": "{{age}} अपडेट हुआ",
+    "age": {
+      "justNow": "अभी-अभी",
+      "minutes": {
+        "one": "1 मिनट पहले",
+        "other": "{{count}} मिनट पहले"
+      },
+      "hours": {
+        "one": "1 घंटा पहले",
+        "other": "{{count}} घंटे पहले"
+      },
+      "days": {
+        "one": "1 दिन पहले",
+        "other": "{{count}} दिन पहले"
+      }
+    },
+    "a11y": {
+      "balance": "{{name}}: {{amount}} sats",
+      "balanceHidden": "{{name}}: बैलेंस छिपा है",
+      "nextWallet": "अगला वॉलेट",
+      "previousWallet": "पिछला वॉलेट"
+    },
+    "picker": {
+      "cardLabel": "वॉलेट बैलेंस",
+      "cardDescription": "वॉलेट का बैलेंस, प्राप्त करें और भेजें के साथ",
+      "barLabel": "वॉलेट बार",
+      "barDescription": "वॉलेट का बैलेंस, प्राप्त करें, स्कैन करें और भेजें के साथ",
+      "buttonsLabel": "वॉलेट बटन",
+      "buttonsDescription": "वॉलेट का बैलेंस, गोल प्राप्त करें और भेजें बटन के साथ"
+    },
+    "config": {
+      "title": "अपना विजेट सेट करें",
+      "subtitle": "चुनें कि यह किस वॉलेट से शुरू हो और कैसा दिखे। अगले वॉलेट पर जाने के लिए विजेट पर › टैप करें।",
+      "walletSection": "शुरुआती वॉलेट",
+      "typeLightning": "Lightning",
+      "typeOnchain": "ऑन-चेन",
+      "noWallets": "पहले Lightning Piggy में वॉलेट जोड़ें। जोड़ते ही विजेट उसे दिखाएगा।",
+      "styleSection": "स्टाइल",
+      "stylePiggyPink": "Piggy गुलाबी",
+      "styleCleanWhite": "साफ़ सफ़ेद",
+      "styleNightGlass": "नाइट ग्लास",
+      "hideBalance": "बैलेंस छिपाएँ",
+      "hideBalanceHint": "रकम की जगह बिंदु दिखाता है",
+      "cancel": "रद्द करें",
+      "save": "सेव करें"
+    }
   }
 }

@@ -515,7 +515,7 @@ const ReceiveSheet: React.FC<Props> = ({
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
       >
-        <BottomSheetView style={styles.content}>
+        <BottomSheetView style={styles.content} testID="receive-sheet">
           {/* No TouchableWithoutFeedback-with-Keyboard.dismiss wrapper here
            *  per TROUBLESHOOTING.adoc rule (6): it interferes with the
            *  sheet's keyboard handling AND, under the New Architecture,

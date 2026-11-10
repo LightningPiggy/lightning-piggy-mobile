@@ -68,6 +68,7 @@ import {
   isForAnotherAccount,
   resolveWrapConversation,
 } from '../services/notificationWrapResolver';
+import type { WidgetAction } from './widgetDeepLinks';
 
 // Lazy (push-only) screens — deferred module eval. Each is wrapped in its own
 // Suspense boundary by `lazyScreen`, so a slow chunk only shows a themed
@@ -168,6 +169,29 @@ export const navigateToSend = (initialAddress: string): boolean => {
   navigationRef.navigate('Main', {
     screen: 'MainTabs',
     params: { screen: 'Home', params: { sendToAddress: initialAddress } },
+  });
+  return true;
+};
+
+/**
+ * A home-screen widget button (#1849): land on Home with `walletId` selected
+ * and the Receive or Send sheet open (Send on its Scan tab for `scan`). Home's
+ * `useWidgetLaunch` does the selecting and opening once the wallets have
+ * loaded; an unknown wallet id falls back to the current wallet. Returns false
+ * until the nav tree is mounted so a cold-start tap can retry.
+ */
+export const navigateToWidgetAction = (action: WidgetAction, walletId: string | null): boolean => {
+  if (!navigationRef.isReady()) return false;
+  navigationRef.navigate('Main', {
+    screen: 'MainTabs',
+    params: {
+      screen: 'Home',
+      params: {
+        widgetAction: action,
+        widgetWalletId: walletId ?? undefined,
+        widgetNonce: Date.now(),
+      },
+    },
   });
   return true;
 };

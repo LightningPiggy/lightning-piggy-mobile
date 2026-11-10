@@ -1,3 +1,4 @@
+import type { SendInputMode } from '../components/SendModeTabs';
 import { useCallback, useMemo, useState } from 'react';
 
 export interface SendTarget {
@@ -5,6 +6,8 @@ export interface SendTarget {
   picture?: string;
   pubkey?: string;
   name?: string;
+  /** Open on this tab instead of the default (widget Scan button, #1849). */
+  mode?: SendInputMode;
 }
 
 /** null means never opened. Once mounted, sheets stay mounted when closed:

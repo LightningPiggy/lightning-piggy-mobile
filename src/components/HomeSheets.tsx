@@ -40,6 +40,7 @@ const HomeSheets = forwardRef<HomeSheetActions>(function HomeSheets(_props, ref)
           initialPicture={state.send.picture}
           recipientPubkey={state.send.pubkey}
           recipientName={state.send.name}
+          initialMode={state.send.mode}
         />
       )}
       {state.transfer !== null && (

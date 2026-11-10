@@ -60,7 +60,7 @@ import { isReverseSwapNotPaid } from '../utils/swapHandoff';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
 import SendPaymentIdentity from './SendPaymentIdentity';
-import SendModeTabs from './SendModeTabs';
+import SendModeTabs, { type SendInputMode } from './SendModeTabs';
 import SendNfcPane from './SendNfcPane';
 import SendScanPane from './SendScanPane';
 import { perfLog } from '../utils/perfLog';
@@ -72,12 +72,12 @@ interface Props {
   initialPicture?: string;
   recipientPubkey?: string;
   recipientName?: string;
-  // Optional Nostr event id to zap. When set, the 9734 zap request
-  // carries an `e` tag scoping the zap to that note — the LNURL
-  // server echoes it onto the 9735 receipt so per-note aggregation
-  // (e.g. the find-log zaps-received pill in HuntPiggyDetail) picks
-  // the zap up. Omit for plain zap-the-author flows.
+  // Optional Nostr event id to zap. When set, the 9734 zap request carries an
+  // `e` tag scoping the zap to that note — the LNURL server echoes it onto the
+  // 9735 receipt so per-note aggregation (e.g. the find-log zaps-received pill
+  // in HuntPiggyDetail) picks the zap up. Omit for plain zap-the-author flows.
   zapEventId?: string;
+  initialMode?: SendInputMode; // Open on this tab (widget Scan button, #1849).
 }
 
 type Step = 'main' | 'amount';
@@ -91,6 +91,7 @@ const SendSheet: React.FC<Props> = ({
   recipientPubkey,
   recipientName,
   zapEventId,
+  initialMode,
 }) => {
   if (visible && !__sendSheetFirstVisibleLogged) {
     __sendSheetFirstVisibleLogged = true;
@@ -299,7 +300,7 @@ const SendSheet: React.FC<Props> = ({
       // on a scanner that can't start (permission denied) is a dead-end; the
       // user can still switch to Scan, which prompts for access. A first open
       // before permission resolves may still move to Scan (useSendInputMode).
-      resetInputModeForOpen(initialAddress);
+      resetInputModeForOpen(initialAddress, initialMode);
       applyPasteText(initialAddress || '');
       setSatsValue('');
       setStep('main');

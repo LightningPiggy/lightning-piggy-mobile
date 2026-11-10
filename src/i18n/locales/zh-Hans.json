@@ -3827,5 +3827,61 @@
     "removeAnyway": "仍然移除",
     "remove": "移除",
     "cancel": "取消"
+  },
+  "widget": {
+    "receive": "收款",
+    "send": "发送",
+    "scan": "扫码",
+    "satsUnit": "sats",
+    "unnamedWallet": "钱包",
+    "empty": "请在 Lightning Piggy 中添加钱包",
+    "fiat": "≈ {{fiat}}",
+    "fiatAndAge": "≈ {{fiat}} · {{age}}",
+    "updated": "更新于{{age}}",
+    "age": {
+      "justNow": "刚刚",
+      "minutes": {
+        "one": "1 分钟前",
+        "other": "{{count}} 分钟前"
+      },
+      "hours": {
+        "one": "1 小时前",
+        "other": "{{count}} 小时前"
+      },
+      "days": {
+        "one": "1 天前",
+        "other": "{{count}} 天前"
+      }
+    },
+    "a11y": {
+      "balance": "{{name}}：{{amount}} sats",
+      "balanceHidden": "{{name}}：余额已隐藏",
+      "nextWallet": "下一个钱包",
+      "previousWallet": "上一个钱包"
+    },
+    "picker": {
+      "cardLabel": "钱包余额",
+      "cardDescription": "显示钱包余额，带收款和发送",
+      "barLabel": "钱包栏",
+      "barDescription": "显示钱包余额，带收款、扫码和发送",
+      "buttonsLabel": "钱包按钮",
+      "buttonsDescription": "显示钱包余额，带圆形收款和发送按钮"
+    },
+    "config": {
+      "title": "设置你的小组件",
+      "subtitle": "选择小组件默认显示的钱包和外观。点按小组件上的 › 可切换到下一个钱包。",
+      "walletSection": "默认钱包",
+      "typeLightning": "Lightning",
+      "typeOnchain": "链上",
+      "noWallets": "请先在 Lightning Piggy 中添加钱包。添加后，小组件会立即显示。",
+      "styleSection": "样式",
+      "stylePiggyPink": "小猪粉",
+      "styleCleanWhite": "简洁白",
+      "styleNightGlass": "夜色玻璃",
+      "hideBalance": "隐藏余额",
+      "hideBalanceHint": "用圆点代替金额",
+      "cancel": "取消",
+      "save": "保存"
+    }
   }
 }
