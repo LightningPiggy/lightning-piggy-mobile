@@ -30,6 +30,7 @@ import { usePlacesCache } from '../hooks/usePlacesCache';
 import { shouldShowEmptyState } from '../utils/placesCache';
 import { formatDistance, haversineMetres } from '../utils/geohash';
 import { orderFeaturedFirst } from '../utils/featuredPlaces';
+import { placeContactLinks } from '../utils/placeContactLinks';
 import { btcMapIconComponent } from '../utils/btcMapIcon';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import BtcMapAttribution from '../components/BtcMapAttribution';
@@ -457,8 +458,9 @@ const PlaceRow: React.FC<{
   const onchain = acceptsOnchain(place);
   const lud16 = lightningAddressOf(place);
   const boosted = isBoosted(place);
-  const website = place.tags['contact:website'];
-  const websiteLabel = website ? website.replace(/^https?:\/\/(www\.)?/i, '') : null;
+  // Validated http(s) link only — the raw OSM tag never reaches Linking (#1785).
+  const website = placeContactLinks(place).website;
+  const websiteLabel = website ? website.value.replace(/^https?:\/\/(www\.)?/i, '') : null;
   return (
     <TouchableOpacity
       style={[styles.row, boosted ? styles.rowBoosted : null]}
@@ -504,7 +506,7 @@ const PlaceRow: React.FC<{
         {website && websiteLabel ? (
           <TouchableOpacity
             onPress={() => {
-              Linking.openURL(website).catch(() => {});
+              Linking.openURL(website.href).catch(() => {});
             }}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
             testID={`place-row-${place.id}-website`}

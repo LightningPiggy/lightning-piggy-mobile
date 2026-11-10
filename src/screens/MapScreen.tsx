@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TouchableOpacity,
-  Linking,
   ScrollView,
   Animated,
   PanResponder,
@@ -11,19 +10,7 @@ import {
   InteractionManager,
 } from 'react-native';
 import * as Location from 'expo-location';
-import {
-  ChevronLeft,
-  Clock,
-  Globe,
-  Mail,
-  MapPin,
-  Phone,
-  PiggyBank,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  Zap,
-} from 'lucide-react-native';
+import { ChevronLeft, MapPin, PiggyBank, SlidersHorizontal } from 'lucide-react-native';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTrustGraph } from '../contexts/TrustGraphContext';
 import type { Palette } from '../styles/palettes';
@@ -33,16 +20,8 @@ import type { CompositeNavigationProp, RouteProp } from '@react-navigation/nativ
 import {
   Bbox,
   BtcMapPlace,
-  acceptsLightning,
-  acceptsOnchain,
-  btcMapMerchantUrl,
-  btcMapVerifyUrl,
-  daysSinceVerified,
   fetchPlacesInBbox,
   peekCachedPlacesSync,
-  formatAddress,
-  isBoosted,
-  lightningAddressOf,
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
@@ -53,8 +32,7 @@ import { useNearbyCacheSubscription } from '../hooks/useNearbyCacheSubscription'
 import { bboxCentre } from '../utils/mapPins';
 import { useNostr } from '../contexts/NostrContext';
 import { encodeGeohash, geohashNeighbours, geohashPrefixesForBbox } from '../utils/geohash';
-import { btcMapIconComponent } from '../utils/btcMapIcon';
-import SocialIcon from '../components/SocialIcon';
+import { MerchantDetailSheet } from '../components/MerchantDetailSheet';
 import WebOfTrustChip from '../components/WebOfTrustChip';
 import WebOfTrustBottomSheet from '../components/WebOfTrustBottomSheet';
 import LegendSheet from '../components/LegendSheet';
@@ -432,7 +410,6 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
             navigation.navigate('PlaceDetail', { placeId });
           }}
           colors={colors}
-          styles={styles}
         />
       )}
 
@@ -579,237 +556,6 @@ function useDismissibleSheet(onClose: () => void): {
   ).current;
   return { translateY, panHandlers: responder.panHandlers };
 }
-
-const MerchantDetailSheet: React.FC<{
-  place: BtcMapPlace;
-  onClose: () => void;
-  onViewDetails: () => void;
-  colors: Palette;
-  styles: MapScreenStyles;
-}> = ({ place, onClose, onViewDetails, colors, styles }) => {
-  const t = useTranslation();
-  const { translateY, panHandlers } = useDismissibleSheet(onClose);
-  const days = daysSinceVerified(place);
-  const lud16 = lightningAddressOf(place);
-  const verifyText =
-    days === null
-      ? null
-      : days === 0
-        ? t('mapScreen.verifiedToday')
-        : days === 1
-          ? t('mapScreen.verifiedOneDay')
-          : t('mapScreen.verifiedDaysAgo', { days });
-
-  return (
-    <View style={styles.sheetBackdrop} testID="merchant-detail-screen">
-      <TouchableOpacity style={styles.sheetTapAway} onPress={onClose} activeOpacity={1} />
-      <Animated.View style={[styles.sheet, { transform: [{ translateY }] }]}>
-        {/* PanResponder lives on the handle bar so vertical drags from
-            the rest of the sheet body don't fight inner ScrollViews
-            (the Categories list etc.). Drag the handle down to
-            dismiss; spring back if released early. */}
-        <View {...panHandlers} style={styles.sheetHandleGrabber} testID="merchant-detail-grabber">
-          <View style={styles.sheetHandle} />
-        </View>
-        <View style={styles.sheetTitleRow}>
-          {(() => {
-            const CategoryIcon = btcMapIconComponent(place.icon);
-            return (
-              <View style={styles.sheetIconWrap}>
-                <CategoryIcon size={18} color={colors.brandPink} strokeWidth={2.5} />
-              </View>
-            );
-          })()}
-          <Text style={styles.sheetTitle} testID="merchant-detail-name">
-            {place.tags.name ?? t('mapScreen.unnamedMerchant')}
-          </Text>
-        </View>
-        <Text style={styles.sheetSubtitle}>{formatAddress(place)}</Text>
-        <View style={styles.sheetChipRow}>
-          {isBoosted(place) && (
-            <View style={styles.sheetChipFeatured} testID="merchant-detail-featured">
-              <Sparkles size={12} color={colors.textHeader} strokeWidth={2.5} />
-              <Text style={styles.sheetChipFeaturedText}>{t('mapScreen.featured')}</Text>
-            </View>
-          )}
-          {acceptsLightning(place) && (
-            <View style={styles.sheetChipPink}>
-              <Zap size={12} color={colors.white} strokeWidth={2.5} />
-              <Text style={styles.sheetChipPinkText}>{t('mapScreen.lightning')}</Text>
-            </View>
-          )}
-          {acceptsOnchain(place) && (
-            <View style={styles.sheetChipOrange}>
-              <Text style={styles.sheetChipOrangeText}>{t('mapScreen.onchain')}</Text>
-            </View>
-          )}
-        </View>
-        {place.description ? (
-          <Text style={styles.sheetDescription} numberOfLines={4}>
-            {place.description}
-          </Text>
-        ) : null}
-        {place.opening_hours ? (
-          <View style={styles.sheetMetaRow}>
-            <Clock size={13} color={colors.textSupplementary} strokeWidth={2.5} />
-            <Text style={styles.sheetMetaText} numberOfLines={2}>
-              {place.opening_hours}
-            </Text>
-          </View>
-        ) : null}
-        {verifyText && <Text style={styles.sheetVerify}>{verifyText}</Text>}
-        {(place.tags['contact:website'] ||
-          place.phone ||
-          place.email ||
-          place.facebookUrl ||
-          place.twitterUrl ||
-          place.instagramUrl) && (
-          <View style={styles.sheetContactRow}>
-            {place.tags['contact:website'] ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(place.tags['contact:website']!)}
-                testID="merchant-detail-website"
-                accessibilityLabel={t('mapScreen.openWebsite')}
-              >
-                <Globe size={13} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  {t('mapScreen.website')}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {place.phone ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(`tel:${place.phone!.replace(/\s+/g, '')}`)}
-                testID="merchant-detail-phone"
-                accessibilityLabel={t('mapScreen.callPhone', { phone: place.phone })}
-              >
-                <Phone size={13} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  {place.phone}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {place.email ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(`mailto:${place.email!}`)}
-                testID="merchant-detail-email"
-                accessibilityLabel={t('mapScreen.emailAddress', { email: place.email })}
-              >
-                <Mail size={13} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  {t('mapScreen.email')}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {place.facebookUrl ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(place.facebookUrl!).catch(() => {})}
-                testID="merchant-detail-facebook"
-                accessibilityLabel={t('mapScreen.openFacebook')}
-              >
-                <SocialIcon network="facebook" size={14} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  {t('mapScreen.facebook')}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {place.twitterUrl ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(place.twitterUrl!).catch(() => {})}
-                testID="merchant-detail-x"
-                accessibilityLabel={t('mapScreen.openX')}
-              >
-                <SocialIcon network="x" size={14} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  {t('mapScreen.x')}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {place.instagramUrl ? (
-              <TouchableOpacity
-                style={styles.sheetContactChip}
-                onPress={() => Linking.openURL(place.instagramUrl!).catch(() => {})}
-                testID="merchant-detail-instagram"
-                accessibilityLabel={t('mapScreen.openInstagram')}
-              >
-                <SocialIcon network="instagram" size={14} />
-                <Text style={styles.sheetContactText} numberOfLines={1}>
-                  {t('mapScreen.instagram')}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        )}
-        <View style={styles.sheetActions}>
-          <TouchableOpacity
-            style={[styles.sheetButton, !lud16 && styles.sheetButtonDisabled]}
-            disabled={!lud16}
-            onPress={() => {
-              if (!lud16) return;
-              onClose();
-              // SendSheet pre-fill is handled in milestone 4 alongside the
-              // payment plumbing; for now we close the sheet so the user
-              // sees the address. TODO(#467): wire to SendSheet when M4
-              // adds the lud16 entry-path on the Home tab.
-            }}
-            testID="merchant-detail-pay-button"
-            accessibilityLabel={
-              lud16
-                ? t('mapScreen.payAddress', { address: lud16 })
-                : t('mapScreen.noLightningAddress')
-            }
-          >
-            <Zap size={16} color={colors.white} strokeWidth={2.5} />
-            {/* Keep the label "Pay" in both states — the disabled
-                surface treatment already communicates non-availability,
-                and the long "No Lightning address" string wraps awkwardly
-                on small screens. Screen readers still get the
-                disambiguating context via accessibilityLabel above. */}
-            <Text style={styles.sheetButtonText}>{t('mapScreen.pay')}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.sheetButtonSecondary}
-            onPress={onViewDetails}
-            testID="merchant-detail-view-button"
-            accessibilityLabel={t('mapScreen.openPlaceDetail')}
-          >
-            <Text style={styles.sheetButtonSecondaryText}>{t('mapScreen.viewDetails')}</Text>
-          </TouchableOpacity>
-        </View>
-        {btcMapVerifyUrl(place) || btcMapMerchantUrl(place) ? (
-          <View style={styles.sheetBtcMapActionsRow}>
-            {btcMapVerifyUrl(place) ? (
-              <TouchableOpacity
-                style={styles.sheetBtcMapActionButton}
-                onPress={() => Linking.openURL(btcMapVerifyUrl(place)!)}
-                testID="merchant-detail-verify"
-                accessibilityLabel={t('mapScreen.verifyListing')}
-              >
-                <ShieldCheck size={13} color={colors.brandPink} strokeWidth={2.5} />
-                <Text style={styles.sheetBtcMapActionText}>{t('mapScreen.verify')}</Text>
-              </TouchableOpacity>
-            ) : null}
-            {btcMapMerchantUrl(place) ? (
-              <TouchableOpacity
-                style={styles.sheetBtcMapActionButton}
-                onPress={() => Linking.openURL(btcMapMerchantUrl(place)!)}
-                testID="merchant-detail-suggest-edit"
-                accessibilityLabel={t('mapScreen.suggestEditLabel')}
-              >
-                <Text style={styles.sheetBtcMapActionText}>{t('mapScreen.suggestEdit')}</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        ) : null}
-      </Animated.View>
-    </View>
-  );
-};
 
 const CacheDetailSheet: React.FC<{
   cache: ParsedCache;
