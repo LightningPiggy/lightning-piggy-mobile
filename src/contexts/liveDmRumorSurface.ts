@@ -20,6 +20,8 @@ import { notePersistedInboxIds } from './knownInboxEvent';
 import { dmRowPreview } from '../utils/dmRowPreview';
 import { notifyDmMessage } from './nostrEventBus';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
+import { mayStartRoom } from '../services/roomStartGate';
+import { audienceAdmits, liveNotificationAudience } from '../services/notificationAudience';
 import { fireMessageNotification, isThreadActivelyViewed } from '../services/notificationService';
 import {
   claimWrapNotification,
@@ -185,7 +187,7 @@ export function createLiveRumorSurfacer(
       rumor.kind === 16 || rumor.kind === 17
         ? { kind: 'not-group' as const, deferredGroupRumor: undefined }
         : await tryRouteGroupRumor(rumor, viewerPubkey, wrapId, shouldAbort, (pk) =>
-            followPubkeysRef.current.has(pk),
+            mayStartRoom(viewerPubkey, pk, (p) => followPubkeysRef.current.has(p)),
           );
     if (shouldAbort()) {
       abandon();
@@ -195,7 +197,10 @@ export function createLiveRumorSurfacer(
       // A stranger starting a room (#1830): nothing stored, no alert. While
       // follows load, hold it like a two-party room chat; the replay re-routes
       // it once the sender is confirmed followed, and the alert fires then.
-      if (isFollowHydrated()) nothingToSee();
+      // Stored groups still unread: it may be a known room — leave it to a
+      // redelivery or the next refresh.
+      if (routeResult.groupsUnknown) abandon();
+      else if (isFollowHydrated()) nothingToSee();
       else {
         followGateBuffer.defer({
           partnerPubkey: routeResult.senderPubkey,
@@ -220,8 +225,17 @@ export function createLiveRumorSurfacer(
       // genuinely-fresh messages (backlog has old timestamps → silent),
       // skip my own, and suppressed when the user is viewing this group.
       const routed = routeResult.kind === 'routed' ? routeResult : null;
-      if (!routed || routed.message.senderPubkey.toLowerCase() === viewerPubkey.toLowerCase()) {
-        nothingToSee(); // our own message, or a group rumor we can't place
+      const sender = routed?.message.senderPubkey.toLowerCase() ?? '';
+      // A room the viewer is already in alerts for every member. One this
+      // message just started (tier 'all' lets anyone) alerts like a 1:1 from
+      // its sender: a follow or replied-to always, others per the tier.
+      const quietStart =
+        routed?.started &&
+        !followPubkeysRef.current.has(sender) &&
+        !hasRepliedTo(viewerPubkey, sender) &&
+        !audienceAdmits(liveNotificationAudience(viewerPubkey), sender);
+      if (!routed || sender === viewerPubkey.toLowerCase() || quietStart) {
+        nothingToSee(); // our own message, a room a stranger started, or a rumor we can't place
       } else if (isFreshArrival(routed.message.createdAt)) {
         // claimWrapNotification: dedupe vs the background watch (#279).
         if (claimWrapNotification(wrapId) || placeholder)

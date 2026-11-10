@@ -132,6 +132,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
     followHydrated = false,
     getReadRelays,
   } = options;
+  const followsHydratedNow = useRef(followHydrated);
+  followsHydratedNow.current = followHydrated; // read by refreshes already in flight (#1830)
 
   useEffect(() => {
     if (isLoggedIn && pubkey) reviveAccountWrites(pubkey);
@@ -485,11 +487,8 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const refreshForPubkey = pubkey;
       const setInboxForRefresh = inboxSetterFor(refreshForPubkey);
       const isStillActive = (): boolean => activeOwnerRef.current === refreshForPubkey;
-      // Local helper: encapsulates the follow gate so all seven sites in
-      // the cache hydrate + NIP-04 + NIP-17 decrypt loops + final merge
-      // reuse the same predicate. When includeNonFollows is true the
-      // gate is a no-op (every pubkey passes), so callers can opt out
-      // of the parental-control filter from a single switch.
+      // The follow gate, shared by every site in the hydrate, decrypt loops
+      // and final merge. includeNonFollows makes it a no-op (all pass).
       const refreshForSigner = signerType;
       const refreshFollows = followPubkeys;
       // Someone we've replied to passes too (#1623), so their later messages
@@ -708,6 +707,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   wraps: kind1059,
                   passesFollowGate,
                   isFollowed: (pk) => refreshFollows.has(pk),
+                  followsHydrated: followsHydratedNow.current,
                   bypassSkipSet: bypassSkipSet || skipSetRecheck !== null,
                   isColdStart,
                   signal: effectiveSignal,

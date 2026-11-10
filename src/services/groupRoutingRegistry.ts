@@ -19,11 +19,42 @@ import type { Group } from '../types/groups';
 
 let known: Group[] = [];
 let knownOwner: string | null = null;
+let knownLoaded = true;
 let reconcilerOwner: string | null = null;
+const loadedWaiters = new Set<() => void>();
 
-export function setKnownGroups(groups: Group[], owner: string | null = null): void {
+/** `loaded` false = the owner's stored groups haven't been read yet (#1830). */
+export function setKnownGroups(
+  groups: Group[],
+  owner: string | null = null,
+  loaded: boolean = true,
+): void {
   known = groups;
   knownOwner = owner;
+  knownLoaded = loaded;
+  if (loaded) for (const wake of [...loadedWaiters]) wake();
+}
+
+/** True once `owner`'s stored groups are in the registry. */
+export function areKnownGroupsLoaded(owner: string | null): boolean {
+  return owner === knownOwner && knownLoaded;
+}
+
+/** Resolves when `owner`'s stored groups are in the registry, or after `ms`. */
+export function whenKnownGroupsLoaded(owner: string | null, ms: number): Promise<boolean> {
+  if (areKnownGroupsLoaded(owner)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      loadedWaiters.delete(check);
+      resolve(areKnownGroupsLoaded(owner));
+    };
+    const check = () => {
+      if (areKnownGroupsLoaded(owner)) done();
+    };
+    const timer = setTimeout(done, ms);
+    loadedWaiters.add(check);
+  });
 }
 
 /**

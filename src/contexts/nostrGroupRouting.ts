@@ -5,8 +5,10 @@ import {
   type DecodedRumor,
 } from '../utils/nip17Unwrap';
 import {
+  areKnownGroupsLoaded,
   findGroupForParticipants,
   reconcileSyntheticGroup,
+  whenKnownGroupsLoaded,
 } from '../services/groupRoutingRegistry';
 import { isSyntheticGroupId, syntheticGroupIdForParticipants } from '../utils/syntheticGroupId';
 import { appendGroupMessage, type GroupMessage } from '../services/groupMessagesStorageService';
@@ -27,16 +29,25 @@ import type { Group } from '../types/groups';
 export type GroupRouteResult =
   // appended; carries the group + message so the LIVE caller can fire an
   // OS notification (#279). Only live deliveries notify — see nostrLiveDmSub.
-  | { kind: 'routed'; group: Group; message: GroupMessage }
+  // `started`: this message created the room (it wasn't known before).
+  | { kind: 'routed'; group: Group; message: GroupMessage; started: boolean }
   | { kind: 'group-no-match' } // group-shaped but no matching local group
   // A stranger's rumor would start a room the viewer isn't in (#1830). Never
   // a DM fallthrough: the live caller holds it while follows load (and
   // re-routes it if the sender turns out to be followed), else drops it.
-  | { kind: 'group-held'; senderPubkey: string }
+  // `groupsUnknown`: the viewer's stored groups still weren't loaded, so it
+  // may belong to a known room — retry later, never skip-set it.
+  | { kind: 'group-held'; senderPubkey: string; groupsUnknown: boolean }
   | { kind: 'not-group'; deferredGroupRumor?: DecodedRumor }; // DM fallthrough, or pending trust
+
+/** Cold start: how long to wait for the stored groups before deciding. */
+export const GROUPS_LOAD_WAIT_MS = 5_000;
 
 /**
  * Try to route a decoded kind-14 rumor as a group message.
+ * `mayStartRoom` decides who may start a room the viewer isn't in yet
+ * (`services/roomStartGate`); it is never the 1:1 storage predicate, which
+ * a thread-open or the Map's refresh widens to everyone.
  *
  * Side-effects on `routed`:
  *  - Appends to groupMessagesStorageService keyed by group.id
@@ -48,7 +59,7 @@ export async function tryRouteGroupRumor(
   viewerPubkey: string,
   wrapId: string,
   shouldAbort: () => boolean = () => false,
-  passesFollowGate: (pk: string) => boolean = () => false,
+  mayStartRoom: (pk: string) => boolean = () => false,
 ): Promise<GroupRouteResult> {
   const cls = classifyRumor(rumor, viewerPubkey);
   if (!cls || cls.type === 'order') return { kind: 'not-group' };
@@ -64,24 +75,32 @@ export async function tryRouteGroupRumor(
   if (cls.type === 'dm') return { kind: 'not-group', deferredGroupRumor: rumor };
   const otherParticipants = cls.otherParticipants;
   let group = findGroupForParticipants(otherParticipants, viewerPubkey);
-  // A subject names a room; it does not authenticate an unknown peer.
-  // Before promoting a two-party DM, preserve the receive caller's follow
-  // policy. Known rooms retain membership as their trust signal. Returning
-  // not-group lets the caller apply its usual drop/defer/skip-set behavior.
-  // Preserve marked rumors so follow hydration can retry group routing.
-  if (!group && isTwoParty && !passesFollowGate(Array.from(otherParticipants)[0])) {
-    return {
-      kind: 'not-group',
-      deferredGroupRumor: rumor,
-    };
-  }
-  // The same gate for a larger room: only someone the viewer follows (or the
-  // viewer, from another device) starts one. A known room needs no check —
-  // its members keep reaching the viewer whatever the tier.
+  // A subject names a room; it does not authenticate an unknown peer. Only
+  // someone who may start a room does: the other party of a two-party chat,
+  // or the sender of a larger one (the viewer's own copy from another device
+  // isn't gated). Known rooms retain membership as their trust signal.
   const sender = rumor.pubkey.toLowerCase();
-  if (!group && !isTwoParty && !cls.fromMe && !passesFollowGate(sender)) {
-    return { kind: 'group-held', senderPubkey: sender };
+  const starter = isTwoParty ? Array.from(otherParticipants)[0] : cls.fromMe ? null : sender;
+  if (!group && starter && !mayStartRoom(starter)) {
+    // At cold start the stored groups may not be read yet: a member of a
+    // room the viewer IS in must not be mistaken for a stranger.
+    if (!areKnownGroupsLoaded(viewerPubkey)) {
+      await whenKnownGroupsLoaded(viewerPubkey, GROUPS_LOAD_WAIT_MS);
+      group = findGroupForParticipants(otherParticipants, viewerPubkey);
+    }
+    // Two-party: not-group lets the caller apply its usual drop/defer/
+    // skip-set behaviour; the marked rumor is kept so follow hydration can
+    // retry group routing.
+    if (!group && isTwoParty) return { kind: 'not-group', deferredGroupRumor: rumor };
+    if (!group) {
+      return {
+        kind: 'group-held',
+        senderPubkey: sender,
+        groupsUnknown: !areKnownGroupsLoaded(viewerPubkey),
+      };
+    }
   }
+  const started = !group;
   if (shouldAbort()) return { kind: 'group-no-match' };
   // Always run the synthetic-reconcile path when the matched group is
   // synthetic (no kind-30200 backing it) — that's the only way later
@@ -173,5 +192,5 @@ export async function tryRouteGroupRumor(
     // tick is the practical recovery path; no automatic replay today.
     return { kind: 'group-no-match' };
   }
-  return { kind: 'routed', group, message };
+  return { kind: 'routed', group, message, started };
 }

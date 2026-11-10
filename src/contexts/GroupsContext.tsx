@@ -161,6 +161,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const activeOwner = useRef(pubkey);
   activeOwner.current = pubkey;
   const [loading, setLoading] = useState(true);
+  const [loadedFor, setLoadedFor] = useState<string | null>(null); // groups read for this account
   // Per account (shared family phone): owner-tagged so a switch never shows
   // the previous account's Secret Mode for even one render.
   const [secretMode, setSecretModeState] = useAccountState(pubkey, false);
@@ -213,6 +214,7 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       // the previous identity's group cache for a frame.
       setGroups([]);
       setLoading(false);
+      setLoadedFor(null);
       return;
     }
     setLoading(true);
@@ -222,7 +224,9 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (!cancelled) setGroups(loaded);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (cancelled) return;
+        setLoading(false);
+        setLoadedFor(pubkey);
       });
     return () => {
       cancelled = true;
@@ -362,8 +366,10 @@ export const GroupsProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // so NostrContext's NIP-17 decrypt loop can resolve which group an
   // inbound rumor belongs to without going through context.
   useEffect(() => {
-    setKnownGroups(storedGroups, pubkey); // NIP-17 routing only — never match a Marmot group
-  }, [storedGroups, pubkey]);
+    // NIP-17 routing only — never match a Marmot group. Until this account's
+    // groups are read, routing waits rather than treat a member as a stranger.
+    setKnownGroups(storedGroups, pubkey, loadedFor === pubkey);
+  }, [storedGroups, pubkey, loadedFor]);
 
   // Eagerly hydrate `activityByGroup` from the disk cache as soon as the
   // user identity is known. Without this, the Messages tab renders group
