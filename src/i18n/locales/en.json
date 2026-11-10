@@ -2269,8 +2269,6 @@
     "removeWalletTitle": "Remove Wallet",
     "removeConfirmMessage": "Are you sure you want to remove \"{{alias}}\"?",
     "disconnectConfirmMessage": "Are you sure you want to disconnect \"{{alias}}\"?",
-    "cancel": "Cancel",
-    "remove": "Remove",
     "copiedTitle": "Copied",
     "xpubCopied": "Extended public key copied to clipboard."
   },
@@ -2286,8 +2284,6 @@
     "hideBalance": "Hide {{alias}} balance",
     "removeWalletTitle": "Remove Wallet",
     "removeWalletMessage": "Remove \"{{alias}}\"? This will disconnect the wallet.",
-    "cancel": "Cancel",
-    "remove": "Remove",
     "removeWalletA11y": "Remove {{alias}}",
     "addWalletA11y": "Add wallet",
     "addWallet": "Add Wallet"
@@ -3828,5 +3824,15 @@
     "noRelays": "No suitable relays are reachable right now. Try again in a moment.",
     "confirmChangedTitle": "Publish these relays instead?",
     "confirmChangedBody": "Your relays have changed since this suggestion was shown. Publishing will list: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "This removes \"{{alias}}\" from this phone, including the recovery phrase stored here. Make sure it's written down first — without its recovery phrase, this wallet's money can't be recovered.",
+    "withCoinosLogin": "This removes \"{{alias}}\" from this phone, including the CoinOS username, password and connection details stored here. Save them first — without them, this wallet's money can't be recovered.",
+    "mayHoldRecovery": "This removes \"{{alias}}\" from this phone, including any recovery phrase or login stored here. If you haven't saved them, this wallet's money may not be recoverable.",
+    "balance": "It holds {{amount}} sats.",
+    "viewRecoveryFirst": "View Recovery Info First",
+    "removeAnyway": "Remove Anyway",
+    "remove": "Remove",
+    "cancel": "Cancel"
   }
 }

@@ -1,7 +1,6 @@
 import React, { memo, useMemo } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Trash2, Eye, EyeOff, ChevronUp, ChevronDown, Wallet, Bitcoin } from 'lucide-react-native';
-import { Alert } from './BrandedAlert';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useLocale } from '../contexts/LocaleContext';
 import type { useWallet } from '../contexts/WalletContext';
@@ -9,6 +8,7 @@ import type { WalletState } from '../types/wallet';
 import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import { createManagedWalletRowStyles } from '../styles/ManagedWalletRow.styles';
 import { resolveWalletHealth } from '../utils/walletHealthDisplay';
+import { useRemoveWalletConfirm } from '../hooks/useRemoveWalletConfirm';
 
 type WalletActions = ReturnType<typeof useWallet>;
 type Status = 'ok' | 'warn' | 'error' | 'unknown' | 'checking';
@@ -16,7 +16,8 @@ interface Props {
   wallet: WalletState;
   index: number;
   walletCount: number;
-  onOpenSettings: (walletId: string) => void;
+  /** Opens the wallet's settings sheet; `'connection'` lands on its recovery info. */
+  onOpenSettings: (walletId: string, tab?: 'connection') => void;
   onRemove: WalletActions['removeWallet'];
   onReorder: WalletActions['reorderWallet'];
   onUpdateSettings: WalletActions['updateWalletSettings'];
@@ -73,6 +74,7 @@ const ManagedWalletRow = memo(function ManagedWalletRow({
   }[status];
   const isFirst = index === 0;
   const isLast = index === walletCount - 1;
+  const confirmRemoveWallet = useRemoveWalletConfirm();
 
   return (
     <View style={styles.row}>
@@ -146,18 +148,13 @@ const ManagedWalletRow = memo(function ManagedWalletRow({
           style={styles.action}
           testID={`wallet-remove-${w.id}`}
           onPress={() =>
-            Alert.alert(
-              t('walletsScreen.removeWalletTitle'),
-              t('walletsScreen.removeWalletMessage', { alias: w.alias }),
-              [
-                { text: t('walletsScreen.cancel'), style: 'cancel' },
-                {
-                  text: t('walletsScreen.remove'),
-                  style: 'destructive',
-                  onPress: () => onRemove(w.id),
-                },
-              ],
-            )
+            void confirmRemoveWallet({
+              wallet: w,
+              title: t('walletsScreen.removeWalletTitle'),
+              fallbackMessage: t('walletsScreen.removeWalletMessage', { alias: w.alias }),
+              onConfirm: () => onRemove(w.id),
+              onViewRecovery: () => onOpenSettings(w.id, 'connection'),
+            })
           }
           hitSlop={HIT_SLOP}
           accessibilityLabel={t('walletsScreen.removeWalletA11y', { alias: w.alias })}

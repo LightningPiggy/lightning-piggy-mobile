@@ -2269,8 +2269,6 @@
     "removeWalletTitle": "Wallet entfernen",
     "removeConfirmMessage": "Möchtest du „{{alias}}“ wirklich entfernen?",
     "disconnectConfirmMessage": "Möchtest du „{{alias}}“ wirklich trennen?",
-    "cancel": "Abbrechen",
-    "remove": "Entfernen",
     "copiedTitle": "Kopiert",
     "xpubCopied": "Erweiterter öffentlicher Schlüssel in die Zwischenablage kopiert."
   },
@@ -2286,8 +2284,6 @@
     "hideBalance": "Guthaben von {{alias}} verbergen",
     "removeWalletTitle": "Wallet entfernen",
     "removeWalletMessage": "„{{alias}}“ entfernen? Dadurch wird die Wallet getrennt.",
-    "cancel": "Abbrechen",
-    "remove": "Entfernen",
     "removeWalletA11y": "{{alias}} entfernen",
     "addWalletA11y": "Wallet hinzufügen",
     "addWallet": "Wallet hinzufügen"
@@ -3828,5 +3824,15 @@
     "noRelays": "Zurzeit sind keine geeigneten Relays erreichbar. Versuch es gleich noch einmal.",
     "confirmChangedTitle": "Stattdessen diese Relays veröffentlichen?",
     "confirmChangedBody": "Deine Relays haben sich geändert, seit dieser Vorschlag angezeigt wurde. Beim Veröffentlichen werden diese aufgelistet: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "Damit wird „{{alias}}“ von diesem Handy entfernt, einschließlich der hier gespeicherten Wiederherstellungsphrase. Schreib sie vorher auf – ohne ihre Wiederherstellungsphrase kann das Geld dieser Wallet nicht wiederhergestellt werden.",
+    "withCoinosLogin": "Damit wird „{{alias}}“ von diesem Handy entfernt, einschließlich des hier gespeicherten CoinOS-Benutzernamens, Passworts und der Verbindungsdaten. Speichere sie vorher – ohne sie kann das Geld dieser Wallet nicht wiederhergestellt werden.",
+    "mayHoldRecovery": "Dadurch wird „{{alias}}“ von diesem Handy entfernt, einschließlich aller hier gespeicherten Wiederherstellungsphrasen oder Logins. Wenn du sie nicht gesichert hast, lässt sich das Geld in dieser Wallet möglicherweise nicht wiederherstellen.",
+    "balance": "Sie enthält {{amount}} sats.",
+    "viewRecoveryFirst": "Erst Wiederherstellungsdaten ansehen",
+    "removeAnyway": "Trotzdem entfernen",
+    "remove": "Entfernen",
+    "cancel": "Abbrechen"
   }
 }

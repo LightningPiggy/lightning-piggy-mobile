@@ -2269,8 +2269,6 @@
     "removeWalletTitle": "移除钱包",
     "removeConfirmMessage": "确定要移除“{{alias}}”吗？",
     "disconnectConfirmMessage": "确定要断开“{{alias}}”吗？",
-    "cancel": "取消",
-    "remove": "移除",
     "copiedTitle": "已复制",
     "xpubCopied": "扩展公钥已复制到剪贴板。"
   },
@@ -2286,8 +2284,6 @@
     "hideBalance": "隐藏{{alias}}的余额",
     "removeWalletTitle": "移除钱包",
     "removeWalletMessage": "移除“{{alias}}”？这将断开该钱包。",
-    "cancel": "取消",
-    "remove": "移除",
     "removeWalletA11y": "移除{{alias}}",
     "addWalletA11y": "添加钱包",
     "addWallet": "添加钱包"
@@ -3828,5 +3824,15 @@
     "noRelays": "目前无法连接到合适的中继。请稍后重试。",
     "confirmChangedTitle": "改为发布这些中继？",
     "confirmChangedBody": "此建议显示后，你的中继已发生变化。发布时将列出：{{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "这会从这部手机上移除“{{alias}}”，包括保存在这里的恢复短语。请先确认已把它抄写下来——没有恢复短语，这个钱包里的钱将无法找回。",
+    "withCoinosLogin": "这会从这部手机上移除“{{alias}}”，包括保存在这里的 CoinOS 用户名、密码和连接信息。请先保存好它们——没有这些信息，这个钱包里的钱将无法找回。",
+    "mayHoldRecovery": "这会从这部手机上移除“{{alias}}”，包括存储在这里的所有恢复短语或登录信息。如果你还没有保存它们，这个钱包里的钱可能无法找回。",
+    "balance": "其中有 {{amount}} sats。",
+    "viewRecoveryFirst": "先查看恢复信息",
+    "removeAnyway": "仍然移除",
+    "remove": "移除",
+    "cancel": "取消"
   }
 }
