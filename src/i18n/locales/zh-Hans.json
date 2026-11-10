@@ -136,6 +136,11 @@
     "unavailable": "无法打开Amber。请确认已安装，然后重试。",
     "failed": "Amber无法完成该请求，请重试。"
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "你的签名器使用了另一个账户进行回应。请将其切换到此账户后重试。",
+    "modified": "你的签名器在签名前修改了请求，因此未发送任何内容。请重试。",
+    "badSignature": "你的签名器返回的签名无效，因此未发送任何内容。请重试。"
+  },
   "alphabetBar": {
     "alphabetIndex": "字母索引",
     "jumpTo": "跳到{{letter}}",
@@ -768,9 +773,14 @@
     "receive": "收款",
     "transfer": "转账",
     "send": "发送",
+    "watchOnlySend": "这是一个只读钱包。它可以接收，但不能发送。",
     "addWallet": "添加钱包",
     "addWalletText": "+ 添加钱包",
     "updatingTransactions": "正在更新交易"
+  },
+  "findLogHeader": {
+    "title": "发现记录（{{total}}）",
+    "titleCapped": "发现记录（{{total}}+）"
   },
   "huntCreateScreen": {
     "ok": "好的",
@@ -1841,6 +1851,9 @@
     "noLightningAddress": "未设置Lightning地址",
     "enterAmountForInvoice": "输入金额以生成发票",
     "loadingAddress": "正在加载地址...",
+    "addressLoadFailed": "无法加载你的Bitcoin地址",
+    "retry": "重试",
+    "retryAddressLabel": "重试加载你的Bitcoin地址",
     "lightningInvoice": "Lightning发票",
     "sendTo": "发送给{{name}}",
     "copy": "复制",
@@ -1988,12 +2001,23 @@
     "cameraAccessNeeded": "扫描二维码需要相机权限",
     "grantCameraPermission": "授予相机权限",
     "grantPermission": "授予权限",
+    "openCameraSettings": "打开设置以允许访问相机",
     "qrViewfinder": "二维码取景框"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "需要权限",
+    "photoLibraryMessage": "请允许访问相册以发送图片。",
+    "cameraPhotoMessage": "请允许访问相机以拍摄并发送照片。",
+    "ok": "好的",
+    "cancel": "取消",
+    "openSettings": "打开设置"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "好的",
     "invalidInvoiceTitle": "发票无效",
     "invalidInvoiceBody": "此发票无效或不完整——请检查后重试。",
+    "unrecognisedInputTitle": "无法支付",
+    "unrecognisedInputBody": "这不是Lightning发票、Lightning地址或Bitcoin地址——请检查后重试。",
     "offerUnsupportedTitle": "暂不支持Lightning收款提议",
     "offerUnsupportedBody": "这是一个Lightning收款提议（BOLT12），Lightning Piggy暂时无法支付。请改为索取Lightning发票或Lightning地址。",
     "walletFallback": "钱包",
@@ -2246,8 +2270,6 @@
     "removeWalletTitle": "移除钱包",
     "removeConfirmMessage": "确定要移除“{{alias}}”吗？",
     "disconnectConfirmMessage": "确定要断开“{{alias}}”吗？",
-    "cancel": "取消",
-    "remove": "移除",
     "copiedTitle": "已复制",
     "xpubCopied": "扩展公钥已复制到剪贴板。"
   },
@@ -2263,8 +2285,6 @@
     "hideBalance": "隐藏{{alias}}的余额",
     "removeWalletTitle": "移除钱包",
     "removeWalletMessage": "移除“{{alias}}”？这将断开该钱包。",
-    "cancel": "取消",
-    "remove": "移除",
     "removeWalletA11y": "移除{{alias}}",
     "addWalletA11y": "添加钱包",
     "addWallet": "添加钱包"
@@ -3810,5 +3830,15 @@
     "noRelays": "目前无法连接到合适的中继。请稍后重试。",
     "confirmChangedTitle": "改为发布这些中继？",
     "confirmChangedBody": "此建议显示后，你的中继已发生变化。发布时将列出：{{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "这会从这部手机上移除“{{alias}}”，包括保存在这里的恢复短语。请先确认已把它抄写下来——没有恢复短语，这个钱包里的钱将无法找回。",
+    "withCoinosLogin": "这会从这部手机上移除“{{alias}}”，包括保存在这里的 CoinOS 用户名、密码和连接信息。请先保存好它们——没有这些信息，这个钱包里的钱将无法找回。",
+    "mayHoldRecovery": "这会从这部手机上移除“{{alias}}”，包括存储在这里的所有恢复短语或登录信息。如果你还没有保存它们，这个钱包里的钱可能无法找回。",
+    "balance": "其中有 {{amount}} sats。",
+    "viewRecoveryFirst": "先查看恢复信息",
+    "removeAnyway": "仍然移除",
+    "remove": "移除",
+    "cancel": "取消"
   }
 }

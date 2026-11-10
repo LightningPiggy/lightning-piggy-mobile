@@ -5,10 +5,14 @@
 // Hoist mocks before imports (jest.mock is hoisted automatically by babel-jest;
 // the vars are captured via the factory closures).
 const mockSubscribeMany = jest.fn();
+const mockSubscribeMap = jest.fn();
 const mockClose = jest.fn();
 
 jest.mock('./nostrService', () => ({
-  pool: { subscribeMany: (...a: unknown[]) => mockSubscribeMany(...a) },
+  pool: {
+    subscribeMany: (...a: unknown[]) => mockSubscribeMany(...a),
+    subscribeMap: (...a: unknown[]) => mockSubscribeMap(...a),
+  },
   DEFAULT_RELAYS: ['wss://default.example'],
   publishSignedEvent: jest.fn(),
 }));
@@ -20,6 +24,7 @@ jest.mock('./devEventDenylist', () => ({
 jest.mock('./nostrPlacesService', () => ({
   GC_LISTING_KIND: 37516,
   GC_FOUND_LOG_KIND: 7516,
+  GC_COMMENT_KIND: 1111,
   parseCache: (e: unknown) => e,
   parseFoundLogEvent: (e: unknown) => e,
 }));
@@ -30,6 +35,11 @@ jest.mock('./geocacheRelays', () => ({
 
 // eslint-disable-next-line import/first
 import {
+  fetchFoundLogsByAuthors,
+  isFutureDated,
+  subscribeComments,
+  subscribeFoundLogs,
+  subscribeFoundLogsByAuthors,
   subscribeNearbyCaches,
   subscribeNearbyEvents,
   subscribeRecentCaches,
@@ -39,6 +49,7 @@ import {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSubscribeMany.mockReturnValue({ close: mockClose });
+  mockSubscribeMap.mockReturnValue({ close: mockClose });
 });
 
 // ---------------------------------------------------------------------------
@@ -149,6 +160,161 @@ describe('subscribeRecentFoundLogs', () => {
     // Each is independently computed via RECENT_SINCE_SECS() at call time.
     // ±10 s is generous enough to be stable under CI load.
     expect(Math.abs(cachesSince - logsSince)).toBeLessThan(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-cache and per-author subscriptions — bounded backfill (#1789)
+// ---------------------------------------------------------------------------
+
+describe('found-log and comment subscription bounds', () => {
+  it('caps a cache’s found-log backfill at 500 without a time window', () => {
+    subscribeFoundLogs('37516:abc:d', jest.fn());
+    const filter = mockSubscribeMany.mock.calls[0][1];
+    expect(filter).toEqual({ kinds: [7516], '#a': ['37516:abc:d'], limit: 500 });
+  });
+
+  it('caps a cache’s comment backfill at 500 without a time window', () => {
+    subscribeComments('37516:abc:d', jest.fn());
+    const filter = mockSubscribeMany.mock.calls[0][1];
+    expect(filter.limit).toBe(500);
+    expect(filter.since).toBeUndefined();
+  });
+
+  it('sends one bounded REQ for a small author set', () => {
+    subscribeFoundLogsByAuthors(['me'], jest.fn());
+    expect(mockSubscribeMany).toHaveBeenCalledTimes(1);
+    expect(mockSubscribeMany.mock.calls[0][1]).toEqual({
+      kinds: [7516],
+      authors: ['me'],
+      limit: 500,
+    });
+  });
+
+  it('opens nothing for an empty author set', () => {
+    subscribeFoundLogsByAuthors([], jest.fn())();
+    expect(mockSubscribeMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('fetchFoundLogsByAuthors (Friends’ finds, #1789)', () => {
+  type MapCall = [
+    { url: string; filter: Record<string, unknown> }[],
+    {
+      reqOptions: { mode: string };
+      onevent: (e: { id: string; created_at: number }) => void;
+      onclose: (reasons: string[]) => void;
+    },
+  ];
+  const calls = (): MapCall[] => mockSubscribeMap.mock.calls as MapCall[];
+  const pubkeys = (n: number): string[] =>
+    Array.from({ length: n }, (_, i) => i.toString(16).padStart(64, '0'));
+
+  it('sends one one-shot REQ per relay for a normal-sized author set', () => {
+    fetchFoundLogsByAuthors(pubkeys(300), jest.fn(), ['wss://a.example'], 200);
+    expect(mockSubscribeMany).not.toHaveBeenCalled();
+    expect(calls()).toHaveLength(1);
+    const [requests, params] = calls()[0];
+    // One filter per relay → one physical REQ (one budget slot) per relay,
+    // released at EOSE.
+    expect(params.reqOptions.mode).toBe('oneshot');
+    expect(requests.map((r) => r.url)).toEqual(['wss://a.example', 'wss://gc.example']);
+    expect(requests[0].filter).toEqual({ kinds: [7516], authors: pubkeys(300), limit: 200 });
+  });
+
+  it('sends a 2,000-author set as 4 sequential one-shot chunks, one at a time', () => {
+    const authors = pubkeys(2000);
+    fetchFoundLogsByAuthors(authors, jest.fn(), ['wss://a.example'], 200);
+    const sent: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      // Only the chunk in flight is open: the next is not sent until every
+      // relay has closed this one.
+      expect(calls()).toHaveLength(i + 1);
+      const [requests, params] = calls()[i];
+      expect(params.reqOptions.mode).toBe('oneshot');
+      expect(new Set(requests.map((r) => r.url)).size).toBe(requests.length);
+      const chunk = requests[0].filter.authors as string[];
+      expect(chunk.length).toBe(500);
+      sent.push(...chunk);
+      params.onclose(['closed automatically on eose']);
+    }
+    expect(calls()).toHaveLength(4);
+    expect(sent).toEqual(authors);
+  });
+
+  it('only asks later chunks for logs newer than the current limit-th newest', () => {
+    fetchFoundLogsByAuthors(pubkeys(1000), jest.fn(), ['wss://a.example'], 3);
+    const [, first] = calls()[0];
+    for (const created_at of [100, 400, 300, 200])
+      first.onevent({ id: `e${created_at}`, created_at });
+    first.onclose([]);
+    // Newest 3 so far: 400, 300, 200 → nothing older than 200 can make the cut.
+    expect(calls()[1][0][0].filter).toMatchObject({ limit: 3, since: 200 });
+  });
+
+  it('does not tighten `since` until `limit` logs are in hand', () => {
+    fetchFoundLogsByAuthors(pubkeys(1000), jest.fn(), ['wss://a.example'], 3);
+    calls()[0][1].onevent({ id: 'e1', created_at: 100 });
+    calls()[0][1].onclose([]);
+    expect(calls()[1][0][0].filter.since).toBeUndefined();
+  });
+
+  it('closing cancels the chunk in flight and the rest', () => {
+    const onEvent = jest.fn();
+    const close = fetchFoundLogsByAuthors(pubkeys(1000), onEvent, ['wss://a.example']);
+    close();
+    expect(mockClose).toHaveBeenCalledTimes(1);
+    calls()[0][1].onevent({ id: 'late', created_at: 1 });
+    calls()[0][1].onclose([]);
+    expect(onEvent).not.toHaveBeenCalled();
+    expect(calls()).toHaveLength(1);
+  });
+
+  it('closes the next chunk, not a dead one, when the pool closes synchronously', () => {
+    // First chunk: the pool calls onclose inside subscribeMap (budget
+    // disposed / REQ failed to start), which starts chunk 2 before the call
+    // returns. The closer must then close chunk 2's handle.
+    const deadClose = jest.fn();
+    const liveClose = jest.fn();
+    mockSubscribeMap
+      .mockImplementationOnce((_req, params: MapCall[1]) => {
+        params.onclose(['pool closed']);
+        return { close: deadClose };
+      })
+      .mockImplementationOnce(() => ({ close: liveClose }));
+    const close = fetchFoundLogsByAuthors(pubkeys(1000), jest.fn(), ['wss://a.example']);
+    expect(calls()).toHaveLength(2);
+    close();
+    expect(liveClose).toHaveBeenCalledTimes(1);
+    expect(deadClose).not.toHaveBeenCalled();
+  });
+
+  it('ignores future-dated logs (>15 min ahead) when tightening `since`', () => {
+    const now = Math.floor(Date.now() / 1000);
+    const onEvent = jest.fn();
+    fetchFoundLogsByAuthors(pubkeys(1000), onEvent, ['wss://a.example'], 2);
+    const [, first] = calls()[0];
+    // Two far-future logs would otherwise set the floor a year ahead and
+    // blank every later chunk.
+    first.onevent({ id: 'f1', created_at: now + 365 * 24 * 3600 });
+    first.onevent({ id: 'f2', created_at: now + 3600 });
+    first.onevent({ id: 'ok', created_at: now - 100 });
+    first.onevent({ id: 'skew', created_at: now + 60 }); // within tolerance
+    first.onclose([]);
+    // Still delivered to the caller…
+    expect(onEvent).toHaveBeenCalledTimes(4);
+    // …but the floor is the 2nd newest of the plausible ones.
+    expect(calls()[1][0][0].filter.since).toBe(now - 100);
+  });
+});
+
+describe('isFutureDated', () => {
+  const nowMs = 1_700_000_000_000;
+  const now = nowMs / 1000;
+  it('allows up to 15 minutes of clock skew', () => {
+    expect(isFutureDated(now + 15 * 60, nowMs)).toBe(false);
+    expect(isFutureDated(now + 15 * 60 + 1, nowMs)).toBe(true);
+    expect(isFutureDated(now - 1, nowMs)).toBe(false);
   });
 });
 

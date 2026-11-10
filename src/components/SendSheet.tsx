@@ -434,7 +434,8 @@ const SendSheet: React.FC<Props> = ({
     // superseded or continued in the background it must not repaint.
     const send = beginSend();
     const { signal } = send.controller;
-    const { onReplyTimeout } = callbacksFor(send);
+    // onDispatched: once pay_invoice is sent, Cancel keeps the in-flight warning (#1776).
+    const { onReplyTimeout, onPaymentDispatched: onDispatched } = callbacksFor(send);
     setSwapReceipt(null);
     setSending(true);
     let swapPaymentHash: string | null = null;
@@ -539,6 +540,7 @@ const SendSheet: React.FC<Props> = ({
           verifyUrl,
           signal,
           onReplyTimeout,
+          onDispatched,
         });
 
         if (__DEV__)
@@ -625,6 +627,7 @@ const SendSheet: React.FC<Props> = ({
         await payInvoiceForWallet(walletId!, invoiceData, {
           signal,
           onReplyTimeout,
+          onDispatched,
           amountMsats: isAmountlessBolt11 ? currentSats * 1000 : undefined,
         });
       }
@@ -641,14 +644,10 @@ const SendSheet: React.FC<Props> = ({
         showOutcome(send, 'in-flight-extended');
         return;
       }
-      // User-initiated cancel via PaymentProgressOverlay's Cancel button:
-      // the overlay has already been hidden by handleCancelPayment, so
-      // just let the send complete silently without surfacing an error.
-      // Only THIS send's signal proves a cancel — an internal timeout abort
-      // must fall through to an error, or the overlay spins forever.
-      if (signal.aborted) {
-        return;
-      }
+      // User Cancel before the pay request was sent (after it, Cancel doesn't
+      // abort). Only THIS send's signal proves a cancel — an internal timeout
+      // abort must fall through to an error.
+      if (signal.aborted) return;
       // A relay/transport connectivity failure (relay unreachable, publish
       // never completed) is an UNKNOWN outcome, not a confirmed failure —
       // the payment may have settled. Surface "Connection lost" with a
@@ -664,17 +663,8 @@ const SendSheet: React.FC<Props> = ({
       // A reverse swap whose Lightning payment provably never settled — the
       // wallet rejected it, or Boltz's own status wrote the swap off (#1167).
       const swapNotPaid = isReverseSwapNotPaid(error);
-      if (!ownsOverlay(send)) {
-        // Continued in background: the overlay is gone, so say it here.
-        if (send.dismissed && swapNotPaid) {
-          Toast.show({
-            type: 'error',
-            text1: t('paymentProgressOverlay.failedTitle'),
-            text2: t('paymentProgressOverlay.swapNotPaid'),
-          });
-        }
-        return;
-      }
+      // Superseded: say nothing. Continued in background: showOutcome toasts it.
+      if (!ownsOverlay(send) && !send.dismissed) return;
       const message = quoteChanged
         ? t('sendSheet.quoteChanged', {
             fee: formatRecipientFee(currentSats, quoteChanged, formatLocale),

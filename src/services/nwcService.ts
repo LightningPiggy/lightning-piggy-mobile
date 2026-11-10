@@ -611,6 +611,8 @@ export interface PayInvoiceOptions {
   amountMsats?: number;
   /** Optional LUD-21 endpoint returned with this invoice. */
   verifyUrl?: string;
+  /** Fires as the pay_invoice request is sent. From here a cancel cannot recall it. */
+  onDispatched?: () => void;
 }
 
 export async function payInvoice(
@@ -657,7 +659,10 @@ async function payInvoiceOnce(
     confirmNwcPayment({
       provider: current,
       paymentHash,
-      reply: () => sendPaymentWithTimeout(current, bolt11, amountMsats),
+      reply: () => {
+        options.onDispatched?.();
+        return sendPaymentWithTimeout(current, bolt11, amountMsats);
+      },
       signal,
       verifyUrl: options.verifyUrl,
       timeoutError: () => {

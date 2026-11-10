@@ -33,6 +33,7 @@ import { useActiveWalletRefresh } from '../hooks/useActiveWalletRefresh';
 import { useNotificationDefaults } from '../hooks/useNotificationDefaults';
 import { useKeyBackupReminder } from '../hooks/useKeyBackupReminder';
 import KeyBackupBanner from '../components/KeyBackupBanner';
+import { Toast } from '../components/BrandedToast';
 import { WALLET_FRESH_MS } from '../utils/walletRefreshScheduler';
 import type { WalletState } from '../types/wallet';
 import * as swapRecoveryService from '../services/swapRecoveryService';
@@ -70,6 +71,7 @@ const HomeScreen: React.FC = () => {
     showWelcome,
     isReceiveDisabled,
     isSendDisabled,
+    isSendWatchOnly,
     isTransferDisabled,
     dimActions,
   } = selectHomeWalletState(wallets, activeWalletId, walletsHydrated);
@@ -367,6 +369,7 @@ const HomeScreen: React.FC = () => {
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ disabled: isSendDisabled }}
+            accessibilityHint={isSendWatchOnly ? t('homeScreen.watchOnlySend') : undefined}
             style={({ pressed }) => [
               styles.actionButton,
               dimActions && styles.actionButtonDisabled,
@@ -374,6 +377,10 @@ const HomeScreen: React.FC = () => {
             ]}
             onPress={() => {
               perfLog('btn-send onPress');
+              if (isSendWatchOnly) {
+                Toast.show({ type: 'info', text1: t('homeScreen.watchOnlySend'), position: 'top' });
+                return;
+              }
               sheetsRef.current?.openSend();
             }}
             disabled={isSendDisabled}

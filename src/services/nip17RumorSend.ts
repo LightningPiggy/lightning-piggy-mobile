@@ -15,6 +15,7 @@ import * as amberService from './amberService';
 import * as nostrConnectService from './nostrConnectService';
 import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
 import type { DmSendResult } from './nostrDmPublish';
+import { RemoteSignerMismatchError } from './remoteSignedEvent';
 import type { RelayConfig } from '../types/nostr';
 
 /** Stable reason a send failed; the UI maps it to localised copy. */
@@ -23,7 +24,10 @@ export type Nip17SendErrorCode =
   | 'noRecipient'
   | 'signingKeyMissing'
   | 'unsupportedSigner'
-  | 'relayUnreachable';
+  | 'relayUnreachable'
+  /** The signer answered for another account or changed the seal (#1779);
+   *  the message is the translated reason, shown as-is. */
+  | 'signerMismatch';
 
 export class Nip17SendError extends Error {
   constructor(
@@ -103,7 +107,7 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSend
   // The recipient's wrap also goes to their kind-10050 inbox (#1570).
   const peerRouting = { lookupRelays: nip17LookupRelays(input.relays) };
 
-  let result: DmSendResult;
+  let result: DmSendResult & { signerError?: unknown };
   if (signerType === 'nsec') {
     // Pubkey-checked read: the shared SecureStore slot must decode to the
     // ACTIVE identity, or the rumor would be sealed with a different key.
@@ -148,6 +152,9 @@ export async function sendNip17Rumor(input: SendNip17RumorInput): Promise<DmSend
 
   const recipientOutcome = result.wrapOutcomes.find((wrap) => wrap.recipientPubkey === recipient);
   if (!recipientOutcome?.published) {
+    if (result.signerError instanceof RemoteSignerMismatchError) {
+      throw new Nip17SendError('signerMismatch', result.signerError.message);
+    }
     throw new Nip17SendError(
       'relayUnreachable',
       recipientOutcome?.error ??

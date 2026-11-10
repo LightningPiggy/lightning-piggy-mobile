@@ -43,10 +43,22 @@ export interface CoalescedMap<V> {
   reset: () => void;
 }
 
-/** Evict oldest-inserted entries (Map preserves insertion order) down to `max`. */
-function capOldest<V>(map: Map<string, V>, max: number | undefined): void {
+/**
+ * Evict down to `max`: the lowest-`rank` entries when a rank is given,
+ * otherwise the oldest-inserted (Map preserves insertion order).
+ */
+function capOldest<V>(
+  map: Map<string, V>,
+  max: number | undefined,
+  rank?: (value: V) => number,
+): void {
   if (max === undefined || map.size <= max) return;
   let toDelete = map.size - max;
+  if (rank) {
+    const lowest = [...map].sort((a, b) => rank(a[1]) - rank(b[1])).slice(0, toDelete);
+    for (const [key] of lowest) map.delete(key);
+    return;
+  }
   for (const key of map.keys()) {
     if (toDelete-- <= 0) break;
     map.delete(key);
@@ -68,6 +80,13 @@ export function useCoalescedMap<V>(options?: {
    * Omit for naturally-bounded key spaces (e.g. keyed per-cache).
    */
   maxSize?: number;
+  /**
+   * Opt-in: when trimming to `maxSize`, keep the highest-ranked entries (e.g.
+   * `(v) => v.createdAt` keeps the newest by date) instead of evicting by
+   * arrival order — for feeds fed by several relays or REQs at once, where a
+   * late-arriving old event must not push out a newer one.
+   */
+  evictBy?: (value: V) => number;
 }): CoalescedMap<V> {
   // 100 ms feels instant (≤120 ms reads as same-frame) yet coalesces a typical
   // relay event burst into 2–3 commits. 25-item threshold flushes early when a
@@ -82,12 +101,14 @@ export function useCoalescedMap<V>(options?: {
   // Held in a ref so `flush` (deps: []) stays referentially stable.
   const maxSizeRef = useRef(options?.maxSize);
   maxSizeRef.current = options?.maxSize;
+  const evictByRef = useRef(options?.evictBy);
+  evictByRef.current = options?.evictBy;
 
   const [map, setMap] = useState<Map<string, V>>(() => {
     // Cap the seed too, so a caller seeding via `initial` over the cap isn't
     // left oversized until the first flush (Copilot review).
     const seed = options?.initial?.() ?? new Map();
-    capOldest(seed, options?.maxSize);
+    capOldest(seed, options?.maxSize, options?.evictBy);
     return seed;
   });
   const pendingRef = useRef<Map<string, V>>(new Map());
@@ -130,9 +151,9 @@ export function useCoalescedMap<V>(options?: {
         next.set(key, value);
       }
       if (next === null) return prev;
-      // Evict oldest-inserted entries once over the cap so a long-lived
-      // subscription can't grow the committed Map unbounded.
-      capOldest(next, maxSizeRef.current);
+      // Evict once over the cap so a long-lived subscription can't grow the
+      // committed Map unbounded.
+      capOldest(next, maxSizeRef.current, evictByRef.current);
       return next;
     });
   }, []);

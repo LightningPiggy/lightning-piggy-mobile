@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import * as nostrService from '../services/nostrService';
 import * as amberService from '../services/amberService';
 import * as nostrConnectService from '../services/nostrConnectService';
+import { parseRemoteSignedEvent } from '../services/remoteSignedEvent';
 import { getMemoisedSecretKey } from './nostrSecretKeyCache';
 import { paintOptimisticBubble } from './nostrDecryptPacing';
 import { createGroupFileRumor } from '../services/nostrFileMessage';
@@ -387,7 +388,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           if (!signedEventJson) {
             return { success: false, error: 'Amber returned empty event' };
           }
-          const signed = JSON.parse(signedEventJson);
+          const signed = parseRemoteSignedEvent(signedEventJson, event, pubkey);
           await nostrService.publishSignedEvent(signed, targetRelays);
           return { success: true };
         }
@@ -402,7 +403,7 @@ export function useGroupMessaging(options: UseGroupMessagingOptions): UseGroupMe
           if (!signedEventJson) {
             return { success: false, error: 'NIP-46 signer returned empty event' };
           }
-          const signed = JSON.parse(signedEventJson);
+          const signed = parseRemoteSignedEvent(signedEventJson, event, pubkey);
           await nostrService.publishSignedEvent(signed, targetRelays);
           return { success: true };
         }

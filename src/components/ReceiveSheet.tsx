@@ -1,4 +1,5 @@
 import { useReceiveFriendShare } from '../hooks/useReceiveFriendShare';
+import { useOnchainReceiveAddress } from '../hooks/useOnchainReceiveAddress';
 import BrandedSpinner from './BrandedSpinner';
 import React, { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { View, Text, TouchableOpacity, Pressable, Share, BackHandler } from 'react-native';
@@ -100,7 +101,6 @@ const ReceiveSheet: React.FC<Props> = ({
   // never writes here.
   const [memoValue, setMemoValue] = useState('');
   const [step, setStep] = useState<Step>('main');
-  const [onchainAddress, setOnchainAddress] = useState<string | null>(null);
   const [friendPickerOpen, setFriendPickerOpen] = useState(false);
   const [sendingToFriend, setSendingToFriend] = useState(false);
   // On-chain → Lightning via Boltz forward submarine swap (issue #92).
@@ -116,6 +116,13 @@ const ReceiveSheet: React.FC<Props> = ({
   // before any request callback can observe the transition: open/close in a
   // layout effect (still inside the commit), a dropdown switch in its handler.
   const sessionTokenRef = useRef(0);
+  const {
+    address: onchainAddress,
+    failed: onchainAddressFailed,
+    request: requestOnchainAddress,
+    reset: resetOnchainAddress,
+    retry: retryOnchainAddress,
+  } = useOnchainReceiveAddress(getReceiveAddress, sessionTokenRef);
   // Session + wallet the current view was initialised for, so the open effect
   // and the wallet effect it triggers issue ONE address request between them.
   const initialisedViewRef = useRef<{ token: number; key: string } | null>(null);
@@ -280,7 +287,7 @@ const ReceiveSheet: React.FC<Props> = ({
     const done = initialisedViewRef.current;
     if (done?.token === token && done.key === key) return;
     initialisedViewRef.current = { token, key };
-    setOnchainAddress(null);
+    resetOnchainAddress();
     setInvoice('');
     setPaymentReceived(false);
     setLoading(false);
@@ -289,15 +296,7 @@ const ReceiveSheet: React.FC<Props> = ({
     const next = pickInitialView(wallet);
     setStep(next.step);
     setMode(next.mode);
-    if (wallet?.walletType === 'onchain' && walletId) {
-      getReceiveAddress(walletId)
-        .then((addr) => {
-          if (sessionTokenRef.current === token) setOnchainAddress(addr);
-        })
-        .catch(() => {
-          console.warn('Failed to fetch on-chain address');
-        });
-    }
+    if (wallet?.walletType === 'onchain' && walletId) requestOnchainAddress(walletId);
   };
 
   // Invalidate the previous open's requests inside the open/close commit.
@@ -618,7 +617,7 @@ const ReceiveSheet: React.FC<Props> = ({
                                   // Invalidate the previous wallet's requests and
                                   // drop its QR in this commit, not an effect later.
                                   sessionTokenRef.current += 1;
-                                  setOnchainAddress(null);
+                                  resetOnchainAddress();
                                   setInvoice('');
                                   setLoading(false);
                                 }
@@ -669,6 +668,8 @@ const ReceiveSheet: React.FC<Props> = ({
                   ) : isOnchainWallet ? (
                     mode === 'amount' && currentSats > 0 ? (
                       `${currentSats.toLocaleString(formatLocale)} sats`
+                    ) : onchainAddressFailed ? (
+                      t('receiveSheet.addressLoadFailed')
                     ) : (
                       t('receiveSheet.loadingAddress')
                     )
@@ -678,6 +679,17 @@ const ReceiveSheet: React.FC<Props> = ({
                     t('receiveSheet.lightningInvoice')
                   )}
                 </Text>
+                {isOnchainWallet && onchainAddressFailed ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    style={styles.secondaryActionButton}
+                    onPress={retryOnchainAddress}
+                    testID="receive-address-retry"
+                    accessibilityLabel={t('receiveSheet.retryAddressLabel')}
+                  >
+                    <Text style={styles.secondaryActionText}>{t('receiveSheet.retry')}</Text>
+                  </TouchableOpacity>
+                ) : null}
                 {mode === 'amount' && invoice && memoValue ? (
                   // Surface the memo so the user can see the "what's it
                   // for" they typed is actually attached to the invoice

@@ -11,6 +11,7 @@ import { useNostr } from '../contexts/NostrContext';
 import * as nostrService from '../services/nostrService';
 import * as nostrConnectService from '../services/nostrConnectService';
 import { getMemoisedSecretKey } from '../contexts/nostrSecretKeyCache';
+import { RemoteSignerMismatchError } from '../services/remoteSignedEvent';
 
 jest.mock('../contexts/NostrContext', () => ({ useNostr: jest.fn() }));
 jest.mock('../contexts/nostrSecretKeyCache', () => ({ getMemoisedSecretKey: jest.fn() }));
@@ -109,6 +110,41 @@ test('a self-wrap success with a failed merchant wrap does not report the order 
     await expect(result.current.placeOrder(input)).rejects.toThrow('vendor publish failed');
   });
   expect(result.current.status).toBe('error');
+});
+
+test('a signer that answered for another account shows its reason, not the relay copy (#1779)', async () => {
+  const refusal = new RemoteSignerMismatchError('wrong-account');
+  (nostrService.sendNip17ToManyWithSigner as jest.Mock).mockResolvedValue({
+    wrapsPublished: 0,
+    delivery: { delivered: false },
+    errors: [refusal.message],
+    signerError: refusal,
+    wrapOutcomes: [],
+  });
+  const { result } = renderHook(() => useMarketCheckout());
+  await act(async () => {
+    await expect(result.current.placeOrder(input)).rejects.toMatchObject({
+      code: 'signerMismatch',
+    });
+  });
+  expect(result.current.status).toBe('error');
+  expect(result.current.error).toBe(
+    'Your signer answered with a different account. Switch it to this account and try again.',
+  );
+});
+
+test('a relay failure still shows the relay copy', async () => {
+  (nostrService.sendNip17ToManyWithSigner as jest.Mock).mockResolvedValue({
+    wrapsPublished: 0,
+    delivery: { delivered: false },
+    errors: ['offline'],
+    wrapOutcomes: [],
+  });
+  const { result } = renderHook(() => useMarketCheckout());
+  await act(async () => {
+    await expect(result.current.placeOrder(input)).rejects.toThrow('offline');
+  });
+  expect(result.current.error).toBe('market.checkout.errors.relayUnreachable');
 });
 
 describe('nsec checkout', () => {

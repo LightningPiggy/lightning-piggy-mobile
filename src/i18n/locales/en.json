@@ -136,6 +136,11 @@
     "unavailable": "Couldn't open Amber. Check that it's installed, then try again.",
     "failed": "Amber couldn't complete the request. Try again."
   },
+  "remoteSignerMismatch": {
+    "wrongAccount": "Your signer answered with a different account. Switch it to this account and try again.",
+    "modified": "Your signer changed the request before signing it, so nothing was sent. Try again.",
+    "badSignature": "Your signer's answer had an invalid signature, so nothing was sent. Try again."
+  },
   "alphabetBar": {
     "alphabetIndex": "Alphabet index",
     "jumpTo": "Jump to {{letter}}",
@@ -768,9 +773,14 @@
     "receive": "Receive",
     "transfer": "Move",
     "send": "Send",
+    "watchOnlySend": "This is a watch-only wallet. It can receive, but not send.",
     "addWallet": "Add a wallet",
     "addWalletText": "+ Add a Wallet",
     "updatingTransactions": "Updating transactions"
+  },
+  "findLogHeader": {
+    "title": "Find log ({{total}})",
+    "titleCapped": "Find log ({{total}}+)"
   },
   "huntCreateScreen": {
     "ok": "OK",
@@ -1841,6 +1851,9 @@
     "noLightningAddress": "No lightning address set",
     "enterAmountForInvoice": "Enter an amount to generate invoice",
     "loadingAddress": "Loading address...",
+    "addressLoadFailed": "Couldn't load your Bitcoin address",
+    "retry": "Retry",
+    "retryAddressLabel": "Retry loading your Bitcoin address",
     "lightningInvoice": "Lightning invoice",
     "sendTo": "Send to {{name}}",
     "copy": "Copy",
@@ -1988,12 +2001,23 @@
     "cameraAccessNeeded": "Camera access needed to scan QR codes",
     "grantCameraPermission": "Grant camera permission",
     "grantPermission": "Grant Permission",
+    "openCameraSettings": "Open Settings to allow camera access",
     "qrViewfinder": "QR code viewfinder"
+  },
+  "permissionPrompt": {
+    "permissionNeeded": "Permission needed",
+    "photoLibraryMessage": "Allow photo library access to send images.",
+    "cameraPhotoMessage": "Allow camera access to take and send photos.",
+    "ok": "OK",
+    "cancel": "Cancel",
+    "openSettings": "Open Settings"
   },
   "sendSheet": {
     "invalidInvoiceDismiss": "OK",
     "invalidInvoiceTitle": "Invalid invoice",
     "invalidInvoiceBody": "This invoice is invalid or incomplete — check it and try again.",
+    "unrecognisedInputTitle": "Can't pay this",
+    "unrecognisedInputBody": "This isn't a Lightning invoice, Lightning address or Bitcoin address — check it and try again.",
     "offerUnsupportedTitle": "Lightning offers aren't supported yet",
     "offerUnsupportedBody": "This is a Lightning offer (BOLT12), which Lightning Piggy can't pay yet. Ask for a Lightning invoice or Lightning address instead.",
     "walletFallback": "Wallet",
@@ -2246,8 +2270,6 @@
     "removeWalletTitle": "Remove Wallet",
     "removeConfirmMessage": "Are you sure you want to remove \"{{alias}}\"?",
     "disconnectConfirmMessage": "Are you sure you want to disconnect \"{{alias}}\"?",
-    "cancel": "Cancel",
-    "remove": "Remove",
     "copiedTitle": "Copied",
     "xpubCopied": "Extended public key copied to clipboard."
   },
@@ -2263,8 +2285,6 @@
     "hideBalance": "Hide {{alias}} balance",
     "removeWalletTitle": "Remove Wallet",
     "removeWalletMessage": "Remove \"{{alias}}\"? This will disconnect the wallet.",
-    "cancel": "Cancel",
-    "remove": "Remove",
     "removeWalletA11y": "Remove {{alias}}",
     "addWalletA11y": "Add wallet",
     "addWallet": "Add Wallet"
@@ -3810,5 +3830,15 @@
     "noRelays": "No suitable relays are reachable right now. Try again in a moment.",
     "confirmChangedTitle": "Publish these relays instead?",
     "confirmChangedBody": "Your relays have changed since this suggestion was shown. Publishing will list: {{relays}}"
+  },
+  "removeWalletPrompt": {
+    "withPhrase": "This removes \"{{alias}}\" from this phone, including the recovery phrase stored here. Make sure it's written down first — without its recovery phrase, this wallet's money can't be recovered.",
+    "withCoinosLogin": "This removes \"{{alias}}\" from this phone, including the CoinOS username, password and connection details stored here. Save them first — without them, this wallet's money can't be recovered.",
+    "mayHoldRecovery": "This removes \"{{alias}}\" from this phone, including any recovery phrase or login stored here. If you haven't saved them, this wallet's money may not be recoverable.",
+    "balance": "It holds {{amount}} sats.",
+    "viewRecoveryFirst": "View Recovery Info First",
+    "removeAnyway": "Remove Anyway",
+    "remove": "Remove",
+    "cancel": "Cancel"
   }
 }
