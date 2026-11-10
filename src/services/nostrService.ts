@@ -737,6 +737,20 @@ export function createGroupChatRumor(input: {
 }
 
 /**
+ * Caps on the initial kind-30200 replay (#1793); live events after EOSE are
+ * not limited. The kind is addressable, so relays keep one event per
+ * (author, d): the authored filter returns one per group the viewer created,
+ * the p-tag filter one per (member who published, group).
+ *
+ * The `#p` filter is spammable (anyone can p-tag the viewer), so its cap must
+ * not shrink what is restored today: 500 matches the reply cap relays such as
+ * strfry already apply. The `authors: [viewer]` filter can't be spammed, so
+ * 200 is ample for the viewer's own groups.
+ */
+export const GROUP_STATE_PTAG_LIMIT = 500;
+export const GROUP_STATE_AUTHORED_LIMIT = 200;
+
+/**
  * Subscribe to inbound kind-30200 group-state events relevant to the
  * viewer. Two filters are OR-ed together so the viewer sees:
  *
@@ -768,25 +782,26 @@ export function subscribeGroupStateForViewer(input: {
   const onevent = (ev: Parameters<typeof input.onEvent>[0]): void => {
     input.onEvent(ev);
   };
-  // Two separate filters (subscribeMany takes a single Filter): one for
-  // events that p-tag the viewer, one for events the viewer authored.
-  const subPtag = pool.subscribeMany(
-    input.relays,
-    { kinds: [GROUP_STATE_KIND], '#p': [input.viewerPubkey] } as Filter,
-    { onevent },
-  );
-  const subAuthored = pool.subscribeMany(
-    input.relays,
-    { kinds: [GROUP_STATE_KIND], authors: [input.viewerPubkey] } as Filter,
+  // Both filters ride ONE physical REQ per relay (subscribeMap groups by
+  // relay), so the sub takes one live slot instead of two (#1399 budget).
+  // No `since`: a group's state event can be months old and still current.
+  const filters: Filter[] = [
+    { kinds: [GROUP_STATE_KIND], '#p': [input.viewerPubkey], limit: GROUP_STATE_PTAG_LIMIT },
+    {
+      kinds: [GROUP_STATE_KIND],
+      authors: [input.viewerPubkey],
+      limit: GROUP_STATE_AUTHORED_LIMIT,
+    },
+  ];
+  const sub = pool.subscribeMap(
+    input.relays.flatMap((url) => filters.map((filter) => ({ url, filter }))),
     { onevent },
   );
   return () => {
-    for (const s of [subPtag, subAuthored]) {
-      try {
-        s.close();
-      } catch {
-        // best-effort
-      }
+    try {
+      sub.close();
+    } catch {
+      // best-effort
     }
   };
 }
