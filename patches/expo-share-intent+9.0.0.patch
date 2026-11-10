@@ -42,7 +42,7 @@ index 0000000..782266a
 +}
 \ No newline at end of file
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
-index 0153c89..ff2e70c 100644
+index ff5b100..7d1a740 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 +++ b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentModule.kt
 @@ -13,6 +13,8 @@ import android.content.ContentResolver
@@ -499,28 +499,6 @@ index 0153c89..ff2e70c 100644
          }
      }
  
-@@ -300,8 +544,19 @@ class ExpoShareIntentModule : Module() {
-                 if (cursor != null && cursor.moveToFirst()) {
-                     val columnIndex = cursor.getColumnIndexOrThrow(column)
-                     val fileName = cursor.getString(columnIndex)
--                    Log.i("FileDirectory", "File name: $fileName")
--                    targetFile = File(context.cacheDir, fileName)
-+                    // Lightning Piggy patch (backport of expo-share-intent 9.0.0):
-+                    // `_display_name` is chosen by the sending app, so a name like
-+                    // "../files/x" would write outside the cache ("Dirty Stream").
-+                    // Keep only the last path segment and require the result to
-+                    // stay inside cacheDir; otherwise fall back to a generated name.
-+                    val safeName = fileName?.let { File(it).name }.orEmpty()
-+                    if (safeName.isNotEmpty()) {
-+                        val candidate = File(context.cacheDir, safeName)
-+                        val cacheRoot = context.cacheDir.canonicalPath + File.separator
-+                        if (candidate.canonicalPath.startsWith(cacheRoot)) {
-+                            targetFile = candidate
-+                        }
-+                    }
-                 }
-             } finally {
-                 cursor?.close()
 diff --git a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt b/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt
 index ff9f033..46be34c 100644
 --- a/node_modules/expo-share-intent/android/src/main/java/expo/modules/shareintent/ExpoShareIntentPackage.kt
