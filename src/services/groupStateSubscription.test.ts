@@ -4,12 +4,7 @@
  * `since` (a group's state event can be old and still current).
  */
 import type { AbstractSimplePool } from 'nostr-tools/abstract-pool';
-import {
-  GROUP_STATE_KIND,
-  GROUP_STATE_LIMIT,
-  pool,
-  subscribeGroupStateForViewer,
-} from './nostrService';
+import { GROUP_STATE_KIND, pool, subscribeGroupStateForViewer } from './nostrService';
 import { withRelayHealth } from './healthAwarePool';
 
 jest.mock('./relayReqLimit', () => ({ discoverRelayReqLimit: async () => undefined }));
@@ -99,8 +94,10 @@ test('sends both viewer filters in one subscribeMap call, each bounded and witho
   expect(subscribeMany).not.toHaveBeenCalled();
   expect(pool.subscribeMap).toHaveBeenCalledTimes(1);
   expect(close).toHaveBeenCalledTimes(1);
-  const p = { kinds: [GROUP_STATE_KIND], '#p': [ME], limit: GROUP_STATE_LIMIT };
-  const a = { kinds: [GROUP_STATE_KIND], authors: [ME], limit: GROUP_STATE_LIMIT };
+  // `#p` keeps the ~500 relays already return today (spammable filter);
+  // the viewer's own groups can't be spammed, so 200 suffices there.
+  const p = { kinds: [GROUP_STATE_KIND], '#p': [ME], limit: 500 };
+  const a = { kinds: [GROUP_STATE_KIND], authors: [ME], limit: 200 };
   expect(requests).toEqual(
     RELAYS.flatMap((url) => [
       { url, filter: p },

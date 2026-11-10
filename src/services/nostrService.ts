@@ -734,15 +734,18 @@ export function createGroupChatRumor(input: {
 }
 
 /**
- * Per-filter cap on replayed kind-30200 events (#1793). The kind is
- * addressable, so relays keep only the newest event per (author, group):
- * the authored filter returns at most one per group the viewer created, the
- * p-tag filter one per (member who republished, group). 200 covers the
- * 100-group ceiling used elsewhere (NIP171_MAX_GROUPS) with room for a second
- * publisher per group, and stops anyone who p-tags the viewer from replaying
- * an unbounded history on every cold start and reconnect.
+ * Caps on the initial kind-30200 replay (#1793); live events after EOSE are
+ * not limited. The kind is addressable, so relays keep one event per
+ * (author, d): the authored filter returns one per group the viewer created,
+ * the p-tag filter one per (member who published, group).
+ *
+ * The `#p` filter is spammable (anyone can p-tag the viewer), so its cap must
+ * not shrink what is restored today: 500 matches the reply cap relays such as
+ * strfry already apply. The `authors: [viewer]` filter can't be spammed, so
+ * 200 is ample for the viewer's own groups.
  */
-export const GROUP_STATE_LIMIT = 200;
+export const GROUP_STATE_PTAG_LIMIT = 500;
+export const GROUP_STATE_AUTHORED_LIMIT = 200;
 
 /**
  * Subscribe to inbound kind-30200 group-state events relevant to the
@@ -780,8 +783,12 @@ export function subscribeGroupStateForViewer(input: {
   // relay), so the sub takes one live slot instead of two (#1399 budget).
   // No `since`: a group's state event can be months old and still current.
   const filters: Filter[] = [
-    { kinds: [GROUP_STATE_KIND], '#p': [input.viewerPubkey], limit: GROUP_STATE_LIMIT },
-    { kinds: [GROUP_STATE_KIND], authors: [input.viewerPubkey], limit: GROUP_STATE_LIMIT },
+    { kinds: [GROUP_STATE_KIND], '#p': [input.viewerPubkey], limit: GROUP_STATE_PTAG_LIMIT },
+    {
+      kinds: [GROUP_STATE_KIND],
+      authors: [input.viewerPubkey],
+      limit: GROUP_STATE_AUTHORED_LIMIT,
+    },
   ];
   const sub = pool.subscribeMap(
     input.relays.flatMap((url) => filters.map((filter) => ({ url, filter }))),
