@@ -3456,7 +3456,9 @@
     "repairTitle": "修复安全聊天？",
     "repairMessage": "如果你的消息发送失败，或不再收到 {{name}} 的消息，请使用此功能。将与 {{name}} 的设备开始一个新的安全聊天，新消息会发到那里。你在这里的消息会保留。",
     "repairDone": "已开始新的安全聊天",
-    "repairFailed": "无法修复聊天"
+    "repairFailed": "无法修复聊天",
+    "stateUnsavedDm": "此设备未能保存这个安全聊天的最新更改。如果重启应用后消息无法打开，请使用“修复安全聊天”。",
+    "stateUnsavedGroup": "此设备未能保存这个群组的最新更改。如果重启应用后消息无法打开，请让管理员将你移除后再重新添加。"
   },
   "settingsRows": {
     "experimentalSubtitle": "仍在测试中的功能",

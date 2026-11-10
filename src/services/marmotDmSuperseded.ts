@@ -4,7 +4,11 @@ import type { MarmotKvBackend } from './marmotStore';
 
 export class DmSuperseded {
   private readonly ids = new Set<string>();
-  constructor(private readonly backend: MarmotKvBackend) {}
+  constructor(
+    private readonly backend: MarmotKvBackend,
+    /** A Repair replaced the group `id` (app id); it gets no more sends. */
+    private readonly onSuperseded?: (id: string) => void,
+  ) {}
 
   async load(): Promise<void> {
     for (const id of await this.backend.keys('dmSuperseded')) this.ids.add(id);
@@ -27,6 +31,7 @@ export class DmSuperseded {
     for (const id of ids) {
       await this.backend.set('dmSuperseded', id, '1');
       this.ids.add(id);
+      this.onSuperseded?.(id);
     }
   }
 }
