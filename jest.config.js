@@ -20,6 +20,7 @@ module.exports = {
     '<rootDir>/src/**/*.test.{ts,tsx}',
     '<rootDir>/.maestro/reporting/**/*.test.ts',
     '<rootDir>/scripts/**/*.test.ts',
+    '<rootDir>/plugins/**/*.test.ts',
     '<rootDir>/.github/workflows/**/*.test.ts',
   ],
   collectCoverageFrom: [

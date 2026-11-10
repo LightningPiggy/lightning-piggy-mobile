@@ -333,7 +333,8 @@ Scan, Send) and a *2×1* with round Receive / Send buttons. Each comes in three
 styles — Piggy pink (default), Clean white and Night glass — picked with the
 starting wallet and a *Hide balance* switch (off by default) on the
 configuration screen Android shows when a widget is added or reconfigured.
-iPhone widgets, card-art styles and lock-screen widgets are later work.
+The iPhone widgets are described in <<home-screen-widgets-ios>>; card-art
+styles and lock-screen widgets are later work.
 
 *How it's built.* `react-native-android-widget` draws the widgets from JSX
 (`src/widgets/`) in a headless JS task, so the widget works with the app
@@ -384,6 +385,87 @@ amount rewrites at most every 5 minutes. There is no `updatePeriodMillis`:
 the app redraws the widget on every snapshot write, and Android never starts
 the app in the background just to refresh it. If drawing ever fails, the
 widget shows "Open Lightning Piggy" rather than a blank tile.
+
+[[home-screen-widgets-ios]]
+=== Home-screen widgets (iPhone)
+
+Two WidgetKit widgets (#1849) with the same behaviour, styles, strings and
+deep links as the Android ones: *small* (wallet name, balance, Receive and
+Send) and *medium* (balance, fiat, "Updated 14:32", Receive, Scan and Send).
+Lock-screen accessories and card art are later work.
+
+*How it's built.* A widget extension written in Swift / SwiftUI lives in
+`targets/widget/` and is added to the generated Xcode project at prebuild by
+`@bacons/apple-targets` (nothing under `ios/` is committed). Its bundle id is
+the app's plus `.widget` (`com.lightningpiggy.app[.dev|.preview].widget`).
+Two small config plugins support it:
+
+* `plugins/withIosWidgetStrings.js` generates the extension's
+  `Localizable.strings` / `.stringsdict` for every language from the `widget`
+  namespace of `src/i18n/locales/*.json`. The generated `*.lproj` folders are
+  gitignored, so the catalogues stay the only copy; plural forms follow the
+  app's rules (including its exactly-one handling).
+* `plugins/withWidgetTargetSettings.js` weak-links ActivityKit and AppIntents
+  so the extension still loads on iOS 15–16, and makes
+  `targets/widget/Info.plist` the widget's only Info.plist source, so the
+  build number EAS writes there at build time is the one that ships (see
+  `DEPLOYMENT.adoc` → "iPhone widget: one-time signing setup").
+
+What the widget says is decided in `targets/widget/WidgetDisplay.swift` and
+`WalletSelection` (`Snapshot.swift`), plain-Foundation ports of
+`src/widgets/walletWidgetModel.ts` and `walletCycling.ts`. CI compiles them
+with `scripts/ios-tests/WidgetLogicTests.swift` on macOS and runs the same
+wallet-selection cases as the Jest tests
+(`src/widgets/walletSelectionCases.json`).
+
+*Data.* The extension can't read the app's AsyncStorage, so after each
+snapshot write `src/widgets/refreshWalletWidgets.ios.ts` copies the same
+allow-listed JSON into the App Group `group.<app bundle id>` (one group per
+build variant, declared for both the app and the extension) through
+`src/services/widgetAppGroup.ios.ts`, then reloads the widget timelines.
+Every wipe (sign-out, account switch, no wallets) clears the App Group first
+and synchronously (`src/services/widgetWipe.ts`), so it happens even if the
+AsyncStorage removal fails; the widget's remembered positions go with it.
+Nothing else is ever written to the App Group. "Updated 14:32" is an
+absolute time, so a timeline is one entry that is refreshed at local midnight
+(when it becomes "yesterday 14:32") and whenever the app writes a snapshot.
+
+*Configuration and switching (iOS 17+).* "Edit Widget" offers the starting
+wallet (choices come from the snapshot), the style and *Hide balance* (off by
+default) through an App Intent configuration. ‹ › are interactive buttons
+backed by an App Intent that moves to the previous / next wallet in carousel
+order and redraws the widget without opening the app. WidgetKit gives no
+per-widget id, so the wallet a widget shows is remembered per configuration
+(size, starting wallet, style, Hide balance): two identically set-up widgets
+move together. Because the shown wallet and its slot are recorded on every
+redraw, removing it hands over to the next wallet, as on Android. Positions
+of configurations no placed widget uses any more are forgotten, so editing a
+widget back to an earlier wallet starts there again.
+
+*Privacy on the lock screen.* The balance and fiat line are marked
+privacy-sensitive: iOS redacts them where it hides private data (locked
+phone, StandBy) and shows them on the unlocked home screen.
+
+*Tinted and clear home screens (iOS 18+).* The background is removed and the
+system draws everything in one tint; buttons then become outlined capsules
+so their labels stay readable, and the balance takes the accent tint.
+
+*iOS 15–16.* The app's deployment target is iOS 15.1. Those versions get a
+static widget instead: first wallet, Piggy pink, balance shown, no ‹ ›. Its
+small size has one tap target there (Receive), so it shows only the Receive
+button. It hides itself from the widget gallery on iOS 17+, where the
+configurable one replaces it; a widget placed on iOS 15–16 has to be added
+again after the phone updates to iOS 17.
+
+*One widget per wallet.* No code needed: add a widget per wallet, choose a
+different starting wallet in each, then drag them onto each other to make a
+Smart Stack; swipe up and down to move between wallets.
+
+*Signing.* EAS reads the extension from the generated project
+(`extra.eas.build.experimental.ios.appExtensions`, filled in by
+`@bacons/apple-targets`) and signs it like the app. Each iOS profile needs a
+one-time interactive credentials step before its first build with the
+widget; see `DEPLOYMENT.adoc` → "iPhone widget: one-time signing setup".
 
 [[persistence]]
 == Persistence & caching
