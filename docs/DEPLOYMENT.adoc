@@ -853,7 +853,17 @@ The listing is signed by **BenGWeeks** (the same npub as the release note), thro
 . Checks out `main` and reads `zapstore.yaml` (name, summary, description, icon, screenshots, and the GitHub release source).
 . Installs a pinned `zsp` binary (sha256-verified).
 . Writes `NOSTR_RELEASE_CLIENT_KEY` to `~/.config/zsp/bunker-keys/<signer pubkey>.key`, so zsp reuses the client key Amber already trusts.
-. Runs `zsp publish`, which picks the newest `vX.Y.Z` Release and its `lightning-piggy-<tag>-arm64-v8a.apk`, then asks Amber to sign the app (kind 32267), release (30063) and asset (3063) events. **Approve them in Amber**; it waits for you like the release note does.
+. Runs `zsp publish`, which picks the newest `vX.Y.Z` Release and its `lightning-piggy-<tag>-arm64-v8a.apk`. Amber is asked to sign Blossom upload authorisations (kind 24242, one per new icon or screenshot) and the app (32267), release (30063) and asset (3063) events. **zsp gives each Amber request only about 30 seconds**, so set Amber to remember approval for these kinds for the release client, or be ready on the phone when the job runs.
+
+==== One-time ownership proof (human only)
+
+`zsp publish` refuses to publish until a NIP-C1 proof links the APK signing certificate to the BenGWeeks npub (`proof_required`). Creating it needs the EAS production keystore, which no agent or CI job should ever open, so Ben runs it once by hand:
+
+. `eas credentials -p android` → production → download the keystore and note its passwords. Keep the file `chmod 600` and delete it afterwards.
+. Install `zsp` 2.0.1 from https://github.com/zapstore/zsp/releases and run `zsp` (the wizard) in the repository root.
+. Give it the keystore when asked, and sign with BenGWeeks through a fresh Amber `bunker://` connection. It publishes the proof (and can publish the current release too).
+
+The proof has an expiry; `zsp` reports when it needs renewing, which is the same manual step.
 
 Missing secrets skip the job with a notice. The relay may report `pending` while it runs its own checks; that is success.
 
