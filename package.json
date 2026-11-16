@@ -54,7 +54,7 @@
     "bdk-rn": "github:BenGWeeks/bdk-rn#40bb7fe23a553eacace047985580643c17cf7fdc",
     "bip32": "^5.0.1",
     "bip39": "^3.1.0",
-    "bitcoinjs-lib": "^7.0.1",
+    "bitcoinjs-lib": "^7.0.2",
     "buffer": "^6.0.3",
     "electrum-client": "github:BlueWallet/rn-electrum-client",
     "events": "^3.3.0",
