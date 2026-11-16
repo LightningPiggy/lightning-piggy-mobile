@@ -28,5 +28,5 @@ images:
   - ./docs/images/app-profile-posts-replies.webp
   - ./docs/images/app-marmot-group-chat.webp
 
-supported_nips: ["01", "17", "44", "46", "47", "55", "57", "59", "65"]
+supported_nips: ['01', '17', '44', '46', '47', '55', '57', '59', '65']
 metadata_sources: []
