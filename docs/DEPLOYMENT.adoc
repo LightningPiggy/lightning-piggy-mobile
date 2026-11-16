@@ -842,42 +842,26 @@ For wider testing, promote the build to the **closed** or **open** testing track
 
 === Zapstore (Nostr App Store)
 
-https://zapstore.dev[Zapstore] is a permissionless Android app store built on Nostr. Apps are discovered through social graphs, releases are cryptographically signed, and developers receive Bitcoin payments (zaps) directly from users.
+https://zapstore.dev[Zapstore] is a permissionless Android app store built on Nostr. Releases are signed Nostr events, installs check the APK signing certificate, and users can zap the developer directly.
 
-==== Why Zapstore
+The listing is signed by **BenGWeeks** (the same npub as the release note), through the same Amber NIP-46 pairing. Whoever signs the first release owns the listing, so keep that signer.
 
-* No registration or approval process — publish with a Nostr keypair
-* No fees — developers receive 100% of zaps
-* Cryptographic verification — releases are signed with your Nostr key; Zapstore verifies the signature on install
-* Native fit for a Bitcoin/Lightning app
+==== How a release reaches Zapstore
 
-==== Publishing
+`.github/workflows/zapstore-publish.yml` runs after *Release Nostr note* succeeds for a published Release. It:
 
-Install the `zsp` CLI tool:
+. Checks out `main` and reads `zapstore.yaml` (name, summary, description, icon, screenshots, and the GitHub release source).
+. Installs a pinned `zsp` binary (sha256-verified).
+. Writes `NOSTR_RELEASE_CLIENT_KEY` to `~/.config/zsp/bunker-keys/<signer pubkey>.key`, so zsp reuses the client key Amber already trusts.
+. Runs `zsp publish`, which picks the newest `vX.Y.Z` Release and its `lightning-piggy-<tag>-arm64-v8a.apk`, then asks Amber to sign the app (kind 32267), release (30063) and asset (3063) events. **Approve them in Amber**; it waits for you like the release note does.
 
-[source,bash]
-----
-# Install zsp (Zapstore Publisher)
-# See: https://github.com/zapstore/zsp
-----
+Missing secrets skip the job with a notice. The relay may report `pending` while it runs its own checks; that is success.
 
-Publish a release:
+Re-run with *Actions → Zapstore publish → Run workflow* (always publishes the newest Release; an already-published version is a no-op).
 
-[source,bash]
-----
-# Build the APK
-eas build --platform android --profile preview
+Zapstore rejects a release whose APK signing certificate changes, so only ever publish APKs from the Release workflow (EAS production keystore), never local builds.
 
-# Run the publishing wizard (interactive)
-# Signs the release with your Nostr key and publishes metadata to relays
-zsp publish
-----
-
-The wizard guides you through source repository, metadata, signing, and relay selection. Signing options include `nsec`, NIP-07 browser extension, or NIP-46 bunker.
-
-When publishing a production release, point Zapstore at the Release's `lightning-piggy-<tag>-arm64-v8a.apk` (the Release no longer has a universal APK; see "Android release APKs"). A `zsp` asset `match` regex for it: `^lightning-piggy-v[0-9]+\.[0-9]+\.[0-9]+-arm64-v8a\.apk$`.
-
-To receive payments, add a Lightning address to your Nostr profile.
+To receive zaps, keep a Lightning address on the BenGWeeks Nostr profile.
 
 === F-Droid
 

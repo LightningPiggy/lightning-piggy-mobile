@@ -1,0 +1,32 @@
+# Zapstore listing; published by .github/workflows/zapstore-publish.yml. See docs/DEPLOYMENT.adoc → "Zapstore".
+repository: https://github.com/LightningPiggy/lightning-piggy-mobile
+release_source: https://github.com/LightningPiggy/lightning-piggy-mobile
+release_filter: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+match: '^lightning-piggy-v[0-9]+\.[0-9]+\.[0-9]+-arm64-v8a\.apk$'
+
+name: Lightning Piggy
+summary: A Bitcoin Lightning wallet for smart savers and their families.
+description: |
+  Lightning Piggy is a Bitcoin Lightning wallet for smart savers and their families, with Nostr built in.
+
+  - **Wallets:** connect any Lightning wallet over Nostr Wallet Connect (NWC), or add an on-chain Bitcoin wallet. Move sats between wallets in a tap.
+  - **Send and receive:** Lightning invoices, Lightning addresses, LNURL and zaps.
+  - **Friends and messages:** private messages and group chats with friends and family over Nostr.
+  - **Explore:** find places that accept Bitcoin on the map, hunt for Piglets (sats hidden around the world), and shop from Lightning Piggy vendors.
+  - **Learn:** short courses on Bitcoin, saving and keeping your treasure safe.
+
+  Open source under the MIT licence.
+license: MIT
+website: https://lightningpiggy.com/app
+tags: [bitcoin, lightning, wallet, nostr, family, savings]
+
+icon: ./assets/icon.png
+images:
+  - ./docs/images/app-wallets-tab.webp
+  - ./docs/images/app-hero-02-explore.webp
+  - ./docs/images/app-hero-03-map.webp
+  - ./docs/images/app-profile-posts-replies.webp
+  - ./docs/images/app-marmot-group-chat.webp
+
+supported_nips: ["01", "17", "44", "46", "47", "55", "57", "59", "65"]
+metadata_sources: []
