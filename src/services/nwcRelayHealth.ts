@@ -58,9 +58,14 @@ function logHealth(walletId: string, message: string): void {
   console.warn(`[NWC] ${walletId.slice(0, 8)} ${message}`);
 }
 
-function errorText(error: unknown): string {
-  const text = error instanceof Error ? error.message : String(error);
-  return text.slice(0, 120);
+// A fixed category, never the raw message: relay rejection reasons can carry an IP or other relay-supplied text.
+function errorKind(error: unknown): string {
+  const text = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (text.includes('reply timeout')) return 'reply timeout';
+  if (text.includes('publish timeout')) return 'publish timeout';
+  if (text.includes('failed to publish')) return 'publish rejected';
+  if (text.includes('failed to connect')) return 'connect failed';
+  return 'other unanswered error';
 }
 
 function notifyHealthChanged(walletId: string): void {
@@ -185,7 +190,7 @@ export function recordRelayOutcome(walletId: string, error?: unknown): void {
   if (error !== undefined && isUnansweredError(error)) {
     const failures = (relayFailures.get(walletId) ?? 0) + 1;
     relayFailures.set(walletId, failures);
-    logHealth(walletId, `no reply (${failures} in a row): ${errorText(error)}`);
+    logHealth(walletId, `no reply (${failures} in a row): ${errorKind(error)}`);
     if (failures >= RELAY_DEAD_AFTER_FAILURES) {
       const backoff = Math.min(
         RELAY_COOLDOWN_BASE_MS * 2 ** (failures - RELAY_DEAD_AFTER_FAILURES),
