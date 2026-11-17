@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import * as nwcService from '../services/nwcService';
 import * as walletStorage from '../services/walletStorageService';
-import type { WalletState } from '../types/wallet';
+import type { WalletConnectionHealth, WalletState } from '../types/wallet';
 
 /** Watchdog tick: reconnect dropped sockets, probe idle wallets, sync health. */
 export const WATCHDOG_INTERVAL_MS = 30_000;
@@ -60,6 +60,8 @@ export function useNwcConnectionWatchdog(
     // foreground); skipping ticks inside the stagger window keeps all resume
     // work behind the 3 s timer (CLAUDE.md #554/#1031).
     let lastResumeAt = Number.NEGATIVE_INFINITY;
+    // walletsRef lags a render behind, so one transition can be seen twice; log each change once.
+    const loggedHealth = new Map<string, WalletConnectionHealth>();
 
     // Sync stored state to relay *responsiveness* (does it answer?), not
     // connect()'s socket-level success — so a dead relay stays Disconnected
@@ -71,10 +73,11 @@ export function useNwcConnectionWatchdog(
       const isConnected = nwcService.isWalletConnected(w.id);
       const health = nwcService.getWalletHealth(w.id, nwcService.isSocketConnected(w.id));
       if (isConnected !== w.isConnected || health !== w.connectionHealth) {
-        if (health !== w.connectionHealth)
-          console.warn(
-            `[NWC] ${w.id.slice(0, 8)} card ${w.connectionHealth ?? 'unset'} -> ${health}`,
-          );
+        const previous = loggedHealth.get(w.id) ?? w.connectionHealth;
+        if (health !== previous) {
+          console.warn(`[NWC] ${w.id.slice(0, 8)} card ${previous ?? 'unset'} -> ${health}`);
+          loggedHealth.set(w.id, health);
+        }
         updateWalletInState(w.id, { isConnected, connectionHealth: health });
       }
     };
