@@ -53,6 +53,21 @@ const lastWalletProbeAt = new Map<string, number>();
 // for its next tick — otherwise a wallet that answered at startup would sit on
 // grey "Checking…" for half a minute (#1768).
 const healthListeners = new Set<(walletId: string) => void>();
+// Kept in release builds (babel strips only log/info/debug), so `adb logcat | grep '\[NWC\]'` shows health changes on a real device. Transitions only, never per request.
+function logHealth(walletId: string, message: string): void {
+  console.warn(`[NWC] ${walletId.slice(0, 8)} ${message}`);
+}
+
+// A fixed category, never the raw message: relay rejection reasons can carry an IP or other relay-supplied text.
+function errorKind(error: unknown): string {
+  const text = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (text.includes('reply timeout')) return 'reply timeout';
+  if (text.includes('publish timeout')) return 'publish timeout';
+  if (text.includes('failed to publish')) return 'publish rejected';
+  if (text.includes('failed to connect')) return 'connect failed';
+  return 'other unanswered error';
+}
+
 function notifyHealthChanged(walletId: string): void {
   for (const listener of healthListeners) {
     try {
@@ -109,6 +124,8 @@ export function isRateLimitError(error: unknown): boolean {
  * `isRelayInCooldown` once it lapses.
  */
 export function markRelayResponsive(walletId: string, now: number = Date.now()): void {
+  const missed = relayFailures.get(walletId) ?? 0;
+  if (missed > 0) logHealth(walletId, `answering again after ${missed} unanswered request(s)`);
   relayFailures.set(walletId, 0);
   relayCooldownUntil.delete(walletId);
   lastWalletReplyAt.set(walletId, now);
@@ -122,6 +139,7 @@ export function markRelayResponsive(walletId: string, now: number = Date.now()):
  * open proves nothing about whether the wallet service is up.
  */
 export function resetWalletReply(walletId: string): void {
+  logHealth(walletId, 'relay socket opened, waiting for a wallet answer');
   lastWalletReplyAt.delete(walletId);
   notifyHealthChanged(walletId);
 }
@@ -172,12 +190,14 @@ export function recordRelayOutcome(walletId: string, error?: unknown): void {
   if (error !== undefined && isUnansweredError(error)) {
     const failures = (relayFailures.get(walletId) ?? 0) + 1;
     relayFailures.set(walletId, failures);
+    logHealth(walletId, `no reply (${failures} in a row): ${errorKind(error)}`);
     if (failures >= RELAY_DEAD_AFTER_FAILURES) {
       const backoff = Math.min(
         RELAY_COOLDOWN_BASE_MS * 2 ** (failures - RELAY_DEAD_AFTER_FAILURES),
         RELAY_COOLDOWN_MAX_MS,
       );
       relayCooldownUntil.set(walletId, Date.now() + backoff);
+      logHealth(walletId, `relay parked for ${Math.round(backoff / 1000)}s`);
     }
     notifyHealthChanged(walletId);
   } else if (error === undefined || isWalletAnswer(error)) {
@@ -227,6 +247,7 @@ export function recordRateLimited(walletId: string): void {
   relayRateLimitStrikes.set(walletId, strikes);
   const backoff = Math.min(RELAY_COOLDOWN_BASE_MS * 2 ** (strikes - 1), RELAY_COOLDOWN_MAX_MS);
   relayRateLimitUntil.set(walletId, Date.now() + backoff);
+  logHealth(walletId, `rate-limited by relay, backing off ${Math.round(backoff / 1000)}s`);
   notifyHealthChanged(walletId);
 }
 
