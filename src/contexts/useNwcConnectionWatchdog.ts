@@ -71,6 +71,10 @@ export function useNwcConnectionWatchdog(
       const isConnected = nwcService.isWalletConnected(w.id);
       const health = nwcService.getWalletHealth(w.id, nwcService.isSocketConnected(w.id));
       if (isConnected !== w.isConnected || health !== w.connectionHealth) {
+        if (health !== w.connectionHealth)
+          console.warn(
+            `[NWC] ${w.id.slice(0, 8)} card ${w.connectionHealth ?? 'unset'} -> ${health}`,
+          );
         updateWalletInState(w.id, { isConnected, connectionHealth: health });
       }
     };
