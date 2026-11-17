@@ -203,7 +203,7 @@ const MarketShopCollectionsScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={[styles.muted, styles.emptyText]} testID="shop-collections-empty">
               {t('market.sell.noCollections')}
             </Text>
-          ) : null
+          ) : undefined
         }
         ItemSeparatorComponent={renderSeparator}
         contentContainerStyle={styles.listContent}

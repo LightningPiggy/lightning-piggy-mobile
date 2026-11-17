@@ -3,7 +3,7 @@ import type { Palette } from './palettes';
 
 export const createWalletHeaderBackdropStyles = (_colors: Palette) =>
   StyleSheet.create({
-    fill: { ...StyleSheet.absoluteFillObject },
+    fill: { ...StyleSheet.absoluteFill },
     pig: {
       position: 'absolute',
       width: 420,

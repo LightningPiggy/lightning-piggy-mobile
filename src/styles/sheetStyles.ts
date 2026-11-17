@@ -13,7 +13,7 @@ import type { Palette } from './palettes';
 export const createSheetStyles = (colors: Palette) =>
   StyleSheet.create({
     sheetBackdrop: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       justifyContent: 'flex-end',
       backgroundColor: 'rgba(0,0,0,0.4)',
     },

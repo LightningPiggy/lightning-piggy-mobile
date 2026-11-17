@@ -1,6 +1,6 @@
 import { enabledAppRelays } from '../services/appRelayPrefs';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as nostrService from '../services/nostrService';
 import { perAccountKey } from '../services/perAccountStorage';
@@ -371,7 +371,7 @@ export function useNip65Relays() {
       }
       setNip65Relays(keepIfSameConfigs(relayList));
       remember(createdAtKey, fetched.createdAt);
-      InteractionManager.runAfterInteractions(() => {
+      idleScheduler.runWhenIdle(() => {
         if (!current()) return;
         AsyncStorage.setItem(
           perAccountKey(RELAY_LIST_CACHE_KEY_BASE, pk),

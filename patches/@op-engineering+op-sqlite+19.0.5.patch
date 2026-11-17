@@ -1,0 +1,12 @@
+diff --git a/node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteBridge.kt b/node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteBridge.kt
+--- a/node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteBridge.kt
++++ b/node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteBridge.kt
+@@ -21,7 +21,7 @@
+     fun install(context: ReactContext): Long {
+         val jsContextPointer = context.javaScriptContextHolder!!.get()
+         val jsCallInvokerHolder =
+-            context.catalystInstance.jsCallInvokerHolder as CallInvokerHolderImpl
++            context.jsCallInvokerHolder as CallInvokerHolderImpl
+         // Trick to get the base database path
+         val dbPath =
+             context.getDatabasePath("defaultDatabase").absolutePath.replace("defaultDatabase", "")

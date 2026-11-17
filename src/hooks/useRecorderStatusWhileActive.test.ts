@@ -3,6 +3,7 @@ import type { RecorderState } from 'expo-audio';
 import { useRecorderStatusWhileActive } from './useRecorderStatusWhileActive';
 
 const idle: RecorderState = {
+  fileSize: 0,
   canRecord: true,
   isRecording: false,
   durationMillis: 0,

@@ -58,6 +58,7 @@ import { getAppFormatLocale } from '../utils/appFormatLocale';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import { AndroidImportance, AndroidNotificationVisibility } from 'expo-notifications';
 import {
   markNotificationDelivered,
   markNotificationsReadWhere,
@@ -277,7 +278,7 @@ async function initialiseInternal(): Promise<void> {
     // configure that without uninstalling the app.
     await Notifications.setNotificationChannelAsync(CHANNEL_MESSAGES, {
       name: 'Messages',
-      importance: Notifications.AndroidImportance.HIGH,
+      importance: AndroidImportance.HIGH,
       // Show the channel description in system Settings so the user
       // knows what each channel covers when they go to mute one.
       description: 'New direct messages and group messages',
@@ -288,19 +289,19 @@ async function initialiseInternal(): Promise<void> {
       // `setLockScreenContentEnabled`, which would make that toggle a
       // no-op on Android. Body redaction is enforced in `fireNotification`
       // (generic copy substitution) regardless of channel visibility.
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      lockscreenVisibility: AndroidNotificationVisibility.PRIVATE,
     });
     await Notifications.setNotificationChannelAsync(CHANNEL_PAYMENTS, {
       name: 'Payments',
-      importance: Notifications.AndroidImportance.HIGH,
+      importance: AndroidImportance.HIGH,
       description: 'Incoming Lightning, on-chain payments, and zaps',
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      lockscreenVisibility: AndroidNotificationVisibility.PRIVATE,
     });
     await Notifications.setNotificationChannelAsync(CHANNEL_PAYMENTS_QUIET, {
       name: 'Earlier payments',
-      importance: Notifications.AndroidImportance.LOW,
+      importance: AndroidImportance.LOW,
       description: 'Payments that arrived while the app was closed, shown quietly',
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      lockscreenVisibility: AndroidNotificationVisibility.PRIVATE,
       // Explicitly silent, not just LOW importance: a user who raises the
       // channel's importance in Settings still gets no sound or buzz.
       sound: null,
@@ -312,10 +313,10 @@ async function initialiseInternal(): Promise<void> {
     // notification, but it should be a silent status chip, not an alert.
     await Notifications.setNotificationChannelAsync(CHANNEL_BACKGROUND_SERVICE, {
       name: 'Background messages and payments',
-      importance: Notifications.AndroidImportance.LOW,
+      importance: AndroidImportance.LOW,
       description:
         'The persistent status shown while Lightning Piggy watches messages and checks payments',
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      lockscreenVisibility: AndroidNotificationVisibility.PUBLIC,
     });
   }
 }

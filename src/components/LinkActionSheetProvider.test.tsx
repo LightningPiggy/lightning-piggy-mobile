@@ -10,9 +10,21 @@ import { LinkActionSheetHost } from './LinkActionSheet';
 // the whole library, which is how a host mounted outside
 // BottomSheetModalProvider — an unconditional startup crash — slipped past
 // three review rounds of #1506.
+// Node has no UI runtime to decorate; skip gesture-handler's deferred native install.
+jest.mock(
+  'react-native-gesture-handler/lib/module/handlers/gestures/installUIRuntimeBindings',
+  () => ({
+    installUIRuntimeBindings: jest.fn(),
+  }),
+);
 jest.mock('react-native-worklets', () =>
   jest.requireActual('react-native-worklets/lib/module/mock'),
 );
+// Reanimated 4.7's native initializer registers CSS events even with its JS
+// mock. The Node test has no CSS/native runtime; retain the real sheet/provider.
+jest.mock('react-native-reanimated/src/initializers', () => ({
+  initializeReanimatedModule: jest.fn(),
+}));
 jest.mock('react-native-reanimated', () => jest.requireActual('react-native-reanimated/mock'));
 jest.mock('../contexts/ThemeContext', () => ({ useThemeColors: () => ({}) }));
 jest.mock('../styles/LinkActionSheet.styles', () => ({ createLinkActionSheetStyles: () => ({}) }));

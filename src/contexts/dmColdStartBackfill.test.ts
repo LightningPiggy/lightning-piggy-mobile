@@ -1,26 +1,24 @@
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import type { RefreshDmInboxOptions } from './nostrContextTypes';
 
 describe('scheduleColdStartBackfill', () => {
-  let runAfterInteractionsSpy: jest.SpyInstance;
+  let runWhenIdleSpy: jest.SpyInstance;
 
   beforeEach(() => {
     // Run the deferred callback synchronously so assertions see the call.
-    runAfterInteractionsSpy = jest
-      .spyOn(InteractionManager, 'runAfterInteractions')
-      .mockImplementation((task) => {
-        if (typeof task === 'function') task();
-        return {
-          then: () => Promise.resolve(),
-          done: () => undefined,
-          cancel: () => undefined,
-        };
-      });
+    runWhenIdleSpy = jest.spyOn(idleScheduler, 'runWhenIdle').mockImplementation((task) => {
+      if (typeof task === 'function') task();
+      return {
+        then: () => Promise.resolve(),
+        done: () => undefined,
+        cancel: () => undefined,
+      };
+    });
   });
 
   afterEach(() => {
-    runAfterInteractionsSpy.mockRestore();
+    runWhenIdleSpy.mockRestore();
   });
 
   const makeRefreshRef = () => {

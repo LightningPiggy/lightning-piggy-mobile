@@ -24,11 +24,11 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 
-// Run InteractionManager callbacks synchronously so the helper's deferred
+// Run idleScheduler callbacks synchronously so the helper's deferred
 // write completes within the test.
-jest.mock('react-native', () => ({
-  InteractionManager: {
-    runAfterInteractions: (task: () => void) => {
+jest.mock('../utils/idleScheduler', () => ({
+  idleScheduler: {
+    runWhenIdle: (task: () => void) => {
       task();
       return { then: (cb: () => void) => cb() };
     },

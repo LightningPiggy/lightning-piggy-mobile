@@ -1,3 +1,4 @@
+import type { TextInputInstance } from 'react-native';
 import React, { useMemo, useRef, useState } from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Search, SlidersHorizontal, X } from 'lucide-react-native';
@@ -26,7 +27,7 @@ export default function MarketHeaderActions({
   const messages = useMemo(() => createMessagesScreenStyles(colors), [colors]);
   const styles = useMemo(() => createMarketHeaderStyles(colors), [colors]);
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
 
   return (
     <View style={styles.actions}>

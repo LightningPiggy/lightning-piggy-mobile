@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { InteractionManager, View } from 'react-native';
+import { View } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import type { RefreshControlProps } from 'react-native';
 import TransactionList from './TransactionList';
 import type { WalletState } from '../types/wallet';
@@ -46,7 +47,7 @@ const WarmTransactionLists: React.FC<Props> = ({
     if (activeWalletId === null) return;
     let task: { cancel: () => void } | null = null;
     const timer = setTimeout(() => {
-      task = InteractionManager.runAfterInteractions(() =>
+      task = idleScheduler.runWhenIdle(() =>
         setWarm(warmWalletIds(walletIdsKey.split(','), activeWalletId)),
       );
     }, WARM_NEIGHBOURS_AFTER_MS);

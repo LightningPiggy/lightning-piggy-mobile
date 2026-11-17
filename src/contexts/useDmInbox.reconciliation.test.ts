@@ -5,7 +5,7 @@
 import { DEFAULT_RELAYS } from '../services/nostrRelayDefaults';
 import { AmberSignerError } from '../services/amberErrors';
 import { requestNip04Decrypt } from '../services/amberService';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { scheduleColdStartBackfill } from './dmColdStartBackfill';
 import { COLD_INITIAL_WRAP_LIMIT } from './nostrDmCache';
 import { act, renderHook } from '@testing-library/react-native';
@@ -429,7 +429,7 @@ it('completes cold and warm refreshes despite a persistent null kind-4 decrypt a
     };
   });
   let backfill!: () => void;
-  jest.spyOn(InteractionManager, 'runAfterInteractions').mockImplementation((task) => {
+  jest.spyOn(idleScheduler, 'runWhenIdle').mockImplementation((task) => {
     if (typeof task === 'function') backfill = task;
     return { then: () => Promise.resolve(), done: () => undefined, cancel: () => undefined };
   });

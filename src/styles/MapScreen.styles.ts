@@ -122,7 +122,7 @@ export const createMapScreenStyles = (colors: Palette) =>
     },
     // ----- bottom sheet
     sheetBackdrop: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       justifyContent: 'flex-end',
       backgroundColor: 'rgba(0,0,0,0.4)',
     },

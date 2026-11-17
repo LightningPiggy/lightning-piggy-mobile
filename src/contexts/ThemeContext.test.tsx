@@ -84,7 +84,7 @@ test('system follows live appearance changes and removes its listener on unmount
   expect(result.current.colors.surface).toBe(darkPalette.surface);
   act(() => onChange({ colorScheme: 'light' }));
   expect(result.current.scheme).toBe('light');
-  act(() => onChange({ colorScheme: 'unspecified' }));
+  act(() => onChange({ colorScheme: null }));
   expect(result.current.scheme).toBe('light');
   unmount();
   expect(remove).toHaveBeenCalledTimes(1);

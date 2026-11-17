@@ -499,7 +499,7 @@ const persistLastResult = (
       places,
       ...(fetchedAtMs !== null ? { fetchedAtMs } : {}),
     };
-    f.write(JSON.stringify(envelope));
+    f.writeSync(JSON.stringify(envelope));
   } catch {
     // Persist failures are non-fatal — `lastResult` still serves the
     // session; next launch just re-fetches.

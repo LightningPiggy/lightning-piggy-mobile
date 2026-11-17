@@ -1,5 +1,6 @@
+import type { ListViewToken as ViewToken } from 'react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, type ViewToken } from 'react-native';
+import { AppState } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { useReadPositions } from './useReadPositions';
 import { flushReadPositions, markConversationRead } from '../services/chatReadPositions';

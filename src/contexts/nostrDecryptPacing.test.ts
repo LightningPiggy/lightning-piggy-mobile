@@ -40,7 +40,7 @@ function installRafMock() {
     rafCallbacks.push(cb);
     return id;
   };
-  global.cancelAnimationFrame = (_id: number) => {
+  global.cancelAnimationFrame = (_id: number | null | undefined) => {
     // For simplicity, clear all pending callbacks (the scheduler only
     // ever has one pending RAF at a time).
     rafCallbacks = [];

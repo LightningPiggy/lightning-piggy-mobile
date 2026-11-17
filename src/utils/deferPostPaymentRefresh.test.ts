@@ -1,19 +1,19 @@
 import { deferPostPaymentRefresh, type InteractionScheduler } from './deferPostPaymentRefresh';
 
-// A controllable fake of InteractionManager: it captures the queued task
+// A controllable fake of idleScheduler: it captures the queued task
 // instead of running it, so a test can assert the refresh is scheduled
 // off the interaction path (deferred) rather than run synchronously —
 // the core guarantee of #859 / #828 (the overlay dismiss is never gated
 // behind the refresh).
 function makeFakeScheduler() {
-  // Model real InteractionManager semantics: cancel() removes the task from
+  // Model real idleScheduler semantics: cancel() removes the task from
   // the queue so a later "interactions settled" tick (runQueued) does NOT run
   // it. This lets the cancel test verify the contract behaviourally, not just
   // that cancel was forwarded (Copilot review on #875).
   const tasks = new Set<() => void>();
   let cancelled = 0;
   const scheduler: InteractionScheduler = {
-    runAfterInteractions(task: () => void) {
+    runWhenIdle(task: () => void) {
       tasks.add(task);
       return {
         cancel() {
@@ -94,7 +94,7 @@ describe('deferPostPaymentRefresh', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('defaults to the real InteractionManager when no scheduler is passed', () => {
+  it('defaults to the real idleScheduler when no scheduler is passed', () => {
     const refresh = jest.fn();
     // Should not throw and should return a handle with cancel().
     const handle = deferPostPaymentRefresh(refresh);

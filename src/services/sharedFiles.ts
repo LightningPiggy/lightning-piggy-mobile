@@ -62,7 +62,7 @@ function verifyOne(image: SharedImage, root: string): SharedImage | null {
   const handle = file.open();
   let head: Uint8Array;
   try {
-    head = handle.readBytes(SNIFF_BYTES);
+    head = handle.readBytesSync(SNIFF_BYTES);
   } finally {
     handle.close();
   }

@@ -13,6 +13,7 @@
 
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
+import { AndroidImportance } from 'expo-notifications';
 import { t } from '../i18n';
 
 export const LIVE_LOCATION_STOP_ACTION = 'stop-live-location';
@@ -30,7 +31,7 @@ function prepare(): Promise<void> {
   prepared ??= (async () => {
     await Notifications.setNotificationChannelAsync(CHANNEL, {
       name: t('liveLocationTracking.channelName'),
-      importance: Notifications.AndroidImportance.LOW,
+      importance: AndroidImportance.LOW,
       sound: null,
       vibrationPattern: null,
       showBadge: false,

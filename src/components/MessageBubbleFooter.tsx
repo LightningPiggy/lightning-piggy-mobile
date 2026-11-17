@@ -42,7 +42,7 @@ const DeliveryTick: React.FC<{
       <View testID={testID} accessibilityLabel={t('messageBubbleFooter.messageSending')}>
         <Clock
           size={12}
-          color={tint ?? (StyleSheet.flatten(styles.deliveryTickPending).color as string)}
+          color={tint ?? (StyleSheet.flatten(styles.deliveryTickPending)?.color as string)}
         />
       </View>
     );
@@ -55,7 +55,7 @@ const DeliveryTick: React.FC<{
       <View testID={testID} accessibilityLabel={t('messageBubbleFooter.sendFailed')}>
         <AlertCircle
           size={13}
-          color={StyleSheet.flatten(styles.deliveryTickFailed).color as string}
+          color={StyleSheet.flatten(styles.deliveryTickFailed)?.color as string}
         />
       </View>
     );
@@ -63,7 +63,8 @@ const DeliveryTick: React.FC<{
 
   // Theme-driven delivered-tick colour (white today, may change by theme) — not
   // necessarily green, so name it semantically rather than by hue.
-  const deliveredColor = tint ?? (StyleSheet.flatten(styles.deliveryTickDelivered).color as string);
+  const deliveredColor =
+    tint ?? (StyleSheet.flatten(styles.deliveryTickDelivered)?.color as string);
   // All target relays acked → double tick; otherwise ≥1 → single tick.
   if (ok === total) {
     return (

@@ -76,7 +76,7 @@ export async function writeNip17SkipSet(storageKey: string, set: Set<string>): P
     const f = new File(Paths.document, wrapCacheFileName(storageKey));
     if (f.exists) f.delete();
     f.create();
-    f.write(JSON.stringify(arr));
+    f.writeSync(JSON.stringify(arr));
   } catch (err) {
     console.warn(`[Nostr] NIP-17 skip-set file write failed (${storageKey}):`, err);
   }
@@ -191,7 +191,7 @@ export async function safeGetDmCacheItem(key: string): Promise<string | null> {
       if (legacy) {
         try {
           f.create();
-          f.write(legacy);
+          f.writeSync(legacy);
           // Retire the legacy row only AFTER the file write succeeds — a
           // failed migration must not discard a usable cache (#689 review).
           AsyncStorage.removeItem(key).catch(() => {});

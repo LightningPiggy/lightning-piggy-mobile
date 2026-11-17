@@ -1,5 +1,6 @@
+import type { ListViewToken as ViewToken } from 'react-native';
 import { act, renderHook } from '@testing-library/react-native';
-import type { FlatList, NativeScrollEvent, NativeSyntheticEvent, ViewToken } from 'react-native';
+import type { FlatList, NativeScrollEvent, NativeSyntheticEvent } from 'react-native';
 import type { WalletState } from '../types/wallet';
 import { useWalletCarousel, type CarouselItem } from './useWalletCarousel';
 import { CAROUSEL_INTERVAL } from '../styles/WalletCarousel.styles';

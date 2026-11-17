@@ -376,7 +376,7 @@ const NfcReadSheet: React.FC<Props> = ({ visible, onClose, expectedCoord }) => {
   }, [stage, startRead, lightningWallets.length]);
   useEffect(() => {
     if (!visible) return;
-    let lastState: AppStateStatus = AppState.currentState;
+    let lastState = AppState.currentState;
     const sub = AppState.addEventListener('change', (next) => {
       const wasBackground = lastState === 'background' || lastState === 'inactive';
       lastState = next;

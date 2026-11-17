@@ -879,7 +879,7 @@ const MessageBubble: React.FC<Props> = ({
               {contactAvatarUri ? (
                 <ExpoImage
                   source={{ uri: contactAvatarUri }}
-                  style={[StyleSheet.absoluteFillObject, { borderRadius: 22 }]}
+                  style={[StyleSheet.absoluteFill, { borderRadius: 22 }]}
                   cachePolicy="memory-disk"
                   recyclingKey={contactAvatarUri}
                   autoplay={false}

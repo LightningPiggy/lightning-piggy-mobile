@@ -12,9 +12,9 @@ const { withAndroidStyles } = require('expo/config-plugins');
  */
 const SPLASH_THEME = 'Theme.App.SplashScreen';
 const ITEMS = {
-  'android:windowSplashScreenBackground': '@color/splashscreen_background',
-  'android:windowSplashScreenAnimatedIcon': '@android:color/transparent',
-  'android:windowSplashScreenIconBackgroundColor': '@color/splashscreen_background',
+  windowSplashScreenBackground: '@color/splashscreen_background',
+  windowSplashScreenAnimatedIcon: '@android:color/transparent',
+  windowSplashScreenIconBackgroundColor: '@color/splashscreen_background',
 };
 
 module.exports = function withTransparentSplashIcon(config) {

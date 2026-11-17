@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
-import { AppState, InteractionManager } from 'react-native';
+import { AppState } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { useNostr } from '../contexts/NostrContext';
@@ -62,7 +63,7 @@ export function useKeyBackupReminder(): {
       };
       // The banner check is a few local reads — after the tab transition, so
       // returning from Back up your key clears it straight away.
-      const handle = InteractionManager.runAfterInteractions(() => void checkBanner());
+      const handle = idleScheduler.runWhenIdle(() => void checkBanner());
       staggered();
       // Notifications may have been allowed / blocked in system settings.
       const sub = AppState.addEventListener('change', (state) => {

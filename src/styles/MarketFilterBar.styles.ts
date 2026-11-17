@@ -7,7 +7,7 @@ export const createMarketFilterBarStyles = (colors: Palette) =>
     modalRoot: { flex: 1 },
     // ----- panel shell -----------------------------------------------------
     backdrop: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       backgroundColor: 'rgba(0, 0, 0, 0.4)',
     },
     // Right-anchored drawer spanning the full height; slides in via translateX.

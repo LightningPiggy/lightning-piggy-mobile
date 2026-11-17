@@ -65,7 +65,7 @@ export const createLibreMiniMapStyles = (colors: Palette) =>
       borderColor: colors.white,
     },
     userAvatarImage: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       borderRadius: 16,
     },
     // Subtle "I'm here" pulse around the user dot. The geographic
@@ -109,7 +109,7 @@ export const createLibreMiniMapStyles = (colors: Palette) =>
       elevation: 2,
     },
     profileMarkerImage: {
-      ...StyleSheet.absoluteFillObject,
+      ...StyleSheet.absoluteFill,
       borderRadius: 14,
     },
     zoomColumn: {

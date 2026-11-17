@@ -21,6 +21,16 @@ module.exports = [
     rules: {
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       '@typescript-eslint/no-explicit-any': 'warn',
+      // SDK 58 enables compiler-adoption rules; keep this upgrade scoped to
+      // API compatibility. React Compiler is not enabled for this app.
+      'react-hooks/globals': 'off',
+      'react-hooks/immutability': 'off',
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/purity': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/static-components': 'off',
+
       // Force toasts to flow through the brand-themed wrapper. Direct
       // imports of `react-native-toast-message` bypass the pink / blue
       // accent + rounded-corner styling configured in BrandedToast.tsx.

@@ -84,3 +84,8 @@ jest.mock('@op-engineering/op-sqlite', () => ({
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
+
+// RN's idle scheduler is native; model it with cancellable timers in Jest.
+global.requestIdleCallback = (callback) =>
+  setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 50 }), 0);
+global.cancelIdleCallback = (handle) => clearTimeout(handle);

@@ -76,7 +76,11 @@ describe('local DB migrations (user_version fast path)', () => {
     await launch().localDb.getLocalDb();
     const { localDb } = launch(); // next app launch
     await localDb.getLocalDb();
-    expect(mockLog).toEqual(['PRAGMA cipher_version;', 'PRAGMA user_version;']);
+    expect(mockLog).toEqual([
+      'PRAGMA cipher_version;',
+      'PRAGMA cipher_compatibility = 4;',
+      'PRAGMA user_version;',
+    ]);
   });
 
   it('upgrades an old-schema DB in place: adds columns + the inbox index, keeps rows', async () => {

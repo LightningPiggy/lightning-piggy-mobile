@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { getCurrentUserPubkey } from '../services/nostrActiveAccount';
 import type { RelayConfig } from '../types/nostr';
 import { checkDefaultDmInbox } from './defaultDmInbox';
@@ -56,7 +56,7 @@ export function useDefaultDmInbox(params: UseDefaultDmInboxParams): void {
       latest.current.pubkey === pubkey &&
       latest.current.isLoggedIn;
     const timer = setTimeout(() => {
-      task = InteractionManager.runAfterInteractions(() => {
+      task = idleScheduler.runWhenIdle(() => {
         if (!isActive()) return;
         const p = latest.current;
         void checkDefaultDmInbox({

@@ -14,6 +14,7 @@
 // to scheduling, rather than fixed at 10:00 local time.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import { AndroidImportance, AndroidNotificationVisibility } from 'expo-notifications';
 import { Platform } from 'react-native';
 import * as nip19 from 'nostr-tools/nip19';
 import { t } from '../i18n';
@@ -130,8 +131,8 @@ function ensureReminderChannel(): Promise<void> {
   channelReady ??= Notifications.setNotificationChannelAsync(REMINDER_CHANNEL, {
     name: t('keyBackupReminder.channelName'),
     description: t('keyBackupReminder.channelDescription'),
-    importance: Notifications.AndroidImportance.DEFAULT,
-    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    importance: AndroidImportance.DEFAULT,
+    lockscreenVisibility: AndroidNotificationVisibility.PRIVATE,
   })
     .then(() => undefined)
     .catch((e) => {

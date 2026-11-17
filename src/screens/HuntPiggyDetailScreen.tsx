@@ -1,3 +1,4 @@
+import { useFindComposerScroll } from '../hooks/useFindComposerScroll';
 import { useCacheDetailHydration } from '../hooks/useCacheDetailHydration';
 import BrandedRefreshControl from '../components/BrandedRefreshControl';
 import BrandedSpinner from '../components/BrandedSpinner';
@@ -144,18 +145,7 @@ const HuntPiggyDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     },
     [],
   );
-  // Composer is always rendered (no toggle) — sharing a find is
-  // independent of trying the LP prize. The route-param + scroll
-  // effect just nudges the page to the composer when navigation
-  // bounces back from HuntFoundScreen after a successful claim, so
-  // the finder lands on the input ready to type rather than at the
-  // top of a long cache page.
-  const scrollRef = useRef<ScrollView>(null);
-  useEffect(() => {
-    if (!openComposerParam) return;
-    const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
-    return () => clearTimeout(t);
-  }, [openComposerParam]);
+  const scrollRef = useFindComposerScroll(openComposerParam);
   const [composerText, setComposerText] = useState('');
   const [composerPhotoUrl, setComposerPhotoUrl] = useState<string | null>(null);
   const [composerUploading, setComposerUploading] = useState(false);

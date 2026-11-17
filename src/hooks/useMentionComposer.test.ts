@@ -1,6 +1,6 @@
 import * as nip19 from 'nostr-tools/nip19';
 import { act, renderHook } from '@testing-library/react-native';
-import type { NativeSyntheticEvent, TextInputSelectionChangeEventData } from 'react-native';
+import type { TextInputSelectionChangeEvent } from 'react-native';
 import { useMentionComposer } from './useMentionComposer';
 
 const ME = 'a'.repeat(64);
@@ -12,7 +12,7 @@ const members = [
 const sel = (at: number) =>
   ({
     nativeEvent: { selection: { start: at, end: at } },
-  }) as NativeSyntheticEvent<TextInputSelectionChangeEventData>;
+  }) as TextInputSelectionChangeEvent;
 
 function setup() {
   let draft = '';

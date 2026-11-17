@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, AppState, type AppStateStatus } from 'react-native';
+import { View, Text, TouchableOpacity, AppState } from 'react-native';
 import NfcScanIndicator from './NfcScanIndicator';
 import {
   isNfcSupported,
@@ -93,7 +93,7 @@ const SendNfcPane: React.FC<Props> = ({ active, onContent }) => {
   // resume it — re-arm on return (same fix as NfcReadSheet, #580).
   useEffect(() => {
     if (!active) return;
-    let lastState: AppStateStatus = AppState.currentState;
+    let lastState = AppState.currentState;
     const sub = AppState.addEventListener('change', (next) => {
       const wasBackground = lastState === 'background' || lastState === 'inactive';
       lastState = next;

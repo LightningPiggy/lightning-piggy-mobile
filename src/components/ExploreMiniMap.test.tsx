@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, render, waitFor } from '@testing-library/react-native';
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { ExploreMiniMap } from './ExploreMiniMap';
 import { loadExploreCamera, cacheExplorePins } from '../services/exploreMapState';
 
@@ -49,12 +49,12 @@ beforeEach(() => {
   mockMounts = 0;
   jobs = [];
   cancels = [];
-  jest.spyOn(InteractionManager, 'runAfterInteractions').mockImplementation((callback) => {
+  jest.spyOn(idleScheduler, 'runWhenIdle').mockImplementation((callback) => {
     jobs.push(callback as () => void);
     const cancel = jest.fn();
     cancels.push(cancel);
     return { cancel, then: jest.fn(), done: jest.fn() } as unknown as ReturnType<
-      typeof InteractionManager.runAfterInteractions
+      typeof idleScheduler.runWhenIdle
     >;
   });
 });

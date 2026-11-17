@@ -1,3 +1,4 @@
+import type { TextInputInstance } from 'react-native';
 import React, { useState, useCallback, useMemo, useRef, useDeferredValue, useEffect } from 'react';
 import { View, Text, Image, TouchableOpacity, ScrollView, TextInput } from 'react-native';
 import TabHeader from '../components/TabHeader';
@@ -52,7 +53,7 @@ const LessonsScreen: React.FC<Props> = ({ navigation }) => {
   const [progress, setProgress] = useState<LearnProgress>({ completedMissions: [] });
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
 
   // Defer the value driving the filter so typing stays responsive on the
   // input itself even if the filter step grows later. Mirrors FriendsScreen.

@@ -1,3 +1,4 @@
+import type { TextInputInstance } from 'react-native';
 import { MarmotInvitations } from '../components/MarmotInvitations';
 import { Nip171Invitations } from '../components/Nip171Invitations';
 import { preferredDmProtocol } from '../services/preferredDmProtocol';
@@ -8,14 +9,8 @@ import NewMessagesPill from '../components/NewMessagesPill';
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import DmProtocolPickerSheet from '../components/DmProtocolPickerSheet';
 import { DEFAULT_DM_PROTOCOL, dmMessageThreadId, type DmProtocol } from '../utils/dmProtocol';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  InteractionManager,
-  AppState,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, AppState } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import { Image as ExpoImage } from 'expo-image';
 import BrandPatternBackground from '../components/BrandPatternBackground';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
@@ -126,7 +121,7 @@ const MessagesScreen: React.FC = () => {
   const lastAppliedEnforceRef = useRef<boolean | null>(null);
   const [search, setSearch] = useState('');
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const searchInputRef = useRef<TextInput>(null);
+  const searchInputRef = useRef<TextInputInstance>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [pickedFriend, setPickedFriend] = useState<PickedFriend | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
@@ -262,8 +257,8 @@ const MessagesScreen: React.FC = () => {
       armLiveDmSub();
       // Two-stage defer (#731 Fix 1 — keep decrypt off the tab-animation hot path):
       //
-      // 1. InteractionManager.runAfterInteractions waits for the tab-bar
-      //    slide animation to complete its "interaction" frame budget.
+      // 1. idleScheduler.runWhenIdle waits for an idle JS turn.
+      //    Native animations may still be running.
       // 2. Inside that callback a 120 ms safety margin lets the first JS
       //    paint of MessagesScreen (FlashList measure + item layout +
       //    avatar decode) finish before the decrypt loop begins. Without
@@ -274,7 +269,7 @@ const MessagesScreen: React.FC = () => {
       // Both the interactionHandle and refreshDelayRef are cancelled in
       // cleanup so a blur before the delay fires is a complete no-op —
       // no decrypt work starts at all (optimal outcome for a fast tab-hop).
-      const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      const interactionHandle = idleScheduler.runWhenIdle(() => {
         const last = dmInboxLastRefreshAt.current;
         if (last.pubkey === pubkey && Date.now() - last.at < DM_INBOX_REFRESH_TTL_MS) return;
         refreshDelayRef.current = setTimeout(() => {
@@ -291,7 +286,7 @@ const MessagesScreen: React.FC = () => {
           // re-fires on a GENUINE later toggle away from this value.
           // Reading `enforceFollowingOnlyRef.current` here (vs. a stale
           // closure) means the WoT tier has had until now — past
-          // InteractionManager + the 120 ms margin, comfortably longer
+          // idleScheduler + the 120 ms margin, comfortably longer
           // than the AsyncStorage hydrate — to settle, so this single
           // fetch carries the correct, settled filter. (#788)
           lastAppliedEnforceRef.current = enforceFollowingOnlyRef.current;
@@ -341,7 +336,7 @@ const MessagesScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       if (!isLoggedIn) return;
-      const handle = InteractionManager.runAfterInteractions(() => {
+      const handle = idleScheduler.runWhenIdle(() => {
         const PREFETCH_TTL_MS = 30_000;
         if (Date.now() - lastAvatarPrefetchAt.current < PREFETCH_TTL_MS) return;
 

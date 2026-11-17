@@ -196,7 +196,7 @@ const MarketShopOrdersScreen: React.FC<Props> = ({ navigation, route }) => {
                 </View>
                 <OrderStatusFilter {...filter} />
               </>
-            ) : null
+            ) : undefined
           }
           ListEmptyComponent={
             orders.length > 0 ? (

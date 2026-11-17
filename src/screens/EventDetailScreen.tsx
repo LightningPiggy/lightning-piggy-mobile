@@ -1,7 +1,7 @@
 import BrandedSpinner from '../components/BrandedSpinner';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Image, Linking, Share } from 'react-native';
-import * as Calendar from 'expo-calendar';
+import * as Calendar from 'expo-calendar/legacy';
 import {
   CalendarPlus,
   ChevronLeft,

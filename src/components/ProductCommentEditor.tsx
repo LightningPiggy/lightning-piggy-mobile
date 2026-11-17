@@ -1,3 +1,4 @@
+import type { TextInputInstance } from 'react-native';
 import React, { useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
 import type { Event as NostrEvent } from 'nostr-tools';
@@ -36,7 +37,7 @@ const ProductCommentEditor: React.FC<Props> = ({
   onSave,
 }) => {
   const t = useTranslation();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<TextInputInstance>(null);
   // The prefilled length at mount — where the cursor starts.
   const initialEnd = useRef(text.length);
 

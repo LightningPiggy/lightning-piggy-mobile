@@ -1,4 +1,4 @@
-import { InteractionManager } from 'react-native';
+import { idleScheduler } from '../utils/idleScheduler';
 import type { StoredIdentity } from '../services/identitiesStore';
 import type { NostrProfile, NostrContact } from '../types/nostr';
 import type { DmInboxEntry } from '../utils/conversationSummaries';
@@ -56,7 +56,7 @@ export async function promoteSuccessorIdentity(
   await deps.hydrateDmInboxFromCache(successor.pubkey);
   // Defer the relay refresh so a successor with no cached profile still
   // converges to its real kind-0 (mirrors switchIdentity).
-  InteractionManager.runAfterInteractions(async () => {
+  idleScheduler.runWhenIdle(async () => {
     try {
       const readRelays = await deps.loadRelays(successor.pubkey);
       await deps.loadProfile(successor.pubkey, readRelays);

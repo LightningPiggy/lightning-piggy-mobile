@@ -410,7 +410,7 @@ const PlacesScreen: React.FC<Props> = ({ navigation }) => {
             <Text style={styles.emptySearchText}>
               {t('placesScreen.noMatch', { query: searchQuery.trim() })}
             </Text>
-          ) : null
+          ) : undefined
         }
       />
       <PlacesFilterSheet

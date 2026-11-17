@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { NativeSyntheticEvent, TextInputSelectionChangeEventData } from 'react-native';
+import type { TextInputSelectionChangeEvent } from 'react-native';
 import {
   applyMentionPick,
   encodeMentions,
@@ -78,7 +78,7 @@ export function useMentionComposer<T extends MentionCandidate>({
   }, [draft, recompute]);
 
   const onSelectionChange = useCallback(
-    (e: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
+    (e: TextInputSelectionChangeEvent) => {
       const { start, end } = e.nativeEvent.selection;
       cursor.current = start === end ? end : -1;
       setForcedSelection(undefined);
