@@ -14,7 +14,8 @@ import {
   type ColorProp,
   type FlexWidgetStyle,
 } from 'react-native-android-widget';
-import { Image, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { Asset } from 'expo-asset';
 import { cardThemes, type CardThemeConfig } from '../themes/cardThemes';
 import { getCardBgStyle } from '../themes/cards';
 import { artSizeOrSquare, containSize, coverSize } from './cardArtLayout';
@@ -55,7 +56,7 @@ const MASCOT_SHARE = 0.9;
 function CardArt({ design, model }: { design: CardThemeConfig; model: WalletWidgetModel }) {
   const frame = model.frame ?? FALLBACK_FRAME;
   const image = design.backgroundImage as number;
-  const art = artSizeOrSquare(Image.resolveAssetSource(image));
+  const art = artSizeOrSquare(Asset.fromModule(image));
   const fullBleed =
     design.backgroundImageResizeMode === 'cover' || design.backgroundImageResizeMode === 'stretch';
   if (fullBleed) {

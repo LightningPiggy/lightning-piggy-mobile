@@ -22,7 +22,9 @@ export function containSize(art: Size, box: Size): Size {
 }
 
 /** Art proportions we can trust; unknown sizes are treated as square. */
-export function artSizeOrSquare(size: Partial<Size> | null | undefined): Size {
+export function artSizeOrSquare(
+  size: { width?: number | null; height?: number | null } | null | undefined,
+): Size {
   const width = size?.width;
   const height = size?.height;
   return width && height && width > 0 && height > 0 ? { width, height } : { width: 1, height: 1 };
