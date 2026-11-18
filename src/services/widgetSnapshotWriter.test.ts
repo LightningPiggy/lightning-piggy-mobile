@@ -51,7 +51,7 @@ function setup(stored: WidgetSnapshot | null = null) {
     wipe: jest.fn(async () => {
       storage = null;
     }),
-    refresh: jest.fn(async (_s: WidgetSnapshot | null) => undefined),
+    refresh: jest.fn(async (_s: WidgetSnapshot | null, _isCurrent?: () => boolean) => undefined),
     fetchedAt: (id: string) => fetched.get(id) ?? null,
   };
   const writer = createWidgetSnapshotWriter(deps);
@@ -191,7 +191,7 @@ describe('createWidgetSnapshotWriter', () => {
     const { writer, deps } = setup();
     writer.update(input());
     await settle();
-    const isCurrent = deps.refresh.mock.calls[0][1] as unknown as () => boolean;
+    const isCurrent = deps.refresh.mock.calls[0][1] as () => boolean;
     expect(isCurrent()).toBe(true);
     await writer.accountChanged(deps.wipe());
     expect(isCurrent()).toBe(false);
