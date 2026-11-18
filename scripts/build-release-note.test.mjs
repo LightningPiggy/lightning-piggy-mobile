@@ -13,6 +13,7 @@ import {
   formatReleaseNote,
   plainText,
   releaseUrl,
+  ZAPSTORE_URL,
 } from './build-release-note.mjs';
 
 const tag = 'v1.4.2';
@@ -25,11 +26,11 @@ test('markdown headings, bold, italics, code and links become plain text', () =>
 test('multiline HTML comments disappear, including commented bullets', () => {
   assert.equal(plainText('<!-- instructions\n- hidden\n-->\n- Visible'), '• Visible');
 });
-test('headline, three install links and matching hashtags', () => {
+test('headline, four install links and matching hashtags', () => {
   const note = formatReleaseNote({ tag, notes: '- A fix' });
   assert.ok(note.startsWith('Lightning Piggy v1.4.2 is out ⚡🐷'));
   for (const value of [
-    `Install\nAndroid APK: ${releaseUrl(tag)}`,
+    `Install\nZapstore (Android): ${ZAPSTORE_URL}\nAndroid APK: ${releaseUrl(tag)}`,
     'iOS TestFlight: https://testflight.apple.com/join/bzfvEecu',
     'Website: https://lightningpiggy.com/app',
     '#LightningPiggy #bitcoin #nostr',

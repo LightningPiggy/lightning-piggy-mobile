@@ -10,6 +10,7 @@ export const HASHTAGS = ['LightningPiggy', 'bitcoin', 'nostr'];
 export const MAX_CHARS = 4000;
 export const releaseUrl = (tag) =>
   `https://github.com/LightningPiggy/lightning-piggy-mobile/releases/tag/${tag}`;
+export const ZAPSTORE_URL = 'https://zapstore.dev/apps/com.lightningpiggy.app';
 
 export function plainText(markdown) {
   return markdown
@@ -35,7 +36,7 @@ export function formatReleaseNote({ tag, notes: rawNotes }) {
   }
   const url = releaseUrl(tag);
   const headline = `Lightning Piggy ${tag} is out ⚡🐷`;
-  const footer = `Install\nAndroid APK: ${url}\niOS TestFlight: https://testflight.apple.com/join/bzfvEecu\nWebsite: https://lightningpiggy.com/app\n\n${HASHTAGS.map((t) => `#${t}`).join(' ')}`;
+  const footer = `Install\nZapstore (Android): ${ZAPSTORE_URL}\nAndroid APK: ${url}\niOS TestFlight: https://testflight.apple.com/join/bzfvEecu\nWebsite: https://lightningpiggy.com/app\n\n${HASHTAGS.map((t) => `#${t}`).join(' ')}`;
   const text = plainText(notes);
   const render = (body) => `${headline}\n\n${body}\n\n${footer}`;
   if (render(text).length <= MAX_CHARS) return render(text);
