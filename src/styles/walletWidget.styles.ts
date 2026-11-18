@@ -116,7 +116,7 @@ export function cardDesignPalette(theme: {
 }
 
 /** Darkens full-bleed card art so white text stays readable over a busy picture. */
-export const WIDGET_ART_SCRIM: ColorProp = 'rgba(0, 0, 0, 0.28)';
+export const WIDGET_ART_SCRIM: ColorProp = 'rgba(0, 0, 0, 0.42)';
 
 /** Below this height (dp) the 2×2 card drops its page dots and tightens up, so both buttons always fit. */
 export const WIDGET_LARGE_SHORT_BELOW = 165;

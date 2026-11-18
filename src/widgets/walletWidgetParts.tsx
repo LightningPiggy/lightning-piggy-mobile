@@ -58,6 +58,9 @@ function assetSize(image: number): { width: number | null; height: number | null
 // The art's box when the launcher didn't say how big the widget is (the 2×2 mock-up's size).
 const FALLBACK_FRAME = { width: 172, height: 172 };
 
+// A 2×2 widget is near square, so the art sits behind the text (in the app's wide card it sits beside it); fade it at least this much.
+const MIN_MASCOT_WASH = 0.4;
+
 // Share of the card's short side a mascot or logo fills, at the right-hand side as in the app.
 const MASCOT_SHARE = 0.9;
 
@@ -95,7 +98,7 @@ function CardArt({ design, model }: { design: CardThemeConfig; model: WalletWidg
   const opacity = Number(
     StyleSheet.flatten(getCardBgStyle(design.backgroundImageStyle, false)).opacity ?? 1,
   );
-  const wash = washColour(design.gradientColors[1], 1 - opacity);
+  const wash = washColour(design.gradientColors[1], Math.max(1 - opacity, MIN_MASCOT_WASH));
   return (
     <OverlapWidget style={{ height: 'match_parent', width: 'match_parent' }}>
       <FlexWidget
