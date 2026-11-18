@@ -3862,6 +3862,7 @@
       "typeOnchain": "On-chain",
       "noWallets": "Add a wallet in Lightning Piggy first. The widget will show it as soon as you do.",
       "styleSection": "Style",
+      "styleCardDesign": "Same as in the app",
       "stylePiggyPink": "Piggy pink",
       "styleCleanWhite": "Clean white",
       "styleNightGlass": "Night glass",

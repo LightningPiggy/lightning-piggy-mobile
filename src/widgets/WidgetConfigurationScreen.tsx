@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WidgetPreview, type WidgetConfigurationScreenProps } from 'react-native-android-widget';
@@ -23,6 +24,8 @@ import {
 } from '../styles/WidgetConfigurationScreen.styles';
 import { WALLET_WIDGET_PALETTES, WIDGET_BRAND_GRADIENT } from '../styles/walletWidget.styles';
 import { WIDGET_STYLE_IDS, type WidgetStyleId } from '../services/widgetSettings';
+import { cardThemes } from '../themes/cardThemes';
+import type { CardTheme } from '../types/wallet';
 import { renderWalletWidget } from './renderWalletWidget';
 import { walletWidgetSizeFor, type WalletWidgetSize } from './WalletWidget';
 import { useWidgetConfiguration } from './useWidgetConfiguration';
@@ -36,6 +39,7 @@ const FALLBACK_SIZE: Record<WalletWidgetSize, { width: number; height: number }>
 };
 
 const STYLE_LABEL_KEYS: Record<WidgetStyleId, string> = {
+  cardDesign: 'widget.config.styleCardDesign',
   piggyPink: 'widget.config.stylePiggyPink',
   cleanWhite: 'widget.config.styleCleanWhite',
   nightGlass: 'widget.config.styleNightGlass',
@@ -51,12 +55,37 @@ function Radio({ on, styles }: { on: boolean; styles: WidgetConfigurationScreenS
 
 function StyleSwatch({
   id,
+  cardTheme,
   styles,
 }: {
   id: WidgetStyleId;
+  /** The chosen wallet's card design, shown as the "Same as in the app" swatch. */
+  cardTheme: CardTheme | null;
   styles: WidgetConfigurationScreenStyles;
 }) {
-  if (id === 'piggyPink') {
+  if (id === 'cardDesign') {
+    const design = cardTheme ? cardThemes[cardTheme] : null;
+    if (design) {
+      return (
+        <LinearGradient
+          colors={design.gradientColors}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.swatch, styles.swatchClip]}
+        >
+          {design.backgroundImage ? (
+            <Image
+              source={design.backgroundImage}
+              style={styles.swatchArt}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
+          ) : null}
+        </LinearGradient>
+      );
+    }
+  }
+  if (id === 'piggyPink' || id === 'cardDesign') {
     return (
       <LinearGradient
         colors={[WIDGET_BRAND_GRADIENT.from, WIDGET_BRAND_GRADIENT.to]}
@@ -66,7 +95,7 @@ function StyleSwatch({
       />
     );
   }
-  const palette = WALLET_WIDGET_PALETTES[id];
+  const palette = WALLET_WIDGET_PALETTES[id as Exclude<WidgetStyleId, 'cardDesign' | 'piggyPink'>];
   const fill = id === 'nightGlass' ? '#140E22' : (palette.background.backgroundColor ?? '#FFFFFF');
   return <View style={[styles.swatch, { backgroundColor: fill }]} />;
 }
@@ -98,16 +127,29 @@ function ConfigurationBody({
   const previewWidth = Math.round(width * scale);
   const previewHeight = Math.round(height * scale);
   const { snapshot, settings } = config;
+  // Laid out at the preview's own size, so a small widget previews (and adapts) exactly as it will draw.
   const renderPreview = useCallback(
-    () => renderWalletWidget(size, snapshot, settings),
-    [size, snapshot, settings],
+    () =>
+      renderWalletWidget(size, snapshot, settings, {
+        width: previewWidth,
+        height: previewHeight,
+      }),
+    [size, snapshot, settings, previewWidth, previewHeight],
   );
+  const shownWallet = wallets.find((w) => w.id === settings.walletId) ?? wallets[0] ?? null;
 
   const onSave = async () => {
     setSaving(true);
     try {
       await config.save();
-      renderWidget(renderWalletWidget(size, config.snapshot, config.settings));
+      renderWidget(
+        renderWalletWidget(
+          size,
+          config.snapshot,
+          config.settings,
+          known ? { width, height } : null,
+        ),
+      );
     } finally {
       setResult('ok');
     }
@@ -182,7 +224,7 @@ function ConfigurationBody({
                 accessibilityLabel={t(STYLE_LABEL_KEYS[id])}
                 testID={`widget-config-style-${id}`}
               >
-                <StyleSwatch id={id} styles={styles} />
+                <StyleSwatch id={id} cardTheme={shownWallet?.cardTheme ?? null} styles={styles} />
                 <Text style={[styles.rowTitle, styles.rowText]}>{t(STYLE_LABEL_KEYS[id])}</Text>
                 <Radio on={on} styles={styles} />
               </Pressable>

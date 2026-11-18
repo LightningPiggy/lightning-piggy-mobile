@@ -6,7 +6,7 @@
 import React from 'react';
 import type { WidgetSnapshot } from '../services/widgetSnapshot';
 import type { WidgetSettings } from '../services/widgetSettings';
-import { buildWalletWidgetModel } from './walletWidgetModel';
+import { buildWalletWidgetModel, type WidgetFrame } from './walletWidgetModel';
 import { resolveWidgetLocale, widgetTranslator } from './widgetI18n';
 import { WalletWidget, type WalletWidgetSize } from './WalletWidget';
 import { FallbackWidget } from './walletWidgetParts';
@@ -50,11 +50,12 @@ export function renderWalletWidget(
   size: WalletWidgetSize,
   snapshot: WidgetSnapshot | null,
   settings: WidgetSettings,
+  frame: WidgetFrame | null = null,
   now: number = Date.now(),
 ): Element {
   try {
     const { t, intlLocale } = widgetTranslator(resolveWidgetLocale(snapshot?.locale));
-    const model = buildWalletWidgetModel({ snapshot, settings, now, t, intlLocale });
+    const model = buildWalletWidgetModel({ snapshot, settings, now, t, intlLocale, frame });
     return resolveWidgetTree(<WalletWidget model={model} size={size} />);
   } catch (e) {
     if (__DEV__) console.warn('[widget] render failed, drawing the fallback:', e);

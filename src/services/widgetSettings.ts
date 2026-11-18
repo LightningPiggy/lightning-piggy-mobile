@@ -7,9 +7,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const WIDGET_SETTINGS_KEY = 'widget_settings_v1';
 
-export const WIDGET_STYLE_IDS = ['piggyPink', 'cleanWhite', 'nightGlass'] as const;
+// 'cardDesign' draws the shown wallet's own card design from the app, so it follows the wallet as you cycle.
+export const WIDGET_STYLE_IDS = ['cardDesign', 'piggyPink', 'cleanWhite', 'nightGlass'] as const;
 export type WidgetStyleId = (typeof WIDGET_STYLE_IDS)[number];
-export const DEFAULT_WIDGET_STYLE: WidgetStyleId = 'piggyPink';
+export const DEFAULT_WIDGET_STYLE: WidgetStyleId = 'cardDesign';
 
 export interface WidgetSettings {
   /** The wallet currently shown; null = the first wallet in carousel order. */

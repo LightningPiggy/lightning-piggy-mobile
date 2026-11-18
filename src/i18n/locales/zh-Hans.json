@@ -3862,6 +3862,7 @@
       "typeOnchain": "链上",
       "noWallets": "请先在 Lightning Piggy 中添加钱包。添加后，小组件会立即显示。",
       "styleSection": "样式",
+      "styleCardDesign": "与应用内相同",
       "stylePiggyPink": "小猪粉",
       "styleCleanWhite": "简洁白",
       "styleNightGlass": "夜色玻璃",

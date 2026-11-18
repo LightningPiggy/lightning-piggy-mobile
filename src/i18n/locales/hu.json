@@ -3862,6 +3862,7 @@
       "typeOnchain": "On-chain",
       "noWallets": "Előbb adj hozzá egy tárcát a Lightning Piggyben. A widget azonnal megjeleníti, amint megteszed.",
       "styleSection": "Stílus",
+      "styleCardDesign": "Ugyanaz, mint az appban",
       "stylePiggyPink": "Piggy rózsaszín",
       "styleCleanWhite": "Tiszta fehér",
       "styleNightGlass": "Éjszakai üveg",

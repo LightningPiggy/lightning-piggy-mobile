@@ -4,13 +4,14 @@
 // it), so the app leaves it a small snapshot in AsyncStorage whenever wallet
 // balances change. PRIVACY: the snapshot is an allow-list. Per wallet it holds
 // only the id, display name, wallet type, balance, fiat value + currency, when
-// the balance was last confirmed, carousel order and a connection-OK flag —
+// the balance was last confirmed, carousel order, a connection-OK flag and the card design's id —
 // never an NWC string, mnemonic, xpub, Lightning address, Nostr key or any
 // other field of the wallet record. `shapeWidgetWallet` copies the allowed
 // fields one by one (never spreads), so a field added to `WalletState` later
 // can't leak into it. The snapshot is wiped on sign-out and account switch.
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { WalletState, WalletType } from '../types/wallet';
+import type { CardTheme, WalletState, WalletType } from '../types/wallet';
+import { cardThemes } from '../themes/cardThemes';
 import { subscribeActivePubkey } from './walletStorageService';
 
 export const WIDGET_SNAPSHOT_KEY = 'widget_snapshot_v1';
@@ -30,6 +31,8 @@ export interface WidgetWallet {
   /** Position in the app's wallet carousel (0 = first). */
   order: number;
   connected: boolean;
+  /** The wallet's card design in the app, for the "Same as in the app" style. */
+  cardTheme: CardTheme | null;
 }
 
 export interface WidgetSnapshot {
@@ -50,6 +53,7 @@ export const WIDGET_WALLET_KEYS = [
   'updatedAt',
   'order',
   'connected',
+  'cardTheme',
 ] as const satisfies readonly (keyof WidgetWallet)[];
 
 export interface ShapeOptions {
@@ -105,6 +109,7 @@ export function shapeWidgetWallet(
     updatedAt: fetchedAt?.(wallet.id) ?? carried,
     order,
     connected,
+    cardTheme: isCardTheme(wallet.theme) ? wallet.theme : null,
   };
 }
 
@@ -153,6 +158,10 @@ function isWidgetWallet(value: unknown): value is WidgetWallet {
   );
 }
 
+function isCardTheme(value: unknown): value is CardTheme {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(cardThemes, value);
+}
+
 /** Parse stored JSON defensively; anything malformed reads as "no snapshot".
  *  Re-shapes each wallet through the allow-list so stray keys are dropped. */
 export function parseWidgetSnapshot(json: string | null): WidgetSnapshot | null {
@@ -171,6 +180,8 @@ export function parseWidgetSnapshot(json: string | null): WidgetSnapshot | null 
         updatedAt: w.updatedAt,
         order: w.order,
         connected: w.connected,
+        // Snapshots written before the card style existed have no theme.
+        cardTheme: isCardTheme((w as { cardTheme?: unknown }).cardTheme) ? w.cardTheme : null,
       }),
     );
     return {

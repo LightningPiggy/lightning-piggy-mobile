@@ -19,6 +19,7 @@ const w = (id: string): WidgetWallet => ({
   updatedAt: null,
   order: 0,
   connected: true,
+  cardTheme: null,
 });
 const snapshot: WidgetSnapshot = { version: 1, locale: 'en', wallets: [w('a'), w('b')] };
 

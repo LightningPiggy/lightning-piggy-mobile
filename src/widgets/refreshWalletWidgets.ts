@@ -19,12 +19,12 @@ export async function refreshWalletWidgets(snapshot: WidgetSnapshot | null): Pro
         // The library doesn't await each widget's render, so errors are
         // handled here: a failure draws the fallback, never a blank widget.
         // renderWalletWidget itself never throws (it falls back too).
-        renderWidget: async ({ widgetId }) => {
+        renderWidget: async ({ widgetId, width, height }) => {
           try {
             const settings = await updateWidgetSettings(widgetId, (current) =>
               settingsAfterWidgetEvent(current, snapshot),
             );
-            return renderWalletWidget(size, snapshot, settings);
+            return renderWalletWidget(size, snapshot, settings, { width, height });
           } catch {
             return renderFallbackWidget(snapshot?.locale);
           }

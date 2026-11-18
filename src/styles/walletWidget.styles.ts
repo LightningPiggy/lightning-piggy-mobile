@@ -31,7 +31,10 @@ export interface WalletWidgetPalette {
   secondary: { background: ColorProp; text: ColorProp };
 }
 
-export const WALLET_WIDGET_PALETTES: Record<WidgetStyleId, WalletWidgetPalette> = {
+export const WALLET_WIDGET_PALETTES: Record<
+  Exclude<WidgetStyleId, 'cardDesign'>,
+  WalletWidgetPalette
+> = {
   // 1. Piggy pink (default): brand gradient, white Receive, translucent Send.
   piggyPink: {
     background: { backgroundGradient: WIDGET_BRAND_GRADIENT },
@@ -85,3 +88,56 @@ export const WIDGET_TYPE = {
 
 export const WIDGET_BUTTON_HEIGHT = 30;
 export const WIDGET_ROUND_BUTTON = 30;
+
+/** "Same as in the app": the palette follows the wallet's card design. Text and amount use the card's own text colour. */
+export function cardDesignPalette(theme: {
+  gradientColors: [string, string];
+  textColor: string;
+}): WalletWidgetPalette {
+  // Card themes store plain hex strings; the widget library types colours more strictly.
+  const [from, to] = theme.gradientColors as [ColorProp, ColorProp];
+  const lightText = isLightColour(theme.textColor);
+  const text = theme.textColor as ColorProp;
+  return {
+    background: { backgroundGradient: { from, to, orientation: 'TL_BR' } },
+    text,
+    textMuted: withAlpha(theme.textColor, 0.8),
+    amount: text,
+    chevron: withAlpha(theme.textColor, 0.75),
+    dotActive: text,
+    dotInactive: withAlpha(theme.textColor, 0.35),
+    primary: lightText
+      ? { backgroundColor: '#FFFFFF', text: '#1D1B26' }
+      : { backgroundColor: '#1D1B26', text: '#FFFFFF' },
+    secondary: { background: withAlpha(theme.textColor, 0.22), text },
+  };
+}
+
+/** Darkens full-bleed card art so white text stays readable over a busy picture. */
+export const WIDGET_ART_SCRIM: ColorProp = 'rgba(0, 0, 0, 0.28)';
+
+/** Below this height (dp) the 2×2 card drops its page dots and tightens up, so both buttons always fit. */
+export const WIDGET_LARGE_SHORT_BELOW = 165;
+
+/** Below this width (dp) the 2×2 card shrinks its amount so the "sats" unit isn't cut off. */
+export const WIDGET_LARGE_NARROW_BELOW = 160;
+
+function parseHex(hex: string): [number, number, number] | null {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function isLightColour(hex: string): boolean {
+  const rgb = parseHex(hex);
+  if (!rgb) return true;
+  const [r, g, b] = rgb;
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150;
+}
+
+function withAlpha(hex: string, alpha: number): ColorProp {
+  const rgb = parseHex(hex);
+  if (!rgb) return hex as ColorProp;
+  return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})` as ColorProp;
+}

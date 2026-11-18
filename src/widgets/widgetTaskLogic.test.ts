@@ -13,6 +13,7 @@ const w = (id: string, order: number): WidgetWallet => ({
   updatedAt: null,
   order,
   connected: true,
+  cardTheme: null,
 });
 const snapshot = (ids: string[]): WidgetSnapshot => ({
   version: 1,

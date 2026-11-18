@@ -3926,6 +3926,7 @@
       "typeOnchain": "On-chain",
       "noWallets": "Najpierw dodaj portfel w Lightning Piggy. Widżet pokaże go od razu, gdy to zrobisz.",
       "styleSection": "Styl",
+      "styleCardDesign": "Tak jak w aplikacji",
       "stylePiggyPink": "Różowa świnka",
       "styleCleanWhite": "Czysta biel",
       "styleNightGlass": "Nocne szkło",

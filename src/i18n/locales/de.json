@@ -3862,6 +3862,7 @@
       "typeOnchain": "On-Chain",
       "noWallets": "Füge zuerst eine Wallet in Lightning Piggy hinzu. Das Widget zeigt sie an, sobald du das getan hast.",
       "styleSection": "Stil",
+      "styleCardDesign": "Wie in der App",
       "stylePiggyPink": "Piggy-Pink",
       "styleCleanWhite": "Schlichtes Weiß",
       "styleNightGlass": "Nachtglas",

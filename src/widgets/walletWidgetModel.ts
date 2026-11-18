@@ -7,6 +7,7 @@ import { formatFiat } from '../services/fiatService';
 import { buildWidgetDeepLink, type WidgetAction } from '../navigation/widgetDeepLinks';
 import { selectWidgetWallet } from './walletCycling';
 import type { WidgetTranslate } from './widgetI18n';
+import type { CardTheme } from '../types/wallet';
 
 /** Page dots shown at most; more wallets slide the window. */
 export const MAX_PAGE_DOTS = 7;
@@ -14,8 +15,17 @@ export const MAX_PAGE_DOTS = 7;
 /** Shown instead of the amount when the balance is hidden. */
 export const HIDDEN_BALANCE = '••••••';
 
+/** The widget's drawn size in dp, when the launcher told us. */
+export interface WidgetFrame {
+  width: number;
+  height: number;
+}
+
 export interface WalletWidgetModel {
   style: WidgetStyleId;
+  /** The shown wallet's card design in the app; null when unknown. */
+  cardTheme: CardTheme | null;
+  frame: WidgetFrame | null;
   /** No wallets to show (signed out, or none added yet). */
   empty: boolean;
   emptyText: string;
@@ -101,6 +111,7 @@ export interface BuildModelInput {
   now: number;
   t: WidgetTranslate;
   intlLocale: string;
+  frame?: WidgetFrame | null;
 }
 
 export function buildWalletWidgetModel({
@@ -109,6 +120,7 @@ export function buildWalletWidgetModel({
   now,
   t,
   intlLocale,
+  frame = null,
 }: BuildModelInput): WalletWidgetModel {
   const wallets = snapshot?.wallets ?? [];
   const { wallet, index } = selectWidgetWallet(wallets, settings);
@@ -127,6 +139,8 @@ export function buildWalletWidgetModel({
   const name = wallet ? wallet.name || t('widget.unnamedWallet') : '';
   return {
     style: settings.style,
+    cardTheme: wallet?.cardTheme ?? null,
+    frame: frame && frame.width > 0 && frame.height > 0 ? frame : null,
     empty: !wallet,
     emptyText: t('widget.empty'),
     walletId,

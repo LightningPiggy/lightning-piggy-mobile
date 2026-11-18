@@ -47,7 +47,8 @@ export async function handleWidgetTask(
     const settings = await deps.updateSettings(widgetId, (current) =>
       settingsAfterWidgetEvent(current, snapshot, clickAction),
     );
-    props.renderWidget(renderWalletWidget(size, snapshot, settings));
+    const { width, height } = props.widgetInfo;
+    props.renderWidget(renderWalletWidget(size, snapshot, settings, { width, height }));
   } catch (e) {
     // Storage or drawing failed: never leave the tile blank.
     if (__DEV__) console.warn('[widget] task failed, drawing the fallback:', e);

@@ -14,13 +14,17 @@ beforeEach(async () => {
 });
 
 describe('normaliseWidgetSettings', () => {
-  it('defaults to the first wallet, Piggy pink, balance shown', () => {
+  it("defaults to the first wallet, the wallet's own card design, balance shown", () => {
     expect(normaliseWidgetSettings(undefined)).toEqual({
       walletId: null,
       walletIndex: 0,
-      style: 'piggyPink',
+      style: 'cardDesign',
       hideBalance: false,
     });
+  });
+
+  it('keeps a widget already set to Piggy pink on Piggy pink', () => {
+    expect(normaliseWidgetSettings({ style: 'piggyPink' }).style).toBe('piggyPink');
   });
 
   it('repairs invalid fields one by one', () => {

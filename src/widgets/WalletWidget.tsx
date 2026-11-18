@@ -5,7 +5,11 @@
 // are plain functions (no hooks).
 import React from 'react';
 import { FlexWidget, TextWidget } from 'react-native-android-widget';
-import { WIDGET_TYPE } from '../styles/walletWidget.styles';
+import {
+  WIDGET_LARGE_NARROW_BELOW,
+  WIDGET_LARGE_SHORT_BELOW,
+  WIDGET_TYPE,
+} from '../styles/walletWidget.styles';
 import type { WalletWidgetModel } from './walletWidgetModel';
 import {
   Balance,
@@ -69,9 +73,16 @@ function NameRow({
 
 // The 2×2 card's padding; the ‹ › tap targets reach into it.
 const LARGE_PADDING = { x: 13, y: 12 };
+const LARGE_PADDING_SHORT = { x: 11, y: 8 };
 
 function LargeWidget({ model }: { model: WalletWidgetModel }) {
-  const type = WIDGET_TYPE.large;
+  // A launcher can size the card below its usual height or width (and the setup screen previews it at that size).
+  const short = (model.frame?.height ?? Infinity) < WIDGET_LARGE_SHORT_BELOW;
+  const narrow = (model.frame?.width ?? Infinity) < WIDGET_LARGE_NARROW_BELOW;
+  const type = narrow
+    ? { ...WIDGET_TYPE.large, amount: WIDGET_TYPE.bar.amount, unit: WIDGET_TYPE.compact.unit }
+    : WIDGET_TYPE.large;
+  const padding = short ? LARGE_PADDING_SHORT : LARGE_PADDING;
   const palette = paletteFor(model);
   return (
     <WidgetCard
@@ -79,8 +90,8 @@ function LargeWidget({ model }: { model: WalletWidgetModel }) {
       style={{
         flexDirection: 'column',
         justifyContent: 'space-between',
-        paddingHorizontal: LARGE_PADDING.x,
-        paddingVertical: LARGE_PADDING.y,
+        paddingHorizontal: padding.x,
+        paddingVertical: padding.y,
       }}
     >
       <FlexWidget
@@ -92,18 +103,13 @@ function LargeWidget({ model }: { model: WalletWidgetModel }) {
         }}
       >
         {model.canCycle ? (
-          <Chevron
-            model={model}
-            direction="previous"
-            fontSize={type.chevron}
-            inset={LARGE_PADDING}
-          />
+          <Chevron model={model} direction="previous" fontSize={type.chevron} inset={padding} />
         ) : null}
         <FlexWidget style={{ flex: 1, flexDirection: 'row', justifyContent: 'center' }}>
           <NameRow model={model} fontSize={type.name} showNextHint={false} showDot />
         </FlexWidget>
         {model.canCycle ? (
-          <Chevron model={model} direction="next" fontSize={type.chevron} inset={LARGE_PADDING} />
+          <Chevron model={model} direction="next" fontSize={type.chevron} inset={padding} />
         ) : null}
       </FlexWidget>
       <FlexWidget style={{ alignItems: 'center', width: 'match_parent' }}>
@@ -133,7 +139,7 @@ function LargeWidget({ model }: { model: WalletWidgetModel }) {
             flex={1}
           />
         </FlexWidget>
-        {model.canCycle ? (
+        {model.canCycle && !short ? (
           <FlexWidget style={{ marginTop: 7 }}>
             <PageDots model={model} />
           </FlexWidget>

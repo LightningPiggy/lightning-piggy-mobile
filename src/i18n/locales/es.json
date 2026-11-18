@@ -3862,6 +3862,7 @@
       "typeOnchain": "On-chain",
       "noWallets": "Primero añade un monedero en Lightning Piggy. El widget lo mostrará en cuanto lo hagas.",
       "styleSection": "Estilo",
+      "styleCardDesign": "Igual que en la app",
       "stylePiggyPink": "Rosa Piggy",
       "styleCleanWhite": "Blanco limpio",
       "styleNightGlass": "Cristal nocturno",

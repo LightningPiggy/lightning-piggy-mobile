@@ -11,6 +11,7 @@ const w = (id: string, order: number): WidgetWallet => ({
   updatedAt: null,
   order,
   connected: true,
+  cardTheme: null,
 });
 const wallets = [w('a', 0), w('b', 1), w('c', 2)];
 

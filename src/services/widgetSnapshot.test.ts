@@ -75,6 +75,7 @@ describe('shapeWidgetWallet', () => {
       updatedAt: NOW,
       order: 0,
       connected: true,
+      cardTheme: 'lightning-piggy',
     });
   });
 
@@ -175,6 +176,17 @@ describe('shapeWidgetWallet', () => {
   });
 });
 
+describe('card theme', () => {
+  it("carries the wallet's card design", () => {
+    expect(shapeWidgetWallet(wallet({ theme: 'wise-owl' }), 0, opts).cardTheme).toBe('wise-owl');
+  });
+
+  it('reads an unknown theme as none', () => {
+    const odd = wallet({ theme: 'retired-theme' as WalletState['theme'] });
+    expect(shapeWidgetWallet(odd, 0, opts).cardTheme).toBeNull();
+  });
+});
+
 describe('buildWidgetSnapshot', () => {
   it('orders wallets as the carousel does and records the language', () => {
     const snapshot = buildWidgetSnapshot(
@@ -226,6 +238,23 @@ describe('parseWidgetSnapshot', () => {
     const parsed = parseWidgetSnapshot(json);
     expect(parsed?.wallets).toHaveLength(1);
     expect(JSON.stringify(parsed)).not.toContain(SECRETS[0]);
+  });
+
+  it('reads a snapshot written before the card style existed, with no theme', () => {
+    const { cardTheme: _dropped, ...legacy } = shapeWidgetWallet(wallet(), 0, opts);
+    const parsed = parseWidgetSnapshot(
+      JSON.stringify({ version: 1, locale: 'en', wallets: [legacy] }),
+    );
+    expect(parsed?.wallets[0].cardTheme).toBeNull();
+  });
+
+  it('drops a card theme the app does not know', () => {
+    const json = JSON.stringify({
+      version: 1,
+      locale: 'en',
+      wallets: [{ ...shapeWidgetWallet(wallet(), 0, opts), cardTheme: 'not-a-theme' }],
+    });
+    expect(parseWidgetSnapshot(json)?.wallets[0].cardTheme).toBeNull();
   });
 
   it.each([null, '', 'not json', '{"version":2,"wallets":[]}', '{"version":1}'])(

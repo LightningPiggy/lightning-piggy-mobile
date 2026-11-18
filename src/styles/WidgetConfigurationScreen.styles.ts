@@ -100,6 +100,13 @@ export const createWidgetConfigurationScreenStyles = (colors: Palette) =>
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.divider,
     },
+    swatchClip: {
+      overflow: 'hidden',
+    },
+    swatchArt: {
+      width: '100%',
+      height: '100%',
+    },
     notice: {
       fontSize: 14,
       color: colors.textBody,

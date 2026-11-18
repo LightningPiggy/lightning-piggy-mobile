@@ -25,6 +25,7 @@ const w = (id: string, patch: Partial<WidgetWallet> = {}): WidgetWallet => ({
   updatedAt: NOW - 2 * MIN,
   order: 0,
   connected: true,
+  cardTheme: null,
   ...patch,
 });
 const snapshot = (wallets: WidgetWallet[]): WidgetSnapshot => ({
@@ -114,7 +115,7 @@ describe('buildWalletWidgetModel', () => {
       pageIndex: 0,
       pageCount: 2,
       canCycle: true,
-      style: 'piggyPink',
+      style: 'cardDesign',
     });
     expect(model.links).toEqual({
       receive: 'lightningpiggy://receive?wallet=a',

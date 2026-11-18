@@ -7,13 +7,18 @@
 import React from 'react';
 import {
   FlexWidget,
+  ImageWidget,
+  OverlapWidget,
   SvgWidget,
   TextWidget,
   type ColorProp,
   type FlexWidgetStyle,
 } from 'react-native-android-widget';
+import { cardThemes, type CardThemeConfig } from '../themes/cardThemes';
 import {
   WALLET_WIDGET_PALETTES,
+  WIDGET_ART_SCRIM,
+  cardDesignPalette,
   WIDGET_BUTTON_HEIGHT,
   WIDGET_RADIUS,
   WIDGET_ROUND_BUTTON,
@@ -23,8 +28,64 @@ import {
 import type { WalletWidgetModel } from './walletWidgetModel';
 import { WIDGET_CLICK_NEXT, WIDGET_CLICK_PREVIOUS } from './widgetClickActions';
 
+/** The shown wallet's card design, or null when this widget doesn't follow it (or the wallet has none). */
+export function cardDesignFor(model: WalletWidgetModel): CardThemeConfig | null {
+  if (model.style !== 'cardDesign' || !model.cardTheme) return null;
+  return cardThemes[model.cardTheme] ?? null;
+}
+
 export function paletteFor(model: WalletWidgetModel): WalletWidgetPalette {
-  return WALLET_WIDGET_PALETTES[model.style];
+  const design = cardDesignFor(model);
+  if (design) return cardDesignPalette(design);
+  // "Same as in the app" with no known design (e.g. an older snapshot) looks like Piggy pink.
+  return WALLET_WIDGET_PALETTES[model.style === 'cardDesign' ? 'piggyPink' : model.style];
+}
+
+// Size used for the art when the launcher didn't say how big the widget is.
+const DEFAULT_ART_SIZE = 172;
+
+/** The card's artwork, as in the app: full-bleed pictures fill the card under a scrim, mascots and logos sit at the right. */
+function CardArt({ design, model }: { design: CardThemeConfig; model: WalletWidgetModel }) {
+  const width = model.frame?.width ?? DEFAULT_ART_SIZE;
+  const height = model.frame?.height ?? DEFAULT_ART_SIZE;
+  const image = design.backgroundImage as number;
+  const fullBleed =
+    design.backgroundImageResizeMode === 'cover' || design.backgroundImageResizeMode === 'stretch';
+  if (fullBleed) {
+    return (
+      <OverlapWidget style={{ height: 'match_parent', width: 'match_parent' }}>
+        <ImageWidget
+          image={image}
+          imageWidth={width}
+          imageHeight={height}
+          resizeMode="cover"
+          radius={WIDGET_RADIUS}
+        />
+        <FlexWidget
+          style={{
+            height: 'match_parent',
+            width: 'match_parent',
+            borderRadius: WIDGET_RADIUS,
+            backgroundColor: WIDGET_ART_SCRIM,
+          }}
+        />
+      </OverlapWidget>
+    );
+  }
+  const side = Math.round(Math.min(height, width) * 0.95);
+  return (
+    <FlexWidget
+      style={{
+        height: 'match_parent',
+        width: 'match_parent',
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+      }}
+    >
+      <ImageWidget image={image} imageWidth={side} imageHeight={side} resizeMode="contain" />
+    </FlexWidget>
+  );
 }
 
 /** The widget's background card; children are laid out by `style`. */
@@ -38,19 +99,39 @@ export function WidgetCard({
   children: React.ReactNode;
 }) {
   const palette = paletteFor(model);
+  const design = cardDesignFor(model);
+  if (!design?.backgroundImage) {
+    return (
+      <FlexWidget
+        style={{
+          height: 'match_parent',
+          width: 'match_parent',
+          borderRadius: WIDGET_RADIUS,
+          ...palette.background,
+          ...(palette.border ? { borderWidth: 1, borderColor: palette.border } : {}),
+          ...style,
+        }}
+      >
+        {children}
+      </FlexWidget>
+    );
+  }
+  // Gradient, then the card's art, then the content on top.
   return (
-    <FlexWidget
+    <OverlapWidget
       style={{
         height: 'match_parent',
         width: 'match_parent',
         borderRadius: WIDGET_RADIUS,
+        overflow: 'hidden',
         ...palette.background,
-        ...(palette.border ? { borderWidth: 1, borderColor: palette.border } : {}),
-        ...style,
       }}
     >
-      {children}
-    </FlexWidget>
+      <CardArt design={design} model={model} />
+      <FlexWidget style={{ height: 'match_parent', width: 'match_parent', ...style }}>
+        {children}
+      </FlexWidget>
+    </OverlapWidget>
   );
 }
 
