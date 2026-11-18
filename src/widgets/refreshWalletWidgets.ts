@@ -9,7 +9,10 @@ import { renderFallbackWidget, renderWalletWidget } from './renderWalletWidget';
 import { WALLET_WIDGET_NAMES, type WalletWidgetSize } from './WalletWidget';
 import { settingsAfterWidgetEvent } from './widgetTaskLogic';
 
-export async function refreshWalletWidgets(snapshot: WidgetSnapshot | null): Promise<void> {
+export async function refreshWalletWidgets(
+  snapshot: WidgetSnapshot | null,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
   if (Platform.OS !== 'android') return;
   const sizes = Object.keys(WALLET_WIDGET_NAMES) as WalletWidgetSize[];
   await Promise.all(
@@ -20,13 +23,15 @@ export async function refreshWalletWidgets(snapshot: WidgetSnapshot | null): Pro
         // handled here: a failure draws the fallback, never a blank widget.
         // renderWalletWidget itself never throws (it falls back too).
         renderWidget: async ({ widgetId, width, height }) => {
+          // The account changed while this redraw was queued: show nothing rather than the old wallets.
+          const shown = isCurrent() ? snapshot : null;
           try {
             const settings = await updateWidgetSettings(widgetId, (current) =>
-              settingsAfterWidgetEvent(current, snapshot),
+              settingsAfterWidgetEvent(current, shown),
             );
-            return renderWalletWidget(size, snapshot, settings, { width, height });
+            return renderWalletWidget(size, shown, settings, { width, height });
           } catch {
-            return renderFallbackWidget(snapshot?.locale);
+            return renderFallbackWidget(shown?.locale);
           }
         },
       }).catch((e: unknown) => {

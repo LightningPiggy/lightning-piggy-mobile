@@ -23,8 +23,9 @@ export interface WriterDeps {
   read: () => Promise<WidgetSnapshot | null>;
   write: (snapshot: WidgetSnapshot) => Promise<void>;
   wipe: () => Promise<void>;
-  /** Redraw placed widgets (null = nothing to show). */
-  refresh: (snapshot: WidgetSnapshot | null) => Promise<void>;
+  /** Redraw placed widgets (null = nothing to show). `isCurrent` turns false once the account changes, so a
+   *  redraw still in flight then draws nothing rather than the previous account's wallets. */
+  refresh: (snapshot: WidgetSnapshot | null, isCurrent?: () => boolean) => Promise<void>;
   fetchedAt: (walletId: string) => number | null;
   debounceMs?: number;
 }
@@ -63,7 +64,15 @@ export function createWidgetSnapshotWriter(deps: WriterDeps) {
     timer = null;
   };
 
-  async function run(): Promise<void> {
+  // One run at a time, so a commit's rollback only ever restores what storage really holds.
+  let running: Promise<void> = Promise.resolve();
+  function run(): Promise<void> {
+    const next = running.then(runOnce, runOnce);
+    running = next.catch(() => undefined);
+    return next;
+  }
+
+  async function runOnce(): Promise<void> {
     const current = input;
     if (!current?.hydrated) return;
     const gen = generation;
@@ -92,7 +101,7 @@ export function createWidgetSnapshotWriter(deps: WriterDeps) {
     await commit({ snapshot, fingerprint: snapshotFingerprint(snapshot) }, () =>
       deps.write(snapshot),
     );
-    if (gen === generation) await deps.refresh(snapshot);
+    if (gen === generation) await deps.refresh(snapshot, () => gen === generation);
   }
 
   /** Record `next` as written, then store it. If storing fails, forget it

@@ -187,6 +187,38 @@ describe('createWidgetSnapshotWriter', () => {
     expect(deps.write).not.toHaveBeenCalled();
   });
 
+  it('tells a redraw it is stale once the account changes', async () => {
+    const { writer, deps } = setup();
+    writer.update(input());
+    await settle();
+    const isCurrent = deps.refresh.mock.calls[0][1] as unknown as () => boolean;
+    expect(isCurrent()).toBe(true);
+    await writer.accountChanged(deps.wipe());
+    expect(isCurrent()).toBe(false);
+  });
+
+  it('never runs two writes at once, so a failed write is never restored as stored', async () => {
+    const { writer, deps } = setup();
+    let inFlight = 0;
+    let most = 0;
+    deps.write.mockImplementation(async () => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      inFlight -= 1;
+      throw new Error('disk full');
+    });
+    writer.update(input({ btcPrice: 1 }));
+    const first = writer.flush();
+    writer.update(input({ btcPrice: 2 }));
+    const second = writer.flush();
+    await jest.advanceTimersByTimeAsync(50);
+    await expect(first).rejects.toThrow('disk full');
+    await expect(second).rejects.toThrow('disk full');
+    expect(most).toBe(1);
+    expect(deps.write).toHaveBeenCalledTimes(2);
+  });
+
   it('retries a write that failed instead of treating it as stored', async () => {
     const { writer, deps } = setup();
     deps.write.mockRejectedValueOnce(new Error('disk full'));
