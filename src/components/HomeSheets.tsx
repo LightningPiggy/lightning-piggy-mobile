@@ -31,7 +31,13 @@ const HomeSheets = forwardRef<HomeSheetActions>(function HomeSheets(_props, ref)
         }
       }}
     >
-      {state.receive !== null && <Receive visible={state.receive} onClose={state.closeReceive} />}
+      {state.receive !== null && (
+        <Receive
+          visible={state.receive.visible}
+          openKey={state.receive.key}
+          onClose={state.closeReceive}
+        />
+      )}
       {state.send !== null && (
         <Send
           visible={state.send.visible}
@@ -40,6 +46,8 @@ const HomeSheets = forwardRef<HomeSheetActions>(function HomeSheets(_props, ref)
           initialPicture={state.send.picture}
           recipientPubkey={state.send.pubkey}
           recipientName={state.send.name}
+          initialMode={state.send.mode}
+          openKey={state.send.key}
         />
       )}
       {state.transfer !== null && (

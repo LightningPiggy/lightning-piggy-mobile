@@ -30,6 +30,7 @@ import { selectHomeWalletState } from '../utils/homeWalletState';
 import { perfLog } from '../utils/perfLog';
 import { noteWalletListCommitted } from '../utils/walletSwipeTiming';
 import { useActiveWalletRefresh } from '../hooks/useActiveWalletRefresh';
+import { useWidgetLaunch } from '../hooks/useWidgetLaunch';
 import { useNotificationDefaults } from '../hooks/useNotificationDefaults';
 import { useKeyBackupReminder } from '../hooks/useKeyBackupReminder';
 import KeyBackupBanner from '../components/KeyBackupBanner';
@@ -152,6 +153,30 @@ const HomeScreen: React.FC = () => {
     route.params?.sendToName,
     navigation,
   ]);
+
+  // Home-screen widget buttons (#1849): select the widget's wallet once the
+  // wallets have loaded, then open Receive / Send / Scan on it.
+  const clearWidgetParams = useCallback(
+    () =>
+      navigation.setParams({
+        widgetAction: undefined,
+        widgetWalletId: undefined,
+        widgetNonce: undefined,
+      }),
+    [navigation],
+  );
+  useWidgetLaunch({
+    action: route.params?.widgetAction,
+    walletId: route.params?.widgetWalletId,
+    nonce: route.params?.widgetNonce,
+    wallets,
+    activeWalletId,
+    walletsHydrated,
+    setActiveWallet,
+    sheetsRef,
+    clearParams: clearWidgetParams,
+    watchOnlyMessage: t('homeScreen.watchOnlySend'),
+  });
 
   // Hold the latest wallets + balance refresher in refs so `fetchWallet` stays
   // stable without taking the constantly-churning `wallets` as a dependency.

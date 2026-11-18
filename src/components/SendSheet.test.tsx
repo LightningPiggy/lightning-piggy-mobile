@@ -604,3 +604,23 @@ describe('Cancel after the pay request was dispatched (#1776)', () => {
     );
   });
 });
+
+// #1849: the home-screen widget's buttons.
+it('opens on the Scan tab when asked, even before camera permission is known', () => {
+  render(<SendSheet visible onClose={onClose} initialMode="scan" />);
+  expect(selectedTab('send-tab-scan')).toBe(true);
+  resolvePermission({ granted: false });
+  expect(selectedTab('send-tab-scan')).toBe(true);
+});
+
+it('a re-open while visible (new openKey) starts a fresh send on the requested tab', () => {
+  const view = render(<SendSheet visible onClose={onClose} openKey={1} />);
+  resolvePermission({ granted: false });
+  fireEvent.changeText(screen.getByTestId('send-paste-input'), 'lnbc1typed');
+  // Same key: an unrelated render keeps the typed text.
+  view.rerender(<SendSheet visible onClose={onClose} openKey={1} />);
+  expect(screen.getByTestId('send-paste-input').props.defaultValue).not.toBe('');
+  view.rerender(<SendSheet visible onClose={onClose} openKey={2} initialMode="scan" />);
+  expect(selectedTab('send-tab-scan')).toBe(true);
+  expect(mockResetInputForOpen).toHaveBeenCalledTimes(2);
+});

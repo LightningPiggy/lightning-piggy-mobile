@@ -290,6 +290,27 @@ describe('sanitizeNavigationState — replay guard (#886)', () => {
     expect(out.routes[0].params.params).not.toHaveProperty('sendToAddress');
   });
 
+  it('strips a widget button request so a cold start never reopens its sheet (#1849)', () => {
+    const state = {
+      index: 0,
+      routeNames: ['Main'],
+      routes: [
+        {
+          key: 'Main-1',
+          name: 'Main',
+          params: {
+            screen: 'Home',
+            params: { widgetAction: 'send', widgetWalletId: 'w1', widgetNonce: 1, keep: 'me' },
+          },
+        },
+      ],
+    } as unknown as NavigationState;
+    const out = sanitizeNavigationState(state) as unknown as {
+      routes: { params: { params: unknown } }[];
+    };
+    expect(out.routes[0].params.params).toEqual({ keep: 'me' });
+  });
+
   it('collapses an empty-routes stack to undefined (no index -1 crash)', () => {
     // A malformed-but-JSON-valid blob with zero routes would otherwise yield
     // index = routes.length - 1 = -1 and crash NavigationContainer on mount.

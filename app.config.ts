@@ -4,6 +4,7 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 // label (via src/utils/appVersion.ts) and the native binary's
 // CFBundleShortVersionString / android.versionName below.
 import pkg from './package.json';
+import type { WithAndroidWidgetsParams } from 'react-native-android-widget';
 
 // Default to the development variant for local builds when APP_VARIANT
 // is unset, so a one-line `npm run android` (or a forgetful prebuild)
@@ -51,6 +52,65 @@ const getAdaptiveIconBackgroundColor = () => {
 };
 
 // Android adaptive-icon radial-gradient background image per variant.
+// Android home-screen widgets (#1849), drawn from JS by
+// react-native-android-widget (src/widgets/). The names must match
+// WALLET_WIDGET_NAMES in src/widgets/WalletWidget.tsx. Sizes follow Android's
+// cell formula (70 × cells − 30 dp). `reconfigurable` opens the configuration
+// screen when a widget is added AND from its reconfigure action;
+// `configuration_optional` would skip it on add, but the agreed flow asks
+// which wallet a new widget is for. No `updatePeriodMillis`: the widget shows
+// an absolute "Updated 14:32", so nothing goes stale between the app's
+// redraws (one per snapshot write), and Android never has to start the app
+// in the background just to redraw it. Picker
+// labels / descriptions come from `widget.picker` in the locale catalogues
+// (plugins/withWidgetPickerStrings.js); `label` here is the build fallback.
+const ANDROID_WIDGETS: WithAndroidWidgetsParams['widgets'] = [
+  {
+    name: 'WalletCardWidget',
+    label: 'Wallet balance',
+    minWidth: '110dp',
+    minHeight: '110dp',
+    targetCellWidth: 2,
+    targetCellHeight: 2,
+    maxResizeWidth: '320dp',
+    maxResizeHeight: '320dp',
+    resizeMode: 'horizontal|vertical',
+    previewImage: './assets/widget-preview/wallet-card.png',
+    widgetFeatures: 'reconfigurable',
+  },
+  {
+    name: 'WalletBarWidget',
+    label: 'Wallet bar',
+    minWidth: '250dp',
+    minHeight: '40dp',
+    targetCellWidth: 4,
+    targetCellHeight: 1,
+    maxResizeHeight: '110dp',
+    resizeMode: 'horizontal|vertical',
+    previewImage: './assets/widget-preview/wallet-bar.png',
+    widgetFeatures: 'reconfigurable',
+  },
+  {
+    name: 'WalletButtonsWidget',
+    label: 'Wallet buttons',
+    minWidth: '110dp',
+    minHeight: '40dp',
+    targetCellWidth: 2,
+    targetCellHeight: 1,
+    maxResizeHeight: '110dp',
+    resizeMode: 'horizontal|vertical',
+    previewImage: './assets/widget-preview/wallet-buttons.png',
+    widgetFeatures: 'reconfigurable',
+  },
+];
+
+// `widget.picker.<key>Label` / `<key>Description` per widget.
+const WIDGET_PICKER_KEYS: Record<string, string> = {
+  WalletCardWidget: 'card',
+  WalletBarWidget: 'bar',
+  WalletButtonsWidget: 'buttons',
+};
+
 const getAdaptiveIconBackgroundImage = () => {
   if (IS_DEV) return './assets/android-icon-background-dev.png';
   if (IS_PREVIEW) return './assets/android-icon-background-preview.png';
@@ -312,6 +372,19 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // for the GitHub Release instead of a universal APK. Dev and preview
     // builds stay universal so EAS install links and emulators keep working.
     ...(IS_PRODUCTION ? ['./plugins/withAndroidAbiSplits'] : []),
+    // Android home-screen widgets (#1849). The picker-strings plugin MUST come
+    // first: Expo runs mods last-registered-first, and it edits the receivers
+    // and provider XML the widget plugin creates.
+    [
+      './plugins/withWidgetPickerStrings',
+      {
+        widgets: ANDROID_WIDGETS.map((w) => ({
+          name: w.name,
+          pickerKey: WIDGET_PICKER_KEYS[w.name],
+        })),
+      },
+    ],
+    ['react-native-android-widget', { widgets: ANDROID_WIDGETS }],
   ],
   android: {
     adaptiveIcon: {

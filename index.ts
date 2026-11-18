@@ -1,5 +1,9 @@
 import { registerRootComponent } from 'expo';
-import { LogBox } from 'react-native';
+import { LogBox, Platform } from 'react-native';
+import {
+  registerWidgetConfigurationScreen,
+  registerWidgetTaskHandler,
+} from 'react-native-android-widget';
 import { perfAnchor, perfLog, perfHeartbeatStart } from './src/utils/perfLog';
 // Side-effect import: defines the background-sync task in the global scope
 // so expo-background-task can invoke it after an OS-driven relaunch (#279).
@@ -33,6 +37,8 @@ perfLog('App.tsx imported');
 import { setNativeCryptoEnabled, warmUpNativeCrypto } from './src/services/nostrCrypto';
 import { loadNativeCryptoEnabled } from './src/services/nativeCryptoPreference';
 import { prewarmLocalDb } from './src/services/localDb';
+import { widgetTaskHandler } from './src/widgets/widgetTaskHandler';
+import { WidgetConfigurationScreen } from './src/widgets/WidgetConfigurationScreen';
 
 // Suppress the dev-tools / debugger warning banners. The "Open debugger
 // to view warnings" overlay keeps intercepting taps + stealing focus on
@@ -75,6 +81,15 @@ prewarmLocalDb();
 // the environment is set up appropriately
 perfLog('registerRootComponent called');
 registerRootComponent(App);
+
+// Android home-screen widget (#1849): the headless task that draws the widget
+// and switches its wallet in place, and the configuration screen Android
+// opens when a widget is added or reconfigured. Registered at module scope so
+// Android can run them with no React tree mounted.
+if (Platform.OS === 'android') {
+  registerWidgetTaskHandler(widgetTaskHandler);
+  registerWidgetConfigurationScreen(WidgetConfigurationScreen);
+}
 
 // Native crypto warm-up (#1046, #1057). Fire-and-forget so it never blocks
 // startup. First hydrate the Settings pref (default on, #1727) and apply it to routing

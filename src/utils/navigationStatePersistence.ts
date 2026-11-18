@@ -30,6 +30,10 @@ const TRANSIENT_PARAM_KEYS = [
   'sendToPubkey',
   'sendToName',
   'openComposer',
+  // Home-screen widget buttons (#1849): open a sheet once, never on restore.
+  'widgetAction',
+  'widgetWalletId',
+  'widgetNonce',
   // Private chat snapshots and one-shot scroll requests never belong on disk.
   'messages',
   'jumpToMessage',

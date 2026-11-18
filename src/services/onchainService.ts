@@ -27,6 +27,7 @@ import { classifySendFeeError, type SendFeeEstimate } from '../utils/sendFeeEsti
 import { createYieldScheduler } from '../contexts/nostrDecryptPacing';
 import { yieldMacrotask } from '../utils/yieldingBatch';
 import { noteOnchainSyncSuccess } from './onchainSyncBackoff';
+import { noteBalanceFetched } from './balanceFetchTimes';
 
 const ADDRESS_INDEX_PREFIX = 'onchain_addr_index_';
 
@@ -506,6 +507,7 @@ export async function syncAndRefresh(walletId: string): Promise<{
     if (single) {
       const result = await syncSingleAddressViaEsplora(single);
       noteOnchainSyncSuccess(walletId); // lifts the background poll's backoff
+      noteBalanceFetched(walletId); // the widget's "Updated 14:32" (#1849)
       return { balance: result.balance, transactions: result.transactions, ok: true };
     }
 
@@ -516,6 +518,7 @@ export async function syncAndRefresh(walletId: string): Promise<{
     const bal = await wallet.getBalance();
     const txList = await wallet.listTransactions(false);
     noteOnchainSyncSuccess(walletId);
+    noteBalanceFetched(walletId);
 
     return { balance: bal.total, transactions: await mapAndSortTransactions(txList), ok: true };
   } catch (e) {

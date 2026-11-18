@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, TouchableOpacity, BackHandler, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useOnchainSendQuote } from '../utils/useOnchainSendQuote';
 import { useSheetKeyboardRestore } from '../utils/useSheetKeyboardRestore';
@@ -7,13 +7,7 @@ import { useSendEligibility } from '../hooks/useSendEligibility';
 import { Image as ExpoImage } from 'expo-image';
 import { Alert } from './BrandedAlert';
 import { Toast } from './BrandedToast';
-import {
-  BottomSheetBackdrop,
-  BottomSheetBackdropProps,
-  BottomSheetTextInput,
-  BottomSheetScrollView,
-  BottomSheetView,
-} from '@gorhom/bottom-sheet';
+import { BottomSheetTextInput, BottomSheetScrollView, BottomSheetView } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { useCameraPermissions } from 'expo-camera';
 import { decode as bolt11Decode } from 'light-bolt11-decoder';
@@ -39,6 +33,7 @@ import { useSendSheetLnurl } from '../hooks/useSendSheetLnurl';
 import { useKeyboardHeight } from '../hooks/useKeyboardHeight';
 import { useSendSheetInput } from '../hooks/useSendSheetInput';
 import { useSendInputMode } from '../hooks/useSendInputMode';
+import { useSendSheetDismiss } from '../hooks/useSendSheetDismiss';
 import * as boltzService from '../services/boltzService';
 import * as onchainService from '../services/onchainService';
 import {
@@ -60,7 +55,7 @@ import { isReverseSwapNotPaid } from '../utils/swapHandoff';
 import AmountEntryScreen from './AmountEntryScreen';
 import SendAmountSection from './SendAmountSection';
 import SendPaymentIdentity from './SendPaymentIdentity';
-import SendModeTabs from './SendModeTabs';
+import SendModeTabs, { type SendInputMode } from './SendModeTabs';
 import SendNfcPane from './SendNfcPane';
 import SendScanPane from './SendScanPane';
 import { perfLog } from '../utils/perfLog';
@@ -78,6 +73,10 @@ interface Props {
   // (e.g. the find-log zaps-received pill in HuntPiggyDetail) picks
   // the zap up. Omit for plain zap-the-author flows.
   zapEventId?: string;
+  // Changes on every open from the Home sheet host. A re-open while already
+  // visible (a widget tap, #1849) then starts afresh on the active wallet.
+  openKey?: number;
+  initialMode?: SendInputMode; // Open on this tab (the widget's Scan button).
 }
 
 type Step = 'main' | 'amount';
@@ -91,6 +90,8 @@ const SendSheet: React.FC<Props> = ({
   recipientPubkey,
   recipientName,
   zapEventId,
+  openKey,
+  initialMode,
 }) => {
   if (visible && !__sendSheetFirstVisibleLogged) {
     __sendSheetFirstVisibleLogged = true;
@@ -144,6 +145,7 @@ const SendSheet: React.FC<Props> = ({
     permission,
     hasInput: scanned || pasteText.length > 0,
     liveInputRef: pasteTextRef,
+    preferredMode: initialMode,
   });
   const [activePubkey, setActivePubkey] = useState(recipientPubkey);
   const [activePicture, setActivePicture] = useState(initialPicture);
@@ -330,17 +332,21 @@ const SendSheet: React.FC<Props> = ({
     // a fresh send. Nothing else (onClose identity, balance ticks) re-runs it,
     // so an unrelated render keeps the in-progress entry.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, initialAddress, initialPicture, recipientPubkey, recipientName, zapEventId]);
+  }, [
+    visible,
+    initialAddress,
+    initialPicture,
+    recipientPubkey,
+    recipientName,
+    zapEventId,
+    openKey,
+  ]);
 
-  useEffect(() => {
-    if (!visible) return;
-    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
-      resetInputForOpen();
-      onClose();
-      return true;
-    });
-    return () => handler.remove();
-  }, [visible, onClose, resetInputForOpen]);
+  const { handleSheetChange, renderBackdrop } = useSendSheetDismiss({
+    visible,
+    onClose,
+    resetInputForOpen,
+  });
 
   // Mirror latest pasteText / invoiceData into refs so handleEditAddress reads the submitted value without closing over it — keeping the callback (and onResolveError) reference-stable so useSendSheetLnurl's effects can depend on it without re-firing on keystrokes (Copilot #872). invoiceDataRef is synced in render so it is current before any failure callback.
   // (pasteTextRef is declared above, before useSendInputMode, and written only by its setters.)
@@ -704,23 +710,6 @@ const SendSheet: React.FC<Props> = ({
     setIsOnchainAddress(false);
     setIsLnurl(false);
   };
-
-  const handleSheetChange = useCallback(
-    (index: number) => {
-      if (index === -1) {
-        resetInputForOpen();
-        onClose();
-      }
-    },
-    [onClose, resetInputForOpen],
-  );
-
-  const renderBackdrop = useCallback(
-    (props: BottomSheetBackdropProps) => (
-      <BottomSheetBackdrop {...props} disappearsOnIndex={-1} appearsOnIndex={0} />
-    ),
-    [],
-  );
 
   // Open the sheet whenever it's asked to be visible. Do NOT gate on the
   // camera-permission hook: `useCameraPermissions()` can stay `null` (e.g. the

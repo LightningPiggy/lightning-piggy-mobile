@@ -11,11 +11,21 @@ import type { ContactProfileBodyData } from '../components/ContactProfileBody';
 import type { MarketProduct } from '../data/marketProducts';
 import type { MarketMode } from '../utils/marketMode';
 import type { LeaderboardEntry } from '../utils/huntLeaderboard';
+import type { WidgetAction } from './widgetDeepLinks';
 
 // Main tab param list
 export type MainTabParamList = {
   Home:
-    | { sendToAddress?: string; sendToName?: string; sendToPicture?: string; sendToPubkey?: string }
+    | {
+        sendToAddress?: string;
+        sendToName?: string;
+        sendToPicture?: string;
+        sendToPubkey?: string;
+        // Home-screen widget button (#1849): open this sheet on this wallet.
+        widgetAction?: WidgetAction;
+        widgetWalletId?: string;
+        widgetNonce?: number;
+      }
     | undefined;
   Messages: undefined;
   // Explore hosts a sub-stack so the type carries NavigatorScreenParams

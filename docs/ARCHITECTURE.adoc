@@ -324,6 +324,67 @@ history, and address derivation. `boltzService.ts` performs Boltz submarine swap
 to bridge Lightning ↔ on-chain. Full design in `SOLUTION_DESIGN.adoc` →
 "On-Chain Wallet Support & Transfer".
 
+[[home-screen-widgets]]
+=== Home-screen widgets (Android)
+
+Three widgets (#1849) show a wallet's balance and open the app straight to
+Receive, Send or Scan: a *2×2 balance card*, a *4×1 bar* (balance, Receive,
+Scan, Send) and a *2×1* with round Receive / Send buttons. Each comes in three
+styles — Piggy pink (default), Clean white and Night glass — picked with the
+starting wallet and a *Hide balance* switch (off by default) on the
+configuration screen Android shows when a widget is added or reconfigured.
+iPhone widgets, card-art styles and lock-screen widgets are later work.
+
+*How it's built.* `react-native-android-widget` draws the widgets from JSX
+(`src/widgets/`) in a headless JS task, so the widget works with the app
+closed. Its Expo plugin (registered in `app.config.ts`) adds the receivers,
+provider XML (sizes, preview images, `reconfigurable`) and the configuration
+activity; `plugins/withWidgetPickerStrings.js` translates the picker's name
+and description from `widget.picker` in the locale catalogues.
+
+*Data — a snapshot, never secrets.* The app writes `widget_snapshot_v1` to
+AsyncStorage (`src/services/widgetSnapshot.ts`; the writer logic is
+`widgetSnapshotWriter.ts`, fed by `useWidgetSnapshotSync`), debounced ~1.5 s
+after balances, connection, price, currency or language change — never per
+relay event. Per wallet it holds only: id, display name, wallet type, balance
+in sats, fiat value + currency, when the balance was fetched, carousel order
+and a connection-OK flag — plus the app language, so the headless task speaks it. It never holds
+a connection string, recovery phrase, xpub, Lightning address, Nostr key or
+any other wallet field: the shaping copies allow-listed fields one by one, and
+a property test pins the key set. A balance hidden in the app is stored as
+unknown, so the widget shows dots. The snapshot is wiped at once on sign-out
+and on every account switch. Per-widget settings (`widget_settings_v1`:
+wallet id, its carousel slot, style, hide-balance) hold no balances.
+
+*Switching wallets.* ‹ › on the 2×2, and tapping the wallet name on the
+smaller sizes, step through the account's wallets in carousel order (with
+wrap-around) inside the widget task, without opening the app. If the shown
+wallet is removed, the widget moves on to the wallet now in its slot. With no
+wallets the widget shows "Add a wallet in Lightning Piggy" and opens the app.
+
+*Deep links.* The buttons open `lightningpiggy://receive?wallet=<id>`,
+`lightningpiggy://send?wallet=<id>` and `lightningpiggy://scan?wallet=<id>`
+(`src/navigation/widgetDeepLinks.ts`). `App.tsx` routes them to Home through
+`navigateToWidgetAction`; Home's `useWidgetLaunch` waits for the wallets on a
+cold start, selects the widget's wallet, then opens the Receive or Send sheet
+(Send on its Scan tab for `scan`). Each open bumps the sheet's open key, so a
+tap while Receive or Send is already up re-captures the widget's wallet
+instead of keeping the old one. An unknown wallet id falls back to the
+current wallet. A widget never pays by itself: Send still needs the user to
+confirm it in the app. Maestro flow:
+`.maestro/wallets/flow-162-widget-deep-links.yaml`.
+
+*Freshness.* The widget shows when the balance was actually fetched, as an
+absolute time ("≈ $68.81 · 14:32", "yesterday 14:32", else the date). That
+time comes from `src/services/balanceFetchTimes.ts`, which the NWC and
+on-chain balance readers stamp after each successful read — never the write
+time, so a price or language change can't make an old balance look fresh, and
+a cached balance nothing has re-read shows no time. A re-fetch with the same
+amount rewrites at most every 5 minutes. There is no `updatePeriodMillis`:
+the app redraws the widget on every snapshot write, and Android never starts
+the app in the background just to refresh it. If drawing ever fails, the
+widget shows "Open Lightning Piggy" rather than a blank tile.
+
 [[persistence]]
 == Persistence & caching
 
