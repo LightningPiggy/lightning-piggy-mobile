@@ -455,7 +455,7 @@ Re-run via *Actions → Release Nostr note → Run workflow* with `tag=v1.4.2`, 
 gh workflow run release-nostr-note.yml --repo LightningPiggy/lightning-piggy-mobile --ref main -f tag=v1.4.2
 ----
 
-NOTE: Dispatch publishes a real note and can create a duplicate on retry. Check the Release body first. APK and TestFlight builds run separately and may not yet be ready when the note is published, and the Zapstore listing updates only after the note (stable releases only), so it briefly shows the previous version. All relay connections and Amber signing happen on the GitHub Actions runner; never test publication locally or connect locally to `relay.damus.io`, `nos.lol` or `nostr.mom`.
+NOTE: Dispatch publishes a real note and can create a duplicate on retry. Check the Release body first. APK and TestFlight builds run separately and may not yet be ready when the note is published, and the Zapstore listing updates only after the note (stable releases only), so it briefly shows the previous version. A manual note retry does not start the Zapstore publish; run `gh workflow run zapstore-publish.yml --repo LightningPiggy/lightning-piggy-mobile --ref main` afterwards. All relay connections and Amber signing happen on the GitHub Actions runner; never test publication locally or connect locally to `relay.damus.io`, `nos.lol` or `nostr.mom`.
 
 ==== Manual re-run without re-tagging
 
