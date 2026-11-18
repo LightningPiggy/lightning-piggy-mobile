@@ -46,6 +46,15 @@ export function paletteFor(model: WalletWidgetModel): WalletWidgetPalette {
   return WALLET_WIDGET_PALETTES[model.style === 'cardDesign' ? 'piggyPink' : model.style];
 }
 
+/** The bundled art's pixel size; an unknown asset reads as square rather than breaking the whole widget. */
+function assetSize(image: number): { width: number | null; height: number | null } | null {
+  try {
+    return Asset.fromModule(image);
+  } catch {
+    return null;
+  }
+}
+
 // The art's box when the launcher didn't say how big the widget is (the 2×2 mock-up's size).
 const FALLBACK_FRAME = { width: 172, height: 172 };
 
@@ -56,7 +65,7 @@ const MASCOT_SHARE = 0.9;
 function CardArt({ design, model }: { design: CardThemeConfig; model: WalletWidgetModel }) {
   const frame = model.frame ?? FALLBACK_FRAME;
   const image = design.backgroundImage as number;
-  const art = artSizeOrSquare(Asset.fromModule(image));
+  const art = artSizeOrSquare(assetSize(image));
   const fullBleed =
     design.backgroundImageResizeMode === 'cover' || design.backgroundImageResizeMode === 'stretch';
   if (fullBleed) {
