@@ -14,11 +14,15 @@ import {
   type ColorProp,
   type FlexWidgetStyle,
 } from 'react-native-android-widget';
+import { Image, StyleSheet } from 'react-native';
 import { cardThemes, type CardThemeConfig } from '../themes/cardThemes';
+import { getCardBgStyle } from '../themes/cards';
+import { artSizeOrSquare, containSize, coverSize } from './cardArtLayout';
 import {
   WALLET_WIDGET_PALETTES,
   WIDGET_ART_SCRIM,
   cardDesignPalette,
+  washColour,
   WIDGET_BUTTON_HEIGHT,
   WIDGET_RADIUS,
   WIDGET_ROUND_BUTTON,
@@ -41,50 +45,66 @@ export function paletteFor(model: WalletWidgetModel): WalletWidgetPalette {
   return WALLET_WIDGET_PALETTES[model.style === 'cardDesign' ? 'piggyPink' : model.style];
 }
 
-// Size used for the art when the launcher didn't say how big the widget is.
-const DEFAULT_ART_SIZE = 172;
+// The art's box when the launcher didn't say how big the widget is (the 2×2 mock-up's size).
+const FALLBACK_FRAME = { width: 172, height: 172 };
+
+// Share of the card's short side a mascot or logo fills, at the right-hand side as in the app.
+const MASCOT_SHARE = 0.9;
 
 /** The card's artwork, as in the app: full-bleed pictures fill the card under a scrim, mascots and logos sit at the right. */
 function CardArt({ design, model }: { design: CardThemeConfig; model: WalletWidgetModel }) {
-  const width = model.frame?.width ?? DEFAULT_ART_SIZE;
-  const height = model.frame?.height ?? DEFAULT_ART_SIZE;
+  const frame = model.frame ?? FALLBACK_FRAME;
   const image = design.backgroundImage as number;
+  const art = artSizeOrSquare(Image.resolveAssetSource(image));
   const fullBleed =
     design.backgroundImageResizeMode === 'cover' || design.backgroundImageResizeMode === 'stretch';
   if (fullBleed) {
+    const box = coverSize(art, frame);
     return (
       <OverlapWidget style={{ height: 'match_parent', width: 'match_parent' }}>
         <ImageWidget
           image={image}
-          imageWidth={width}
-          imageHeight={height}
+          imageWidth={box.width}
+          imageHeight={box.height}
           resizeMode="cover"
-          radius={WIDGET_RADIUS}
+          style={{ height: 'match_parent', width: 'match_parent' }}
         />
         <FlexWidget
           style={{
             height: 'match_parent',
             width: 'match_parent',
-            borderRadius: WIDGET_RADIUS,
             backgroundColor: WIDGET_ART_SCRIM,
           }}
         />
       </OverlapWidget>
     );
   }
-  const side = Math.round(Math.min(height, width) * 0.95);
+  const side = Math.round(Math.min(frame.width, frame.height) * MASCOT_SHARE);
+  const box = containSize(art, { width: side, height: side });
+  // The app draws mascots faded (getCardBgStyle opacity); an image here can't fade, so a wash of the card's colour does it.
+  const opacity = Number(
+    StyleSheet.flatten(getCardBgStyle(design.backgroundImageStyle, false)).opacity ?? 1,
+  );
+  const wash = washColour(design.gradientColors[1], 1 - opacity);
   return (
-    <FlexWidget
-      style={{
-        height: 'match_parent',
-        width: 'match_parent',
-        flexDirection: 'row',
-        justifyContent: 'flex-end',
-        alignItems: 'center',
-      }}
-    >
-      <ImageWidget image={image} imageWidth={side} imageHeight={side} resizeMode="contain" />
-    </FlexWidget>
+    <OverlapWidget style={{ height: 'match_parent', width: 'match_parent' }}>
+      <FlexWidget
+        style={{
+          height: 'match_parent',
+          width: 'match_parent',
+          flexDirection: 'row',
+          justifyContent: 'flex-end',
+          alignItems: 'center',
+        }}
+      >
+        <ImageWidget image={image} imageWidth={box.width} imageHeight={box.height} />
+      </FlexWidget>
+      {wash ? (
+        <FlexWidget
+          style={{ height: 'match_parent', width: 'match_parent', backgroundColor: wash }}
+        />
+      ) : null}
+    </OverlapWidget>
   );
 }
 

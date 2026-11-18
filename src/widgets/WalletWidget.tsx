@@ -79,9 +79,7 @@ function LargeWidget({ model }: { model: WalletWidgetModel }) {
   // A launcher can size the card below its usual height or width (and the setup screen previews it at that size).
   const short = (model.frame?.height ?? Infinity) < WIDGET_LARGE_SHORT_BELOW;
   const narrow = (model.frame?.width ?? Infinity) < WIDGET_LARGE_NARROW_BELOW;
-  const type = narrow
-    ? { ...WIDGET_TYPE.large, amount: WIDGET_TYPE.bar.amount, unit: WIDGET_TYPE.compact.unit }
-    : WIDGET_TYPE.large;
+  const type = narrow ? WIDGET_TYPE.largeNarrow : WIDGET_TYPE.large;
   const padding = short ? LARGE_PADDING_SHORT : LARGE_PADDING;
   const palette = paletteFor(model);
   return (

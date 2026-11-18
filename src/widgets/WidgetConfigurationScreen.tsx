@@ -127,7 +127,7 @@ function ConfigurationBody({
   const previewWidth = Math.round(width * scale);
   const previewHeight = Math.round(height * scale);
   const { snapshot, settings } = config;
-  // Laid out at the preview's own size, so a small widget previews (and adapts) exactly as it will draw.
+  // Laid out at the size it is previewed at, so a small widget adapts here just as it does on the home screen.
   const renderPreview = useCallback(
     () =>
       renderWalletWidget(size, snapshot, settings, {

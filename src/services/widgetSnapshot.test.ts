@@ -181,9 +181,13 @@ describe('card theme', () => {
     expect(shapeWidgetWallet(wallet({ theme: 'wise-owl' }), 0, opts).cardTheme).toBe('wise-owl');
   });
 
-  it('reads an unknown theme as none', () => {
-    const odd = wallet({ theme: 'retired-theme' as WalletState['theme'] });
-    expect(shapeWidgetWallet(odd, 0, opts).cardTheme).toBeNull();
+  it("falls back to the wallet type's default card, as the app does", () => {
+    const retired = 'retired-theme' as WalletState['theme'];
+    expect(shapeWidgetWallet(wallet({ theme: retired }), 0, opts).cardTheme).toBe(
+      'lightning-piggy',
+    );
+    const onchain = wallet({ theme: retired, walletType: 'onchain' });
+    expect(shapeWidgetWallet(onchain, 0, opts).cardTheme).toBe('bitcoin');
   });
 });
 

@@ -11,7 +11,7 @@
 // can't leak into it. The snapshot is wiped on sign-out and account switch.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { CardTheme, WalletState, WalletType } from '../types/wallet';
-import { cardThemes } from '../themes/cardThemes';
+import { cardThemes, defaultCardThemeFor } from '../themes/cardThemes';
 import { subscribeActivePubkey } from './walletStorageService';
 
 export const WIDGET_SNAPSHOT_KEY = 'widget_snapshot_v1';
@@ -109,7 +109,8 @@ export function shapeWidgetWallet(
     updatedAt: fetchedAt?.(wallet.id) ?? carried,
     order,
     connected,
-    cardTheme: isCardTheme(wallet.theme) ? wallet.theme : null,
+    // As the app does: a missing or retired theme shows the wallet type's default card.
+    cardTheme: isCardTheme(wallet.theme) ? wallet.theme : defaultCardThemeFor(wallet.walletType),
   };
 }
 

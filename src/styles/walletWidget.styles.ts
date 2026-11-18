@@ -82,6 +82,8 @@ export const WIDGET_RADIUS = 22;
 /** Type sizes (dp) per widget size, from the mock-ups. */
 export const WIDGET_TYPE = {
   large: { amount: 23, unit: 11.5, name: 11.5, detail: 10.5, button: 11.5, chevron: 18 },
+  // The 2×2 card when a launcher makes it narrower than usual.
+  largeNarrow: { amount: 19, unit: 10, name: 11.5, detail: 10.5, button: 11.5, chevron: 18 },
   bar: { amount: 19, unit: 11.5, name: 11.5, detail: 10.5, button: 11.5, chevron: 14 },
   compact: { amount: 16, unit: 10, name: 10.5, detail: 10, button: 14, chevron: 12 },
 } as const;
@@ -140,4 +142,10 @@ function withAlpha(hex: string, alpha: number): ColorProp {
   const rgb = parseHex(hex);
   if (!rgb) return hex as ColorProp;
   return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})` as ColorProp;
+}
+
+/** The card's colour at `alpha`, laid over art to fade it; null when there's nothing to fade. */
+export function washColour(hex: string, alpha: number): ColorProp | null {
+  if (!(alpha > 0.01)) return null;
+  return withAlpha(hex, Math.min(alpha, 1));
 }
