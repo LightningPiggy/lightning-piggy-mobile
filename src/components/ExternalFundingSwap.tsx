@@ -6,7 +6,7 @@ import { Text, TouchableOpacity, View, FlatList } from 'react-native';
 import { navigationRef } from '../navigation/AppNavigator';
 import * as SecureStore from 'expo-secure-store';
 import * as Clipboard from 'expo-clipboard';
-import QRCode from 'react-native-qrcode-svg';
+import ScannableQr from './ScannableQr';
 import { useLocale } from '../contexts/LocaleContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useWallet } from '../contexts/WalletContext';
@@ -229,7 +229,10 @@ export default function ExternalFundingSwap({
           {awaiting && (
             <>
               <View style={styles.qr} testID="external-swap-qr">
-                <QRCode value={buildBoltzBip21Uri(swap.address, swap.expectedAmount)} size={200} />
+                <ScannableQr
+                  value={buildBoltzBip21Uri(swap.address, swap.expectedAmount)}
+                  size={200}
+                />
               </View>
               <Text style={styles.amount} testID="external-swap-exact-amount">
                 {t('externalSwap.exactAmount', {

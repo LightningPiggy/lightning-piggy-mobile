@@ -2,7 +2,7 @@ import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
 import { View, Text } from 'react-native';
 import { Check } from 'lucide-react-native';
-import QRCode from 'react-native-qrcode-svg';
+import ScannableQr from './ScannableQr';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
@@ -53,7 +53,7 @@ export default function ReceivePaymentQr({
     >
       {isOnchainWallet && onchainAddress && (mode === 'address' || currentSats > 0) ? (
         <View>
-          <QRCode value={onchainUri} size={200} />
+          <ScannableQr value={onchainUri} size={200} />
           {paymentReceived && (
             <View style={styles.checkmark}>
               <Text style={styles.checkmarkText}>{'\u2713'}</Text>
@@ -64,7 +64,7 @@ export default function ReceivePaymentQr({
         <Text style={styles.noInvoice}>{t('receiveSheet.enterAmountForQr')}</Text>
       ) : mode === 'address' && lightningAddress ? (
         <View>
-          <QRCode value={`lightning:${lightningAddress}`} size={200} />
+          <ScannableQr value={`lightning:${lightningAddress}`} size={200} />
           {paymentReceived && (
             <View style={styles.checkmark}>
               <Check size={28} color={colors.white} />
@@ -75,7 +75,7 @@ export default function ReceivePaymentQr({
         <BrandedSpinner size="large" />
       ) : mode === 'amount' && invoice ? (
         <View>
-          <QRCode value={invoice} size={200} />
+          <ScannableQr value={invoice} size={200} />
           {paymentReceived && (
             <View style={styles.checkmark}>
               <Check size={28} color={colors.white} />

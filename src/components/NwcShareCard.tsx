@@ -1,7 +1,7 @@
 import { useChatCardWidth } from '../styles/chatCardWidth';
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
+import ScannableQr from './ScannableQr';
 import { Wallet, ShieldAlert, Plus } from 'lucide-react-native';
 import { useTranslation } from '../contexts/LocaleContext';
 import { formatTime } from '../utils/messageContent';
@@ -51,9 +51,7 @@ const NwcShareCard: React.FC<Props> = ({ card, fromMe, createdAt, colors, onAdd 
         ) : null}
 
         <View style={styles.qrWrap}>
-          {/* Reuses the app's QR renderer (react-native-qrcode-svg), same as
-              ReceiveSheet. `quietZone` keeps the code scannable on the card. */}
-          <QRCode value={card.nwcUrl} size={180} quietZone={4} />
+          <ScannableQr value={card.nwcUrl} size={180} />
         </View>
 
         <View style={styles.warningBox}>
