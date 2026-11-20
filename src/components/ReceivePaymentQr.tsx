@@ -10,7 +10,7 @@ import type { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
 interface Props {
   styles: Pick<
     ReturnType<typeof createReceiveSheetStyles>,
-    'qrContainer' | 'checkmark' | 'checkmarkText' | 'noInvoice'
+    'qrContainer' | 'qrContainerShowingQr' | 'checkmark' | 'checkmarkText' | 'noInvoice'
   >;
   isOnchainWallet: boolean;
   onchainAddress: string | null;
@@ -37,9 +37,17 @@ export default function ReceivePaymentQr({
 }: Props) {
   const colors = useThemeColors();
   const t = useTranslation();
+  const showsOnchainQr =
+    isOnchainWallet && !!onchainAddress && (mode === 'address' || currentSats > 0);
+  // Mirrors the branches below: the card turns white only while one of them draws a QR.
+  const awaitingOnchainAmount = isOnchainWallet && mode === 'amount' && currentSats === 0;
+  const showsQr =
+    showsOnchainQr ||
+    (mode === 'address' && !!lightningAddress) ||
+    (mode === 'amount' && !awaitingOnchainAmount && !loading && !!invoice);
   return (
     <View
-      style={styles.qrContainer}
+      style={[styles.qrContainer, showsQr && styles.qrContainerShowingQr]}
       accessible={
         isOnchainWallet
           ? !!onchainAddress && (mode === 'address' || currentSats > 0)

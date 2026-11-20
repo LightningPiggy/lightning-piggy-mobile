@@ -33,6 +33,9 @@ export const createTipSheetStyles = (colors: Palette) =>
       alignItems: 'center',
       padding: 20,
     },
+    qrContainerShowingQr: {
+      backgroundColor: colors.white,
+    },
     amountLabel: {
       fontSize: 13,
       color: colors.textSupplementary,

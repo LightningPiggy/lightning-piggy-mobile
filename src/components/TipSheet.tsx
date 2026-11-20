@@ -162,7 +162,12 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
           showsVerticalScrollIndicator={false}
         >
           {/* QR Code at top */}
-          <View style={styles.qrContainer}>
+          <View
+            style={[
+              styles.qrContainer,
+              !loading && !paymentReceived && !!invoice && styles.qrContainerShowingQr,
+            ]}
+          >
             {loading ? (
               <BrandedSpinner size="large" />
             ) : paymentReceived ? (
