@@ -485,13 +485,10 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       const refreshForPubkey = pubkey;
       const setInboxForRefresh = inboxSetterFor(refreshForPubkey);
       const isStillActive = (): boolean => activeOwnerRef.current === refreshForPubkey;
-      // Local helper: encapsulates the follow gate so all seven sites in
-      // the cache hydrate + NIP-04 + NIP-17 decrypt loops + final merge
-      // reuse the same predicate. When includeNonFollows is true the
-      // gate is a no-op (every pubkey passes), so callers can opt out
-      // of the parental-control filter from a single switch.
+      // Follows + their loaded flag, from the same render (#1830); gate below.
       const refreshForSigner = signerType;
       const refreshFollows = followPubkeys;
+      const refreshFollowsHydrated = followHydrated;
       // Someone we've replied to passes too (#1623), so their later messages
       // are stored like a follow's (the Messages list keeps its trust tiers).
       const passesFollowGate = (pk: string): boolean =>
@@ -708,6 +705,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
                   wraps: kind1059,
                   passesFollowGate,
                   isFollowed: (pk) => refreshFollows.has(pk),
+                  followsHydrated: refreshFollowsHydrated,
                   bypassSkipSet: bypassSkipSet || skipSetRecheck !== null,
                   isColdStart,
                   signal: effectiveSignal,
@@ -864,6 +862,7 @@ export function useDmInbox(options: UseDmInboxOptions): UseDmInboxResult {
       signerType,
       getReadRelays,
       followPubkeys,
+      followHydrated,
       decryptNip04ForInbox,
       amberNip44DecryptSilent,
       inboxSetterFor,

@@ -20,6 +20,7 @@ import {
 import { ingestWraps, type IngestableWrap } from '../services/dmIngest';
 import type { DmMessageRow } from '../services/dmDb';
 import { tryRouteGroupRumor } from './nostrGroupRouting';
+import { mayStartRoom } from '../services/roomStartGate';
 import { createYieldScheduler, NIP17_LOOP_YIELD_EVERY } from './nostrDecryptPacing';
 import { loadNip17SkipSet, writeNip17SkipSet } from './nostrDmCache';
 import { routeMarmotWelcome } from '../services/marmotWelcomeRouter';
@@ -45,8 +46,13 @@ export interface InboxWrapIngestParams<W extends IngestableWrap> {
    * decrypted 1:1 rumor (the thread-open path, where the user explicitly
    * opened a conversation). */
   passesFollowGate: (pk: string) => boolean;
-  /** Actual follows, independent of permissive DM/WoT or thread-open policy. */
+  /** Actual follows, independent of permissive DM/WoT or thread-open policy.
+   * Also who may start a room (`roomStartGate`) — `passesFollowGate` never
+   * decides that (#1830). */
   isFollowed?: (pk: string) => boolean;
+  /** False while the follow list is still loading: a wrap held as a
+   * stranger's new room is then left for a later refresh, not skip-set. */
+  followsHydrated?: boolean;
   /** Per-account skip-set file key (#743). Omit on the thread-open path,
    * which never consulted or wrote the skip-set. */
   skipKey?: string;
@@ -222,10 +228,13 @@ async function ingestInboxWrapsRun<W extends IngestableWrap>(
                 owner,
                 wrap.id,
                 () => signal?.aborted === true,
-                passesFollowGate,
+                (pk) => mayStartRoom(owner, pk, params.isFollowed ?? (() => false)),
               );
         if (routeResult.kind !== 'not-group') {
-          if (skipKey) {
+          const retryLater =
+            routeResult.kind === 'group-held' &&
+            (routeResult.groupsUnknown || params.followsHydrated === false);
+          if (skipKey && !retryLater) {
             skipSet.add(wrap.id);
             skipSetDirty = true;
           }

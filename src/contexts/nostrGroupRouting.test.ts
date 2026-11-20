@@ -348,6 +348,7 @@ describe.each(['live', 'refresh'] as const)('%s two-party room trust', (path) =>
           wraps: [{ id: 'untrusted-wrap' }],
           unwrap: () => message,
           passesFollowGate: (pk) => trusted && pk === PEER,
+          isFollowed: (pk) => trusted && pk === PEER,
         });
         expect(result.stored).toBe(0);
         expect(result.entries).toEqual([]);

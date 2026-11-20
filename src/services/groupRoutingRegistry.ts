@@ -19,11 +19,50 @@ import type { Group } from '../types/groups';
 
 let known: Group[] = [];
 let knownOwner: string | null = null;
+let knownLoaded = true;
 let reconcilerOwner: string | null = null;
+const loadedWaiters = new Set<() => void>();
+// An owner whose groups already failed to load within one wait: later wraps
+// don't each wait again (a stuck load costs one timeout, not one per wrap).
+let timedOutOwner: string | null = null;
 
-export function setKnownGroups(groups: Group[], owner: string | null = null): void {
+/** `loaded` false = the owner's stored groups haven't been read yet (#1830). */
+export function setKnownGroups(
+  groups: Group[],
+  owner: string | null = null,
+  loaded: boolean = true,
+): void {
+  if (loaded || owner !== timedOutOwner) timedOutOwner = null;
   known = groups;
   knownOwner = owner;
+  knownLoaded = loaded;
+  if (loaded) for (const wake of [...loadedWaiters]) wake();
+}
+
+/** True once `owner`'s stored groups are in the registry. */
+export function areKnownGroupsLoaded(owner: string | null): boolean {
+  return owner === knownOwner && knownLoaded;
+}
+
+/** Resolves when `owner`'s stored groups are in the registry, or after `ms`
+ * (at once if an earlier wait for `owner` already timed out). */
+export function whenKnownGroupsLoaded(owner: string | null, ms: number): Promise<boolean> {
+  if (areKnownGroupsLoaded(owner)) return Promise.resolve(true);
+  if (owner !== null && owner === timedOutOwner) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      loadedWaiters.delete(check);
+      const loaded = areKnownGroupsLoaded(owner);
+      if (!loaded) timedOutOwner = owner;
+      resolve(loaded);
+    };
+    const check = () => {
+      if (areKnownGroupsLoaded(owner)) done();
+    };
+    const timer = setTimeout(done, ms);
+    loadedWaiters.add(check);
+  });
 }
 
 /**
