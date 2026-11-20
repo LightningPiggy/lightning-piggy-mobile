@@ -2,7 +2,7 @@ import BrandedSpinner from './BrandedSpinner';
 import React from 'react';
 import { View, Text } from 'react-native';
 import { Check } from 'lucide-react-native';
-import QRCode from 'react-native-qrcode-svg';
+import ScannableQr from './ScannableQr';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
 import type { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
@@ -10,7 +10,7 @@ import type { createReceiveSheetStyles } from '../styles/ReceiveSheet.styles';
 interface Props {
   styles: Pick<
     ReturnType<typeof createReceiveSheetStyles>,
-    'qrContainer' | 'checkmark' | 'checkmarkText' | 'noInvoice'
+    'qrContainer' | 'qrContainerShowingQr' | 'checkmark' | 'checkmarkText' | 'noInvoice'
   >;
   isOnchainWallet: boolean;
   onchainAddress: string | null;
@@ -37,9 +37,17 @@ export default function ReceivePaymentQr({
 }: Props) {
   const colors = useThemeColors();
   const t = useTranslation();
+  const showsOnchainQr =
+    isOnchainWallet && !!onchainAddress && (mode === 'address' || currentSats > 0);
+  // Mirrors the branches below: the card turns white only while one of them draws a QR.
+  const awaitingOnchainAmount = isOnchainWallet && mode === 'amount' && currentSats === 0;
+  const showsQr =
+    showsOnchainQr ||
+    (mode === 'address' && !!lightningAddress) ||
+    (mode === 'amount' && !awaitingOnchainAmount && !loading && !!invoice);
   return (
     <View
-      style={styles.qrContainer}
+      style={[styles.qrContainer, showsQr && styles.qrContainerShowingQr]}
       accessible={
         isOnchainWallet
           ? !!onchainAddress && (mode === 'address' || currentSats > 0)
@@ -53,7 +61,7 @@ export default function ReceivePaymentQr({
     >
       {isOnchainWallet && onchainAddress && (mode === 'address' || currentSats > 0) ? (
         <View>
-          <QRCode value={onchainUri} size={200} />
+          <ScannableQr value={onchainUri} size={200} />
           {paymentReceived && (
             <View style={styles.checkmark}>
               <Text style={styles.checkmarkText}>{'\u2713'}</Text>
@@ -64,7 +72,7 @@ export default function ReceivePaymentQr({
         <Text style={styles.noInvoice}>{t('receiveSheet.enterAmountForQr')}</Text>
       ) : mode === 'address' && lightningAddress ? (
         <View>
-          <QRCode value={`lightning:${lightningAddress}`} size={200} />
+          <ScannableQr value={`lightning:${lightningAddress}`} size={200} />
           {paymentReceived && (
             <View style={styles.checkmark}>
               <Check size={28} color={colors.white} />
@@ -75,7 +83,7 @@ export default function ReceivePaymentQr({
         <BrandedSpinner size="large" />
       ) : mode === 'amount' && invoice ? (
         <View>
-          <QRCode value={invoice} size={200} />
+          <ScannableQr value={invoice} size={200} />
           {paymentReceived && (
             <View style={styles.checkmark}>
               <Check size={28} color={colors.white} />

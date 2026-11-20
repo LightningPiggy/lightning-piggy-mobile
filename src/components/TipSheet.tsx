@@ -8,7 +8,7 @@ import {
   BottomSheetView,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
-import QRCode from 'react-native-qrcode-svg';
+import ScannableQr from './ScannableQr';
 import { Check } from 'lucide-react-native';
 import { useWallet, useWalletLive } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
@@ -162,7 +162,12 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
           showsVerticalScrollIndicator={false}
         >
           {/* QR Code at top */}
-          <View style={styles.qrContainer}>
+          <View
+            style={[
+              styles.qrContainer,
+              !loading && !paymentReceived && !!invoice && styles.qrContainerShowingQr,
+            ]}
+          >
             {loading ? (
               <BrandedSpinner size="large" />
             ) : paymentReceived ? (
@@ -171,7 +176,7 @@ const TipSheet: React.FC<Props> = ({ visible, onClose, course }) => {
                 <Text style={styles.successText}>{t('tipSheet.tipReceived')}</Text>
               </View>
             ) : invoice ? (
-              <QRCode value={invoice} size={200} />
+              <ScannableQr value={invoice} size={200} />
             ) : (
               <Text style={styles.errorText}>{t('tipSheet.couldNotGenerate')}</Text>
             )}

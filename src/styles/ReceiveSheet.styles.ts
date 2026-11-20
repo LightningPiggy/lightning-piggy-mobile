@@ -77,6 +77,9 @@ export const createReceiveSheetStyles = (colors: Palette) =>
       borderWidth: 1,
       borderColor: colors.background,
     },
+    qrContainerShowingQr: {
+      backgroundColor: colors.white,
+    },
     checkmark: {
       position: 'absolute',
       top: -20,

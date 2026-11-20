@@ -53,7 +53,7 @@ import {
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
 import { ChevronLeft, Copy, Share2, Check, AlertTriangle } from 'lucide-react-native';
-import QRCode from 'react-native-qrcode-svg';
+import ScannableQr from './ScannableQr';
 import * as Clipboard from 'expo-clipboard';
 import * as SecureStore from 'expo-secure-store';
 import Toast from './BrandedToast';
@@ -663,7 +663,7 @@ const BoltzReceiveSheet: React.FC<Props> = ({ visible, onClose, walletId }) => {
             ) : swap ? (
               <>
                 <View style={styles.qrContainer}>
-                  <QRCode value={bip21Uri} size={200} />
+                  <ScannableQr value={bip21Uri} size={200} />
                 </View>
 
                 <View style={styles.amountRow}>

@@ -36,7 +36,7 @@ export const createBoltzReceiveSheetStyles = (colors: Palette) =>
       width: 220,
       height: 220,
       borderRadius: 24,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.white,
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 1,
