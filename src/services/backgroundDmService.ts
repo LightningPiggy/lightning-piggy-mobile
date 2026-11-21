@@ -79,6 +79,7 @@ import {
   wasWrapHandled,
 } from './dmWrapNotificationDedupe';
 import * as nostrService from './nostrService';
+import { claimAudibleContentlessAlert } from './contentlessAlertWindow';
 import { subscribeInboxDmsForViewer } from './dmLiveSubscription';
 import {
   fireMessageNotification,
@@ -292,6 +293,8 @@ async function handleWrap(input: {
     if (!claimWrapNotification(ev.id)) return;
     // Remembered so the live sub can replace it once it decrypts the wrap.
     noteContentlessWrapAlert(ev.id);
+    // Own copies, reactions and group traffic look the same until decrypted: buzz once per window (#1861).
+    const audible = await claimAudibleContentlessAlert(viewerPubkey);
     await fireMessageNotification({
       kind: 'dm',
       owner: viewerPubkey,
@@ -300,7 +303,7 @@ async function handleWrap(input: {
       body: 'Open Lightning Piggy to read',
       // The sender is inside the encryption; the wrap id lets a tap open the
       // right conversation once the app has decrypted it (#1154).
-      data: { wrapId: ev.id },
+      data: { wrapId: ev.id, ...(audible ? {} : { quiet: true }) },
     });
     return;
   }
