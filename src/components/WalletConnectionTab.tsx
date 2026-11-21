@@ -12,7 +12,7 @@ import {
   KeyRound,
 } from 'lucide-react-native';
 import SettingsRow from './SettingsRow';
-import QRCode from 'react-native-qrcode-svg';
+import ScannableQr from './ScannableQr';
 import { Alert } from './BrandedAlert';
 import type { useTranslation } from '../contexts/LocaleContext';
 import type { Palette } from '../styles/palettes';
@@ -300,16 +300,7 @@ const WalletConnectionTab: React.FC<Props> = ({
           <Text style={styles.hintText}>{t('settingsPages.connectionWarning')}</Text>
           {qrShown && (
             <View style={styles.qrPanel} testID="settings-nwc-qr-panel">
-              <QRCode
-                value={nwcConnection}
-                size={220}
-                // Hard-code black-on-white so the QR stays scannable in both
-                // themes — `colors.textHeader` is near-white in dark mode,
-                // which against the white qrPanel background renders the QR
-                // effectively invisible.
-                backgroundColor="#FFFFFF"
-                color="#000000"
-              />
+              <ScannableQr value={nwcConnection} size={220} />
               <Text style={styles.qrHint}>{t('walletSettingsSheet.nwcQrHint')}</Text>
             </View>
           )}

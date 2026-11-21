@@ -3871,5 +3871,9 @@
       "cancel": "Cancel",
       "save": "Save"
     }
+  },
+  "scannableQr": {
+    "showFullScreen": "Show QR code full screen",
+    "tapToClose": "Tap anywhere to close"
   }
 }
