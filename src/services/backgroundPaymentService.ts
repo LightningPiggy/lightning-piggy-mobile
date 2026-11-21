@@ -5,12 +5,27 @@ import { loadIdentities } from './identitiesStore';
 import { getNwcUrl, getWalletList } from './walletStorageService';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import { firePaymentNotification, hasNotificationPermission } from './notificationService';
-import { notifyPaymentOnce } from './paymentNotificationDedupe';
+import { notifyPaymentOnce, wasPaymentNotified } from './paymentNotificationDedupe';
 import { readBackgroundPayments } from './backgroundPaymentTransport';
 
 const appIsActive = () => AppState.currentState === 'active';
 const INTERVAL_MS = 60_000;
 const CATCHUP_SECONDS = 24 * 60 * 60;
+// Re-read this far behind the newest receipt already seen, for wallets whose timestamps land slightly out of order.
+const SEEN_OVERLAP_SECONDS = 5 * 60;
+
+/** Newest plausible receipt time in a page of rows, or 0. */
+export function newestReceiptTime(
+  transactions: { settled_at?: number; created_at?: number }[],
+  now: number,
+): number {
+  let newest = 0;
+  for (const tx of transactions) {
+    const time = tx?.settled_at ?? tx?.created_at;
+    if (Number.isSafeInteger(time) && time! <= now + 120 && time! > newest) newest = time!;
+  }
+  return newest;
+}
 let controller: AbortController | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -77,7 +92,21 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
         (await getWalletList(activePubkey)).some((w) => w.id === wallet.id) &&
         (await getNwcUrl(wallet.id)) === url;
       if (appIsActive()) return;
-      const transactions = await readBackgroundPayments(wallet.id, url, signal);
+      const windowStart = Math.max(start, now - CATCHUP_SECONDS);
+      // Page back only to just before the newest receipt the last pass saw, so a busy wallet costs one page a minute (#1860).
+      const seenKey = `background_payment_seen_v1:${activePubkey}:${wallet.id}`;
+      const seen = Number(await AsyncStorage.getItem(seenKey));
+      const pageFloor =
+        Number.isSafeInteger(seen) && seen > 0
+          ? Math.max(windowStart, seen - SEEN_OVERLAP_SECONDS)
+          : windowStart;
+      const { rows: transactions, complete } = await readBackgroundPayments(
+        wallet.id,
+        url,
+        signal,
+        pageFloor,
+      );
+      const eligible: { id: string; time: number }[] = [];
       // A switch/removal/disable during a slow request must invalidate its result.
       if (signal.aborted || !(await scopeCurrent())) return;
       if (!(await walletCurrent())) continue;
@@ -93,7 +122,7 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
           tx.type !== 'incoming' ||
           (tx.state && tx.state !== 'settled') ||
           !Number.isSafeInteger(receiptTime) ||
-          receiptTime! < Math.max(start, now - CATCHUP_SECONDS) ||
+          receiptTime! < windowStart ||
           receiptTime! > now + 120 ||
           !/^[0-9a-f]{64}$/i.test(tx.payment_hash ?? '') ||
           !Number.isSafeInteger(tx.amount) ||
@@ -101,6 +130,7 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
         )
           continue;
         if (signal.aborted) return;
+        eligible.push({ id: tx.payment_hash.toLowerCase(), time: receiptTime! });
         // Re-validated per delivery, inside the dedupe queue: the credential,
         // wallet list, preference or identity can change between two
         // transactions of the same response (Copilot review, #1100).
@@ -126,6 +156,16 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
             generationCurrent() &&
             !appIsActive(),
         );
+      }
+      // Only a complete pass moves the floor, and never past a receipt whose alert didn't go out (retried next pass).
+      if (complete && !signal.aborted) {
+        let floor = newestReceiptTime(transactions, now);
+        for (const { id, time } of eligible) {
+          if (!(await wasPaymentNotified(activePubkey, wallet.id, id)))
+            floor = Math.min(floor, time - 1);
+        }
+        if (floor > (Number.isSafeInteger(seen) ? seen : 0))
+          await AsyncStorage.setItem(seenKey, String(floor));
       }
     } catch {
       // A wallet with revoked list_transactions permission, a locked keystore,
