@@ -1,3 +1,4 @@
+import { claimAudibleContentlessAlert } from './contentlessAlertWindow';
 // Tests for the Amethyst-style realtime background DM watch (#279 realtime
 // upgrade). The relay subscription, identity/relay storage, notification
 // service, profile cache, and NIP-17 unwrap are all mocked so we assert the
@@ -19,6 +20,9 @@ import {
   claimWrapNotification,
   __resetForTests as __resetDedupeForTests,
 } from './dmWrapNotificationDedupe';
+jest.mock('./contentlessAlertWindow', () => ({
+  claimAudibleContentlessAlert: jest.fn(() => Promise.resolve(true)),
+}));
 jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn().mockResolvedValue(null) }));
 
 const mockSubscribe = jest.fn();
@@ -325,6 +329,20 @@ describe('remote signer path: contentless notifications', () => {
         // The wrap id lets a tap open the conversation once decrypted (#1154).
         data: { wrapId: 'w4' },
       }),
+    );
+  });
+
+  it('posts a further contentless alert quietly within the buzz window (#1861)', async () => {
+    mockLoadIdentities.mockResolvedValue(amberIdentity());
+    jest.mocked(claimAudibleContentlessAlert).mockResolvedValueOnce(false);
+
+    await runBackgroundDmWatch();
+    settleBacklog();
+    await capturedOnEvent()({ id: 'w5', kind: 1059 });
+    await Promise.resolve();
+
+    expect(mockFireMessageNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { wrapId: 'w5', quiet: true } }),
     );
   });
 

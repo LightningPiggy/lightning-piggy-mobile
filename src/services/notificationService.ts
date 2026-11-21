@@ -90,6 +90,7 @@ const CHANNEL_PAYMENTS = 'payments';
 // LOW importance: catch-up payments land in the shade with no sound or
 // heads-up, even if the app is backgrounded before the post fires.
 const CHANNEL_PAYMENTS_QUIET = 'payments-quiet';
+const CHANNEL_MESSAGES_QUIET = 'messages-quiet';
 // Low-importance channel for the persistent "watching for messages"
 // foreground-service notification (#279 realtime upgrade). LOW so it
 // never buzzes or pops a banner — it's the ongoing status chip Android
@@ -306,6 +307,15 @@ async function initialiseInternal(): Promise<void> {
       sound: null,
       enableVibrate: false,
     });
+    await Notifications.setNotificationChannelAsync(CHANNEL_MESSAGES_QUIET, {
+      name: 'More encrypted messages',
+      importance: Notifications.AndroidImportance.LOW,
+      description:
+        'Further encrypted-message alerts shortly after one already buzzed, shown quietly',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+      sound: null,
+      enableVibrate: false,
+    });
     // Importance LOW = no sound, no heads-up banner. This is the channel
     // the persistent foreground-service chip rides on (#279 realtime
     // upgrade): Android requires a foreground service to show an ongoing
@@ -371,6 +381,12 @@ export async function requestNotificationPermission(): Promise<boolean> {
  * independent "Hunt" channel surfaces, add it later with a careful
  * migration; until then sharing the channel is the lower-friction default.
  */
+function quietChannelFor(kind: NotificationKind): string {
+  return channelForKind(kind) === CHANNEL_MESSAGES
+    ? CHANNEL_MESSAGES_QUIET
+    : CHANNEL_PAYMENTS_QUIET;
+}
+
 function channelForKind(kind: NotificationKind): string {
   switch (kind) {
     case 'dm':
@@ -479,7 +495,7 @@ export async function fireNotification(payload: NotificationPayload): Promise<st
           ? {
               type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
               seconds: 1,
-              channelId: quiet ? CHANNEL_PAYMENTS_QUIET : channelForKind(payload.kind),
+              channelId: quiet ? quietChannelFor(payload.kind) : channelForKind(payload.kind),
             }
           : null,
     });
