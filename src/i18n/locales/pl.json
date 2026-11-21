@@ -3935,5 +3935,9 @@
       "cancel": "Anuluj",
       "save": "Zapisz"
     }
+  },
+  "scannableQr": {
+    "showFullScreen": "Pokaż kod QR na pełnym ekranie",
+    "tapToClose": "Dotknij w dowolnym miejscu, aby zamknąć"
   }
 }
