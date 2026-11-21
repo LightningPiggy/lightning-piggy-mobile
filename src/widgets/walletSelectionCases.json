@@ -1,0 +1,102 @@
+{
+  "selection": [
+    {
+      "name": "no position yet, no starting wallet: the first",
+      "wallets": ["a", "b", "c"],
+      "cursor": null,
+      "start": null,
+      "shown": 0,
+      "next": 1,
+      "previous": 2
+    },
+    {
+      "name": "the starting wallet",
+      "wallets": ["a", "b", "c"],
+      "cursor": null,
+      "start": "b",
+      "shown": 1,
+      "next": 2,
+      "previous": 0
+    },
+    {
+      "name": "a starting wallet that no longer exists: the first",
+      "wallets": ["a", "b"],
+      "cursor": null,
+      "start": "gone",
+      "shown": 0,
+      "next": 1,
+      "previous": 1
+    },
+    {
+      "name": "the remembered wallet",
+      "wallets": ["a", "b", "c"],
+      "cursor": { "walletId": "b", "index": 1 },
+      "start": "a",
+      "shown": 1,
+      "next": 2,
+      "previous": 0
+    },
+    {
+      "name": "the remembered wallet moved in the carousel",
+      "wallets": ["c", "a", "b"],
+      "cursor": { "walletId": "a", "index": 0 },
+      "start": null,
+      "shown": 1,
+      "next": 2,
+      "previous": 0
+    },
+    {
+      "name": "the shown wallet was removed: the next one",
+      "wallets": ["a", "c"],
+      "cursor": { "walletId": "b", "index": 1 },
+      "start": "b",
+      "shown": 1,
+      "next": 0,
+      "previous": 0
+    },
+    {
+      "name": "the last wallet was removed: the new last",
+      "wallets": ["a", "b"],
+      "cursor": { "walletId": "c", "index": 2 },
+      "start": null,
+      "shown": 1,
+      "next": 0,
+      "previous": 0
+    },
+    {
+      "name": "a negative slot clamps to the first",
+      "wallets": ["a", "b"],
+      "cursor": { "walletId": "gone", "index": -3 },
+      "start": null,
+      "shown": 0,
+      "next": 1,
+      "previous": 1
+    },
+    {
+      "name": "one wallet wraps onto itself",
+      "wallets": ["a"],
+      "cursor": null,
+      "start": "a",
+      "shown": 0,
+      "next": 0,
+      "previous": 0
+    },
+    {
+      "name": "no wallets",
+      "wallets": [],
+      "cursor": { "walletId": "a", "index": 0 },
+      "start": "a",
+      "shown": null,
+      "next": null,
+      "previous": null
+    }
+  ],
+  "pageDots": [
+    { "pageCount": 0, "pageIndex": 0, "count": 0, "active": 0 },
+    { "pageCount": 3, "pageIndex": 2, "count": 3, "active": 2 },
+    { "pageCount": 7, "pageIndex": 6, "count": 7, "active": 6 },
+    { "pageCount": 10, "pageIndex": 0, "count": 7, "active": 0 },
+    { "pageCount": 10, "pageIndex": 5, "count": 7, "active": 3 },
+    { "pageCount": 10, "pageIndex": 9, "count": 7, "active": 6 }
+  ]
+}

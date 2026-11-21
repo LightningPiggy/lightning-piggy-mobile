@@ -415,10 +415,68 @@ eas build:list --platform android --status finished --limit 1 \
   | grep -E "^Version|^Build number"
 ----
 
+[[ios-widget-credentials]]
+==== iPhone widget: one-time signing setup (#1849)
+
+The iPhone home-screen widget is a separate app extension
+(`targets/widget`, see `ARCHITECTURE.adoc` → "Home-screen widgets
+(iPhone)"). It brings two signing changes that EAS can only set up in an
+*interactive* session, so the `--non-interactive` release workflow fails
+until they're done:
+
+* a new bundle id per variant, `<app bundle id>.widget`, which needs its own
+  provisioning profile; and
+* the **App Groups** capability on both the app and the widget
+  (`group.<app bundle id>`). The app's existing provisioning profiles don't
+  include it, so they must be regenerated.
+
+Do this once, before the first iOS build of each profile that contains the
+widget (no Mac needed):
+
+[cols="1,2,2",options="header"]
+|===
+|`eas.json` profile |Bundle ids (app / widget) |Profile type
+|`development` |`com.lightningpiggy.app.dev` / `com.lightningpiggy.app.dev.widget` |development
+|`preview` |`com.lightningpiggy.app.preview` / `com.lightningpiggy.app.preview.widget` |ad-hoc
+|`production` |`com.lightningpiggy.app` / `com.lightningpiggy.app.widget` |App Store
+|`production-adhoc` |`com.lightningpiggy.app` / `com.lightningpiggy.app.widget` |ad-hoc (its own profiles, separate from `production`'s)
+|===
+
+. For each profile, run `npx -p eas-cli eas credentials -p ios`, choose the
+  profile, and let EAS set up both targets (it reads them from
+  `extra.eas.build.experimental.ios.appExtensions`, which
+  `@bacons/apple-targets` fills in). Accept when it offers to register the
+  `.widget` bundle id, enable App Groups and regenerate the app's profile.
+  An interactive `eas build -p ios --profile <profile>` does the same.
+. If EAS doesn't create the App Group itself, add it at
+  https://developer.apple.com/account/resources/identifiers[Identifiers →
+  App Groups] (`group.com.lightningpiggy.app`, `.dev`, `.preview`) and tick it
+  on both identifiers of that variant, then re-run step 1.
+. The preview variant's identifiers are registered by hand (see "One-time
+  Apple Developer Portal setup" under ad-hoc below): register
+  `com.lightningpiggy.app.preview.widget` too, with **App Groups** only, and
+  add **App Groups** to `com.lightningpiggy.app.preview` alongside NFC.
+
+*Version numbers.* The widget always ships with the app's numbers. Prebuild
+gives it the app's marketing version (`MARKETING_VERSION`, from
+`package.json`) and a placeholder build number (`CURRENT_PROJECT_VERSION`, 1).
+At build time EAS writes the remote build number as `CFBundleVersion` into
+the Info.plist of *every signed target*, the widget included
+(`@expo/build-tools` → `ios/configure.js` → `updateVersionsAsync`, which
+walks every target with a provisioning profile; `eas build --local` runs the
+same step). That only sticks because `plugins/withWidgetTargetSettings.js`
+turns off `GENERATE_INFOPLIST_FILE` for the widget: with it on, Xcode takes
+`CFBundleVersion` from `CURRENT_PROJECT_VERSION` and ignores the plist (checked
+with Xcode 26.5: plist `87` → built `1`; with it off → built `87`). So App
+Store Connect sees the same `CFBundleVersion` on the app and the widget.
+
 ==== Cutting a release
 
 **Always go through this workflow — never run `eas build` manually for a release.** The workflow tags first then builds, so artifacts are anchored to one commit; manual / local builds aren't tied to a published tag, so there's no record of which source revision actually shipped and the GitHub Release notes drift away from the binary in users' hands (v1.1.0 hit this — the local build artifact wasn't anchored to the tag).
 
+. **First release with the iPhone widget only:** complete
+  <<ios-widget-credentials>> for `production` (and `production-adhoc` if you
+  sideload). Otherwise the `build-ios` job fails at signing.
 . **Bump the version locally first** — `npm version <patch|minor|major|x.y.z>` writes `package.json`, creates a commit, and tags `vX.Y.Z` atomically. Push it: `git push origin main --follow-tags`.
 . Go to https://github.com/LightningPiggy/lightning-piggy-mobile/releases → *Draft a new release*.
 . Choose a tag like `v1.0.1` (create on publish) targeted at `main`. **The tag is the source of truth for the user-visible version** — the workflow strips the leading `v` and writes it into `package.json` via `npm version --no-git-tag-version`. `app.config.ts` reads `version: pkg.version`, so iOS `CFBundleShortVersionString`, Android `versionName`, and the in-app version label (drawer + About screen, via `src/utils/appVersion.ts`) all flow from that single value. Pre-release suffixes (e.g. `v1.0.0-rc1`) are stripped to keep the store-facing version a strict `X.Y.Z`.
