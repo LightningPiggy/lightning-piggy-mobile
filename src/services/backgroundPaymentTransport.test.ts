@@ -1,5 +1,5 @@
 import { AppState, type AppStateStatus } from 'react-native';
-import { PAGE_SIZE, readBackgroundPayments } from './backgroundPaymentTransport';
+import { MAX_PAGES, PAGE_SIZE, readBackgroundPayments } from './backgroundPaymentTransport';
 import { patchRelayPublish } from './nwcRelayPublishPatch';
 const mockEnable = jest.fn();
 const mockList = jest.fn();
@@ -25,7 +25,7 @@ beforeEach(() => {
 });
 afterEach(() => jest.useRealTimers());
 it('only requests paid incoming history on its own connection and closes it', async () => {
-  await readBackgroundPayments('wallet', 'url', new AbortController().signal);
+  await readBackgroundPayments('wallet', 'url', new AbortController().signal, 0);
   expect(mockList).toHaveBeenCalledWith({
     type: 'incoming',
     unpaid: false,
@@ -42,7 +42,7 @@ it('only requests paid incoming history on its own connection and closes it', as
 });
 it('bounds a stalled wallet and cleans up', async () => {
   mockList.mockReturnValue(new Promise(() => {}));
-  const request = readBackgroundPayments('wallet', 'url', new AbortController().signal);
+  const request = readBackgroundPayments('wallet', 'url', new AbortController().signal, 0);
   const assertion = expect(request).rejects.toThrow('timed out');
   await jest.advanceTimersByTimeAsync(25_000);
   await assertion;
@@ -57,7 +57,7 @@ it('cancels on stop and does not issue history requests after a late enable', as
     }),
   );
   const controller = new AbortController();
-  const request = readBackgroundPayments('wallet', 'url', controller.signal);
+  const request = readBackgroundPayments('wallet', 'url', controller.signal, 0);
   const assertion = expect(request).rejects.toThrow('cancelled');
   controller.abort();
   await assertion;
@@ -73,14 +73,14 @@ it('returns the WebLN rows unchanged, already in sats', async () => {
   const row = { type: 'incoming', state: 'settled', amount: 1234, fees_paid: 0 };
   mockList.mockResolvedValue({ transactions: [row] });
   await expect(
-    readBackgroundPayments('wallet', 'url', new AbortController().signal),
+    readBackgroundPayments('wallet', 'url', new AbortController().signal, 0),
   ).resolves.toEqual([row]);
 });
 
 it('normalizes a wallet response with no transaction array', async () => {
   mockList.mockResolvedValue({});
   await expect(
-    readBackgroundPayments('wallet', 'url', new AbortController().signal),
+    readBackgroundPayments('wallet', 'url', new AbortController().signal, 0),
   ).resolves.toEqual([]);
 });
 
@@ -92,7 +92,7 @@ it('cancels the private connection when the UI resumes', async () => {
     return { remove };
   });
   mockList.mockReturnValue(new Promise(() => {}));
-  const pending = readBackgroundPayments('wallet', 'url', new AbortController().signal);
+  const pending = readBackgroundPayments('wallet', 'url', new AbortController().signal, 0);
   const assertion = expect(pending).rejects.toThrow('cancelled');
   resume('active');
   await assertion;
@@ -103,34 +103,91 @@ it('cancels the private connection when the UI resumes', async () => {
 
 const stubAppState = () =>
   jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() } as never);
+afterEach(() => jest.restoreAllMocks());
 
-const rowsAt = (time: number, count: number) =>
-  Array.from({ length: count }, () => ({ settled_at: time, created_at: time }));
+let hash = 0;
+const rowsAt = (time: number | undefined, count: number) =>
+  Array.from({ length: count }, () => ({
+    settled_at: time,
+    created_at: time,
+    payment_hash: (++hash).toString(16).padStart(64, '0'),
+  }));
+const read = (floor = 1_000, signal = new AbortController().signal) =>
+  readBackgroundPayments('wallet', 'url', signal, floor);
 
-it('asks for one small page when the page reaches back past the watch window', async () => {
+it('asks for one small page when the page reaches back past the floor', async () => {
   stubAppState();
   mockList.mockResolvedValueOnce({
     transactions: [...rowsAt(2_000, PAGE_SIZE - 1), ...rowsAt(500, 1)],
   });
-  const rows = await readBackgroundPayments('wallet', 'url', new AbortController().signal, 1_000);
+  expect(await read()).toHaveLength(PAGE_SIZE);
   expect(mockList).toHaveBeenCalledTimes(1);
-  expect(rows).toHaveLength(PAGE_SIZE);
 });
 
-it('pages on while a whole page is inside the window, so a burst of payments is not missed', async () => {
+it('pages on while a whole page is newer than the floor, so a burst is not missed', async () => {
   stubAppState();
   mockList
     .mockResolvedValueOnce({ transactions: rowsAt(2_000, PAGE_SIZE) })
     .mockResolvedValueOnce({ transactions: rowsAt(1_500, 3) });
-  const rows = await readBackgroundPayments('wallet', 'url', new AbortController().signal, 1_000);
-  expect(mockList).toHaveBeenCalledTimes(2);
+  expect(await read()).toHaveLength(PAGE_SIZE + 3);
   expect(mockList).toHaveBeenLastCalledWith(expect.objectContaining({ offset: PAGE_SIZE }));
-  expect(rows).toHaveLength(PAGE_SIZE + 3);
 });
 
-it('stops after five pages however busy the wallet is', async () => {
+it('treats a row exactly at the floor, or with no time, as newer', async () => {
   stubAppState();
-  mockList.mockResolvedValue({ transactions: rowsAt(2_000, PAGE_SIZE) });
-  await readBackgroundPayments('wallet', 'url', new AbortController().signal, 1_000);
-  expect(mockList).toHaveBeenCalledTimes(5);
+  mockList
+    .mockResolvedValueOnce({ transactions: [...rowsAt(1_000, 10), ...rowsAt(undefined, 10)] })
+    .mockResolvedValueOnce({ transactions: [] });
+  await read();
+  expect(mockList).toHaveBeenCalledTimes(2);
+});
+
+it('stops after the page cap however busy the wallet is', async () => {
+  stubAppState();
+  mockList.mockImplementation(async () => ({ transactions: rowsAt(2_000, PAGE_SIZE) }));
+  expect(await read()).toHaveLength(MAX_PAGES * PAGE_SIZE);
+  expect(mockList.mock.calls.map(([args]) => args.offset)).toEqual([0, 20, 40, 60, 80]);
+});
+
+it('stops when the wallet ignores offset and repeats the same page', async () => {
+  stubAppState();
+  const page = rowsAt(2_000, PAGE_SIZE);
+  mockList.mockResolvedValue({ transactions: page });
+  expect(await read()).toHaveLength(PAGE_SIZE);
+  expect(mockList).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the rows already read when a later page fails', async () => {
+  stubAppState();
+  mockList
+    .mockResolvedValueOnce({ transactions: rowsAt(2_000, PAGE_SIZE) })
+    .mockRejectedValueOnce(new Error('reply timeout'));
+  expect(await read()).toHaveLength(PAGE_SIZE);
+});
+
+it('still fails when the first page fails', async () => {
+  stubAppState();
+  mockList.mockRejectedValueOnce(new Error('reply timeout'));
+  await expect(read()).rejects.toThrow('reply timeout');
+});
+
+it('returns the rows already read when the deadline hits a later page', async () => {
+  stubAppState();
+  mockList
+    .mockResolvedValueOnce({ transactions: rowsAt(2_000, PAGE_SIZE) })
+    .mockReturnValueOnce(new Promise(() => {}));
+  const pending = read();
+  await jest.advanceTimersByTimeAsync(25_000);
+  expect(await pending).toHaveLength(PAGE_SIZE);
+});
+
+it('asks for no further page once aborted', async () => {
+  stubAppState();
+  const controller = new AbortController();
+  mockList.mockImplementationOnce(async () => {
+    controller.abort();
+    return { transactions: rowsAt(2_000, PAGE_SIZE) };
+  });
+  await expect(read(1_000, controller.signal)).rejects.toThrow();
+  expect(mockList).toHaveBeenCalledTimes(1);
 });

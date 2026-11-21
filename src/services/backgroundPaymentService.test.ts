@@ -9,6 +9,7 @@ import { readBackgroundPayments } from './backgroundPaymentTransport';
 import {
   canWatchBackgroundPayments,
   checkBackgroundPayments,
+  newestReceiptTime,
   isBackgroundPaymentWatchRunning,
   startBackgroundPaymentWatch,
   stopBackgroundPaymentWatch,
@@ -319,4 +320,21 @@ it('keeps the persisted watch start and catches a newly created state-only recei
   read.mockResolvedValue([{ ...tx, settled_at: null, created_at: 1030 }] as never);
   await check();
   expect(fire).toHaveBeenCalledTimes(1);
+});
+
+it('pages back only to just before the newest receipt the last pass saw', async () => {
+  await check();
+  expect(read).toHaveBeenLastCalledWith('w', 'nwc-secret', expect.anything(), 1_000);
+  read.mockResolvedValue([{ ...tx, settled_at: 1_900, payment_hash: 'c'.repeat(64) }] as never);
+  jest.setSystemTime(2_000_000);
+  await check();
+  jest.setSystemTime(3_000_000);
+  await check();
+  // Five minutes behind the newest receipt seen (1,900 s), never before the watch window.
+  expect(read).toHaveBeenLastCalledWith('w', 'nwc-secret', expect.anything(), 1_600);
+});
+
+it('ignores a receipt time in the future when remembering the newest', () => {
+  expect(newestReceiptTime([{ settled_at: 5_000 }, { created_at: 900 }], 1_000)).toBe(900);
+  expect(newestReceiptTime([], 1_000)).toBe(0);
 });

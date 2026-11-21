@@ -11,6 +11,21 @@ import { readBackgroundPayments } from './backgroundPaymentTransport';
 const appIsActive = () => AppState.currentState === 'active';
 const INTERVAL_MS = 60_000;
 const CATCHUP_SECONDS = 24 * 60 * 60;
+// Re-read this far behind the newest receipt already seen, for wallets whose timestamps land slightly out of order.
+const SEEN_OVERLAP_SECONDS = 5 * 60;
+
+/** Newest plausible receipt time in a page of rows, or 0. */
+export function newestReceiptTime(
+  transactions: { settled_at?: number; created_at?: number }[],
+  now: number,
+): number {
+  let newest = 0;
+  for (const tx of transactions) {
+    const time = tx?.settled_at ?? tx?.created_at;
+    if (Number.isSafeInteger(time) && time! <= now + 120 && time! > newest) newest = time!;
+  }
+  return newest;
+}
 let controller: AbortController | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 
@@ -78,7 +93,17 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
         (await getNwcUrl(wallet.id)) === url;
       if (appIsActive()) return;
       const windowStart = Math.max(start, now - CATCHUP_SECONDS);
-      const transactions = await readBackgroundPayments(wallet.id, url, signal, windowStart);
+      // Page back only to just before the newest receipt the last pass saw, so a busy wallet costs one page a minute (#1860).
+      const seenKey = `background_payment_seen_v1:${activePubkey}:${wallet.id}`;
+      const seen = Number(await AsyncStorage.getItem(seenKey));
+      const pageFloor =
+        Number.isSafeInteger(seen) && seen > 0
+          ? Math.max(windowStart, seen - SEEN_OVERLAP_SECONDS)
+          : windowStart;
+      const transactions = await readBackgroundPayments(wallet.id, url, signal, pageFloor);
+      const newest = newestReceiptTime(transactions, now);
+      if (newest > (Number.isSafeInteger(seen) ? seen : 0))
+        await AsyncStorage.setItem(seenKey, String(newest));
       // A switch/removal/disable during a slow request must invalidate its result.
       if (signal.aborted || !(await scopeCurrent())) return;
       if (!(await walletCurrent())) continue;
