@@ -41,6 +41,21 @@ export function notifyPaymentOnce(
   return operation;
 }
 
+/** Whether a payment's notification is recorded as delivered (or claimed by the UI). */
+export async function wasPaymentNotified(
+  owner: string,
+  walletId: string,
+  paymentId: string,
+): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(`payment_notifications_v1:${owner}:${walletId}`);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) && parsed.includes(paymentId);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Claim payments the UI already showed without an OS notification — the
  * receive announcer publishes only the newest of a burst, so the rest must be

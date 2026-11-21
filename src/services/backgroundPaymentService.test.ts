@@ -55,7 +55,7 @@ beforeEach(async () => {
   jest.mocked(loadBackgroundDmEnabled).mockResolvedValue(true);
   jest.mocked(hasNotificationPermission).mockResolvedValue(true);
   fire.mockResolvedValue('notification');
-  read.mockResolvedValue([tx] as never);
+  read.mockResolvedValue({ rows: [tx], complete: true } as never);
 });
 afterEach(() => {
   stopBackgroundPaymentWatch();
@@ -83,14 +83,17 @@ it('announces the same sats amount the foreground receive path shows for the row
   expect(fire).toHaveBeenCalledWith(expect.objectContaining({ amountSats: foreground.amountSats }));
 });
 it('does not announce existing history, outgoing, unpaid, failed, or malformed transactions', async () => {
-  read.mockResolvedValue([
-    { ...tx, settled_at: 999 },
-    { ...tx, type: 'outgoing' },
-    { ...tx, settled_at: 0 },
-    { ...tx, state: 'failed' },
-    { ...tx, amount: -1 },
-    { ...tx, payment_hash: '' },
-  ] as never);
+  read.mockResolvedValue({
+    rows: [
+      { ...tx, settled_at: 999 },
+      { ...tx, type: 'outgoing' },
+      { ...tx, settled_at: 0 },
+      { ...tx, state: 'failed' },
+      { ...tx, amount: -1 },
+      { ...tx, payment_hash: '' },
+    ],
+    complete: true,
+  } as never);
   await check();
   expect(fire).not.toHaveBeenCalled();
 });
@@ -114,7 +117,7 @@ it.each(['account', 'removed', 'disabled', 'aborted', 'credential'])(
       if (change === 'disabled') jest.mocked(loadBackgroundDmEnabled).mockResolvedValue(false);
       if (change === 'aborted') controller.abort();
       if (change === 'credential') jest.mocked(getNwcUrl).mockResolvedValue('replacement');
-      return [tx] as never;
+      return { rows: [tx], complete: true } as never;
     });
     await checkBackgroundPayments(controller.signal);
     expect(fire).not.toHaveBeenCalled();
@@ -127,7 +130,7 @@ it.each(['account', 'credential', 'removed'])(
     // transaction is being delivered, so the SECOND must be re-validated
     // (Copilot review, #1100).
     const second = { ...tx, payment_hash: 'c'.repeat(64) };
-    read.mockResolvedValue([tx, second] as never);
+    read.mockResolvedValue({ rows: [tx, second], complete: true } as never);
     fire.mockImplementationOnce(async () => {
       if (change === 'account')
         jest.mocked(loadIdentities).mockResolvedValue({ activePubkey: 'other', identities: [] });
@@ -240,7 +243,7 @@ it('rejects a late payment after the scope changes away and back', async () => {
   read.mockImplementationOnce(async () => {
     invalidateBackgroundPaymentScope();
     invalidateBackgroundPaymentScope();
-    return [tx] as never;
+    return { rows: [tx], complete: true } as never;
   });
   await check();
   expect(fire).not.toHaveBeenCalled();
@@ -258,7 +261,7 @@ it('does not start a wallet request when the UI resumes during credential lookup
 it('does not notify when the app resumes while the wallet request is in flight', async () => {
   read.mockImplementationOnce(async () => {
     AppState.currentState = 'active';
-    return [tx] as never;
+    return { rows: [tx], complete: true } as never;
   });
   await check();
   expect(fire).not.toHaveBeenCalled();
@@ -268,7 +271,10 @@ it('does not notify when the app resumes while the wallet request is in flight',
 });
 
 it('stops notifications from the same batch when the app resumes after a delivery', async () => {
-  read.mockResolvedValue([tx, { ...tx, payment_hash: 'c'.repeat(64) }] as never);
+  read.mockResolvedValue({
+    rows: [tx, { ...tx, payment_hash: 'c'.repeat(64) }],
+    complete: true,
+  } as never);
   fire.mockImplementationOnce(async () => {
     AppState.currentState = 'active';
     return 'notification';
@@ -278,7 +284,10 @@ it('stops notifications from the same batch when the app resumes after a deliver
 });
 
 it('notifies a recent explicitly settled receipt without a settlement timestamp exactly once', async () => {
-  read.mockResolvedValue([{ ...tx, settled_at: undefined, created_at: 1000 }] as never);
+  read.mockResolvedValue({
+    rows: [{ ...tx, settled_at: undefined, created_at: 1000 }],
+    complete: true,
+  } as never);
   await check();
   await check();
   await notifyPaymentOnce(owner, 'w', tx.payment_hash, () =>
@@ -297,7 +306,10 @@ it('notifies a recent explicitly settled receipt without a settlement timestamp 
 it.each([undefined, '', 'pending', 'failed', 'expired', 'unknown'])(
   'does not use creation time to imply settlement for state %s',
   async (state) => {
-    read.mockResolvedValue([{ ...tx, state, settled_at: undefined, created_at: 1000 }] as never);
+    read.mockResolvedValue({
+      rows: [{ ...tx, state, settled_at: undefined, created_at: 1000 }],
+      complete: true,
+    } as never);
     await check();
     expect(fire).not.toHaveBeenCalled();
   },
@@ -306,7 +318,10 @@ it.each([undefined, '', 'pending', 'failed', 'expired', 'unknown'])(
 it.each([undefined, null, 0, 999, 1121, NaN, 1000.5])(
   'does not notify timestamp-less history with missing, old, invalid or future creation time %s',
   async (created_at) => {
-    read.mockResolvedValue([{ ...tx, settled_at: undefined, created_at }] as never);
+    read.mockResolvedValue({
+      rows: [{ ...tx, settled_at: undefined, created_at }],
+      complete: true,
+    } as never);
     await check();
     expect(fire).not.toHaveBeenCalled();
   },
@@ -317,7 +332,10 @@ it('keeps the persisted watch start and catches a newly created state-only recei
   await check();
   jest.setSystemTime(1_060_000);
   AppState.currentState = 'background';
-  read.mockResolvedValue([{ ...tx, settled_at: null, created_at: 1030 }] as never);
+  read.mockResolvedValue({
+    rows: [{ ...tx, settled_at: null, created_at: 1030 }],
+    complete: true,
+  } as never);
   await check();
   expect(fire).toHaveBeenCalledTimes(1);
 });
@@ -325,7 +343,10 @@ it('keeps the persisted watch start and catches a newly created state-only recei
 it('pages back only to just before the newest receipt the last pass saw', async () => {
   await check();
   expect(read).toHaveBeenLastCalledWith('w', 'nwc-secret', expect.anything(), 1_000);
-  read.mockResolvedValue([{ ...tx, settled_at: 1_900, payment_hash: 'c'.repeat(64) }] as never);
+  read.mockResolvedValue({
+    rows: [{ ...tx, settled_at: 1_900, payment_hash: 'c'.repeat(64) }],
+    complete: true,
+  } as never);
   jest.setSystemTime(2_000_000);
   await check();
   jest.setSystemTime(3_000_000);
@@ -337,4 +358,39 @@ it('pages back only to just before the newest receipt the last pass saw', async 
 it('ignores a receipt time in the future when remembering the newest', () => {
   expect(newestReceiptTime([{ settled_at: 5_000 }, { created_at: 900 }], 1_000)).toBe(900);
   expect(newestReceiptTime([], 1_000)).toBe(0);
+});
+
+const seenFloor = async () =>
+  Number(await AsyncStorage.getItem(`background_payment_seen_v1:${owner}:w`)) || 0;
+const later = { ...tx, settled_at: 2_010, payment_hash: 'd'.repeat(64) };
+
+it('does not move the floor after an incomplete read', async () => {
+  jest.setSystemTime(2_000_000);
+  read.mockResolvedValue({ rows: [later], complete: false } as never);
+  await check();
+  expect(await seenFloor()).toBe(0);
+});
+
+it('does not move the floor when the pass is aborted after the read', async () => {
+  jest.setSystemTime(2_000_000);
+  const controller = new AbortController();
+  read.mockImplementation(async () => {
+    controller.abort();
+    return { rows: [later], complete: true } as never;
+  });
+  await checkBackgroundPayments(controller.signal);
+  expect(await seenFloor()).toBe(0);
+});
+
+it('keeps the floor below a receipt whose alert failed, so it is retried', async () => {
+  jest.setSystemTime(2_000_000);
+  fire.mockResolvedValue(null);
+  read.mockResolvedValue({ rows: [later], complete: true } as never);
+  await check();
+  // Just below the receipt whose alert failed, so the next pass reads it again.
+  expect(await seenFloor()).toBe(2_009);
+  fire.mockResolvedValue('notification');
+  await check();
+  expect(fire).toHaveBeenCalledTimes(2);
+  expect(await seenFloor()).toBe(2_010);
 });

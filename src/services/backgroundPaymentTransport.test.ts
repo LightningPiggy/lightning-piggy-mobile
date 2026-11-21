@@ -74,14 +74,14 @@ it('returns the WebLN rows unchanged, already in sats', async () => {
   mockList.mockResolvedValue({ transactions: [row] });
   await expect(
     readBackgroundPayments('wallet', 'url', new AbortController().signal, 0),
-  ).resolves.toEqual([row]);
+  ).resolves.toEqual({ rows: [row], complete: true });
 });
 
 it('normalizes a wallet response with no transaction array', async () => {
   mockList.mockResolvedValue({});
   await expect(
     readBackgroundPayments('wallet', 'url', new AbortController().signal, 0),
-  ).resolves.toEqual([]);
+  ).resolves.toEqual({ rows: [], complete: true });
 });
 
 it('cancels the private connection when the UI resumes', async () => {
@@ -120,7 +120,7 @@ it('asks for one small page when the page reaches back past the floor', async ()
   mockList.mockResolvedValueOnce({
     transactions: [...rowsAt(2_000, PAGE_SIZE - 1), ...rowsAt(500, 1)],
   });
-  expect(await read()).toHaveLength(PAGE_SIZE);
+  expect((await read()).rows).toHaveLength(PAGE_SIZE);
   expect(mockList).toHaveBeenCalledTimes(1);
 });
 
@@ -129,7 +129,7 @@ it('pages on while a whole page is newer than the floor, so a burst is not misse
   mockList
     .mockResolvedValueOnce({ transactions: rowsAt(2_000, PAGE_SIZE) })
     .mockResolvedValueOnce({ transactions: rowsAt(1_500, 3) });
-  expect(await read()).toHaveLength(PAGE_SIZE + 3);
+  expect((await read()).rows).toHaveLength(PAGE_SIZE + 3);
   expect(mockList).toHaveBeenLastCalledWith(expect.objectContaining({ offset: PAGE_SIZE }));
 });
 
@@ -145,7 +145,9 @@ it('treats a row exactly at the floor, or with no time, as newer', async () => {
 it('stops after the page cap however busy the wallet is', async () => {
   stubAppState();
   mockList.mockImplementation(async () => ({ transactions: rowsAt(2_000, PAGE_SIZE) }));
-  expect(await read()).toHaveLength(MAX_PAGES * PAGE_SIZE);
+  const result = await read();
+  expect(result.rows).toHaveLength(MAX_PAGES * PAGE_SIZE);
+  expect(result.complete).toBe(true);
   expect(mockList.mock.calls.map(([args]) => args.offset)).toEqual([0, 20, 40, 60, 80]);
 });
 
@@ -153,7 +155,7 @@ it('stops when the wallet ignores offset and repeats the same page', async () =>
   stubAppState();
   const page = rowsAt(2_000, PAGE_SIZE);
   mockList.mockResolvedValue({ transactions: page });
-  expect(await read()).toHaveLength(PAGE_SIZE);
+  expect((await read()).rows).toHaveLength(PAGE_SIZE);
   expect(mockList).toHaveBeenCalledTimes(2);
 });
 
@@ -162,7 +164,9 @@ it('keeps the rows already read when a later page fails', async () => {
   mockList
     .mockResolvedValueOnce({ transactions: rowsAt(2_000, PAGE_SIZE) })
     .mockRejectedValueOnce(new Error('reply timeout'));
-  expect(await read()).toHaveLength(PAGE_SIZE);
+  const result = await read();
+  expect(result.rows).toHaveLength(PAGE_SIZE);
+  expect(result.complete).toBe(false);
 });
 
 it('still fails when the first page fails', async () => {
@@ -178,7 +182,9 @@ it('returns the rows already read when the deadline hits a later page', async ()
     .mockReturnValueOnce(new Promise(() => {}));
   const pending = read();
   await jest.advanceTimersByTimeAsync(25_000);
-  expect(await pending).toHaveLength(PAGE_SIZE);
+  const result = await pending;
+  expect(result.rows).toHaveLength(PAGE_SIZE);
+  expect(result.complete).toBe(false);
 });
 
 it('asks for no further page once aborted', async () => {

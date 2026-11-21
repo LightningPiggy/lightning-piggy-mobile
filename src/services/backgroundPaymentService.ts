@@ -5,7 +5,7 @@ import { loadIdentities } from './identitiesStore';
 import { getNwcUrl, getWalletList } from './walletStorageService';
 import { loadBackgroundDmEnabled } from './backgroundDmPreference';
 import { firePaymentNotification, hasNotificationPermission } from './notificationService';
-import { notifyPaymentOnce } from './paymentNotificationDedupe';
+import { notifyPaymentOnce, wasPaymentNotified } from './paymentNotificationDedupe';
 import { readBackgroundPayments } from './backgroundPaymentTransport';
 
 const appIsActive = () => AppState.currentState === 'active';
@@ -100,10 +100,13 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
         Number.isSafeInteger(seen) && seen > 0
           ? Math.max(windowStart, seen - SEEN_OVERLAP_SECONDS)
           : windowStart;
-      const transactions = await readBackgroundPayments(wallet.id, url, signal, pageFloor);
-      const newest = newestReceiptTime(transactions, now);
-      if (newest > (Number.isSafeInteger(seen) ? seen : 0))
-        await AsyncStorage.setItem(seenKey, String(newest));
+      const { rows: transactions, complete } = await readBackgroundPayments(
+        wallet.id,
+        url,
+        signal,
+        pageFloor,
+      );
+      const eligible: { id: string; time: number }[] = [];
       // A switch/removal/disable during a slow request must invalidate its result.
       if (signal.aborted || !(await scopeCurrent())) return;
       if (!(await walletCurrent())) continue;
@@ -127,6 +130,7 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
         )
           continue;
         if (signal.aborted) return;
+        eligible.push({ id: tx.payment_hash.toLowerCase(), time: receiptTime! });
         // Re-validated per delivery, inside the dedupe queue: the credential,
         // wallet list, preference or identity can change between two
         // transactions of the same response (Copilot review, #1100).
@@ -152,6 +156,16 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
             generationCurrent() &&
             !appIsActive(),
         );
+      }
+      // Only a complete pass moves the floor, and never past a receipt whose alert didn't go out (retried next pass).
+      if (complete && !signal.aborted) {
+        let floor = newestReceiptTime(transactions, now);
+        for (const { id, time } of eligible) {
+          if (!(await wasPaymentNotified(activePubkey, wallet.id, id)))
+            floor = Math.min(floor, time - 1);
+        }
+        if (floor > (Number.isSafeInteger(seen) ? seen : 0))
+          await AsyncStorage.setItem(seenKey, String(floor));
       }
     } catch {
       // A wallet with revoked list_transactions permission, a locked keystore,

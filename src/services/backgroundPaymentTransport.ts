@@ -11,9 +11,15 @@ export type BackgroundTransaction = Awaited<
   ReturnType<NostrWebLNProvider['listTransactions']>
 >['transactions'][number];
 
+/** Rows read this pass; `complete` is false when a later page failed or ran out of time. */
+export interface BackgroundRead {
+  rows: BackgroundTransaction[];
+  complete: boolean;
+}
+
 export const PAGE_SIZE = 20;
 export const MAX_PAGES = 5;
-// A later page starts only with this much of the 25 s deadline unused (the SDK waits up to 10 s per reply).
+// No later page starts once paging has run this long (the SDK waits up to 10 s per reply; the deadline is 25 s).
 const PAGE_BUDGET_MS = 15_000;
 
 // Unknown times count as newer, so a page of them is followed rather than cut short.
@@ -28,8 +34,8 @@ export async function readBackgroundPayments(
   url: string,
   signal: AbortSignal,
   pageFloor: number,
-): Promise<BackgroundTransaction[]> {
-  if (AppState.currentState === 'active' || signal.aborted) return [];
+): Promise<BackgroundRead> {
+  if (AppState.currentState === 'active' || signal.aborted) return { rows: [], complete: false };
   // Load the SDK only for an opted-in background request, not during headless task registration.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { NostrWebLNProvider } = require('@getalby/sdk') as typeof import('@getalby/sdk');
@@ -44,6 +50,7 @@ export async function readBackgroundPayments(
   let timer: ReturnType<typeof setTimeout> | undefined;
   let cancelled = false;
   let timedOut = false;
+  let complete = true;
   const rows: BackgroundTransaction[] = [];
   const close = () => {
     try {
@@ -82,12 +89,16 @@ export async function readBackgroundPayments(
           // No `from`: some wallets filter creation time, missing invoices made
           // earlier but settled now. Select by settlement time in the worker.
           // Same public WebLN wrapper nwcService.listTransactions uses.
+
           // Small pages every minute (#1860): the next only while a whole page is newer than the floor.
           const pagesStartedAt = Date.now();
           let previousFirst: string | undefined;
           for (let page = 0; page < MAX_PAGES; page++) {
             if (cancelled) throw new Error('Cancelled');
-            if (page > 0 && Date.now() - pagesStartedAt > PAGE_BUDGET_MS) break;
+            if (page > 0 && Date.now() - pagesStartedAt > PAGE_BUDGET_MS) {
+              complete = false;
+              break;
+            }
             let batch: BackgroundTransaction[];
             try {
               const result = await provider.listTransactions({
@@ -100,8 +111,10 @@ export async function readBackgroundPayments(
             } catch (error) {
               // A later page failing keeps the newer rows already read.
               if (page === 0 || cancelled) throw error;
+              complete = false;
               break;
             }
+            if (cancelled) throw new Error('Cancelled');
             // A wallet that ignores `offset` returns the same page again.
             if (page > 0 && batch[0]?.payment_hash && batch[0].payment_hash === previousFirst)
               break;
@@ -109,7 +122,7 @@ export async function readBackgroundPayments(
             rows.push(...batch);
             if (batch.length < PAGE_SIZE || !batch.every((tx) => isNewerThan(tx, pageFloor))) break;
           }
-          return rows;
+          return { rows: rows.slice(), complete };
         } finally {
           // enable/probe can settle after cancellation; close any late socket.
           if (cancelled) {
@@ -120,7 +133,8 @@ export async function readBackgroundPayments(
     ]);
   } catch (error) {
     // Out of time on a later page: the pages already read hold the newest receipts.
-    if (timedOut && rows.length > 0 && !signal.aborted) return rows;
+    if (timedOut && rows.length > 0 && !signal.aborted)
+      return { rows: rows.slice(), complete: false };
     throw error;
   } finally {
     appStateSubscription.remove();
