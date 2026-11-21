@@ -11,11 +11,21 @@ export type BackgroundTransaction = Awaited<
   ReturnType<NostrWebLNProvider['listTransactions']>
 >['transactions'][number];
 
+export const PAGE_SIZE = 20;
+const MAX_PAGES = 5;
+
+// Unknown times count as inside, so a page of them is followed rather than cut short.
+function isInsideWindow(tx: BackgroundTransaction, windowStart: number): boolean {
+  const time = tx?.settled_at ?? tx?.created_at;
+  return !Number.isSafeInteger(time) || time >= windowStart;
+}
+
 /** A read-only request on a private connection; never replace the UI's client. */
 export async function readBackgroundPayments(
   walletId: string,
   url: string,
   signal: AbortSignal,
+  windowStart = 0,
 ): Promise<BackgroundTransaction[]> {
   if (AppState.currentState === 'active' || signal.aborted) return [];
   // Load the SDK only for an opted-in background request, not during headless task registration.
@@ -65,12 +75,22 @@ export async function readBackgroundPayments(
           // No `from`: some wallets filter creation time, missing invoices made
           // earlier but settled now. Select by settlement time in the worker.
           // Same public WebLN wrapper nwcService.listTransactions uses.
-          const result = await provider.listTransactions({
-            type: 'incoming',
-            unpaid: false,
-            limit: 100,
-          });
-          return Array.isArray(result.transactions) ? result.transactions : [];
+          // Small pages, since this runs every minute per wallet (#1860); the next page only while the whole page is still inside the watch window.
+          const rows: BackgroundTransaction[] = [];
+          for (let page = 0; page < MAX_PAGES; page++) {
+            if (cancelled) throw new Error('Cancelled');
+            const result = await provider.listTransactions({
+              type: 'incoming',
+              unpaid: false,
+              limit: PAGE_SIZE,
+              offset: page * PAGE_SIZE,
+            });
+            const batch = Array.isArray(result.transactions) ? result.transactions : [];
+            rows.push(...batch);
+            if (batch.length < PAGE_SIZE || !batch.every((tx) => isInsideWindow(tx, windowStart)))
+              break;
+          }
+          return rows;
         } finally {
           // enable/probe can settle after cancellation; close any late socket.
           if (cancelled) {

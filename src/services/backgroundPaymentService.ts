@@ -77,7 +77,8 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
         (await getWalletList(activePubkey)).some((w) => w.id === wallet.id) &&
         (await getNwcUrl(wallet.id)) === url;
       if (appIsActive()) return;
-      const transactions = await readBackgroundPayments(wallet.id, url, signal);
+      const windowStart = Math.max(start, now - CATCHUP_SECONDS);
+      const transactions = await readBackgroundPayments(wallet.id, url, signal, windowStart);
       // A switch/removal/disable during a slow request must invalidate its result.
       if (signal.aborted || !(await scopeCurrent())) return;
       if (!(await walletCurrent())) continue;
@@ -93,7 +94,7 @@ export async function checkBackgroundPayments(signal: AbortSignal): Promise<void
           tx.type !== 'incoming' ||
           (tx.state && tx.state !== 'settled') ||
           !Number.isSafeInteger(receiptTime) ||
-          receiptTime! < Math.max(start, now - CATCHUP_SECONDS) ||
+          receiptTime! < windowStart ||
           receiptTime! > now + 120 ||
           !/^[0-9a-f]{64}$/i.test(tx.payment_hash ?? '') ||
           !Number.isSafeInteger(tx.amount) ||

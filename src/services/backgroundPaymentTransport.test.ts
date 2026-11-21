@@ -1,5 +1,5 @@
 import { AppState, type AppStateStatus } from 'react-native';
-import { readBackgroundPayments } from './backgroundPaymentTransport';
+import { PAGE_SIZE, readBackgroundPayments } from './backgroundPaymentTransport';
 import { patchRelayPublish } from './nwcRelayPublishPatch';
 const mockEnable = jest.fn();
 const mockList = jest.fn();
@@ -26,7 +26,12 @@ beforeEach(() => {
 afterEach(() => jest.useRealTimers());
 it('only requests paid incoming history on its own connection and closes it', async () => {
   await readBackgroundPayments('wallet', 'url', new AbortController().signal);
-  expect(mockList).toHaveBeenCalledWith({ type: 'incoming', unpaid: false, limit: 100 });
+  expect(mockList).toHaveBeenCalledWith({
+    type: 'incoming',
+    unpaid: false,
+    limit: PAGE_SIZE,
+    offset: 0,
+  });
   // The LNbits no-wait-for-OK patch must be applied to THIS provider before
   // any request goes out, exactly as nwcService.connect does.
   const patch = jest.mocked(patchRelayPublish);
@@ -94,4 +99,38 @@ it('cancels the private connection when the UI resumes', async () => {
   expect(mockClose).toHaveBeenCalled();
   expect(remove).toHaveBeenCalled();
   listener.mockRestore();
+});
+
+const stubAppState = () =>
+  jest.spyOn(AppState, 'addEventListener').mockReturnValue({ remove: jest.fn() } as never);
+
+const rowsAt = (time: number, count: number) =>
+  Array.from({ length: count }, () => ({ settled_at: time, created_at: time }));
+
+it('asks for one small page when the page reaches back past the watch window', async () => {
+  stubAppState();
+  mockList.mockResolvedValueOnce({
+    transactions: [...rowsAt(2_000, PAGE_SIZE - 1), ...rowsAt(500, 1)],
+  });
+  const rows = await readBackgroundPayments('wallet', 'url', new AbortController().signal, 1_000);
+  expect(mockList).toHaveBeenCalledTimes(1);
+  expect(rows).toHaveLength(PAGE_SIZE);
+});
+
+it('pages on while a whole page is inside the window, so a burst of payments is not missed', async () => {
+  stubAppState();
+  mockList
+    .mockResolvedValueOnce({ transactions: rowsAt(2_000, PAGE_SIZE) })
+    .mockResolvedValueOnce({ transactions: rowsAt(1_500, 3) });
+  const rows = await readBackgroundPayments('wallet', 'url', new AbortController().signal, 1_000);
+  expect(mockList).toHaveBeenCalledTimes(2);
+  expect(mockList).toHaveBeenLastCalledWith(expect.objectContaining({ offset: PAGE_SIZE }));
+  expect(rows).toHaveLength(PAGE_SIZE + 3);
+});
+
+it('stops after five pages however busy the wallet is', async () => {
+  stubAppState();
+  mockList.mockResolvedValue({ transactions: rowsAt(2_000, PAGE_SIZE) });
+  await readBackgroundPayments('wallet', 'url', new AbortController().signal, 1_000);
+  expect(mockList).toHaveBeenCalledTimes(5);
 });
