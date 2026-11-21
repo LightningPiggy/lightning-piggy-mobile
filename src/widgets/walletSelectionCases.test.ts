@@ -18,6 +18,7 @@ function wallets(ids: string[]): WidgetWallet[] {
     updatedAt: null,
     order,
     connected: true,
+    cardTheme: null,
   }));
 }
 
