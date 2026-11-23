@@ -3871,5 +3871,9 @@
       "cancel": "取消",
       "save": "保存"
     }
+  },
+  "scannableQr": {
+    "showFullScreen": "全屏显示二维码",
+    "tapToClose": "轻点任意位置关闭"
   }
 }

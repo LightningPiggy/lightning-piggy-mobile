@@ -3871,5 +3871,9 @@
       "cancel": "Mégse",
       "save": "Mentés"
     }
+  },
+  "scannableQr": {
+    "showFullScreen": "QR-kód megjelenítése teljes képernyőn",
+    "tapToClose": "Koppints bárhová a bezáráshoz"
   }
 }
