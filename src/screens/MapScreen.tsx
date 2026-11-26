@@ -25,6 +25,8 @@ import {
 } from '../services/btcMapService';
 import type { ParsedCache } from '../services/nostrPlacesService';
 import { useCoalescedMap } from '../utils/useCoalescedMap';
+import { gpsBarsForFixes, type GpsSignalBars } from '../utils/gpsSignal';
+import { GpsSignalIndicator } from '../components/GpsSignalIndicator';
 import { useMapAuthorCaches } from '../hooks/useMapAuthorCaches';
 import { useMapPins } from '../hooks/useMapPins';
 import { useDebouncedMapBounds } from '../hooks/useDebouncedMapBounds';
@@ -320,6 +322,8 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // The header + permission-screen back button can now return to a DM, so the
   // "Back to Explore" wording only fits the in-stack entry points.
+  // Header GPS indicator: derived from the same accuracy the map halo uses.
+  const gpsBars = useMemo(() => gpsBarsForFixes(livePos, pos), [livePos, pos]);
   const backLabel = route.params?.returnTo ? t('mapScreen.back') : t('mapScreen.backToExplore');
 
   // ------- render --------------------------------------------------------
@@ -332,6 +336,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
           onOpenFilters={() => setFiltersOpen(true)}
           colors={colors}
           backLabel={backLabel}
+          gpsBars={gpsBars}
         />
         <View style={styles.deniedBody}>
           <MapPin size={64} color={colors.textSupplementary} strokeWidth={1.5} />
@@ -356,6 +361,7 @@ const MapScreen: React.FC<Props> = ({ navigation, route }) => {
         onOpenFilters={() => setFiltersOpen(true)}
         colors={colors}
         backLabel={backLabel}
+        gpsBars={gpsBars}
       />
       <View style={styles.webviewWrapper}>
         <LibreMiniMap
@@ -471,7 +477,8 @@ const Header: React.FC<{
   onOpenFilters: () => void;
   colors: Palette;
   backLabel: string;
-}> = ({ onBack, onOpenFilters, colors, backLabel }) => {
+  gpsBars: GpsSignalBars;
+}> = ({ onBack, onOpenFilters, colors, backLabel, gpsBars }) => {
   const t = useTranslation();
   const styles = useMemo(() => createMapScreenStyles(colors), [colors]);
   return (
@@ -485,14 +492,17 @@ const Header: React.FC<{
         <ChevronLeft size={24} color={colors.white} strokeWidth={2.5} />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>{t('mapScreen.title')}</Text>
-      <TouchableOpacity
-        onPress={onOpenFilters}
-        accessibilityLabel={t('mapScreen.filterPins')}
-        testID="map-filter-button"
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <SlidersHorizontal size={22} color={colors.white} strokeWidth={2.5} />
-      </TouchableOpacity>
+      <View style={styles.headerRightGroup}>
+        <GpsSignalIndicator bars={gpsBars} colors={colors} />
+        <TouchableOpacity
+          onPress={onOpenFilters}
+          accessibilityLabel={t('mapScreen.filterPins')}
+          testID="map-filter-button"
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <SlidersHorizontal size={22} color={colors.white} strokeWidth={2.5} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 };

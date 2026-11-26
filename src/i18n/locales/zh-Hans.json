@@ -1194,7 +1194,12 @@
     "clear": "清除",
     "categoriesHint": "点按可缩小到一个或多个BTC Map分类。",
     "categoriesSelected": "已选{{count}}项",
-    "categoryToggle": "{{category}}分类{{state}}"
+    "categoryToggle": "{{category}}分类{{state}}",
+    "gpsSignal": "GPS 信号：{{level}}",
+    "gpsStrong": "强",
+    "gpsGood": "良好",
+    "gpsWeak": "弱",
+    "gpsNoFix": "无信号"
   },
   "merchantDetailSheet": {
     "verifiedToday": "今天已通过OSM核实",

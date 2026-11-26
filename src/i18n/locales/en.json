@@ -1194,7 +1194,12 @@
     "clear": "Clear",
     "categoriesHint": "Tap to narrow to one or more BTC Map categories.",
     "categoriesSelected": "{{count}} selected",
-    "categoryToggle": "{{category}} category {{state}}"
+    "categoryToggle": "{{category}} category {{state}}",
+    "gpsSignal": "GPS signal: {{level}}",
+    "gpsStrong": "strong",
+    "gpsGood": "good",
+    "gpsWeak": "weak",
+    "gpsNoFix": "no fix"
   },
   "merchantDetailSheet": {
     "verifiedToday": "Verified today via OSM",

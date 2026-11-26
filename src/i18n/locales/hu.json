@@ -1194,7 +1194,12 @@
     "clear": "Törlés",
     "categoriesHint": "Koppintással szűkítheted egy vagy több BTC Map-kategóriára.",
     "categoriesSelected": "{{count}} kijelölve",
-    "categoryToggle": "{{category}} kategória: {{state}}"
+    "categoryToggle": "{{category}} kategória: {{state}}",
+    "gpsSignal": "GPS-jel: {{level}}",
+    "gpsStrong": "erős",
+    "gpsGood": "jó",
+    "gpsWeak": "gyenge",
+    "gpsNoFix": "nincs jel"
   },
   "merchantDetailSheet": {
     "verifiedToday": "Ma ellenőrizve az OSM-en",

@@ -1194,7 +1194,12 @@
     "clear": "Borrar",
     "categoriesHint": "Toca para limitar a una o más categorías de BTC Map.",
     "categoriesSelected": "{{count}} seleccionadas",
-    "categoryToggle": "Filtro de categoría {{category}}: {{state}}"
+    "categoryToggle": "Filtro de categoría {{category}}: {{state}}",
+    "gpsSignal": "Señal GPS: {{level}}",
+    "gpsStrong": "fuerte",
+    "gpsGood": "buena",
+    "gpsWeak": "débil",
+    "gpsNoFix": "sin señal"
   },
   "merchantDetailSheet": {
     "verifiedToday": "Verificado hoy vía OSM",
