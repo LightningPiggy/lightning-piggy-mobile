@@ -7,14 +7,12 @@ import {
   Keyboard,
   useWindowDimensions,
 } from 'react-native';
-import { Alert } from './BrandedAlert';
 import {
   BottomSheetBackdrop,
   BottomSheetScrollView,
   type BottomSheetBackdropProps,
 } from '@gorhom/bottom-sheet';
 import { BottomSheetModal } from './AccessibleBottomSheetModal';
-import * as Clipboard from 'expo-clipboard';
 import { useWallet } from '../contexts/WalletContext';
 import { useThemeColors } from '../contexts/ThemeContext';
 import { useTranslation } from '../contexts/LocaleContext';
@@ -279,13 +277,6 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose, initialTab = 
     onClose();
   }, [walletId, wallet, alias, selectedTheme, lnAddress, updateWalletSettings, onClose]);
 
-  const handleCopyXpub = useCallback(async () => {
-    if (xpubDisplay) {
-      await Clipboard.setStringAsync(xpubDisplay);
-      Alert.alert(t('walletSettingsSheet.copiedTitle'), t('walletSettingsSheet.xpubCopied'));
-    }
-  }, [xpubDisplay, t]);
-
   // Switch tabs, re-masking any credential revealed on the Connection tab
   // when the user navigates away — so a revealed NWC string / CoinOS
   // password / QR doesn't linger on-screen after leaving the tab that
@@ -415,7 +406,6 @@ const WalletSettingsSheet: React.FC<Props> = ({ walletId, onClose, initialTab = 
               walletId={walletId}
               screenFocused={screenFocused}
               xpubDisplay={xpubDisplay}
-              onCopyXpub={handleCopyXpub}
               relayUrl={relayUrl}
               nwcConnection={nwcConnection}
               nwcRevealed={nwcRevealed}
