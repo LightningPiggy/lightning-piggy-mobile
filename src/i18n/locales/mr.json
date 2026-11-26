@@ -1194,7 +1194,12 @@
     "clear": "काढा",
     "categoriesHint": "एक किंवा अधिक BTC Map श्रेणींपुरते मर्यादित करण्यासाठी टॅप करा.",
     "categoriesSelected": "{{count}} निवडले",
-    "categoryToggle": "{{category}} श्रेणी {{state}}"
+    "categoryToggle": "{{category}} श्रेणी {{state}}",
+    "gpsSignal": "GPS सिग्नल: {{level}}",
+    "gpsStrong": "मजबूत",
+    "gpsGood": "चांगला",
+    "gpsWeak": "कमकुवत",
+    "gpsNoFix": "सिग्नल नाही"
   },
   "merchantDetailSheet": {
     "verifiedToday": "आज OSM द्वारे पडताळले",

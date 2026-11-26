@@ -1200,7 +1200,12 @@
     "clear": "Очистити",
     "categoriesHint": "Торкніться, щоб звузити до однієї чи кількох категорій BTC Map.",
     "categoriesSelected": "{{count}} обрано",
-    "categoryToggle": "Категорія {{category}} {{state}}"
+    "categoryToggle": "Категорія {{category}} {{state}}",
+    "gpsSignal": "Сигнал GPS: {{level}}",
+    "gpsStrong": "сильний",
+    "gpsGood": "добрий",
+    "gpsWeak": "слабкий",
+    "gpsNoFix": "немає сигналу"
   },
   "merchantDetailSheet": {
     "verifiedToday": "Перевірено сьогодні через OSM",

@@ -1200,7 +1200,12 @@
     "clear": "Wyczyść",
     "categoriesHint": "Dotknij, aby zawęzić do jednej lub kilku kategorii BTC Map.",
     "categoriesSelected": "Wybrane: {{count}}",
-    "categoryToggle": "Kategoria {{category}}: {{state}}"
+    "categoryToggle": "Kategoria {{category}}: {{state}}",
+    "gpsSignal": "Sygnał GPS: {{level}}",
+    "gpsStrong": "mocny",
+    "gpsGood": "dobry",
+    "gpsWeak": "słaby",
+    "gpsNoFix": "brak sygnału"
   },
   "merchantDetailSheet": {
     "verifiedToday": "Zweryfikowano dziś przez OSM",
