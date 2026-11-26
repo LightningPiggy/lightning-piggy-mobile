@@ -27,6 +27,11 @@ export const createMapScreenStyles = (colors: Palette) =>
       fontWeight: '700',
       color: colors.white,
     },
+    headerRightGroup: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
     headerRightSpacer: {
       width: 24,
     },
