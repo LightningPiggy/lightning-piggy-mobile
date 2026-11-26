@@ -91,7 +91,7 @@ it('copies only after the gate, and only through the secret clipboard', async ()
   expect(copySensitiveText).toHaveBeenCalledWith(SECRET);
 });
 
-it('requires the unprotected warning to be accepted before copying when capture protection fails', async () => {
+it('warns and cancels before copying when capture protection fails', async () => {
   (ScreenCapture.preventScreenCaptureAsync as jest.Mock).mockRejectedValueOnce(new Error('no'));
   const { result } = setup();
   let pending!: Promise<boolean>;
@@ -114,7 +114,7 @@ it('requires the unprotected warning to be accepted before copying when capture 
   expect(copySensitiveText).not.toHaveBeenCalled();
 });
 
-it('copies after the user accepts the unprotected warning and passes the secret gate', async () => {
+it('copies after accepting a failed protection warning', async () => {
   (ScreenCapture.preventScreenCaptureAsync as jest.Mock).mockRejectedValueOnce(new Error('no'));
   const { result } = setup();
   let pending!: Promise<boolean>;

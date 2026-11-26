@@ -4,7 +4,8 @@ import { createI18nInstance } from '../i18n';
 import { useWalletSecretGate } from '../hooks/useWalletSecretGate';
 import WalletConnectionTab from './WalletConnectionTab';
 
-const XPUB = 'xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKrhko4egpiMZbpiaQL2jkwSB1icqYh2cfDfVxdx4df189oLKnC5fSwqPfgyP3hooxujYzAu3fDVmz';
+const XPUB =
+  'xpub6CUGRUonZSQ4TWtTMmzXdrXDtypWKiKrhko4egpiMZbpiaQL2jkwSB1icqYh2cfDfVxdx4df189oLKnC5fSwqPfgyP3hooxujYzAu3fDVmz';
 
 jest.mock('../hooks/useWalletSecretGate', () => ({
   useWalletSecretGate: jest.fn(() => ({
