@@ -108,6 +108,24 @@ export function useWalletSecretGate(active: boolean, walletId: string | null): W
     [t],
   );
 
+  const ensureCaptureProtection = useCallback(async () => {
+    const generation = generationRef.current;
+    const isCurrent = () => mountedRef.current && generationRef.current === generation;
+    const isProtected = await protectionRef.current;
+    if (!isCurrent()) return false;
+    if (
+      !isProtected &&
+      !(await confirm(
+        t('keyBackupScreen.unprotectedTitle'),
+        t('walletSettingsSheet.secretUnprotectedMessage'),
+        t('keyBackupScreen.unprotectedConfirm'),
+        'wallet-secret-unprotected',
+      ))
+    )
+      return false;
+    return isCurrent();
+  }, [confirm, t, protectionRef]);
+
   const unlock = useCallback(async (): Promise<boolean> => {
     if (!active || !mountedRef.current || unlockingRef.current) return false;
     if (unlocked) return true;
@@ -161,27 +179,17 @@ export function useWalletSecretGate(active: boolean, walletId: string | null): W
   const reveal = useCallback(async () => {
     const generation = generationRef.current;
     const isCurrent = () => mountedRef.current && generationRef.current === generation;
-    const isProtected = await protectionRef.current;
-    if (!isCurrent()) return false;
-    if (
-      !isProtected &&
-      !(await confirm(
-        t('keyBackupScreen.unprotectedTitle'),
-        t('walletSettingsSheet.secretUnprotectedMessage'),
-        t('keyBackupScreen.unprotectedConfirm'),
-        'wallet-secret-unprotected',
-      ))
-    )
-      return false;
-    if (!isCurrent()) return false;
+    if (!(await ensureCaptureProtection()) || !isCurrent()) return false;
     return (await unlock()) && isCurrent();
-  }, [unlock, confirm, t, protectionRef]);
+  }, [unlock, ensureCaptureProtection]);
 
   const copy = useCallback(
     async (text: string) => {
       const generation = generationRef.current;
+      const isCurrent = () => mountedRef.current && generationRef.current === generation;
+      if (!(await ensureCaptureProtection()) || !isCurrent()) return false;
       if (!(await unlock())) return false;
-      if (!mountedRef.current || generationRef.current !== generation) return false;
+      if (!isCurrent()) return false;
       try {
         await copySensitiveText(text);
         return true;
@@ -189,7 +197,7 @@ export function useWalletSecretGate(active: boolean, walletId: string | null): W
         return false;
       }
     },
-    [unlock],
+    [unlock, ensureCaptureProtection],
   );
 
   return { unlocked: active && unlocked, busy, authFailed, reveal, copy };
