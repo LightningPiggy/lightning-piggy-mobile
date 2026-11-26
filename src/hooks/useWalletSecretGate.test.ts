@@ -91,6 +91,48 @@ it('copies only after the gate, and only through the secret clipboard', async ()
   expect(copySensitiveText).toHaveBeenCalledWith(SECRET);
 });
 
+it('warns and cancels before copying when capture protection fails', async () => {
+  (ScreenCapture.preventScreenCaptureAsync as jest.Mock).mockRejectedValueOnce(new Error('no'));
+  const { result } = setup();
+  let pending!: Promise<boolean>;
+  act(() => {
+    pending = result.current.copy(SECRET);
+  });
+  await act(async () => {});
+  const [title, message, buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+  expect(title).toBe('keyBackupScreen.unprotectedTitle');
+  expect(message).toBe('walletSettingsSheet.secretUnprotectedMessage');
+  expect(authenticateForKeyReveal).not.toHaveBeenCalled();
+  expect(copySensitiveText).not.toHaveBeenCalled();
+  let copied = true;
+  await act(async () => {
+    buttons[0].onPress();
+    copied = await pending;
+  });
+  expect(copied).toBe(false);
+  expect(authenticateForKeyReveal).not.toHaveBeenCalled();
+  expect(copySensitiveText).not.toHaveBeenCalled();
+});
+
+it('copies after accepting a failed protection warning', async () => {
+  (ScreenCapture.preventScreenCaptureAsync as jest.Mock).mockRejectedValueOnce(new Error('no'));
+  const { result } = setup();
+  let pending!: Promise<boolean>;
+  act(() => {
+    pending = result.current.copy(SECRET);
+  });
+  await act(async () => {});
+  const [, , buttons] = (Alert.alert as jest.Mock).mock.calls[0];
+  let copied = false;
+  await act(async () => {
+    buttons[1].onPress();
+    copied = await pending;
+  });
+  expect(copied).toBe(true);
+  expect(authenticateForKeyReveal).toHaveBeenCalledTimes(1);
+  expect(copySensitiveText).toHaveBeenCalledWith(SECRET);
+});
+
 it('asks for a fresh unlock after the app goes to the background', async () => {
   const { result } = setup();
   await act(async () => {

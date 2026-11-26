@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import {
@@ -35,7 +35,6 @@ interface Props {
   screenFocused: boolean;
   // On-chain. `undefined` = still loading, `null` = loaded but absent, `string` = ready.
   xpubDisplay: string | null | undefined;
-  onCopyXpub: () => void;
   // NWC
   relayUrl: string | null;
   nwcConnection: string | null;
@@ -70,7 +69,6 @@ const WalletConnectionTab: React.FC<Props> = ({
   walletId,
   screenFocused,
   xpubDisplay,
-  onCopyXpub,
   relayUrl,
   nwcConnection,
   nwcRevealed,
@@ -97,11 +95,19 @@ const WalletConnectionTab: React.FC<Props> = ({
     (walletType === 'onchain' && (xpubLoading || !!xpubDisplay)) || walletType === 'nwc';
 
   const showsNwc = walletType === 'nwc' && !!nwcConnection;
-  const gate = useWalletSecretGate(screenFocused && (showsNwc || !!coinosRecovery), walletId);
+  // The xpub reveals the wallet's whole history and balance, so it is gated
+  // like the NWC string and the CoinOS password (#1833).
+  const showsXpub = walletType === 'onchain' && !!xpubDisplay;
+  const gate = useWalletSecretGate(
+    screenFocused && (showsNwc || !!coinosRecovery || showsXpub),
+    walletId,
+  );
   // A toggle the parent left on still shows nothing until this visit is unlocked.
   const nwcShown = nwcRevealed && gate.unlocked;
   const qrShown = nwcQrShown && gate.unlocked;
   const passwordShown = passwordRevealed && gate.unlocked;
+  const [xpubRevealed, setXpubRevealed] = useState(false);
+  const xpubShown = xpubRevealed && gate.unlocked;
   const canCopySecret = canCopySensitiveText();
 
   const toggleSecret = async (shown: boolean, flag: boolean, onToggle: () => void) => {
@@ -347,17 +353,39 @@ const WalletConnectionTab: React.FC<Props> = ({
           {xpubDisplay === undefined ? (
             <Text style={styles.xpubText}>{'…'}</Text>
           ) : (
-            <TouchableOpacity
-              onPress={onCopyXpub}
-              activeOpacity={0.7}
-              accessibilityLabel={t('walletSettingsSheet.copyXpub')}
-              testID="settings-onchain-copy-xpub"
-            >
-              <Text style={styles.xpubText} numberOfLines={3}>
-                {xpubDisplay}
+            <View style={styles.credentialRow}>
+              <Text style={styles.credentialText} numberOfLines={3}>
+                {xpubShown ? xpubDisplay : '••••••••••••'}
               </Text>
-              <Text style={styles.copyHint}>{t('walletSettingsSheet.tapToCopy')}</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() =>
+                  toggleSecret(xpubShown, xpubRevealed, () => setXpubRevealed((v) => !v))
+                }
+                disabled={gate.busy}
+                accessibilityLabel={t('walletSettingsSheet.extendedPublicKey')}
+                testID="settings-onchain-reveal-xpub"
+                style={styles.credentialAction}
+                hitSlop={8}
+              >
+                {xpubShown ? (
+                  <EyeOff size={18} color={colors.textSupplementary} strokeWidth={2} />
+                ) : (
+                  <Eye size={18} color={colors.textSupplementary} strokeWidth={2} />
+                )}
+              </TouchableOpacity>
+              {canCopySecret && (
+                <TouchableOpacity
+                  onPress={() => copySecret(xpubDisplay, t('walletSettingsSheet.xpubCopied'))}
+                  disabled={gate.busy}
+                  accessibilityLabel={t('walletSettingsSheet.copyXpub')}
+                  testID="settings-onchain-copy-xpub"
+                  style={styles.credentialAction}
+                  hitSlop={8}
+                >
+                  <CopyIcon size={18} color={colors.brandPink} strokeWidth={2} />
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </>
       )}
