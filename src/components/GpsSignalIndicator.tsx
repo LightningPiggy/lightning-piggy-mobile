@@ -18,7 +18,7 @@ export const GpsSignalIndicator: React.FC<{
   const t = useTranslation();
   const styles: GpsSignalIndicatorStyles = useMemo(
     () => createGpsSignalIndicatorStyles(colors),
-    [colors]
+    [colors],
   );
   const levelKey = (['gpsNoFix', 'gpsWeak', 'gpsGood', 'gpsStrong'] as const)[bars];
   const label = t('mapScreen.gpsSignal', { level: t(`mapScreen.${levelKey}`) });

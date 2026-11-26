@@ -19,7 +19,7 @@ export function gpsSignalBars(accuracyMetres: number | null | undefined): GpsSig
 // has one, otherwise the initial fix the map was centred on.
 export function gpsBarsForFixes(
   livePos: { accuracy: number | null } | null | undefined,
-  initialPos: { accuracy: number | null } | null | undefined
+  initialPos: { accuracy: number | null } | null | undefined,
 ): GpsSignalBars {
   return gpsSignalBars(livePos?.accuracy ?? initialPos?.accuracy ?? null);
 }
